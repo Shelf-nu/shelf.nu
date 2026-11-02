@@ -1947,13 +1947,6 @@ export default function AssetOverview() {
 }
 
 /**
- * Small helper for BOOLEAN custom fields.
- * Supports tri-state: yes / no / unset (empty string).
- * When `isUnset` is true the hidden input sends "" which
- * `buildCustomFieldValue` treats as undefined (no value stored).
- * This prevents "Not set" booleans from being forced to "no" on save.
- */
-/**
  * The unit count on a "Placed at locations" row, with "N in custody" on a
  * second, smaller line when some of the location's units are out with
  * people. Stacked rather than inline so a long location name keeps its room
