@@ -17,6 +17,12 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
+import type { ModelPrefill } from "./model-default-prefill";
+import {
+  EMPTY_MODEL_PREFILL,
+  getUsablePrefill,
+  prefillVersion,
+} from "./model-default-prefill";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
@@ -25,39 +31,70 @@ import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
 import { DateTimePicker } from "../shared/date-time-picker";
 
+/**
+ * The custom field inputs of the asset form.
+ *
+ * Inputs are uncontrolled: each starts from the value a picked model
+ * pre-filled (`modelPrefill`) or else the asset's saved value. An input
+ * remounts only when the model changes its pre-filled value, so whatever the
+ * user typed elsewhere stays.
+ *
+ * @param props.currency - Workspace currency, shown on amount fields
+ * @param props.fieldErrors - Validation message per custom field id
+ * @param props.modelPrefill - Values the picked asset model filled in
+ */
 export default function AssetCustomFields({
   currency,
   fieldErrors,
+  modelPrefill = EMPTY_MODEL_PREFILL,
 }: {
   currency: Currency;
   fieldErrors: Record<string, string | undefined>;
+  modelPrefill?: ModelPrefill;
 }) {
   const { customFields, asset } = useLoaderData<typeof loader>();
 
   const customFieldsValues =
     (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) || [];
 
-  const [dateObj, setDateObj] = useState(() =>
-    customFieldsValues
-      .filter((v) => v.value.valueDate)
-      .reduce(
-        (res, cur) => {
-          res[cur.customFieldId] = new Date(cur.value.valueDate!);
-          return res;
-        },
-        {} as Record<string, Date | null>
-      )
-  );
-
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const { prefs } = useDateFormatter();
 
+  const getSavedValue = (id: string) =>
+    customFieldsValues?.find((cfv) => cfv.customFieldId === id)?.value;
+
+  /** The value a picked model pre-filled into this field, when usable. */
+  const getPrefill = (id: string) => {
+    const field = customFields.find((f) => f.id === id);
+    return field ? getUsablePrefill(modelPrefill, field) : undefined;
+  };
+
   const getCustomFieldVal = (id: string) => {
-    const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
-      ?.value;
+    const prefilled = getPrefill(id);
+    if (prefilled !== undefined) {
+      return prefilled;
+    }
+    const value = getSavedValue(id);
     return value ? (getCustomFieldDisplayValue(value, prefs) as string) : "";
   };
+
+  /** Initial `YYYY-MM-DD` value of a date field. */
+  const getDateVal = (id: string) => {
+    const prefilled = getPrefill(id);
+    if (prefilled !== undefined) {
+      return prefilled;
+    }
+    const valueDate = getSavedValue(id)?.valueDate;
+    return valueDate ? new Date(valueDate).toISOString().split("T")[0] : "";
+  };
+
+  /**
+   * React key of a field's input: it changes only when a picked model
+   * changes the field's pre-filled value, which remounts the uncontrolled
+   * input with that value.
+   */
+  const inputKey = (id: string) => `${id}-${prefillVersion(modelPrefill, id)}`;
 
   // Get field errors from the plain object passed from parent
   // This avoids react-zorm + React 19 incompatibility
@@ -91,32 +128,14 @@ export default function AssetCustomFields({
     DATE: (field) => (
       <div className="flex w-full items-end">
         <DateTimePicker
+          key={inputKey(field.id)}
           mode="date"
           className="w-full"
           label={field.name}
           hideLabel
           name={`cf-${field.id}`}
-          value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
+          defaultValue={getDateVal(field.id)}
           clearable
-          onChange={(next) => {
-            if (!next) {
-              // Clear affordance emits an empty wire.
-              setDateObj({ ...dateObj, [field.id]: null });
-              return;
-            }
-
-            let selectedDate = new Date(next);
-
-            /**
-             * Guard against an unparseable value so we never store an invalid
-             * Date (mirrors the previous native-input behaviour).
-             */
-            if (isNaN(selectedDate.valueOf())) {
-              selectedDate = new Date();
-            }
-
-            setDateObj({ ...dateObj, [field.id]: selectedDate });
-          }}
           error={getFieldError(field.id)}
           disabled={disabled}
         />
@@ -131,22 +150,23 @@ export default function AssetCustomFields({
         </label>
 
         <OptionSelect
+          key={inputKey(field.id)}
           field={field}
           getCustomFieldVal={getCustomFieldVal}
           error={getFieldError(field.id)}
+          disabled={disabled}
         />
       </>
     ),
     MULTILINE_TEXT: (field) => {
-      const value = customFieldsValues?.find(
-        (cfv) => cfv.customFieldId === field.id
-      )?.value?.raw;
+      const value = getPrefill(field.id) ?? getSavedValue(field.id)?.raw;
 
       const error = getFieldError(field.id);
 
       return (
         <>
           <MarkdownEditor
+            key={inputKey(field.id)}
             name={`cf-${field.id}`}
             label={field.name}
             defaultValue={value ? String(value) : ""}
@@ -163,6 +183,7 @@ export default function AssetCustomFields({
     AMOUNT: (field) => (
       <div className="relative w-full">
         <Input
+          key={inputKey(field.id)}
           hideLabel
           type="number"
           label={field.name}
@@ -184,6 +205,7 @@ export default function AssetCustomFields({
     ),
     NUMBER: (field) => (
       <Input
+        key={inputKey(field.id)}
         hideLabel
         type="number"
         label={field.name}
@@ -233,6 +255,7 @@ export default function AssetCustomFields({
                 >
                   {fieldTypeToCompMap[field.type]?.(field) ?? (
                     <Input
+                      key={inputKey(field.id)}
                       hideLabel
                       placeholder={field.helpText || undefined}
                       type={field.type.toLowerCase()}
@@ -264,6 +287,7 @@ export default function AssetCustomFields({
                 >
                   {fieldTypeToCompMap[field.type]?.(field) ?? (
                     <Input
+                      key={inputKey(field.id)}
                       hideLabel
                       placeholder={field.helpText || undefined}
                       type={field.type.toLowerCase()}
@@ -310,15 +334,19 @@ export default function AssetCustomFields({
  * the save with nothing on screen to explain why.
  *
  * @param error - Validation message for this field, shown under the trigger
+ * @param disabled - Disables the trigger so no option can be picked
  */
 export function OptionSelect({
   field,
   getCustomFieldVal,
   error,
+  disabled = false,
 }: {
   field: Pick<CustomField, "id" | "name" | "options">;
   getCustomFieldVal: (id: string) => string;
   error?: string;
+  /** Disables the trigger, e.g. while the form submits. */
+  disabled?: boolean;
 }) {
   // State for popover, search, selection
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -405,6 +433,7 @@ export function OptionSelect({
               shownError && "border-error-300 focus:border-error-300"
             )}
             ref={triggerRef}
+            disabled={disabled}
             aria-invalid={shownError ? true : undefined}
             aria-describedby={shownError ? `cf-${field.id}-error` : undefined}
           >

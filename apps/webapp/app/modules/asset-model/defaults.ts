@@ -59,6 +59,13 @@ export type AssetModelDefaults = {
 /** What an asset already holds, for the fields a model could fill. */
 export type AssetFillState = {
   categoryId: string | null;
+  /**
+   * The category is empty on purpose: the user cleared it, as opposed to
+   * never setting it. A cleared category is an answer, so the model neither
+   * fills it nor fills fields limited to categories. Only valid when
+   * `categoryId` is `null`.
+   */
+  categoryCleared?: boolean;
   valuation: number | null;
   /** Ids of the custom fields that already have a value on the asset. */
   customFieldIdsWithValue: ReadonlySet<string>;
@@ -108,7 +115,9 @@ export function isUsableFieldDefault(fieldDefault: ModelCustomFieldDefault) {
  * Decides which of an asset's empty fields a model fills.
  *
  * The category is decided first because it decides which custom fields the
- * asset has: a field limited to other categories is never filled.
+ * asset has: a field limited to other categories is never filled. A category
+ * cleared on purpose (`current.categoryCleared`) stays empty, so only fields
+ * open to every category are filled.
  *
  * @param params.model - The model's defaults
  * @param params.current - What the asset already holds
@@ -123,7 +132,11 @@ export function planModelDefaultFill({
 }): ModelDefaultFill {
   const fill: ModelDefaultFill = { customFields: [] };
 
-  if (!current.categoryId && model.defaultCategoryId) {
+  if (
+    !current.categoryId &&
+    !current.categoryCleared &&
+    model.defaultCategoryId
+  ) {
     fill.categoryId = model.defaultCategoryId;
   }
   if (current.valuation === null && model.defaultValuation !== null) {

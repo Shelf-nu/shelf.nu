@@ -108,6 +108,22 @@ describe("planModelDefaultFill", () => {
     expect(fill.customFields.map((d) => d.customFieldId)).toEqual(["cf-ports"]);
   });
 
+  it("leaves a deliberately cleared category empty, with only unscoped fields filled", () => {
+    const scoped = fieldDefault({
+      id: "cf-ports",
+      categories: [{ id: "cat-network" }],
+    });
+    const unscoped = fieldDefault({ id: "cf-brand" });
+
+    const fill = planModelDefaultFill({
+      model: model({ customFieldDefaults: [scoped, unscoped] }),
+      current: { ...emptyAsset, categoryCleared: true },
+    });
+
+    expect(fill.categoryId).toBeUndefined();
+    expect(fill.customFields.map((d) => d.customFieldId)).toEqual(["cf-brand"]);
+  });
+
   it("ignores a dropdown default whose option was removed from the field", () => {
     const fill = planModelDefaultFill({
       model: model({

@@ -60,6 +60,13 @@ import {
   type BulkCreateSuccess,
 } from "./bulk-create-success-modal";
 import AssetCustomFields from "./custom-fields-inputs";
+import type { ModelPrefill, PrefillModel } from "./model-default-prefill";
+import {
+  EMPTY_MODEL_PREFILL,
+  VALUATION_PREFILL_KEY,
+  planModelPrefill,
+  prefillVersion,
+} from "./model-default-prefill";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
@@ -554,14 +561,24 @@ const AssetFormInner = ({
 
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<{
-      id: string;
-      name?: string;
-      defaultCategoryId?: string | null;
-      image?: string | null;
-      thumbnailImage?: string | null;
-    }>;
+    assetModels?: Array<
+      PrefillModel & {
+        id: string;
+        name?: string;
+        defaultCategoryId?: string | null;
+        image?: string | null;
+        thumbnailImage?: string | null;
+      }
+    >;
   }>()?.assetModels;
+
+  /**
+   * Valuation and custom field values the picked model filled into empty
+   * inputs. Without it a required custom field the model covers would block
+   * the save on the client before the server fill could run.
+   */
+  const [modelPrefill, setModelPrefill] =
+    useState<ModelPrefill>(EMPTY_MODEL_PREFILL);
 
   /** The chosen model's row, used for the inherited-image preview + copy. */
   const selectedAssetModel = selectedAssetModelId
@@ -647,6 +664,31 @@ const AssetFormInner = ({
     const model = modelId
       ? assetModelsData?.find((m) => m.id === modelId)
       : undefined;
+
+    // Fill the empty valuation and custom field inputs with the model's
+    // defaults, and take back the untouched ones the previous model filled.
+    const form = formRef.current;
+    const formData = form ? new FormData(form) : null;
+    const savedKeys = new Set<string>(
+      (asset?.customFields ?? []).map((cfv) => cfv.customFieldId)
+    );
+    if (valuation !== null && valuation !== undefined) {
+      savedKeys.add(VALUATION_PREFILL_KEY);
+    }
+    setModelPrefill(
+      planModelPrefill({
+        previous: modelPrefill,
+        model,
+        readCurrent: (key) => {
+          const entry = formData?.get(
+            key === VALUATION_PREFILL_KEY ? key : `cf-${key}`
+          );
+          return typeof entry === "string" ? entry : null;
+        },
+        savedKeys,
+      })
+    );
+
     // The Category select keeps its pick in a hidden input, not in the URL.
     // A value the previous model put there does not count as the user's pick.
     const categoryInput = formRef.current?.elements.namedItem("category");
@@ -1446,6 +1488,8 @@ const AssetFormInner = ({
         >
           <div className="relative w-full">
             <Input
+              // Remounts when a picked model changes the pre-filled value.
+              key={prefillVersion(modelPrefill, VALUATION_PREFILL_KEY)}
               type="number"
               label="Value"
               inputClassName="pl-[70px] valuation-input"
@@ -1455,7 +1499,9 @@ const AssetFormInner = ({
               step="any"
               min={0}
               className="w-full"
-              defaultValue={valuation || ""}
+              defaultValue={
+                modelPrefill.values[VALUATION_PREFILL_KEY] ?? (valuation || "")
+              }
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
@@ -1512,6 +1558,7 @@ const AssetFormInner = ({
         <AssetCustomFields
           currency={currency}
           fieldErrors={customFieldErrors}
+          modelPrefill={modelPrefill}
         />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">

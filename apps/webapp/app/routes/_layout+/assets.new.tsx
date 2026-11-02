@@ -97,7 +97,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         category: searchParams.get("category"),
       }),
       estimateNextSequentialId(organizationId),
-      getAssetModels({ organizationId, page: 1, perPage: 100 }),
+      getAssetModels({
+        organizationId,
+        page: 1,
+        perPage: 100,
+        withCustomFieldDefaults: true,
+      }),
     ]);
 
     return payload({

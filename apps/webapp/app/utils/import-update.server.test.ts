@@ -40,6 +40,7 @@ vitest.mock("~/database/db.server", () => ({
     },
     category: {
       findMany: vitest.fn().mockResolvedValue([]),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     location: {
       findMany: vitest.fn().mockResolvedValue([]),
@@ -255,6 +256,74 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
         ],
       })
     );
+  });
+
+  it("keeps a category the file clears empty, and skips model defaults limited to categories", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-i",
+        sequentialId: "SAM-I1",
+        type: AssetType.INDIVIDUAL,
+        categoryId: "cat-electronics",
+        category: { id: "cat-electronics", name: "Electronics" },
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.assetModel.findMany).mockResolvedValueOnce([
+      { id: "model-existing", name: "Dell Latitude" },
+    ] as unknown as Awaited<ReturnType<typeof db.assetModel.findMany>>);
+    vi.mocked(getAssetModelsDefaults).mockResolvedValue(
+      new Map([
+        [
+          "model-existing",
+          {
+            id: "model-existing",
+            name: "Dell Latitude",
+            defaultCategoryId: "cat-laptops",
+            defaultValuation: null,
+            customFieldDefaults: [
+              {
+                customFieldId: "cf-ram",
+                value: { raw: "16 GB", valueText: "16 GB" },
+                customField: {
+                  id: "cf-ram",
+                  name: "RAM",
+                  type: "TEXT",
+                  active: true,
+                  deletedAt: null,
+                  options: [],
+                  categories: [{ id: "cat-laptops" }],
+                },
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    const csvData = [
+      ["Asset ID", "Asset model", "Category"],
+      ["SAM-I1", "Dell Latitude", "Uncategorized"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(updateAsset).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(updateAsset).mock.calls[0][0];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        id: "uuid-i",
+        assetModelId: "model-existing",
+        categoryId: "uncategorized",
+      })
+    );
+    expect(
+      (payload.customFieldsValues ?? []).map((value) => value.id)
+    ).not.toContain("cf-ram");
   });
 
   it("creates a missing AssetModel on an INDIVIDUAL asset", async () => {

@@ -95,6 +95,7 @@ export function AssetModelCustomFieldDefaults({
                   field={field}
                   getCustomFieldVal={valueFor}
                   error={error}
+                  disabled={disabled}
                 />
               </div>
             ) : field.type === "DATE" ? (

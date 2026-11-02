@@ -17,6 +17,7 @@
  * @see {@link file://./defaults.ts}
  * @see {@link file://./../../components/asset-model/form.tsx}
  */
+import { Prisma } from "@prisma/client";
 import type { Currency, CustomField, Organization, User } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { z } from "zod";
@@ -46,6 +47,7 @@ import {
   MODEL_DEFAULT_FIELD_TYPES,
   defaultValueToFormString,
   isEmptyFill,
+  isUsableFieldDefault,
   planModelDefaultFill,
 } from "./defaults";
 
@@ -207,6 +209,10 @@ export function fillAssetFormDataFromModel({
   };
 
   const formCategory = formData.get("category");
+  // "uncategorized" counts as blank here: the form's category select shows
+  // Uncategorized when nothing was chosen, so it cannot tell a deliberate
+  // choice from no choice. The import differs (`categoryCleared` in
+  // `import-update.server.ts`): a cleared Category cell is always an answer.
   const categoryIsBlank = blank("category") || formCategory === "uncategorized";
 
   const formCustomFieldIds = new Set(
@@ -279,13 +285,99 @@ export function buildModelDefaultsFillNote({
 }
 
 /**
+ * Reads a model's default category, scoped to the organization.
+ *
+ * A default category that no longer exists in this organization fills
+ * nothing, so every path that plans a fill resolves it through here first.
+ *
+ * @param client - Database or transaction client
+ * @param params.defaultCategoryId - The model's stored default category
+ * @param params.organizationId - Caller's organization
+ * @returns The category, or `null` when there is none to fill with
+ */
+async function findModelDefaultCategory(
+  client: ModelDefaultsTxClient,
+  {
+    defaultCategoryId,
+    organizationId,
+  }: { defaultCategoryId: string | null; organizationId: Organization["id"] }
+) {
+  if (!defaultCategoryId) {
+    return null;
+  }
+  return client.category.findFirst({
+    where: { id: defaultCategoryId, organizationId },
+    select: { id: true, name: true, color: true },
+  });
+}
+
+/** One custom field value a model fill wants to insert. */
+type CustomFieldValueInsert = {
+  assetId: string;
+  customFieldId: string;
+  value: ICustomFieldValueJson;
+};
+
+/**
+ * Inserts custom field values, skipping every (asset, field) pair that
+ * already has a value when the insert runs.
+ *
+ * `AssetCustomFieldValue` has no unique (assetId, customFieldId), so a plain
+ * insert after a read would duplicate a value saved between the two. The
+ * existence check runs in the same statement as the insert, which keeps that
+ * window to a single statement. `@updatedAt` has no database default, so it
+ * is set here; the id is a text uuid like other raw inserts.
+ *
+ * @param tx - The transaction the fill runs in
+ * @param rows - The values to insert
+ * @returns `assetId:customFieldId` keys of the rows actually inserted
+ */
+async function insertMissingCustomFieldValues(
+  tx: ModelDefaultsTxClient,
+  rows: CustomFieldValueInsert[]
+): Promise<Set<string>> {
+  if (rows.length === 0) {
+    return new Set();
+  }
+  const inserted = await tx.$queryRaw<
+    { assetId: string; customFieldId: string }[]
+  >(Prisma.sql`
+    INSERT INTO "AssetCustomFieldValue"
+      ("id", "assetId", "customFieldId", "value", "createdAt", "updatedAt")
+    SELECT DISTINCT ON (v."assetId", v."customFieldId")
+      gen_random_uuid()::text, v."assetId", v."customFieldId", v."value"::jsonb,
+      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    FROM unnest(
+      ${rows.map((row) => row.assetId)}::text[],
+      ${rows.map((row) => row.customFieldId)}::text[],
+      ${rows.map((row) => JSON.stringify(row.value))}::text[]
+    ) AS v("assetId", "customFieldId", "value")
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "AssetCustomFieldValue" existing
+      WHERE existing."assetId" = v."assetId"
+        AND existing."customFieldId" = v."customFieldId"
+    )
+    RETURNING "assetId", "customFieldId"
+  `);
+  return new Set(
+    inserted.map((row) => customFieldValueKey(row.assetId, row.customFieldId))
+  );
+}
+
+/** Key of one (asset, custom field) pair. */
+function customFieldValueKey(assetId: string, customFieldId: string) {
+  return `${assetId}:${customFieldId}`;
+}
+
+/**
  * Fills the empty fields of assets that belong to a model, inside the
  * caller's transaction.
  *
  * Each asset is re-read on `tx`, so the decision uses the values the write
- * will actually replace. Archived assets are frozen and skipped. Every filled
- * field emits its own `ASSET_*_CHANGED` event, and each asset gets one note
- * listing what was filled.
+ * will actually replace. Archived assets are frozen and skipped. A custom
+ * field value saved after the read is kept, and the model's value for it is
+ * dropped. Every filled field emits its own `ASSET_*_CHANGED` event, and each
+ * asset gets one note listing what was filled.
  *
  * @param tx - The transaction the caller's change runs in
  * @param params.model - The model's defaults
@@ -343,14 +435,12 @@ export async function applyAssetModelDefaultsToAssets(
     },
   });
 
-  const category = model.defaultCategoryId
-    ? await tx.category.findFirst({
-        where: { id: model.defaultCategoryId, organizationId },
-        select: { id: true, name: true, color: true },
-      })
-    : null;
+  const category = await findModelDefaultCategory(tx, {
+    defaultCategoryId: model.defaultCategoryId,
+    organizationId,
+  });
 
-  const planned = assets
+  const allPlanned = assets
     .map((asset) => ({
       asset,
       fill: planModelDefaultFill({
@@ -370,11 +460,11 @@ export async function applyAssetModelDefaultsToAssets(
     }))
     .filter(({ fill }) => !isEmptyFill(fill));
 
-  if (planned.length === 0) {
+  if (allPlanned.length === 0) {
     return { assetsFilled: 0, fieldsFilled: 0 };
   }
 
-  const categoryAssetIds = planned
+  const categoryAssetIds = allPlanned
     .filter(({ fill }) => fill.categoryId !== undefined)
     .map(({ asset }) => asset.id);
   if (category && categoryAssetIds.length > 0) {
@@ -384,7 +474,7 @@ export async function applyAssetModelDefaultsToAssets(
     });
   }
 
-  const valuationAssetIds = planned
+  const valuationAssetIds = allPlanned
     .filter(({ fill }) => fill.valuation !== undefined)
     .map(({ asset }) => asset.id);
   if (model.defaultValuation !== null && valuationAssetIds.length > 0) {
@@ -394,15 +484,35 @@ export async function applyAssetModelDefaultsToAssets(
     });
   }
 
-  const customFieldRows = planned.flatMap(({ asset, fill }) =>
-    fill.customFields.map((fieldDefault) => ({
-      assetId: asset.id,
-      customFieldId: fieldDefault.customFieldId,
-      value: fieldDefault.value as unknown as object,
-    }))
+  const insertedKeys = await insertMissingCustomFieldValues(
+    tx,
+    allPlanned.flatMap(({ asset, fill }) =>
+      fill.customFields.map((fieldDefault) => ({
+        assetId: asset.id,
+        customFieldId: fieldDefault.customFieldId,
+        value: fieldDefault.value,
+      }))
+    )
   );
-  if (customFieldRows.length > 0) {
-    await tx.assetCustomFieldValue.createMany({ data: customFieldRows });
+
+  // Events and notes describe only what was written: a custom field value
+  // that already existed at insert time is not reported as filled.
+  const planned = allPlanned
+    .map(({ asset, fill }) => ({
+      asset,
+      fill: {
+        ...fill,
+        customFields: fill.customFields.filter((fieldDefault) =>
+          insertedKeys.has(
+            customFieldValueKey(asset.id, fieldDefault.customFieldId)
+          )
+        ),
+      },
+    }))
+    .filter(({ fill }) => !isEmptyFill(fill));
+
+  if (planned.length === 0) {
+    return { assetsFilled: 0, fieldsFilled: 0 };
   }
 
   await recordEvents(
@@ -524,7 +634,24 @@ export type LinkedAssetsFillSummary = {
 };
 
 /**
+ * Whether a model holds any default it could fill: a category, a valuation
+ * or a usable custom field default.
+ *
+ * @param model - The model's defaults
+ */
+export function modelHasFillableDefaults(model: AssetModelDefaults) {
+  return (
+    model.defaultCategoryId !== null ||
+    model.defaultValuation !== null ||
+    model.customFieldDefaults.some(isUsableFieldDefault)
+  );
+}
+
+/**
  * Summarises what "fill linked assets" would do, for the model edit page.
+ *
+ * A default category missing from the organization fills nothing, exactly as
+ * in `applyAssetModelDefaultsToAssets`.
  *
  * @param params.model - The model's defaults
  * @param params.organizationId - Caller's organization
@@ -537,6 +664,19 @@ export async function getLinkedAssetsFillSummary({
   model: AssetModelDefaults;
   organizationId: Organization["id"];
 }): Promise<LinkedAssetsFillSummary> {
+  if (!modelHasFillableDefaults(model)) {
+    return { assetCount: 0, fields: [] };
+  }
+
+  const category = await findModelDefaultCategory(db, {
+    defaultCategoryId: model.defaultCategoryId,
+    organizationId,
+  });
+  const fillableModel = { ...model, defaultCategoryId: category?.id ?? null };
+  if (!modelHasFillableDefaults(fillableModel)) {
+    return { assetCount: 0, fields: [] };
+  }
+
   const assets = await db.asset.findMany({
     where: { assetModelId: model.id, organizationId, archivedAt: null },
     select: {
@@ -559,7 +699,7 @@ export async function getLinkedAssetsFillSummary({
 
   for (const asset of assets) {
     const fill = planModelDefaultFill({
-      model,
+      model: fillableModel,
       current: {
         categoryId: asset.categoryId,
         valuation: asset.valuation,

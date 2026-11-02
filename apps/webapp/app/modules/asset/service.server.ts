@@ -13,6 +13,7 @@ import type {
   UserOrganization,
   BarcodeType,
   ConsumptionType,
+  Currency,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -8703,6 +8704,7 @@ export async function bulkUpdateAssetModel({
   settings,
   lastAuditDateAccess,
   locale,
+  currency,
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -8710,6 +8712,8 @@ export async function bulkUpdateAssetModel({
   assetModelId: Asset["assetModelId"];
   /** Request locale, for the valuation in the defaults-fill notes. */
   locale: string;
+  /** Organization currency, for the valuation in the defaults-fill notes. */
+  currency: Currency;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   /**
@@ -8839,21 +8843,6 @@ export async function bulkUpdateAssetModel({
       // every note in this batch is written by the same person.
       const loadUserForNotes = createLoadUserForNotes(userId);
       const userLink = await resolveUserLink({ userId, loadUserForNotes });
-      // Read before the transaction: defaults only fill on the link path.
-      const modelDefaults = newAssetModelId
-        ? await getAssetModelDefaults({
-            assetModelId: newAssetModelId,
-            organizationId,
-          })
-        : null;
-      const currency = modelDefaults
-        ? (
-            await db.organization.findUniqueOrThrow({
-              where: { id: organizationId },
-              select: { currency: true },
-            })
-          ).currency
-        : null;
       const newModel = newAssetModelId
         ? // Keyed on the id, never the name: a model saved with a
           // whitespace-only name trims to "", and branching on that would
@@ -8977,8 +8966,16 @@ export async function bulkUpdateAssetModel({
             );
           }
 
-          // Joining a model fills the assets' empty fields from its defaults.
-          if (modelDefaults && currency) {
+          // Joining a model fills the assets' empty fields from its defaults,
+          // read in this transaction so the fill uses the defaults as they
+          // are when the assets join.
+          const modelDefaults = newAssetModelId
+            ? await getAssetModelDefaults(
+                { assetModelId: newAssetModelId, organizationId },
+                tx
+              )
+            : null;
+          if (modelDefaults) {
             ({ assetsFilled: filled } = await applyAssetModelDefaultsToAssets(
               tx,
               {

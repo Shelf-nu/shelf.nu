@@ -138,7 +138,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         tagUseFor: TagUseFor.ASSET,
       }),
-      getAssetModels({ organizationId, page: 1, perPage: 100 }),
+      getAssetModels({
+        organizationId,
+        page: 1,
+        perPage: 100,
+        withCustomFieldDefaults: true,
+      }),
     ]);
 
     const searchParams = getCurrentSearchParams(request);

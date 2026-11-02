@@ -21,6 +21,7 @@ import AssetModelForm, {
 import { LinkedAssetsFillCard } from "~/components/asset-model/linked-assets-fill-card";
 import { db } from "~/database/db.server";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
+import type { AssetModelDefaults } from "~/modules/asset-model/defaults";
 import {
   fillLinkedAssetsFromModel,
   getAssetModelDefaults,
@@ -185,8 +186,11 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
       fields: await getModelDefaultFieldOptions({ organizationId }),
     });
 
-    /** What the defaults would fill before this save, to compare after it. */
-    const fillBefore = await summariseLinkedFill(id, organizationId);
+    /** The defaults before this save, to tell whether the save changed them. */
+    const defaultsBefore = await getAssetModelDefaults({
+      assetModelId: id,
+      organizationId,
+    });
 
     // The model and its defaults are one change: either both are saved or
     // neither is.
@@ -222,10 +226,11 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
      * page so the user sees the card that offers it. Otherwise go back to the
      * list as usual, so a user who chose not to fill is not held here.
      */
-    const fillAfter = await summariseLinkedFill(id, organizationId);
-    const newFill =
-      fillAfter.assetCount > 0 &&
-      JSON.stringify(fillAfter) !== JSON.stringify(fillBefore);
+    const newFill = await saveGaveDefaultsNewFill({
+      defaultsBefore,
+      assetModelId: id,
+      organizationId,
+    });
 
     return redirect(
       newFill ? `/settings/asset-models/${id}/edit` : "/settings/asset-models"
@@ -237,22 +242,73 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
 }
 
 /**
- * What filling a model's linked assets would change right now.
+ * The parts of a model's defaults a save can change, in a stable order, so
+ * two reads compare equal exactly when the saved defaults are the same.
  *
- * @param assetModelId - The model
- * @param organizationId - Caller's organization
+ * @param defaults - A model's defaults, or `null` when it was not found
  */
-async function summariseLinkedFill(
-  assetModelId: string,
-  organizationId: string
-) {
-  const defaults = await getAssetModelDefaults({
+function defaultsFingerprint(defaults: AssetModelDefaults | null) {
+  if (!defaults) {
+    return "null";
+  }
+  return JSON.stringify({
+    defaultCategoryId: defaults.defaultCategoryId,
+    defaultValuation: defaults.defaultValuation,
+    customFieldDefaults: defaults.customFieldDefaults
+      .map((fieldDefault) => [fieldDefault.customFieldId, fieldDefault.value])
+      .sort(([a], [b]) => String(a).localeCompare(String(b))),
+  });
+}
+
+/**
+ * Whether a save gave the model's defaults something new to fill on its
+ * linked assets.
+ *
+ * Linked assets are scanned only when needed: not at all when the save left
+ * the defaults unchanged, and a second time (with the old defaults) only when
+ * the new ones have something to fill. The save does not touch assets, so the
+ * old defaults scanned now give the same answer as before the save.
+ *
+ * @param params.defaultsBefore - The model's defaults read before the save
+ * @param params.assetModelId - The model
+ * @param params.organizationId - Caller's organization
+ * @returns `true` when the fill the defaults offer differs from before
+ */
+async function saveGaveDefaultsNewFill({
+  defaultsBefore,
+  assetModelId,
+  organizationId,
+}: {
+  defaultsBefore: AssetModelDefaults | null;
+  assetModelId: string;
+  organizationId: string;
+}) {
+  const defaultsAfter = await getAssetModelDefaults({
     assetModelId,
     organizationId,
   });
-  return defaults
-    ? getLinkedAssetsFillSummary({ model: defaults, organizationId })
+  if (
+    !defaultsAfter ||
+    defaultsFingerprint(defaultsAfter) === defaultsFingerprint(defaultsBefore)
+  ) {
+    return false;
+  }
+
+  const fillAfter = await getLinkedAssetsFillSummary({
+    model: defaultsAfter,
+    organizationId,
+  });
+  if (fillAfter.assetCount === 0) {
+    return false;
+  }
+
+  const fillBefore = defaultsBefore
+    ? await getLinkedAssetsFillSummary({
+        model: defaultsBefore,
+        organizationId,
+      })
     : { assetCount: 0, fields: [] };
+  return JSON.stringify(fillAfter) !== JSON.stringify(fillBefore);
 }
 
 export default function EditAssetModel() {

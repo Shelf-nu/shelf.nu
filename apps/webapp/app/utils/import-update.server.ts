@@ -864,6 +864,12 @@ export async function applyBulkUpdatesFromImport({
                 : categoryId === "uncategorized"
                 ? null
                 : categoryId,
+            // A Category cell the file clears is an answer, so the model
+            // neither fills it nor fills fields limited to categories. The
+            // asset form treats "uncategorized" as blank instead (see
+            // `fillAssetFormDataFromModel`): its select cannot tell a choice
+            // from no choice, while an import cell is always typed.
+            categoryCleared: categoryId === "uncategorized",
             valuation:
               valuation === undefined ? existingAsset.valuation : valuation,
             // A cell the file clears is an answer too, so it is not filled.
@@ -875,7 +881,7 @@ export async function applyBulkUpdatesFromImport({
             ]),
           },
         });
-        if (fill.categoryId !== undefined && categoryId !== "uncategorized") {
+        if (fill.categoryId !== undefined) {
           categoryId = fill.categoryId;
         }
         if (fill.valuation !== undefined) valuation = fill.valuation;

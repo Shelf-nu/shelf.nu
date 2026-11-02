@@ -4761,6 +4761,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -4811,6 +4812,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4851,6 +4853,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4900,6 +4903,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
@@ -4939,6 +4943,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4969,10 +4974,6 @@ describe("bulkUpdateAssetModel", () => {
       .mocked(applyAssetModelDefaultsToAssets)
       .mockResolvedValueOnce({ assetsFilled: 1, fieldsFilled: 1 });
     //@ts-expect-error mock setup
-    db.organization.findUniqueOrThrow.mockResolvedValueOnce({
-      currency: "AUD",
-    });
-    //@ts-expect-error mock setup
     db.asset.findMany.mockResolvedValue([
       { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
       { id: "asset-2", type: "INDIVIDUAL", assetModelId: "model-1" },
@@ -4980,6 +4981,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-AU",
+      currency: "AUD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -4999,6 +5001,11 @@ describe("bulkUpdateAssetModel", () => {
         locale: "en-AU",
       })
     );
+    // The defaults are read inside the transaction, on its client.
+    expect(getAssetModelDefaults).toHaveBeenCalledWith(
+      { assetModelId: "model-1", organizationId: "org-1" },
+      expect.anything()
+    );
     expect(result.filled).toBe(1);
   });
 
@@ -5013,6 +5020,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "available",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
@@ -5074,6 +5082,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
@@ -5097,6 +5106,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -5132,6 +5142,7 @@ describe("bulkUpdateAssetModel", () => {
     // not a rule violation. Only the LINK direction rejects.
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -5159,6 +5170,7 @@ describe("bulkUpdateAssetModel", () => {
     await expect(
       bulkUpdateAssetModel({
         locale: "en-US",
+        currency: "USD",
         lastAuditDateAccess: "hidden",
         userId: "user-1",
         assetIds: ["asset-1"],
@@ -5186,6 +5198,7 @@ describe("bulkUpdateAssetModel", () => {
     await expect(
       bulkUpdateAssetModel({
         locale: "en-US",
+        currency: "USD",
         lastAuditDateAccess: "hidden",
         userId: "user-1",
         assetIds: ["asset-1"],
@@ -5215,6 +5228,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["foreign-asset-1", "foreign-asset-2"],
@@ -5233,6 +5247,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: [],

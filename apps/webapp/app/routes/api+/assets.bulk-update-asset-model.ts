@@ -80,6 +80,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       settings,
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
       locale: getLocale(request),
+      currency: currentOrganization.currency,
     });
 
     /**

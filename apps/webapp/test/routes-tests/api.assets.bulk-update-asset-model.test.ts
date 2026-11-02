@@ -94,7 +94,7 @@ const permissionResult = {
   role: OrganizationRoles.ADMIN,
   canUseBarcodes: false,
   access: accessFor([OrganizationRoles.ADMIN]),
-  currentOrganization: { auditsEnabled: true },
+  currentOrganization: { auditsEnabled: true, currency: "USD" },
 } as Awaited<ReturnType<typeof requirePermission>>;
 
 /** Builds the result shape the service returns, with link-success defaults. */
@@ -200,6 +200,7 @@ describe("api/assets/bulk-update-asset-model", () => {
         settings: { mode: "SIMPLE" },
         lastAuditDateAccess: "available",
         locale: expect.any(String),
+        currency: "USD",
       });
     });
 
