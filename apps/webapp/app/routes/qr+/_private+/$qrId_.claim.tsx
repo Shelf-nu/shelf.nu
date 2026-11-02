@@ -63,7 +63,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Code not found",
           message:
             "The code you are trying to claim is not available for claiming.",
-          additionalData: { qrId, currentOrganization },
+          additionalData: {
+            qrId,
+            currentOrganizationId: currentOrganization.id,
+          },
           label: "QR",
         });
       });
