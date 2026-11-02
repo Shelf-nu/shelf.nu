@@ -38,6 +38,7 @@ import {
   relinkAssetQrCode,
   updateAsset,
 } from "~/modules/asset/service.server";
+import { bulkSetAssetCustomField } from "~/modules/asset/bulk-custom-field.server";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import {
   bulkRemoveAssetsFromKits,
@@ -67,6 +68,7 @@ import { action as bulkMarkAvailabilityAction } from "~/routes/api+/assets.bulk-
 import { action as bulkRemoveFromKitsAction } from "~/routes/api+/assets.bulk-remove-from-kits";
 import { action as bulkUpdateAssetModelAction } from "~/routes/api+/assets.bulk-update-asset-model";
 import { action as bulkUpdateCategoryAction } from "~/routes/api+/assets.bulk-update-category";
+import { action as bulkUpdateCustomFieldAction } from "~/routes/api+/assets.bulk-update-custom-field";
 import { action as bulkUpdateLocationAction } from "~/routes/api+/assets.bulk-update-location";
 import { action as bulkUpdateReorderPointAction } from "~/routes/api+/assets.bulk-update-reorder-point";
 import { action as generateSequentialIdsAction } from "~/routes/api+/generate-sequential-ids";
@@ -121,6 +123,13 @@ vi.mock("~/modules/organization/context.server", () => ({
 // why: a few routes query Prisma directly (archived check, kit removal
 // transaction, bulk add-to-kit type split); no database runs in unit tests.
 vi.mock("~/database/db.server", () => ({ db: dbMock }));
+
+// why: the bulk custom-field write has its own service tests; the case below
+// only pins whether the route reaches it, and with which record.
+vi.mock("~/modules/asset/bulk-custom-field.server", () => ({
+  bulkSetAssetCustomField: vi.fn(async () => ({ changed: 1 })),
+  bulkCustomFieldMessage: vi.fn(() => "1 asset updated"),
+}));
 
 // why: every asset write below has its own service tests; these cases only
 // pin whether a route reaches it, and with which record.
@@ -572,6 +581,22 @@ const OPENED_BY_THE_SWITCH: GatedRoute[] = [
 
 /** Routes that share a granted pair but stay closed to a Manager. */
 const CLOSED_EITHER_WAY: GatedRoute[] = [
+  {
+    route: "api+/assets.bulk-update-custom-field.ts action",
+    call: post(
+      bulkUpdateCustomFieldAction,
+      "/api/assets/bulk-update-custom-field",
+      { "assetIds[0]": "asset-1", customFieldId: "cf-1", value: "Blue" }
+    ),
+    service: bulkSetAssetCustomField,
+    receives: expect.objectContaining({
+      assetIds: ["asset-1"],
+      customFieldId: "cf-1",
+      rawValue: "Blue",
+      organizationId: ORG_ID,
+    }),
+    status: 200,
+  },
   {
     route: "api+/assets.bulk-update-reorder-point.ts action",
     call: post(

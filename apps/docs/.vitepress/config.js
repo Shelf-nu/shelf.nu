@@ -84,6 +84,7 @@ export default {
             link: "/tracking-scripts",
           },
           { text: "URL Shortener", link: "/url-shortener" },
+          { text: "Toast Notifications", link: "/notifications" },
         ],
       },
       {

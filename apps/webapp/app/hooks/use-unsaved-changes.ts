@@ -60,6 +60,10 @@ export const UNSAVED_CHANGES_DEFAULT_IGNORE = [
   "intent",
   "nameChangeOnly",
   "addAnother",
+  // The end date the expired-reservation check-out prompt posts. It belongs
+  // to the check-out, not to the booking form it submits through, and it
+  // only exists while the prompt is open; see `CheckoutDialog`.
+  "expiredCheckoutNewTo",
 ];
 
 /** DOM events that can precede a change of a submitted value. */

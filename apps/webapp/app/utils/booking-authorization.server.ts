@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { WITHHELD_CUSTODIAN_NAME } from "@shelf/labels";
-import { bookingCustodianIsSelf } from "./bookings";
+import { bookingCustodianIsSelf, canWriteBooking } from "./bookings";
 import { ShelfError } from "./error";
 import { canManageBookingItems } from "./permissions/role-access";
 import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
@@ -168,28 +168,8 @@ interface ValidateBookingOwnershipParams {
   action: string;
 }
 
-/**
- * Whether the caller may write to this booking: every booking for roles with
- * `bookings.writeAll`, otherwise only ones they created or hold through the
- * user custody link. The non-throwing form of {@link validateBookingOwnership},
- * for surfaces that decide which actions to offer.
- *
- * @param params.booking - The booking's creator and user custody link
- * @param params.userId - The caller
- * @param params.access - The caller's access
- * @returns `true` when writes to this booking are allowed
- */
-export function canWriteBooking({
-  booking,
-  userId,
-  access,
-}: Omit<ValidateBookingOwnershipParams, "action">): boolean {
-  return (
-    access.bookings.writeAll ||
-    booking.creatorId === userId ||
-    booking.custodianUserId === userId
-  );
-}
+/** Re-exported so server callers keep importing it beside its throwing form. */
+export { canWriteBooking };
 
 /**
  * Refuses a write to a booking the caller does not own.

@@ -286,6 +286,647 @@ export function pickPasses(tier, areas) {
   };
 }
 
+/** The Prisma schema file, whose model and enum names are the app's table names. */
+const SCHEMA_FILE = "packages/database/prisma/schema.prisma";
+
+/** Migration SQL files, one folder per migration. */
+const MIGRATION_SQL = /^packages\/database\/prisma\/migrations\/.+\.sql$/;
+
+/**
+ * Splits a unified diff into one entry per file, with the lines it adds and
+ * removes (without their `+`/`-` prefix) and whether it creates or deletes the file.
+ * @param {string} diff - `gh pr diff` or `git diff` output
+ * @returns {Array<{path: string, status: "added" | "deleted" | "modified", added: string[], removed: string[]}>}
+ */
+export function splitDiff(diff) {
+  const files = [];
+  let current = null;
+  let inHunk = false;
+  for (const line of diff.split("\n")) {
+    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    if (header) {
+      current = { path: header[2], status: "modified", added: [], removed: [] };
+      files.push(current);
+      inHunk = false;
+      continue;
+    }
+    if (!current) continue;
+    if (!inHunk) {
+      if (line.startsWith("new file mode")) current.status = "added";
+      else if (line.startsWith("deleted file mode")) current.status = "deleted";
+      else if (line.startsWith("@@")) inHunk = true;
+      continue;
+    }
+    if (line.startsWith("+")) current.added.push(line.slice(1));
+    else if (line.startsWith("-")) current.removed.push(line.slice(1));
+  }
+  return files;
+}
+
+/**
+ * Scans SQL into statements on `;`, ignoring semicolons inside string
+ * literals (`''` and, in E'...' strings, backslash escapes included), quoted
+ * identifiers (`"..."`, `""` included) and dollar-quoted bodies (functions,
+ * DO blocks, any `$tag$`). A `$` inside a name (`foo$tag$bar`) is part of the
+ * name, as in Postgres. Line comments (`--`) and block comments (slash-star,
+ * nested ones included) are dropped, so the Warnings block Prisma writes at
+ * the top of a migration never hides the statement after it.
+ *
+ * Valid SQL never ends inside a literal, identifier, comment or body, so
+ * `unterminated` means the scan lost track somewhere and its statement
+ * boundaries cannot be trusted.
+ * @param {string} sql
+ * @returns {{statements: string[], unterminated: boolean}} trimmed, non-empty statements without the trailing `;`
+ */
+export function scanSql(sql) {
+  const statements = [];
+  let current = "";
+  /** @type {null | "'" | '"' | "comment" | string} the open literal, identifier, comment or `$tag$` */
+  let open = null;
+  // Inside an E'...' string a backslash escapes the next character, `\'` included.
+  let escapeString = false;
+  let commentDepth = 0;
+  for (let i = 0; i < sql.length; i++) {
+    const char = sql[i];
+    if (open === "comment") {
+      if (sql.startsWith("/*", i)) {
+        commentDepth += 1;
+        i += 1;
+      } else if (sql.startsWith("*/", i)) {
+        commentDepth -= 1;
+        i += 1;
+        if (commentDepth === 0) {
+          open = null;
+          // Keep the words either side of the comment apart.
+          current += " ";
+        }
+      }
+      continue;
+    }
+    if (open === "'" || open === '"') {
+      current += char;
+      if (open === "'" && escapeString && char === "\\" && i + 1 < sql.length) {
+        current += sql[++i];
+      } else if (char === open) {
+        // A doubled quote is the quote character itself, not the end.
+        if (sql[i + 1] === open) current += sql[++i];
+        else open = null;
+      }
+      continue;
+    }
+    if (open) {
+      if (sql.startsWith(open, i)) {
+        current += open;
+        i += open.length - 1;
+        open = null;
+      } else current += char;
+      continue;
+    }
+    if (char === "-" && sql[i + 1] === "-") {
+      const end = sql.indexOf("\n", i);
+      i = end === -1 ? sql.length : end - 1;
+      continue;
+    }
+    if (char === "/" && sql[i + 1] === "*") {
+      open = "comment";
+      commentDepth = 1;
+      i += 1;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      open = char;
+      // An E prefix that is not the end of an identifier (`name'` is not one).
+      escapeString =
+        char === "'" &&
+        /[Ee]/.test(sql[i - 1] ?? "") &&
+        !/[\w$]/.test(sql[i - 2] ?? "");
+      current += char;
+      continue;
+    }
+    if (char === "$" && !/[\w$]/.test(sql[i - 1] ?? "")) {
+      const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      if (tag) {
+        open = tag[0];
+        current += tag[0];
+        i += tag[0].length - 1;
+        continue;
+      }
+    }
+    if (char === ";") {
+      if (current.trim()) statements.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) statements.push(current.trim());
+  return { statements, unterminated: open !== null };
+}
+
+/**
+ * Splits SQL into statements. See `scanSql` for what it understands.
+ * @param {string} sql
+ * @returns {string[]}
+ */
+export function splitSqlStatements(sql) {
+  return scanSql(sql).statements;
+}
+
+/** Strips the double quotes Prisma puts around identifiers. */
+const unquote = (name) => name.replace(/"/g, "");
+
+/** The referential action of a foreign key's `ON DELETE` clause. */
+const ON_DELETE =
+  /ON DELETE (CASCADE|RESTRICT|NO ACTION|SET NULL|SET DEFAULT)/i;
+
+/** An optionally quoted, optionally schema-qualified SQL identifier. */
+const IDENT = String.raw`((?:"[^"]+"|[\w]+)(?:\.(?:"[^"]+"|[\w]+))?)`;
+
+/** Splits a `CREATE TABLE` body into its column and constraint definitions. */
+const tableBodyParts = (body) =>
+  body
+    .split(/,\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+/** A table constraint written inside `CREATE TABLE` (primary key, check, ...). */
+const TABLE_CONSTRAINT =
+  /^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)\b/i;
+
+/**
+ * Lists the columns of a `CREATE TABLE` body, skipping table constraints, so
+ * the report can preview the table one column per row.
+ * @param {string} body - the text between the outer parentheses
+ * @returns {Array<{name: string, type: string, nullable: boolean, default: string}>}
+ *   built-in types are lower case and user types (enums) keep their name as
+ *   written; `default` is the SQL default expression, or "" when there is none
+ */
+export function createTableColumns(body) {
+  return tableBodyParts(body)
+    .filter((part) => !TABLE_CONSTRAINT.test(part))
+    .map((part) => {
+      const match =
+        /^("[^"]+"|\w+)\s+("[^"]+"|[\w]+(?:\(\d+(?:,\s*\d+)?\))?(?:\[\])?)(.*)$/s.exec(
+          part
+        );
+      if (!match)
+        return {
+          name: part.replace(/\s+/g, " "),
+          type: "",
+          nullable: true,
+          default: "",
+        };
+      const rest = match[3].replace(/\s+/g, " ");
+      const fallback = /DEFAULT (.+?)(?: NOT NULL| NULL|$)/i.exec(rest);
+      return {
+        name: unquote(match[1]),
+        type: match[2].startsWith('"')
+          ? unquote(match[2])
+          : match[2].toLowerCase(),
+        nullable: !/NOT NULL/i.test(rest),
+        default: fallback ? fallback[1].trim() : "",
+      };
+    });
+}
+
+/**
+ * Lists the table constraints written inside a `CREATE TABLE` body, in the
+ * same shape `ALTER TABLE ... ADD CONSTRAINT` produces, so a check or key
+ * declared inline is reported like one added afterwards.
+ * @param {string} table - the table being created
+ * @param {string} body - the text between the outer parentheses
+ * @returns {Array<{action: string, target: string, detail: string}>}
+ */
+export function createTableConstraints(table, body) {
+  return tableBodyParts(body)
+    .filter((part) => TABLE_CONSTRAINT.test(part))
+    .map((part) => {
+      const flat = part.replace(/\s+/g, " ");
+      const named = /^CONSTRAINT ("[^"]+"|\w+) (.*)$/i.exec(flat);
+      return {
+        action: "add constraint",
+        target: table,
+        detail: named
+          ? `${unquote(named[1])}: ${unquote(named[2])}`
+          : unquote(flat),
+      };
+    });
+}
+
+/**
+ * A statement keyword right after a `;` inside one scanned statement: the
+ * scan folded a second statement into the first.
+ */
+const SECOND_STATEMENT =
+  /;\s*(?:CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|TRUNCATE|GRANT|REVOKE|COMMENT)\b/i;
+
+/** Statements whose dollar-quoted body legitimately holds other statements. */
+const HAS_BODY = /^(?:CREATE (?:OR REPLACE )?(?:FUNCTION|PROCEDURE)|DO)\b/i;
+
+/**
+ * Classifies one migration statement into what the report lists: the action,
+ * the table, type or index it touches, and a one-line detail. Statements the
+ * parser does not know come back as `other` with their opening text, so
+ * nothing in a migration is ever left out of the list.
+ * @param {string} statement - one SQL statement without its `;`
+ * @returns {Array<{action: string, target: string, detail: string, sql?: string, columns?: ReturnType<typeof createTableColumns>}>} `columns` only on `create table`; `sql` (the whole statement) only on data writes and `other`; `hiddenStatement` when the statement still holds a second one after a `;`; usually one entry; `ALTER TABLE` with several clauses gives one per clause
+ */
+export function classifySqlStatement(statement) {
+  const entries = classifyOne(statement);
+  const flat = statement.replace(/\s+/g, " ").trim();
+  if (HAS_BODY.test(flat) || !SECOND_STATEMENT.test(statement)) return entries;
+  return entries.map((entry) => ({ ...entry, hiddenStatement: true }));
+}
+
+/**
+ * Classifies one statement; `classifySqlStatement` adds the hidden-statement flag.
+ * @param {string} statement
+ * @returns {ReturnType<typeof classifySqlStatement>}
+ */
+function classifyOne(statement) {
+  const sql = statement.replace(/\s+/g, " ").trim();
+  const short = sql.length > 160 ? `${sql.slice(0, 157)}...` : sql;
+  let m;
+
+  if (
+    (m = new RegExp(
+      `^CREATE TABLE (?:IF NOT EXISTS )?${IDENT}\\s*\\(`,
+      "i"
+    ).exec(sql))
+  ) {
+    const open = statement.indexOf("(");
+    const close = statement.lastIndexOf(")");
+    const body = statement.slice(open + 1, close);
+    const columns = createTableColumns(body);
+    return [
+      {
+        action: "create table",
+        target: unquote(m[1]),
+        detail: columns
+          .map((c) => `${c.name} ${c.type}${c.nullable ? " null" : ""}`)
+          .join(", "),
+        columns,
+      },
+      ...createTableConstraints(unquote(m[1]), body),
+    ];
+  }
+  if ((m = new RegExp(`^DROP TABLE (?:IF EXISTS )?${IDENT}`, "i").exec(sql)))
+    return [{ action: "drop table", target: unquote(m[1]), detail: "" }];
+  if (
+    (m = new RegExp(
+      `^ALTER TABLE (?:IF EXISTS )?(?:ONLY )?${IDENT} (.*)$`,
+      "i"
+    ).exec(sql))
+  ) {
+    const table = unquote(m[1]);
+    const rest = m[2];
+    if ((m = new RegExp(`^RENAME TO ${IDENT}`, "i").exec(rest)))
+      return [
+        {
+          action: "rename table",
+          target: table,
+          detail: `to ${unquote(m[1])}`,
+        },
+      ];
+    if (
+      (m = new RegExp(`^RENAME (?:COLUMN )?${IDENT} TO ${IDENT}`, "i").exec(
+        rest
+      ))
+    )
+      return [
+        {
+          action: "rename column",
+          target: `${table}.${unquote(m[1])}`,
+          detail: `to ${unquote(m[2])}`,
+        },
+      ];
+    if (/^(ENABLE|DISABLE|FORCE) ROW LEVEL SECURITY/i.test(rest))
+      return [
+        {
+          action: "row level security",
+          target: table,
+          detail: rest.split(" ")[0].toLowerCase(),
+        },
+      ];
+    // One ALTER TABLE can carry several comma-separated clauses.
+    return rest.split(/,\s*(?=(?:ADD|DROP|ALTER|RENAME)\b)/i).map((clause) => {
+      let c;
+      if (
+        (c = new RegExp(
+          `^ADD CONSTRAINT ${IDENT} FOREIGN KEY \\(([^)]*)\\) REFERENCES ${IDENT}(.*)$`,
+          "i"
+        ).exec(clause))
+      ) {
+        const onDelete = ON_DELETE.exec(c[4]);
+        return {
+          action: "add foreign key",
+          target: `${table}(${unquote(c[2])})`,
+          detail: `${unquote(c[1])} -> ${unquote(c[3])}${
+            onDelete ? `, on delete ${onDelete[1].toLowerCase()}` : ""
+          }`,
+        };
+      }
+      if ((c = new RegExp(`^ADD CONSTRAINT ${IDENT} (.*)$`, "i").exec(clause)))
+        return {
+          action: "add constraint",
+          target: table,
+          detail: `${unquote(c[1])}: ${c[2]}`,
+        };
+      if (
+        (c = new RegExp(`^DROP CONSTRAINT (?:IF EXISTS )?${IDENT}`, "i").exec(
+          clause
+        ))
+      )
+        return {
+          action: "drop constraint",
+          target: table,
+          detail: unquote(c[1]),
+        };
+      if (
+        (c = new RegExp(
+          `^ADD (?:COLUMN )?(?:IF NOT EXISTS )?${IDENT} (.*)$`,
+          "i"
+        ).exec(clause))
+      )
+        return {
+          action: "add column",
+          target: `${table}.${unquote(c[1])}`,
+          detail: unquote(c[2]),
+        };
+      if (
+        (c = new RegExp(`^DROP (?:COLUMN )?(?:IF EXISTS )?${IDENT}`, "i").exec(
+          clause
+        ))
+      )
+        return {
+          action: "drop column",
+          target: `${table}.${unquote(c[1])}`,
+          detail: "",
+        };
+      if (
+        (c = new RegExp(`^ALTER (?:COLUMN )?${IDENT} (.*)$`, "i").exec(clause))
+      )
+        return {
+          action: "alter column",
+          target: `${table}.${unquote(c[1])}`,
+          detail: unquote(c[2]),
+        };
+      return { action: "alter table", target: table, detail: clause };
+    });
+  }
+  if (
+    (m = new RegExp(
+      `^CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(?:IF NOT EXISTS )?${IDENT} ON ${IDENT}(?: USING (\\w+))?\\s*\\((.*?)\\)( NULLS NOT DISTINCT)?(?: WHERE (.*))?$`,
+      "i"
+    ).exec(sql))
+  )
+    return [
+      {
+        action: m[1] ? "create unique index" : "create index",
+        target: unquote(m[2]),
+        detail: `on ${unquote(m[3])}(${unquote(m[5])})${
+          m[4] ? ` using ${m[4]}` : ""
+        }${m[6] ? ", nulls not distinct" : ""}${
+          m[7] ? ` where ${unquote(m[7])}` : ""
+        }`,
+      },
+    ];
+  if (
+    (m = new RegExp(
+      `^DROP INDEX (?:CONCURRENTLY )?(?:IF EXISTS )?${IDENT}`,
+      "i"
+    ).exec(sql))
+  )
+    return [{ action: "drop index", target: unquote(m[1]), detail: "" }];
+  if (
+    (m = new RegExp(`^CREATE TYPE ${IDENT} AS ENUM \\((.*)\\)$`, "i").exec(sql))
+  )
+    return [
+      {
+        action: "create enum",
+        target: unquote(m[1]),
+        detail: m[2].replace(/'/g, ""),
+      },
+    ];
+  if (
+    (m = new RegExp(
+      `^ALTER TYPE ${IDENT} ADD VALUE (?:IF NOT EXISTS )?'([^']+)'`,
+      "i"
+    ).exec(sql))
+  )
+    return [{ action: "add enum value", target: unquote(m[1]), detail: m[2] }];
+  if (
+    (m = new RegExp(
+      `^ALTER TYPE ${IDENT} RENAME VALUE '([^']+)' TO '([^']+)'`,
+      "i"
+    ).exec(sql))
+  )
+    return [
+      {
+        action: "rename enum value",
+        target: unquote(m[1]),
+        detail: `${m[2]} to ${m[3]}`,
+      },
+    ];
+  if (
+    (m = new RegExp(`^ALTER TYPE ${IDENT} RENAME TO ${IDENT}`, "i").exec(sql))
+  )
+    return [
+      {
+        action: "rename enum",
+        target: unquote(m[1]),
+        detail: `to ${unquote(m[2])}`,
+      },
+    ];
+  if ((m = new RegExp(`^DROP TYPE (?:IF EXISTS )?${IDENT}`, "i").exec(sql)))
+    return [{ action: "drop enum", target: unquote(m[1]), detail: "" }];
+  if (
+    (m = new RegExp(`^CREATE (?:OR REPLACE )?FUNCTION ${IDENT}`, "i").exec(sql))
+  )
+    return [{ action: "create function", target: unquote(m[1]), detail: "" }];
+  if ((m = new RegExp(`^DROP FUNCTION (?:IF EXISTS )?${IDENT}`, "i").exec(sql)))
+    return [{ action: "drop function", target: unquote(m[1]), detail: "" }];
+  if (
+    (m = new RegExp(
+      `^CREATE (?:OR REPLACE )?(?:CONSTRAINT )?TRIGGER ${IDENT} (.*?) ON ${IDENT}`,
+      "i"
+    ).exec(sql))
+  )
+    return [
+      {
+        action: "create trigger",
+        target: unquote(m[1]),
+        detail: `${m[2].toLowerCase()} on ${unquote(m[3])}`,
+      },
+    ];
+  if (
+    (m = new RegExp(
+      `^DROP TRIGGER (?:IF EXISTS )?${IDENT} ON ${IDENT}`,
+      "i"
+    ).exec(sql))
+  )
+    return [
+      {
+        action: "drop trigger",
+        target: unquote(m[1]),
+        detail: `on ${unquote(m[2])}`,
+      },
+    ];
+  if (
+    (m = new RegExp(
+      `^CREATE (?:OR REPLACE )?(?:MATERIALIZED )?VIEW ${IDENT}`,
+      "i"
+    ).exec(sql))
+  )
+    return [{ action: "create view", target: unquote(m[1]), detail: "" }];
+  if ((m = new RegExp(`^CREATE POLICY ${IDENT} ON ${IDENT}`, "i").exec(sql)))
+    return [
+      { action: "create policy", target: unquote(m[2]), detail: unquote(m[1]) },
+    ];
+  // Data writes and unknown statements keep the statement as written in
+  // `sql`: the WHERE or ON CONFLICT past the short `detail` decides which rows
+  // they touch, and a literal's own whitespace is part of what it matches.
+  const original = statement.trim();
+  const writes = dataWrites(sql);
+  if (writes.length > 0)
+    return writes.map((write) => ({ ...write, detail: short, sql: original }));
+  return [{ action: "other", target: "", detail: short, sql: original }];
+}
+
+/** The data-writing statements, keyed by the action the report names. */
+const DATA_WRITES = [
+  ["insert rows", `INSERT INTO ${IDENT}`],
+  ["update rows", `UPDATE (?:ONLY )?${IDENT}`],
+  ["delete rows", `DELETE FROM (?:ONLY )?${IDENT}`],
+  ["delete rows", `TRUNCATE (?:TABLE )?${IDENT}`],
+];
+
+/**
+ * Removes every parenthesised group, leaving the top level of a statement.
+ * @param {string} sql
+ * @returns {string}
+ */
+function topLevel(sql) {
+  let text = sql;
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(/\([^()]*\)/g, " ");
+  } while (text !== previous);
+  return text;
+}
+
+/**
+ * Lists every table a statement writes rows to. A plain statement has at most
+ * one. A statement opening with `WITH` can write in its main statement and in
+ * each data-modifying CTE body, and Postgres runs all of them, so each is its
+ * own entry, the main statement's first.
+ * @param {string} sql - one statement, whitespace collapsed
+ * @returns {Array<{action: string, target: string}>} empty when it writes nothing
+ */
+function dataWrites(sql) {
+  for (const [action, pattern] of DATA_WRITES) {
+    const m = new RegExp(`^${pattern}`, "i").exec(sql);
+    if (m) return [{ action, target: unquote(m[1]) }];
+  }
+  if (!/^WITH\b/i.test(sql)) return [];
+  // `FOR UPDATE` and `ON UPDATE` are not writes.
+  const findAll = (text) =>
+    DATA_WRITES.flatMap(([action, pattern]) =>
+      [...text.matchAll(new RegExp(`(?<!FOR |ON )\\b${pattern}`, "gi"))].map(
+        (m) => ({ action, target: unquote(m[1]), index: m.index })
+      )
+    ).sort((a, b) => a.index - b.index);
+  const main = findAll(topLevel(sql));
+  const seen = new Set();
+  return [...main, ...findAll(sql)]
+    .map(({ action, target }) => ({ action, target }))
+    .filter(({ action, target }) => {
+      const key = `${action} ${target}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+/**
+ * Lists the `model` and `enum` blocks a schema diff adds or removes, and the
+ * `@@map`/`@map` lines it touches (where a Prisma name and the table name differ).
+ * Moving a block is not a change, so names both added and removed cancel out.
+ * @param {{added: string[], removed: string[]}} schemaDiff
+ * @returns {{modelsAdded: string[], modelsRemoved: string[], enumsAdded: string[], enumsRemoved: string[], mapsChanged: string[]}}
+ */
+export function summarizeSchemaDiff({ added, removed }) {
+  const names = (lines, kind) =>
+    lines
+      .map((line) => new RegExp(`^${kind}\\s+(\\w+)\\s*\\{`).exec(line.trim()))
+      .filter(Boolean)
+      .map((match) => match[1]);
+  const diffOf = (a, b) => a.filter((name) => !b.includes(name));
+  const addedModels = names(added, "model");
+  const removedModels = names(removed, "model");
+  const addedEnums = names(added, "enum");
+  const removedEnums = names(removed, "enum");
+  return {
+    modelsAdded: diffOf(addedModels, removedModels),
+    modelsRemoved: diffOf(removedModels, addedModels),
+    enumsAdded: diffOf(addedEnums, removedEnums),
+    enumsRemoved: diffOf(removedEnums, addedEnums),
+    mapsChanged: [
+      ...added.filter((l) => /@@?map\(/.test(l)).map((l) => `+ ${l.trim()}`),
+      ...removed.filter((l) => /@@?map\(/.test(l)).map((l) => `- ${l.trim()}`),
+    ],
+  };
+}
+
+/**
+ * Pulls every database change out of the PR diff so the report can list it in
+ * full: each migration with every statement it runs, and the models and enums
+ * the Prisma schema gains or loses. Done here, not by an agent, so no change
+ * can be summarised away. Statements come from added lines only, which is the
+ * whole file for a new migration but not for one in `editedMigrations`.
+ * @param {string} diff
+ * @returns {null | {migrations: Array<{path: string, status: string, parseWarnings: string[], statements: Array<{action: string, target: string, detail: string}>}>, schema: ReturnType<typeof summarizeSchemaDiff> | null, editedMigrations: string[]}}
+ *   null when the PR touches neither the schema nor a migration. `editedMigrations`
+ *   lists migrations that existed before the PR and are changed or deleted by it.
+ */
+export function extractDbChanges(diff) {
+  const files = splitDiff(diff);
+  const schemaFile = files.find((file) => file.path === SCHEMA_FILE);
+  const migrationFiles = files.filter((file) => MIGRATION_SQL.test(file.path));
+  if (!schemaFile && migrationFiles.length === 0) return null;
+  return {
+    migrations: migrationFiles.map((file) => {
+      const scan = scanSql(file.added.join("\n"));
+      const statements = scan.statements.flatMap(classifySqlStatement);
+      const parseWarnings = [];
+      if (scan.unterminated)
+        parseWarnings.push(
+          "the SQL ends inside a string, quoted name, comment or dollar-quoted body, so its statement boundaries cannot be trusted"
+        );
+      const hidden = new Set(
+        statements.filter((s) => s.hiddenStatement).map((s) => s.target)
+      );
+      if (hidden.size > 0)
+        parseWarnings.push(
+          `a statement on ${[...hidden].join(
+            ", "
+          )} still holds a second statement after a semicolon`
+        );
+      return {
+        path: file.path,
+        status: file.status,
+        statements,
+        parseWarnings,
+      };
+    }),
+    schema: schemaFile ? summarizeSchemaDiff(schemaFile) : null,
+    editedMigrations: migrationFiles
+      .filter((file) => file.status !== "added")
+      .map((file) => file.path),
+  };
+}
+
 /**
  * Condenses `gh pr view --json statusCheckRollup` into what the report shows.
  * Check runs carry status/conclusion; commit statuses carry state.
@@ -624,6 +1265,21 @@ export function collectContext({ run, prArg, startedAt, marker }) {
     );
   }
 
+  const db = extractDbChanges(diff);
+  for (const migration of db?.migrations ?? []) {
+    for (const reason of migration.parseWarnings)
+      warnings.push(
+        `The DB change list for ${migration.path} may be incomplete: ${reason}. Read that migration in full before approving it.`
+      );
+  }
+  if (db?.editedMigrations.length) {
+    warnings.push(
+      `This PR changes or deletes migrations that already existed (${db.editedMigrations.join(
+        ", "
+      )}): databases that already ran them never see the change.`
+    );
+  }
+
   const areas = summarizeAreas(files);
   const countedFiles = files.filter((file) => isCounted(file.path)).length;
   const changedLines = countChangedLines(files);
@@ -663,6 +1319,7 @@ export function collectContext({ run, prArg, startedAt, marker }) {
     tier,
     passes: pickPasses(tier, areas),
     files,
+    db,
     rules: rules.map(({ path: rulePath, description }) => ({
       path: rulePath,
       description,

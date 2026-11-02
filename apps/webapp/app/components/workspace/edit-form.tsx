@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   type Organization,
   type Currency,
@@ -74,6 +75,11 @@ interface Props {
    * selected workspace, which is the one that route edits.
    */
   showManagersSwitch?: boolean;
+  /**
+   * Rendered right under the general settings card, next to the print
+   * switches it belongs with. Only the workspace settings route passes it.
+   */
+  afterGeneral?: ReactNode;
 }
 
 export const EditGeneralWorkspaceSettingsFormSchema = (
@@ -111,6 +117,7 @@ export const WorkspaceEditForms = ({
   scimEnabled,
   scimTokens,
   showManagersSwitch,
+  afterGeneral,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
     <WorkspaceGeneralEditForms
@@ -118,6 +125,7 @@ export const WorkspaceEditForms = ({
       currency={currency}
       qrIdDisplayPreference={qrIdDisplayPreference}
     />
+    {afterGeneral}
     <WorkspacePermissionsEditForm showManagersSwitch={showManagersSwitch} />
     <WorkspaceSSOEditForm />
     <WorkspaceScimTokensSection
@@ -328,8 +336,8 @@ const WorkspaceGeneralEditForms = ({
           className={"border-b-0"}
           subHeading={
             <p>
-              Control whether each item's code is printed as a picture on the
-              booking checklist and the audit receipt.
+              Control whether each item's code is printed as a picture on
+              booking documents and the audit receipt.
             </p>
           }
         >

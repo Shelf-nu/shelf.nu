@@ -12,6 +12,7 @@ import {
   PackagePlus,
   QrCode,
   SlidersHorizontal,
+  TextCursorInput,
   Ungroup,
 } from "lucide-react";
 import { Spinner } from "./spinner";
@@ -123,6 +124,7 @@ export type IconType =
   // so every BulkDialogType must also be an IconType. Reuses the graph glyph:
   // a reorder point is a line you draw across a level.
   | "reorder-point"
+  | "custom-field"
   | "lock"
   | "activate"
   | "deactivate"
@@ -130,6 +132,8 @@ export type IconType =
   | "add-to-audit"
   | "delete-audit"
   | "scan"
+  | "checkout"
+  | "checkin"
   | "tool"
   | "rows"
   | "install"
@@ -197,12 +201,16 @@ export const iconsMap: IconsMap = {
   bookings: <BookingsIcon />,
   graph: <GraphIcon />,
   "reorder-point": <GraphIcon />,
+  "custom-field": <TextCursorInput />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
   kit: <Package />,
   "assign-custody": <CheckOutIcon />,
   "release-custody": <CheckInIcon />,
   "partial-checkin": <PackageCheck />,
+  // The bookings list's bulk Check out / Check in menu items.
+  checkout: <CheckOutIcon />,
+  checkin: <CheckInIcon />,
   "asset-label": <AssetLabel />,
   "no-permissions": <NoPermissionsIcon />,
   activate: <ActiveSwitchIcon />,

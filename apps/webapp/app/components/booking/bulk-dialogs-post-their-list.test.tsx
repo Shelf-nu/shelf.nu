@@ -1,8 +1,8 @@
 /**
  * The booking bulk dialogs post which bookings list they were opened on.
  *
- * Delete, archive and cancel open from `/bookings`, a kit's Bookings tab and an
- * asset's Bookings tab. On "Select all" the server resolves the selection from
+ * Delete, archive, cancel, check-out and check-in open from `/bookings`, a
+ * kit's Bookings tab and an asset's Bookings tab. On "Select all" the server resolves the selection from
  * the posted list and URL params, so each dialog's form must say which list it
  * is: `bookingsList` always (`index`, `kit` or `asset`), plus `kitId` on a kit's
  * tab and `assetId` on an asset's tab. The server refuses a "Select all" from a
@@ -25,6 +25,8 @@ import type { ListItemData } from "~/components/list/list-item";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import BulkArchiveDialog from "./bulk-archive-dialog";
 import BulkCancelDialog from "./bulk-cancel-dialog";
+import BulkCheckinDialog from "./bulk-checkin-dialog";
+import BulkCheckoutDialog from "./bulk-checkout-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 
 // why: the form is what is under test, not a submission; a plain form keeps
@@ -57,6 +59,8 @@ const DIALOGS: {
   { name: "delete", Dialog: BulkDeleteDialog, type: "trash" },
   { name: "archive", Dialog: BulkArchiveDialog, type: "archive" },
   { name: "cancel", Dialog: BulkCancelDialog, type: "cancel" },
+  { name: "check-out", Dialog: BulkCheckoutDialog, type: "checkout" },
+  { name: "check-in", Dialog: BulkCheckinDialog, type: "checkin" },
 ];
 
 const PAGES = [
