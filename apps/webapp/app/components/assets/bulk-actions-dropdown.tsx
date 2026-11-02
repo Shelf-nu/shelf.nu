@@ -593,20 +593,18 @@ function ConditionalDropdown() {
                 />
               </DropdownMenuItem>
             </When>
-            <When truthy={canBulkUpdateLocation}>
-              <DropdownMenuItem className="border-t md:hidden lg:p-0">
-                <Button
-                  type="button"
-                  role="button"
-                  variant="secondary"
-                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                  width="full"
-                  onClick={() => setOpen(false)}
-                >
-                  Close
-                </Button>
-              </DropdownMenuItem>
-            </When>
+            <DropdownMenuItem className="border-t md:hidden lg:p-0">
+              <Button
+                type="button"
+                role="button"
+                variant="secondary"
+                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                width="full"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </Button>
+            </DropdownMenuItem>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

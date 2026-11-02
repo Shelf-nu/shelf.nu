@@ -354,3 +354,23 @@ describe("assets index bulk menu: what a Manager may edit in bulk", () => {
     ]);
   });
 });
+
+/**
+ * On a phone the menu is a sheet with its own "Close" button. Everyone who
+ * can open the menu needs it, whatever bulk actions their role offers.
+ */
+describe("assets index bulk menu: closing it on a phone", () => {
+  it.each([
+    ["an Administrator", [OrganizationRoles.ADMIN], true],
+    ["a Manager with the switch on", [OrganizationRoles.MANAGER], true],
+    ["a Manager with the switch off", [OrganizationRoles.MANAGER], false],
+    ["a Base user", [OrganizationRoles.BASE], false],
+    ["a Self service user", [OrganizationRoles.SELF_SERVICE], false],
+  ])("offers %s the Close button", (_who, roles, managersCanEditAssets) => {
+    caller.roles = withWorkspaceGrants(roles, { managersCanEditAssets });
+
+    renderWithSelection([row({ id: "drill" })]);
+
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+  });
+});
