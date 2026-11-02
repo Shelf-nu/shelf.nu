@@ -193,6 +193,45 @@ describe("planModelPrefill", () => {
     expect(again.values).toEqual(afterA.values);
     expect(again.versions).toEqual(afterA.versions);
   });
+
+  // The multiline editor always submits its text with a trailing newline, so
+  // an empty one reads "\n" and a filled one reads "<value>\n".
+  it("fills a blank multiline editor, which reads back as a newline", () => {
+    const next = pick({ model: modelA, form: { brand: "\n" } });
+
+    expect(next.values).toEqual({
+      [VALUATION_PREFILL_KEY]: "450",
+      brand: "Westermo",
+    });
+    expect(prefillVersion(next, "brand")).toBe(1);
+  });
+
+  it("treats model A's multiline value read back with a newline as untouched", () => {
+    const afterA = pick({ model: modelA, form: { brand: "\n" } });
+
+    const afterB = pick({
+      previous: afterA,
+      model: modelB,
+      form: { brand: "Westermo\n" },
+    });
+
+    expect(afterB.values.brand).toBe("Siemens");
+    expect(prefillVersion(afterB, "brand")).toBe(2);
+  });
+
+  it("does not remount a multiline editor whose text only differs by the newline", () => {
+    const afterA = pick({ model: modelA, form: { brand: "\n" } });
+
+    const again = pick({
+      previous: afterA,
+      model: modelA,
+      form: { brand: "Westermo\n" },
+    });
+
+    expect(prefillVersion(again, "brand")).toBe(
+      prefillVersion(afterA, "brand")
+    );
+  });
 });
 
 describe("getUsablePrefill", () => {

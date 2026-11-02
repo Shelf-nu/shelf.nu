@@ -105,12 +105,16 @@ export function planModelPrefill({
   ]);
 
   for (const key of keys) {
-    const current = readCurrent(key);
+    const read = readCurrent(key);
+    // The multiline editor always submits its text with a trailing newline,
+    // so a blank one reads "\n". Compare without it.
+    const current = read === null ? null : withoutTrailingNewlines(read);
     const ours = previous.values[key];
     const isFree =
       current === null
         ? !savedKeys.has(key)
-        : current === "" || (ours !== undefined && current === ours);
+        : current === "" ||
+          (ours !== undefined && current === withoutTrailingNewlines(ours));
     if (!isFree) {
       continue;
     }
@@ -119,12 +123,17 @@ export function planModelPrefill({
     if (next !== undefined) {
       values[key] = next;
     }
-    if ((next ?? "") !== (current ?? "")) {
+    if (withoutTrailingNewlines(next ?? "") !== (current ?? "")) {
       versions[key] = (versions[key] ?? 0) + 1;
     }
   }
 
   return { values, versions };
+}
+
+/** A form value without the line breaks a multiline editor appends. */
+function withoutTrailingNewlines(value: string) {
+  return value.replace(/\n+$/, "");
 }
 
 /**
