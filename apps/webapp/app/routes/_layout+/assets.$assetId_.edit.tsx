@@ -251,12 +251,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    const searchParams = getCurrentSearchParams(request);
-
+    // Fields load for the category the asset is saved with: the submitted
+    // one, after the model fill above. The URL's `?category=` only drives the
+    // form and can lag behind a category the model filled.
     const customFields = await getActiveCustomFields({
       organizationId,
-      category:
-        searchParams.get("category") ?? String(formData.get("category")),
+      category: formData.get("category") as string | null,
     });
 
     // A Link field may still hold a value saved before it became a Link

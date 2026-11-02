@@ -125,7 +125,10 @@ function savedAsset(overrides: {
 }
 
 /** Posts the edit form with blank category, valuation and Brand. */
-async function post(fields: Record<string, string> = {}): Promise<Response> {
+async function post(
+  fields: Record<string, string> = {},
+  query = ""
+): Promise<Response> {
   // why: a URLSearchParams body, not FormData: happy-dom's multipart round
   // trip drops empty-valued fields, and blank fields are the subject here.
   const body = new URLSearchParams({
@@ -137,7 +140,7 @@ async function post(fields: Record<string, string> = {}): Promise<Response> {
     assetModelId: "model-1",
     ...fields,
   });
-  const request = new Request("http://localhost/assets/asset-1/edit", {
+  const request = new Request(`http://localhost/assets/asset-1/edit${query}`, {
     method: "POST",
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -193,6 +196,20 @@ describe("assets.$assetId_.edit: model defaults", () => {
     expect(payload.valuation).toBe(450);
     expect(submittedBrand()).toEqual(
       expect.objectContaining({ raw: "Westermo" })
+    );
+  });
+
+  it("loads the custom fields of the category the model fills, not the one in the URL", async () => {
+    savedAsset({ assetModelId: null });
+
+    // The Category picker writes its choice to the URL, so a user who picked
+    // Uncategorized submits ?category=uncategorized while the model fills
+    // its own category on the server.
+    await post({}, "?category=uncategorized");
+
+    expect(updateAssetPayload().categoryId).toBe("cat-network");
+    expect(getActiveCustomFields).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "cat-network" })
     );
   });
 
