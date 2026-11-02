@@ -15,6 +15,7 @@ import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
 import {
   ASSIGN_UNITS_FIRST_REASON,
   NO_ASSETS_PDF_REASON,
+  NO_CHECKIN_RECEIPT_REASON,
   canActOnBooking,
   canQuickMove,
   resolveBookingActions,
@@ -183,7 +184,7 @@ describe("resolveBookingActions: an Owner, by status", () => {
     expect(actions.checkOutRemaining.visible).toBe(false);
   });
 
-  it("hides the check-in receipt when it is not available", () => {
+  it("disables an unavailable check-in receipt with the generic reason", () => {
     const absent = resolveFor(
       buildBooking({ canPrintCheckinReceipt: undefined })
     );
@@ -191,8 +192,37 @@ describe("resolveBookingActions: an Owner, by status", () => {
       buildBooking({ canPrintCheckinReceipt: false })
     );
 
-    expect(absent.checkinReceipt.visible).toBe(false);
-    expect(unavailable.checkinReceipt.visible).toBe(false);
+    for (const actions of [absent, unavailable]) {
+      expect(actions.checkinReceipt).toEqual({
+        visible: true,
+        disabled: { reason: NO_CHECKIN_RECEIPT_REASON },
+      });
+    }
+  });
+
+  it("disables an unavailable check-in receipt with the booking's own reason", () => {
+    const actions = resolveFor(
+      buildBooking({
+        canPrintCheckinReceipt: false,
+        checkinReceiptUnavailableReason: "Nothing has been returned yet.",
+      })
+    );
+
+    expect(actions.checkinReceipt).toEqual({
+      visible: true,
+      disabled: { reason: "Nothing has been returned yet." },
+    });
+  });
+
+  it("enables an available check-in receipt whatever reason is passed", () => {
+    const actions = resolveFor(
+      buildBooking({
+        canPrintCheckinReceipt: true,
+        checkinReceiptUnavailableReason: "Unused",
+      })
+    );
+
+    expect(actions.checkinReceipt).toEqual({ visible: true, disabled: false });
   });
 });
 

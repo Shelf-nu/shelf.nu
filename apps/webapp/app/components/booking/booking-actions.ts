@@ -73,8 +73,14 @@ export type BookingActionsBooking = {
   modelRequests: CountableModelRequest[];
   /** Whether "Check out remaining" would find something to send. */
   hasItemsToCheckOut?: boolean;
-  /** Absent reads as "receipt not available". */
+  /** Absent reads as "receipt not available", which disables the receipt. */
   canPrintCheckinReceipt?: boolean;
+  /**
+   * Why the receipt is unavailable, for its disabled state. The booking page
+   * knows the specific reason; without one the generic
+   * {@link NO_CHECKIN_RECEIPT_REASON} is shown.
+   */
+  checkinReceiptUnavailableReason?: string;
 };
 
 /** Who is looking: their roles, resolved reach and the workspace's switches. */
@@ -94,6 +100,9 @@ const CHECK_OUT_BLOCKED_TITLE = "Can't check out yet";
 
 /** Why the booking document is disabled on a booking with no assets. */
 export const NO_ASSETS_PDF_REASON = "No assets in booking to generate a PDF.";
+
+/** Why the check-in receipt is disabled when no specific reason is given. */
+export const NO_CHECKIN_RECEIPT_REASON = "Nothing has been checked in yet.";
 
 /**
  * Whether the viewer may act on this booking at all: they write every booking,
@@ -192,7 +201,7 @@ function state(
  * | archive             | archivable and `booking:archive`                               | never                        |
  * | duplicate           | always                                                         | never                        |
  * | bookingDocument     | documents allowed for the viewer                               | no assets                    |
- * | checkinReceipt      | documents allowed and the receipt is available                 | never                        |
+ * | checkinReceipt      | documents allowed                                              | receipt not available        |
  * | revertToDraft       | RESERVED                                                       | never                        |
  * | delete              | the role may delete any booking, or the booking is a DRAFT     | never                        |
  * | manageNotifications | the role manages recipients and the booking is not closed      | never                        |
@@ -284,7 +293,14 @@ export function resolveBookingActions({
       booking.assetCount === 0 ? { reason: NO_ASSETS_PDF_REASON } : false
     ),
     checkinReceipt: state(
-      canUseDocuments && booking.canPrintCheckinReceipt === true
+      canUseDocuments,
+      booking.canPrintCheckinReceipt === true
+        ? false
+        : {
+            reason:
+              booking.checkinReceiptUnavailableReason ??
+              NO_CHECKIN_RECEIPT_REASON,
+          }
     ),
     revertToDraft: state(isReserved),
     delete: state(

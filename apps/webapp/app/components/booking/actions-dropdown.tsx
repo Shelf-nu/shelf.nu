@@ -1,30 +1,26 @@
-import { BookingStatus } from "@prisma/client";
+/**
+ * The booking page's "Actions" menu.
+ *
+ * Which entries show comes from the shared rules (`useBookingActions`), the
+ * same ones the bookings list row reads, so the two surfaces cannot disagree.
+ * The page renders this menu only for viewers who may act on the booking
+ * (`canSeeActions` in `forms/edit-booking-form.tsx`).
+ *
+ * @see {@link file://./booking-actions-menu.tsx} the menu itself
+ * @see {@link file://./booking-actions.ts} the rules
+ * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the loader and actions
+ */
 import { useLoaderData } from "react-router";
-import { ChevronRight } from "~/components/icons/library";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuTrigger,
-} from "~/components/shared/dropdown";
 import { useSearchParams } from "~/hooks/search-params";
-import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useOrganizationRoles } from "~/hooks/use-organization-roles";
-import { useRoleAccess } from "~/hooks/use-role-access";
-import { isBookingArchivable } from "~/modules/booking/helpers";
+import { isCheckinReceiptAvailable } from "~/modules/booking/checkin-receipt-availability";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { ArchiveBookingAction } from "./archive-booking-action";
+import { useBookingActions } from "./booking-actions";
+import { BookingActionsMenu } from "./booking-actions-menu";
 import {
   BookingCheckinReceiptPDF,
   checkinReceiptUnavailableReason,
-  isCheckinReceiptAvailable,
 } from "./booking-checkin-receipt-pdf";
 import {
   BookingOverviewPDF,
@@ -33,127 +29,86 @@ import {
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 import { DuplicateBookingAction } from "./duplicate-booking-action";
-
 import ExtendBookingDialog from "./extend-booking-dialog";
 import ManageNotificationsDialog from "./manage-notifications-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
-import { Button } from "../shared/button";
-import When from "../when/when";
 
+/** Props for {@link ActionsDropdown}. */
 interface Props {
+  /** Stretches the trigger's wrapper to the full width of its container. */
   fullWidth?: boolean;
 }
 
+/**
+ * Renders the booking page's Actions menu, in this order: revert to draft,
+ * cancel, extend, archive, duplicate, manage notifications, delete, a divider,
+ * the booking document and the check-in receipt.
+ *
+ * @param props - See {@link Props}
+ */
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking, hasDispositionedUnits, nextReservations } =
     useLoaderData<typeof loader>();
-  const {
-    isCompleted,
-    isOngoing,
-    isReserved,
-    isOverdue,
-    isDraft,
-    isArchived,
-    isCancelled,
-  } = useBookingStatusHelpers(booking.status);
 
-  const roles = useOrganizationRoles();
-  const roleAccess = useRoleAccess();
   // The PDFs list assets in the order the page is showing them.
   const [searchParams] = useSearchParams();
   const assetOrder = pdfAssetOrderFromSearchParams(searchParams);
 
-  const canArchiveBooking = userHasPermission({
-    roles,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.archive,
+  const canPrintCheckinReceipt = isCheckinReceiptAvailable({
+    status: booking.status,
+    bookingAssets: booking.bookingAssets,
+    hasDispositionedUnits,
   });
 
-  const canCancelBooking = userHasPermission({
-    roles,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.cancel,
-  });
+  // The page names what is missing; the list row shows the rule's generic text.
+  const unavailableReason = checkinReceiptUnavailableReason(
+    booking.bookingAssets
+  );
 
-  const canExtendBooking =
-    (isOngoing || isOverdue) &&
-    userHasPermission({
-      roles,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.extend,
-    });
+  const actions = useBookingActions({
+    status: booking.status,
+    to: booking.to,
+    custodianUserId: booking.custodianUserId,
+    custodianTeamMemberUserId: booking.custodianTeamMember?.userId ?? null,
+    assetCount: booking.bookingAssets.length,
+    modelRequests: booking.modelRequests ?? [],
+    canPrintCheckinReceipt,
+    checkinReceiptUnavailableReason: unavailableReason,
+  });
 
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger
-        className={tw("asset-actions grow", fullWidth ? "w-full" : "")}
-      >
-        <Button
-          variant="secondary"
-          data-test-id="bookingActionsButton"
-          as="span"
-          className="flex"
-        >
-          <span className="flex items-center gap-2">
-            Actions <ChevronRight className="chev rotate-90" />
-          </span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuPortal>
-        <DropdownMenuContent
-          align="end"
-          className="order w-[220px] rounded-md bg-white p-1.5 text-right"
-        >
-          <When truthy={booking.status === BookingStatus.RESERVED}>
-            <RevertToDraftDialog booking={booking} />
-          </When>
-          <When
-            truthy={(isOngoing || isReserved || isOverdue) && canCancelBooking}
-          >
-            <CancelBookingDialog booking={booking} />
-          </When>
-          <When truthy={canExtendBooking}>
-            <ExtendBookingDialog
-              booking={booking}
-              nextReservations={nextReservations}
-            />
-          </When>
-          <When
-            truthy={
-              isBookingArchivable({ status: booking.status, to: booking.to }) &&
-              canArchiveBooking
-            }
-          >
-            <DropdownMenuItem asChild>
-              <ArchiveBookingAction booking={{ id: booking.id }} />
-            </DropdownMenuItem>
-          </When>
+    <div className={tw("grow", fullWidth ? "w-full" : "")}>
+      <BookingActionsMenu trigger="button">
+        {actions.revertToDraft.visible ? (
+          <RevertToDraftDialog booking={booking} />
+        ) : null}
+        {actions.cancel.visible ? (
+          <CancelBookingDialog booking={booking} />
+        ) : null}
+        {actions.extend.visible ? (
+          <ExtendBookingDialog
+            booking={booking}
+            nextReservations={nextReservations}
+          />
+        ) : null}
+        {actions.archive.visible ? (
+          <ArchiveBookingAction booking={{ id: booking.id }} />
+        ) : null}
+        {actions.duplicate.visible ? (
+          <DuplicateBookingAction booking={{ id: booking.id }} />
+        ) : null}
+        {actions.manageNotifications.visible ? (
+          <ManageNotificationsDialog />
+        ) : null}
+        {/* Members whose policy limits delete to drafts see Delete only on a
+            draft; the server applies the same rule (`assertCanDeleteBooking`). */}
+        {actions.delete.visible ? <DeleteBooking booking={booking} /> : null}
 
-          <DropdownMenuItem asChild>
-            <DuplicateBookingAction booking={{ id: booking.id }} />
-          </DropdownMenuItem>
-
-          <When
-            truthy={
-              roleAccess.policy.notifications.manageBookingRecipients &&
-              !isCompleted &&
-              !isArchived &&
-              !isCancelled
-            }
-          >
-            <ManageNotificationsDialog />
-          </When>
-
-          {/* Members whose policy limits delete to drafts see Delete only on a
-              draft; the server applies the same rule (`assertCanDeleteBooking`). */}
-          <When
-            truthy={!roleAccess.policy.bookings.deleteOnlyDrafts || isDraft}
-          >
-            <DeleteBooking booking={booking} />
-          </When>
-
+        {actions.bookingDocument.visible || actions.checkinReceipt.visible ? (
           <Divider className="my-2" />
+        ) : null}
+        {actions.bookingDocument.visible ? (
           <BookingOverviewPDF
             booking={{
               id: booking.id,
@@ -162,21 +117,17 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             }}
             assetOrder={assetOrder}
           />
+        ) : null}
+        {actions.checkinReceipt.visible ? (
           <BookingCheckinReceiptPDF
             booking={booking}
-            available={isCheckinReceiptAvailable({
-              status: booking.status,
-              bookingAssets: booking.bookingAssets,
-              hasDispositionedUnits,
-            })}
-            unavailableReason={checkinReceiptUnavailableReason(
-              booking.bookingAssets
-            )}
+            available={canPrintCheckinReceipt}
+            unavailableReason={unavailableReason}
             assetOrder={assetOrder}
             timeStamp={new Date().getTime()}
           />
-        </DropdownMenuContent>
-      </DropdownMenuPortal>
-    </DropdownMenu>
+        ) : null}
+      </BookingActionsMenu>
+    </div>
   );
 };
