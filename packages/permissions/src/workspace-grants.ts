@@ -47,6 +47,11 @@ type GrantRow = Partial<
  * migration) opt out with `matrixOnly: true`. Delete,
  * archive, import and every create on categories, tags, locations, custom
  * fields and asset models use pairs this row never grants.
+ *
+ * Every webapp route or module that checks one of these pairs is listed by
+ * hand in `apps/webapp/test/routes-tests/manager-edit-switch.route-registry.test.ts`,
+ * as opened or matrix-only; a new check fails that test until it is
+ * classified. Widening a row means reviewing that list too.
  */
 export const WORKSPACE_GRANTS: Readonly<
   Record<WorkspaceGrantSetting, GrantRow>
