@@ -1,9 +1,9 @@
 /**
- * The Actions column of one bookings-list row: compact icon buttons with a
- * tooltip each, the bookings twin of the assets index's `AssetQuickActions`.
- * New row actions belong here, in the same icon-button shape.
+ * The Quick actions column of one bookings-list row: compact icon buttons with
+ * a tooltip each (the bookings twin of the assets index's `AssetQuickActions`),
+ * followed by a ⋯ menu holding the rest of the booking page's Actions menu.
  *
- * Today it holds check-out and check-in, so an operator can move a booking
+ * The icons are check-out and check-in, so an operator can move a booking
  * along without opening it, the way the booking header does, with the same
  * dialogs and the same server action:
  *
@@ -22,6 +22,15 @@
  * model units no asset is assigned to yet keeps its Check out button
  * disabled: the booking page's fulfil scanner is where those are assigned.
  *
+ * The ⋯ menu offers, each only when {@link resolveBookingActions} shows it:
+ * extend, cancel, archive, duplicate, then (after a divider) the booking
+ * document and the check-in receipt. It never offers revert to draft, delete
+ * or manage notifications: those stay on the booking page. The PDFs list
+ * assets in the server's default order, and the extend dialog fetches its own
+ * reservation horizon when it opens. The receipt entry is shown disabled with
+ * the rule's reason until something has been checked in. A row where the
+ * viewer may do nothing renders nothing at all.
+ *
  * Each row posts through its own fetcher form to the booking's overview
  * action, which owns the permission check, the explicit-mode guard, the asset
  * notes and the success toast. The form also says it comes from the list
@@ -31,7 +40,9 @@
  * sends; the row has no space for an inline error and shows none.
  *
  * @see {@link file://./booking-actions.ts} decides which buttons show
- * @see {@link file://./list-bookings-content.tsx} renders this in the Actions column
+ * @see {@link file://./booking-actions-menu.tsx} the ⋯ menu
+ * @see {@link file://./actions-dropdown.tsx} the booking page's menu, which this mirrors
+ * @see {@link file://./list-bookings-content.tsx} renders this in the Quick actions column
  * @see {@link file://./../assets/assets-index/asset-quick-actions.tsx} the assets index twin
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
  * @see {@link file://./checkout-dialog.tsx} and {@link file://./checkin-dialog.tsx}
@@ -41,10 +52,18 @@ import { ArrowRightFromLineIcon, LogInIcon, LogOutIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { ArchiveBookingAction } from "./archive-booking-action";
 import { useBookingActions } from "./booking-actions";
 import type { BookingActionsBooking } from "./booking-actions";
+import { BookingActionsMenu } from "./booking-actions-menu";
+import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
+import { BookingOverviewPDF } from "./booking-overview-pdf";
+import { CancelBookingDialog } from "./cancel-booking-dialog";
 import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
+import { DuplicateBookingAction } from "./duplicate-booking-action";
+import ExtendBookingDialog from "./extend-booking-dialog";
+import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
 
 /**
@@ -110,10 +129,35 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
    */
   const busy = useDisabled(fetcher);
 
-  const { checkOut, checkOutRemaining, checkIn } = actions;
-  if (!checkOut.visible && !checkOutRemaining.visible && !checkIn.visible) {
+  const {
+    checkOut,
+    checkOutRemaining,
+    checkIn,
+    extend,
+    cancel,
+    archive,
+    duplicate,
+    bookingDocument,
+    checkinReceipt,
+  } = actions;
+  const hasMenuEntries =
+    extend.visible ||
+    cancel.visible ||
+    archive.visible ||
+    duplicate.visible ||
+    bookingDocument.visible ||
+    checkinReceipt.visible;
+  if (
+    !checkOut.visible &&
+    !checkOutRemaining.visible &&
+    !checkIn.visible &&
+    !hasMenuEntries
+  ) {
     return null;
   }
+
+  // Stamped into the receipt's file name, fixed for this render.
+  const receiptTimeStamp = new Date().getTime();
 
   const dialogBooking = {
     id: booking.id,
@@ -187,6 +231,55 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
               {...ACTIONS.checkIn}
             />
           )
+        ) : null}
+
+        {/* No row-level click handler needs guarding: the list row navigates
+            through its links and bulk selection is its own checkbox. */}
+        {hasMenuEntries ? (
+          <BookingActionsMenu trigger="icon">
+            {extend.visible ? (
+              <ExtendBookingDialog
+                booking={{
+                  id: booking.id,
+                  from: dialogBooking.from,
+                  to: dialogBooking.to,
+                }}
+              />
+            ) : null}
+            {cancel.visible ? (
+              <CancelBookingDialog
+                booking={{ id: booking.id, name: booking.name }}
+              />
+            ) : null}
+            {archive.visible ? (
+              <ArchiveBookingAction booking={{ id: booking.id }} />
+            ) : null}
+            {duplicate.visible ? (
+              <DuplicateBookingAction booking={{ id: booking.id }} />
+            ) : null}
+            {bookingDocument.visible || checkinReceipt.visible ? (
+              <Divider className="my-2" />
+            ) : null}
+            {bookingDocument.visible ? (
+              <BookingOverviewPDF
+                booking={{
+                  id: booking.id,
+                  name: booking.name,
+                  assetCount: booking.assetCount,
+                }}
+              />
+            ) : null}
+            {checkinReceipt.visible ? (
+              <BookingCheckinReceiptPDF
+                booking={{ id: booking.id, name: booking.name }}
+                available={booking.canPrintCheckinReceipt === true}
+                unavailableReason={
+                  checkinReceipt.disabled ? checkinReceipt.disabled.reason : ""
+                }
+                timeStamp={receiptTimeStamp}
+              />
+            ) : null}
+          </BookingActionsMenu>
         ) : null}
       </div>
     </>

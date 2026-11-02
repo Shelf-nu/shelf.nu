@@ -147,6 +147,11 @@ type ListBookingsContentProps = {
      * OVERDUE row offers "Check out remaining".
      */
     hasItemsToCheckOut?: boolean;
+    /**
+     * Set by the same decorator: true when something has been checked in, so
+     * the row's check-in receipt entry is enabled.
+     */
+    canPrintCheckinReceipt?: boolean;
   };
   /**
    * History state for the row link, so the booking page can step through

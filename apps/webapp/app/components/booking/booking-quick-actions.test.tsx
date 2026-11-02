@@ -22,7 +22,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
-import { ASSIGN_UNITS_FIRST_REASON } from "./booking-actions";
+import {
+  ASSIGN_UNITS_FIRST_REASON,
+  NO_CHECKIN_RECEIPT_REASON,
+} from "./booking-actions";
 import { BookingQuickActions } from "./booking-quick-actions";
 
 /** The roles the viewer holds; both role hooks below read it. */
@@ -104,6 +107,60 @@ vi.mock("~/hooks/use-date-formatter", () => ({
   }),
 }));
 
+// why: the ⋯ menu's open-state hook reads the app's `useSearchParams`, which
+// needs a router and the assets-index loader; neither is mounted in a row test.
+vi.mock("~/hooks/search-params", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>(
+    "~/hooks/search-params"
+  );
+  return {
+    ...actual,
+    useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  };
+});
+
+/** A stand-in menu entry: a button named after the action it replaces. */
+function stubEntry(label: string) {
+  return function StubEntry() {
+    return <button type="button">{label}</button>;
+  };
+}
+
+// why: each action component (dialog, fetcher, loader reads) has its own
+// tests; the row test asserts which entries the menu lists and in what order.
+vi.mock("./extend-booking-dialog", () => ({ default: stubEntry("Extend") }));
+// why: see the extend stub.
+vi.mock("./cancel-booking-dialog", () => ({
+  CancelBookingDialog: stubEntry("Cancel"),
+}));
+// why: see the extend stub.
+vi.mock("./archive-booking-action", () => ({
+  ArchiveBookingAction: stubEntry("Archive"),
+}));
+// why: see the extend stub.
+vi.mock("./duplicate-booking-action", () => ({
+  DuplicateBookingAction: stubEntry("Duplicate"),
+}));
+// why: see the extend stub.
+vi.mock("./booking-overview-pdf", () => ({
+  BookingOverviewPDF: stubEntry("Booking document"),
+}));
+// why: see the extend stub; the stand-in keeps the row's `available` and
+// `unavailableReason` inputs observable as the disabled state and the title.
+vi.mock("./booking-checkin-receipt-pdf", () => ({
+  BookingCheckinReceiptPDF: ({
+    available,
+    unavailableReason,
+  }: {
+    available: boolean;
+    unavailableReason: string;
+  }) => (
+    <button type="button" disabled={!available} title={unavailableReason}>
+      Check-in receipt
+    </button>
+  ),
+}));
+
 type RowBooking = ComponentProps<typeof BookingQuickActions>["booking"];
 
 /** A RESERVED booking with nothing unusual about it. */
@@ -142,7 +199,25 @@ function renderRow(
 function buttonLabels(): string[] {
   return screen
     .queryAllByRole("button")
-    .map((button) => button.getAttribute("aria-label") ?? "");
+    .map((button) => button.getAttribute("aria-label") ?? "")
+    .filter((label) => label !== MORE_ACTIONS);
+}
+
+/** The ⋯ trigger's accessible name; it is not one of the icon actions. */
+const MORE_ACTIONS = "More actions";
+
+/** Opens the row's ⋯ menu (the desktop trigger is rendered first). */
+function openMenu() {
+  fireEvent.click(screen.getAllByRole("button", { name: MORE_ACTIONS })[0]);
+}
+
+/** The names of the entries in the open menu, in order. */
+function menuEntries(): string[] {
+  return screen
+    .queryAllByRole("button")
+    .filter((button) => !button.hasAttribute("aria-label"))
+    .map((button) => button.textContent ?? "")
+    .filter((text) => text !== "" && text !== "Close");
 }
 
 describe("BookingQuickActions: what the row renders", () => {
@@ -183,10 +258,10 @@ describe("BookingQuickActions: what the row renders", () => {
     BookingStatus.COMPLETE,
     BookingStatus.CANCELLED,
     BookingStatus.ARCHIVED,
-  ])("renders nothing for a %s booking", (status) => {
-    const { container } = renderRow({ status });
+  ])("renders no check-out or check-in button for a %s booking", (status) => {
+    renderRow({ status });
 
-    expect(container).toBeEmptyDOMElement();
+    expect(buttonLabels()).toEqual([]);
   });
 
   it("disables Check out while reserved model units are unassigned, with the reason", () => {
@@ -317,12 +392,123 @@ describe("BookingQuickActions: what the row renders", () => {
     expect(buttonLabels()).toEqual(["Check out"]);
   });
 
-  it("renders nothing for a BASE viewer, who holds neither grant", () => {
-    const { container } = renderRow(
+  it("gives a BASE custodian no check-out or check-in, only Duplicate and the booking document in the menu", () => {
+    // The fixture's custodian is ME, the signed-in user, so this viewer holds
+    // the booking but has none of the move, extend, cancel or archive grants.
+    renderRow(
       { status: BookingStatus.ONGOING, hasItemsToCheckOut: true },
       { roles: [OrganizationRoles.BASE] }
     );
 
+    expect(buttonLabels()).toEqual([]);
+    openMenu();
+    const entries = menuEntries();
+    expect(entries).toEqual(
+      expect.arrayContaining(["Duplicate", "Booking document"])
+    );
+    for (const absent of ["Extend", "Cancel", "Archive"]) {
+      expect(entries).not.toContain(absent);
+    }
+  });
+
+  it("renders nothing for a BASE viewer on a booking they do not hold", () => {
+    const { container } = renderRow(
+      {
+        status: BookingStatus.ONGOING,
+        hasItemsToCheckOut: true,
+        custodianUserId: "user-other",
+      },
+      { roles: [OrganizationRoles.BASE] }
+    );
+
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("BookingQuickActions: the ⋯ menu", () => {
+  it("offers Extend, Cancel, Duplicate, Booking document, Check-in receipt on an ONGOING row", () => {
+    renderRow({
+      status: BookingStatus.ONGOING,
+      canPrintCheckinReceipt: true,
+    });
+    openMenu();
+
+    expect(menuEntries()).toEqual([
+      "Extend",
+      "Cancel",
+      "Duplicate",
+      "Booking document",
+      "Check-in receipt",
+    ]);
+    expect(
+      screen.getByRole("button", { name: "Check-in receipt" })
+    ).toBeEnabled();
+  });
+
+  it("shows the check-in receipt disabled, with the rule's reason, until something was checked in", () => {
+    renderRow({
+      status: BookingStatus.ONGOING,
+      canPrintCheckinReceipt: false,
+    });
+    openMenu();
+
+    const receipt = screen.getByRole("button", { name: "Check-in receipt" });
+    expect(receipt).toBeDisabled();
+    expect(receipt).toHaveAttribute("title", NO_CHECKIN_RECEIPT_REASON);
+  });
+
+  it("offers Archive, Duplicate and the PDFs on a COMPLETE row", () => {
+    renderRow({
+      status: BookingStatus.COMPLETE,
+      to: new Date("2020-01-01T00:00:00Z"),
+      canPrintCheckinReceipt: true,
+    });
+    openMenu();
+
+    expect(menuEntries()).toEqual([
+      "Archive",
+      "Duplicate",
+      "Booking document",
+      "Check-in receipt",
+    ]);
+  });
+
+  it("offers Cancel and Archive on a RESERVED row whose end has passed", () => {
+    renderRow({
+      status: BookingStatus.RESERVED,
+      to: new Date("2020-01-01T00:00:00Z"),
+    });
+    openMenu();
+
+    expect(menuEntries()).toEqual(
+      expect.arrayContaining(["Cancel", "Archive"])
+    );
+    expect(menuEntries()).not.toContain("Extend");
+  });
+
+  it("never offers Delete, Revert to draft, Reserve or Manage notifications", () => {
+    renderRow({ status: BookingStatus.RESERVED, canPrintCheckinReceipt: true });
+    openMenu();
+
+    const entries = menuEntries().join("|");
+    for (const forbidden of [
+      "Delete",
+      "Revert to draft",
+      "Reserve",
+      "Manage notifications",
+    ]) {
+      expect(entries.toLowerCase()).not.toContain(forbidden.toLowerCase());
+    }
+  });
+
+  it("renders no menu for a SELF_SERVICE viewer who is not the custodian", () => {
+    renderRow(
+      { status: BookingStatus.ONGOING, custodianUserId: "user-other" },
+      { roles: [OrganizationRoles.SELF_SERVICE] }
+    );
+
+    expect(
+      screen.queryByRole("button", { name: MORE_ACTIONS })
+    ).not.toBeInTheDocument();
   });
 });

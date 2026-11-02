@@ -395,8 +395,8 @@ export default function BookingsIndexPage({
               <Th>Tags</Th>
               <Th>Custodian</Th>
               <Th>Created by</Th>
-              {/* Row actions, see BookingQuickActions */}
-              <Th>Actions</Th>
+              {/* Check-in/out icons and the ⋯ menu, see BookingQuickActions */}
+              <Th>Quick actions</Th>
             </>
           }
           headerExtraContent={
