@@ -202,6 +202,32 @@ export function wrapLinkForNote(to: string, text: string): string {
 }
 
 /**
+ * Wraps text a person typed (a name, a code, a value) for a system note.
+ *
+ * Every user-typed value in a system note goes inside a tag, never as bare
+ * text: bare text is where the note's link chips are looked for, so a name
+ * that looks like a URL would become a link to it. Use `wrapLinkForNote` when
+ * the value names something with a page in Shelf, and this when it does not
+ * (or the note is on that page already).
+ *
+ * @param text - The value as typed; Markdoc delimiters are removed
+ * @param options.chips - Show the web links in the value as link chips. Only
+ *   for custom field values, whose links the asset page shows as chips too.
+ * @returns The `name` tag
+ *
+ * Example: wrapNameForNote("Shoot 2") -> "{% name text=\"Shoot 2\" /%}"
+ */
+export function wrapNameForNote(
+  text: string | null | undefined,
+  options: { chips?: boolean } = {}
+): string {
+  const safe = stripMarkdocDelimiters(text).replace(/"/g, "&quot;");
+  return options.chips
+    ? `{% name text="${safe}" chips=true /%}`
+    : `{% name text="${safe}" /%}`;
+}
+
+/**
  * Appends an optional free-text remark to a system-generated note line.
  *
  * Several quantity custody / adjustment endpoints let the caller attach a
@@ -284,7 +310,7 @@ export function extractAssetsListTags(content: string): Array<{
  * @returns Formatted string for use in booking notes
  *
  * If custodian has a user: "{% link to="/settings/team/users/123" text="John Doe" /%}"
- * If custodian is team member only: "**Team Member Name**"
+ * If custodian is team member only: "{% name text="Team Member Name" /%}"
  */
 export function wrapCustodianForNote(custodian: {
   teamMember: {
@@ -298,14 +324,9 @@ export function wrapCustodianForNote(custodian: {
     // Custodian has a user account, create a link
     return wrapUserLinkForNote(teamMember.user);
   } else {
-    // Team member without a user account renders as literal bold text, so the
-    // name must be stripped of Markdoc delimiters as well as escaped for
-    // emphasis — a non-registered member's name is free-form user input and
-    // this wrapper is shared by every custody note in the app.
-    return `**${stripMarkdocDelimiters(teamMember.name).replace(
-      /\*\*/g,
-      "\\*\\*"
-    )}**`;
+    // A non-registered member's name is free-form user input and has no page
+    // to link to, so it goes inside a `name` tag.
+    return wrapNameForNote(teamMember.name);
   }
 }
 

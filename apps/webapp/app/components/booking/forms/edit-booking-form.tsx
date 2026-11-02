@@ -8,6 +8,7 @@ import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
+import type { ZodObject, ZodString } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
@@ -53,6 +54,7 @@ import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
+import { EXPIRED_CHECKOUT_NEW_TO_FIELD } from "../checkout-dialog";
 import {
   BookingFormSchema,
   getReserveStartBlockedReason,
@@ -171,15 +173,8 @@ const BOOKING_SAVE_INTENTS = ["save", "reserve"] as const;
  * @param props - The booking to edit and an optional form action
  */
 export function EditBookingForm(props: BookingFormData) {
-  const { key, discard, discarded } = useDiscardRemount();
-  return (
-    <EditBookingFormInner
-      key={key}
-      {...props}
-      onDiscard={discard}
-      autoFocusName={!discarded}
-    />
-  );
+  const { key, discard } = useDiscardRemount();
+  return <EditBookingFormInner key={key} {...props} onDiscard={discard} />;
 }
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -187,12 +182,9 @@ function EditBookingFormInner({
   booking,
   action,
   onDiscard,
-  autoFocusName,
 }: BookingFormData & {
   /** Resets the form to the loaded values (remounts it). */
   onDiscard: () => void;
-  /** Focus the Name field on mount; false after a Discard. */
-  autoFocusName: boolean;
 }) {
   const navigation = useNavigation();
   const {
@@ -354,6 +346,15 @@ function EditBookingFormInner({
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
     actionData?.error
   );
+  /**
+   * The end date picked in the expired-reservation check-out prompt, refused
+   * by the server. The prompt closes on submit, so its error is shown beside
+   * the booking dates and named after the prompt's field, never under the
+   * form's own End Date.
+   */
+  const expiredCheckoutNewToError = getValidationErrors<
+    ZodObject<{ [EXPIRED_CHECKOUT_NEW_TO_FIELD]: ZodString }>
+  >(actionData?.error)?.[EXPIRED_CHECKOUT_NEW_TO_FIELD]?.message;
 
   const canCheckInBooking = userHasPermission({
     roles,
@@ -618,8 +619,23 @@ function EditBookingFormInner({
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
                     sourceQuestions={checkoutSourceQuestions}
-                    booking={{ id, name: name!, from: startDateAsDate }}
+                    booking={{
+                      id,
+                      name: name!,
+                      from: startDateAsDate,
+                      // For the expired-reservation prompt: a RESERVED
+                      // booking whose end has passed is asked for a new end
+                      // date or an explicit "as overdue". The stored end, not
+                      // the editable field: the server judges expiry on the
+                      // saved row, and an unsaved edit must not flip the
+                      // prompt.
+                      status,
+                      to: loaderBooking.to,
+                    }}
                     disabled={disabled}
+                    // The full check-out from the header is the one path
+                    // that can give an expired reservation a new window.
+                    allowNewEndDate
                     canFullCheckOut={!!bookingStatus?.isReserved}
                     canCheckOutRemaining={
                       !!(
@@ -689,6 +705,7 @@ function EditBookingFormInner({
               <div>
                 <NameField
                   key={id}
+                  focusOnMount={false}
                   name={name || undefined}
                   fieldName={zo.fields.name()}
                   disabled={
@@ -703,7 +720,6 @@ function EditBookingFormInner({
                     validationErrors?.name?.message || zo.errors.name()?.message
                   }
                   onChange={updateName}
-                  autoFocus={autoFocusName}
                 />
               </div>
               <div className="mt-[10px]">
@@ -726,6 +742,11 @@ function EditBookingFormInner({
                   disabled={inputFieldIsDisabled}
                   workingHoursData={workingHoursData}
                 />
+                {expiredCheckoutNewToError ? (
+                  <p role="alert" className="mt-2 text-sm text-error-500">
+                    New end date for the check-out: {expiredCheckoutNewToError}
+                  </p>
+                ) : null}
               </div>
               <div className="mt-[10px]">
                 <CustodianField

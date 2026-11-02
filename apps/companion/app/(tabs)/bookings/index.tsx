@@ -42,6 +42,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { BookingListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { pushIntoTab } from "@/lib/navigation";
 import {
   consumeBookingsListDirty,
   markBookingsListDirty,
@@ -609,7 +610,7 @@ function BookingsListContent() {
                 setCurrentOrg(onlyTeam);
               } else {
                 // Several teams: the workspace picker lives in Settings.
-                router.push("/(tabs)/settings");
+                pushIntoTab("/(tabs)/settings");
               }
             }}
             activeOpacity={0.7}

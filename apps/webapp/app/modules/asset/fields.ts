@@ -163,6 +163,7 @@ export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
             helpText: true,
             required: true,
             type: true,
+            format: true,
             categories: true,
             options: true,
           },
@@ -285,6 +286,7 @@ export const assetIndexFields = ({
         quantity: true,
         custodian: {
           select: {
+            id: true,
             name: true,
             userId: true,
             user: {

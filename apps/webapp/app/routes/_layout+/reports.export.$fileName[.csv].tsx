@@ -263,6 +263,10 @@ export const loader = async ({
         const reportData = await topBookedKitsReport({
           organizationId,
           timeframe,
+          kitFilter: {
+            categoryIds: reportFilters.params.categoryIds,
+            locationIds: reportFilters.params.locationIds,
+          },
           page: 1,
           pageSize: 10000,
         });

@@ -25,10 +25,12 @@ import { useMemo, useState } from "react";
 import type { Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
+import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 import {
   getQuantityBadgeLabelAndColor,
+  getNextReservationExpiry,
   getQuantityData,
   type QuantityAwareAsset,
   type QuantityBreakdown,
@@ -121,7 +123,17 @@ export function AssetStatusBadge({
    */
   quantityListsDeferred?: boolean;
 }) {
-  const derivedQuantityData = useMemo(() => getQuantityData(asset), [asset]);
+  /**
+   * `getQuantityData` reads the clock: a reservation stops counting once its
+   * end passes. A page left open re-derives at the next such end, and the
+   * tick below is what makes the memos recompute then.
+   */
+  const expiryTick = useRerenderAt(getNextReservationExpiry(asset));
+  const derivedQuantityData = useMemo(
+    () => getQuantityData(asset),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- why: `expiryTick` marks the moment the clock-dependent result changes
+    [asset, expiryTick]
+  );
   const inlineQuantityData = quantityBreakdown ?? derivedQuantityData;
 
   // Whether the asset is actually QT (by schema type). Used to gate the
@@ -148,9 +160,11 @@ export function AssetStatusBadge({
     api: `/api/assets/${id}/quantity-breakdown`,
     enabled: needsLazyBreakdown && hasInteracted,
   });
+  const lazyExpiryTick = useRerenderAt(getNextReservationExpiry(lazyAsset));
   const lazyQuantityData = useMemo(
     () => getQuantityData(lazyAsset ?? null),
-    [lazyAsset]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- why: `lazyExpiryTick` marks the moment the clock-dependent result changes
+    [lazyAsset, lazyExpiryTick]
   );
   /**
    * With deferred lists the caller's figures stay authoritative (label,

@@ -182,6 +182,8 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
       access: expect.objectContaining({
         bookings: expect.objectContaining({ writeAll: true }),
       }),
+      // The time zone a model-pool refusal names its day in.
+      hints: expect.objectContaining({ timeZone: expect.any(String) }),
     });
     expect(vi.mocked(redirect)).toHaveBeenCalledWith("/bookings/booking-123");
   });

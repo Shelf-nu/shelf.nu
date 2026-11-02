@@ -9,6 +9,7 @@ import {
 } from "./last-audit-date-access";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type { BookableListScope } from "./list-scope.server";
+import { getAssetListWhereForSelectAll } from "./list-where.server";
 import {
   detectPoolKeys,
   generateWhereClause,
@@ -16,10 +17,7 @@ import {
   POOL_AGGREGATE_JOIN,
 } from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
-import {
-  getArchivedFilterFromParams,
-  getAssetsWhereInput,
-} from "./utils.server";
+import { getArchivedFilterFromParams } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
 const label = "Assets";
@@ -88,7 +86,9 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param organizationId - Organization to scope query
  * @param filters - URL search params string with advanced filters
  * @param settings - Asset index settings with columns configuration
- * @param bookableScope - The caller's list scope; `null` selects every asset
+ * @param bookableScope - The caller's list scope; `null` selects every asset.
+ *   Applied in the same SQL the advanced index uses, so select-all matches the
+ *   rows a Base or Self Service member was shown.
  * @param timeZone - Acting user's IANA timezone; forwarded to
  *   {@link generateWhereClause} so built-in date-column filters truncate the
  *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
@@ -104,7 +104,7 @@ async function getAdvancedFilteredAssetIds({
   organizationId,
   filters,
   settings,
-  bookableScope = null,
+  bookableScope,
   timeZone = "UTC",
   honorArchivedView = false,
   lastAuditDateAccess,
@@ -112,7 +112,7 @@ async function getAdvancedFilteredAssetIds({
   organizationId: string;
   filters: string;
   settings: AssetIndexSettings;
-  bookableScope?: BookableListScope | null;
+  bookableScope: BookableListScope | null;
   timeZone?: string;
   honorArchivedView?: boolean;
   lastAuditDateAccess: LastAuditDateAccess;
@@ -209,6 +209,8 @@ async function getAdvancedFilteredAssetIds({
  *   filter query so built-in date-column filters truncate the day in the
  *   user's tz (avoids an off-by-one). Defaults to "UTC".
  * @param lastAuditDateAccess - How the caller may use the last audit date
+ * @param bookableScope - The caller's list scope, `null` for a member who sees
+ *   every asset
  * @returns Promise resolving to array of asset IDs to operate on
  *
  * @example
@@ -239,6 +241,7 @@ export async function resolveAssetIdsForBulkOperation({
   timeZone = "UTC",
   allowedTeamMemberIds,
   lastAuditDateAccess,
+  bookableScope,
   honorArchivedView = false,
 }: {
   assetIds: Asset["id"][];
@@ -269,6 +272,13 @@ export async function resolveAssetIdsForBulkOperation({
    * to a caller who may not see it. Resolve it with `lastAuditDateAccessFor`.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope({ access, userId })`:
+   * `null` for members who see every asset. Required, with no default, so
+   * every caller states an answer: a Base or Self Service member's list hides
+   * assets outside their scope, and "select all" must not reach them either.
+   */
+  bookableScope: BookableListScope | null;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -284,8 +294,8 @@ export async function resolveAssetIdsForBulkOperation({
   if (isAdvancedMode && currentSearchParams) {
     /**
      * The advanced syntax carries its own custodian filter (`custody:is:…`),
-     * which never passes through `getAssetsWhereInput` — so the allow-list has
-     * to be honoured separately here.
+     * which never passes through the simple-mode list where, so the allow-list
+     * has to be honoured separately here.
      *
      * `/assets` flips a restricted role's saved mode back to SIMPLE, but only
      * when they actually visit it; a demoted user whose stored mode is still
@@ -300,23 +310,35 @@ export async function resolveAssetIdsForBulkOperation({
       return [];
     }
 
-    // ADVANCED MODE: Use dedicated function for advanced filters
+    // ADVANCED MODE: Use dedicated function for advanced filters. The list
+    // scope goes into the same `generateWhereClause` the advanced index uses.
     return getAdvancedFilteredAssetIds({
       organizationId,
       filters: currentSearchParams,
       settings,
+      bookableScope,
       timeZone,
       honorArchivedView,
       lastAuditDateAccess,
     });
   } else {
-    // SIMPLE MODE: Use simple where clause
-    // Note: getAssetsWhereInput will safely ignore any advanced filter syntax
-    const where = getAssetsWhereInput({
+    // SIMPLE MODE: the simple index's own where, built from the same URL and
+    // options as its loader, so select-all matches the rows the list showed.
+    // Every bulk action comes from the /assets index, whose loader honours the
+    // low stock toggle. Advanced syntax in a stale URL is read the way the
+    // simple list reads it: a non-enum `status` (such as `is:AVAILABLE`) is
+    // ignored, params the simple list has no filter for (custom fields,
+    // `custody`, `tags`) are ignored, and an operator value under a shared
+    // key (`category=is:x`, `location=is:x`) is matched as a literal id, so
+    // it selects nothing, exactly as the list would show nothing.
+    const where = await getAssetListWhereForSelectAll({
       organizationId,
       currentSearchParams,
       allowedTeamMemberIds,
+      bookableScope,
+      locationIdsOverride: undefined,
       honorArchivedView,
+      honorLowStockFilter: true,
     });
 
     const assets = await db.asset.findMany({

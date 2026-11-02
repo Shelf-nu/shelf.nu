@@ -67,6 +67,7 @@ export const KITS_INCLUDE_FIELDS = {
     select: {
       custodian: {
         select: {
+          id: true,
           userId: true,
           name: true,
           user: {

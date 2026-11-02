@@ -397,7 +397,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
       </Td>
 
       <Td>
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
 
       <Td>
@@ -414,7 +414,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
       </Td>
       {/* Tags */}
       <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
 
       <When

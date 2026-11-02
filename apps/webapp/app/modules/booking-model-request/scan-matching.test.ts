@@ -42,6 +42,7 @@ describe("matchScansToModelRequests", () => {
     );
 
     expect(result.rows.map((row) => row.bucket)).toEqual(["matched"]);
+    expect(result.rows[0].matchedModelName).toBe("Model One");
     expect(result.matchedCountByModel.get("model-1")).toBe(1);
   });
 
@@ -51,6 +52,7 @@ describe("matchScansToModelRequests", () => {
     );
 
     expect(result.rows.map((row) => row.bucket)).toEqual(["unmatched"]);
+    expect(result.rows[0].unmatchedReason).toBe("notReserved");
     expect(result.matchedCountByModel.get("model-1")).toBeUndefined();
   });
 
@@ -75,6 +77,46 @@ describe("matchScansToModelRequests", () => {
   });
 
   // A reserved unit is a whole unit.
+  it("says an over-scan of a reserved model is over the count", () => {
+    const result = matchScansToModelRequests(
+      input({
+        items: {
+          "qr-1": assetScan("asset-1", "model-1"),
+          "qr-2": assetScan("asset-2", "model-1"),
+        },
+        expectedModelRequests: [
+          {
+            assetModelId: "model-1",
+            assetModelName: "Model One",
+            booked: 1,
+            remaining: 1,
+          },
+        ],
+      })
+    );
+
+    const unmatched = result.rows.filter((row) => row.bucket === "unmatched");
+    expect(unmatched).toHaveLength(1);
+    expect(unmatched[0].unmatchedReason).toBe("overReserved");
+    expect(unmatched[0].overReservedModelName).toBe("Model One");
+  });
+
+  // A reservation filled before the session started is gone from the
+  // outstanding list, but its model is still reserved.
+  it("names a fully filled reserved model as over the count", () => {
+    const result = matchScansToModelRequests(
+      input({
+        items: { "qr-1": assetScan("asset-1", "model-2") },
+        reservedModels: [
+          { assetModelId: "model-2", assetModelName: "Model Two" },
+        ],
+      })
+    );
+
+    expect(result.rows[0].unmatchedReason).toBe("overReserved");
+    expect(result.rows[0].overReservedModelName).toBe("Model Two");
+  });
+
   it("never counts a quantity-tracked scan", () => {
     const result = matchScansToModelRequests(
       input({
@@ -85,6 +127,9 @@ describe("matchScansToModelRequests", () => {
     );
 
     expect(result.rows.map((row) => row.bucket)).toEqual(["unmatched"]);
+    // A reservation is for whole units, so the scan is neither over the
+    // count nor of an unreserved model.
+    expect(result.rows[0].unmatchedReason).toBeUndefined();
     expect(result.matchedCountByModel.get("model-1")).toBeUndefined();
   });
 

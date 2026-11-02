@@ -41,8 +41,11 @@ import {
 } from "~/utils/asset-description";
 import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
-import type { CustomFieldZodSchema } from "~/utils/custom-fields";
-import { mergedSchema } from "~/utils/custom-fields";
+import {
+  mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
+} from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -227,6 +230,22 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
   ),
 });
 
+/**
+ * Starting value of the Value input for a stored valuation.
+ *
+ * Zero is a real valuation and must show as 0. Only a missing valuation
+ * leaves the field blank, because the form schema reads a blank field as
+ * "no value" and saving it would clear the stored 0.
+ *
+ * @param valuation - The asset's stored valuation, if any.
+ * @returns The number to show, or `""` for no valuation.
+ */
+export function valuationInputDefault(
+  valuation: Asset["valuation"] | undefined
+): number | "" {
+  return valuation ?? "";
+}
+
 /** Pass props of the values to be used as default for the form fields */
 
 type Props = Partial<
@@ -347,17 +366,16 @@ const AssetFormInner = ({
     { id?: string; type: Barcode["type"]; value: string }[]
   >(barcodes ?? []);
 
-  const customFields = useLoaderData<typeof loader>().customFields.map(
-    (cf) =>
-      cf.active && {
-        id: cf.id,
-        name: cf.name,
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      }
-  ) as CustomFieldZodSchema[];
+  const loaderData = useLoaderData<typeof loader>();
+  const customFields = loaderData.customFields
+    .filter((cf) => cf.active)
+    .map(toCustomFieldZodSchema);
+  // When editing, what the asset stores now: a Link field accepts its stored
+  // value unchanged, as the edit action does.
+  const storedValues = useMemo(
+    () => storedCustomFieldTexts(loaderData.asset?.customFields ?? []),
+    [loaderData.asset?.customFields]
+  );
 
   // Bulk mode tightens a few fields (assetModelId, nameTemplate,
   // count). Same `mergedSchema` pipeline either way — both base
@@ -372,8 +390,9 @@ const AssetFormInner = ({
           ? NewAssetBulkFormSchema
           : NewAssetFormSchema) as typeof NewAssetFormSchema,
         customFields,
+        storedValues,
       }),
-    [bulkMode, customFields]
+    [bulkMode, customFields, storedValues]
   );
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);
@@ -1500,7 +1519,8 @@ const AssetFormInner = ({
               min={0}
               className="w-full"
               defaultValue={
-                modelPrefill.values[VALUATION_PREFILL_KEY] ?? (valuation || "")
+                modelPrefill.values[VALUATION_PREFILL_KEY] ??
+                valuationInputDefault(valuation)
               }
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">

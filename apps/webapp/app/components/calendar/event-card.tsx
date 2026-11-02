@@ -302,6 +302,7 @@ export function EventCardContent({
         <BookingStatusBadge
           status={booking.status}
           custodianUserId={booking.custodian.user?.id}
+          to={booking.end}
         />
       </div>
 
@@ -327,13 +328,17 @@ export function EventCardContent({
         <div>
           <p className="mb-1 text-sm font-normal">Custodian:</p>
           <div className="mb-3 flex items-center gap-2">
-            <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
+            <TeamMemberBadge
+              teamMember={booking.custodian}
+              hidePrivate
+              linkTo="none"
+            />
           </div>
         </div>
         <div>
           <p className="mb-1 text-sm font-normal">Created by:</p>
           <div className="mb-3 flex items-center gap-2">
-            <TeamMemberBadge teamMember={booking.creator} />
+            <TeamMemberBadge teamMember={booking.creator} linkTo="none" />
           </div>
         </div>
       </div>

@@ -144,6 +144,7 @@ describe("parseModelDefaultsFromFormData", () => {
       id: "brand",
       name: "Brand",
       type: "OPTION" as const,
+      format: "PLAIN" as const,
       helpText: null,
       options: ["Westermo", "Siemens"],
       categories: [],
@@ -152,6 +153,7 @@ describe("parseModelDefaultsFromFormData", () => {
       id: "rating",
       name: "Temperature rating",
       type: "NUMBER" as const,
+      format: "PLAIN" as const,
       helpText: null,
       options: [],
       categories: [],
@@ -188,6 +190,41 @@ describe("parseModelDefaultsFromFormData", () => {
     expect(() =>
       parseModelDefaultsFromFormData({ formData, fields })
     ).toThrow();
+  });
+
+  describe("a Link field", () => {
+    const linkFields = [
+      {
+        id: "manual",
+        name: "Manual",
+        type: "TEXT" as const,
+        format: "LINK" as const,
+        helpText: null,
+        options: [],
+        categories: [],
+      },
+    ];
+
+    it("stores the default as a normalized web link", () => {
+      const formData = new FormData();
+      formData.set("cf-manual", "www.example.com/manual.pdf");
+
+      const [manual] = parseModelDefaultsFromFormData({
+        formData,
+        fields: linkFields,
+      });
+
+      expect(manual.value?.raw).toBe("https://www.example.com/manual.pdf");
+    });
+
+    it("refuses a default that is not a web link", () => {
+      const formData = new FormData();
+      formData.set("cf-manual", "not a link");
+
+      expect(() =>
+        parseModelDefaultsFromFormData({ formData, fields: linkFields })
+      ).toThrow();
+    });
   });
 });
 

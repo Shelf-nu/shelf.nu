@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import {
+  andAssetWhere,
   applyArchivedFilter,
   compareCustomFieldValues,
   detectPotentialChanges,
@@ -480,7 +482,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -496,7 +498,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated **Warranty Status** from **Active** to **Expired**.'
+      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated {% name text="Warranty Status" /%} from {% name text="Active" chips=true /%} to {% name text="Expired" chips=true /%}.'
     );
   });
 
@@ -512,7 +514,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed **Purchase Order** value **PO-2024-001**.'
+      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed {% name text="Purchase Order" /%} value {% name text="PO-2024-001" chips=true /%}.'
     );
   });
 
@@ -528,7 +530,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -544,6 +546,25 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe("");
+  });
+
+  it("keeps URL-shaped field names and values inside name tags", () => {
+    const content = getCustomFieldUpdateNoteContent({
+      customFieldName: URL_SHAPED_VALUE,
+      previousValue: URL_SHAPED_VALUE,
+      newValue: "Expired",
+      userId: "user-456",
+      firstName: "Jane",
+      lastName: "Smith",
+      isFirstTimeSet: false,
+    });
+
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
+    // The field name never shows chips; the value does.
+    expect(content).toContain(`{% name text="${URL_SHAPED_VALUE}" /%}`);
+    expect(content).toContain(
+      `{% name text="${URL_SHAPED_VALUE}" chips=true /%}`
+    );
   });
 
   it("should handle missing new value for first time set", () => {
@@ -956,6 +977,99 @@ describe("getAssetsWhereInput status filter", () => {
     });
     expect(where.status).toBeUndefined();
     expect(JSON.stringify(where)).not.toContain("is:AVAILABLE");
+  });
+});
+
+describe("getAssetsWhereInput filter groups", () => {
+  it("ANDs uncategorized, untagged and without-location instead of ORing them", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams:
+        "category=uncategorized&tag=untagged&location=without-location",
+      allowedTeamMemberIds: "all",
+    });
+
+    // One group per filter, each holding its own options.
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
+      {
+        OR: [
+          { tags: { some: { id: { in: ["untagged"] } } } },
+          { tags: { none: {} } },
+        ],
+      },
+      {
+        OR: [
+          {
+            assetLocations: {
+              some: { locationId: { in: ["without-location"] } },
+            },
+          },
+          { assetLocations: { none: {} } },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps the custodian filter a group of its own next to the tag filter", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "tag=untagged&teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.OR).toBeUndefined();
+    const groups = where.AND as Prisma.AssetWhereInput[];
+    expect(groups).toHaveLength(2);
+    expect(groups[1].OR).toContainEqual({
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
+    });
+  });
+
+  it("counts a booking custodian only while the booking is out", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    const [custodianGroup] = where.AND as Prisma.AssetWhereInput[];
+    const bookingBranches = (custodianGroup.OR ?? []).filter(
+      (clause) => clause.bookingAssets
+    );
+    expect(bookingBranches).toHaveLength(2);
+    for (const branch of bookingBranches) {
+      expect(branch.bookingAssets?.some?.booking?.status).toEqual({
+        in: ["ONGOING", "OVERDUE"],
+      });
+    }
+  });
+});
+
+describe("andAssetWhere", () => {
+  const clause: Prisma.AssetWhereInput = { categoryId: null };
+
+  it("starts an AND list when there is none", () => {
+    const where: Prisma.AssetWhereInput = { organizationId: "org-1" };
+    andAssetWhere(where, clause);
+    expect(where).toEqual({ organizationId: "org-1", AND: [clause] });
+  });
+
+  it("appends to an existing AND list", () => {
+    const first: Prisma.AssetWhereInput = { tags: { none: {} } };
+    const where: Prisma.AssetWhereInput = { AND: [first] };
+    andAssetWhere(where, clause);
+    expect(where.AND).toEqual([first, clause]);
+  });
+
+  it("keeps a single AND object when it adds to it", () => {
+    const first: Prisma.AssetWhereInput = { tags: { none: {} } };
+    const where: Prisma.AssetWhereInput = { AND: first };
+    andAssetWhere(where, clause);
+    expect(where.AND).toEqual([first, clause]);
   });
 });
 

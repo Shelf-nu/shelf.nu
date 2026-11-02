@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, Link, Outlet } from "react-router";
+import { data, Link, Outlet, useLoaderData } from "react-router";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
 import CategoryQuickActions from "~/components/category/category-quick-actions";
@@ -19,6 +19,8 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { buildAssetIndexFilterHref } from "~/modules/asset-index-settings/filter-href";
+import { getAssetIndexModeForUser } from "~/modules/asset-index-settings/service.server";
 import {
   assertCategoryDeleteConfirmed,
   deleteCategory,
@@ -53,7 +55,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.category,
@@ -66,12 +68,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { categories, totalCategories } = await getCategories({
-      organizationId,
-      page,
-      perPage,
-      search,
-    });
+    const [{ categories, totalCategories }, assetIndexMode] = await Promise.all(
+      [
+        getCategories({
+          organizationId,
+          page,
+          perPage,
+          search,
+        }),
+        // Decides the filter grammar of each row's link into the asset index
+        getAssetIndexModeForUser({
+          userId,
+          organizationId,
+          ui: access.policy.ui,
+        }),
+      ]
+    );
     const totalPages = Math.ceil(totalCategories / perPage);
 
     const header: HeaderData = {
@@ -93,6 +105,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         hasActiveFilters,
+        assetIndexMode,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -203,6 +216,10 @@ export default function CategoriesPage() {
   );
 }
 
+/**
+ * One row of the categories list. The asset count links to the asset index
+ * filtered to this category, in the filter grammar of the viewer's index mode.
+ */
 const CategoryItem = ({
   item,
 }: {
@@ -211,26 +228,45 @@ const CategoryItem = ({
       assets: number;
     };
   };
-}) => (
-  <>
-    <Td title={`Category: ${item.name}`} className="w-1/4">
-      <Badge color={item.color} withDot={false}>
-        {item.name}
-      </Badge>
-    </Td>
-    <Td className="max-w-62 md:w-3/4">
-      {item.description ? (
-        <LineBreakText
-          className="md:w-3/4"
-          text={item.description}
-          numberOfLines={3}
-          charactersPerLine={60}
-        />
-      ) : null}
-    </Td>
-    <Td>{item._count.assets}</Td>
-    <Td>
-      <CategoryQuickActions category={item} />
-    </Td>
-  </>
-);
+}) => {
+  const { assetIndexMode } = useLoaderData<typeof loader>();
+  const assetCount = item._count.assets;
+
+  return (
+    <>
+      <Td title={`Category: ${item.name}`} className="w-1/4">
+        <Badge color={item.color} withDot={false}>
+          {item.name}
+        </Badge>
+      </Td>
+      <Td className="max-w-62 md:w-3/4">
+        {item.description ? (
+          <LineBreakText
+            className="md:w-3/4"
+            text={item.description}
+            numberOfLines={3}
+            charactersPerLine={60}
+          />
+        ) : null}
+      </Td>
+      <Td>
+        <Button
+          to={buildAssetIndexFilterHref({
+            mode: assetIndexMode,
+            key: "category",
+            value: item.id,
+          })}
+          variant="link-gray"
+          aria-label={`View ${assetCount} ${
+            assetCount === 1 ? "asset" : "assets"
+          } in ${item.name}`}
+        >
+          {assetCount}
+        </Button>
+      </Td>
+      <Td>
+        <CategoryQuickActions category={item} />
+      </Td>
+    </>
+  );
+};

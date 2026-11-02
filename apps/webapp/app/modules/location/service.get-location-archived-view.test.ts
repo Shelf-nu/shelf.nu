@@ -66,6 +66,85 @@ describe("getLocation archived view", () => {
     }
   );
 
+  it("counts only the assets the search and custodian filters keep", async () => {
+    await getLocation({
+      id: "loc-1",
+      organizationId: "org-1",
+      search: "Sony",
+      teamMemberIds: ["tm-1"],
+      archivedFilter: "active",
+    });
+
+    const listWhere = findManyMock.mock.calls[0]?.[0]?.where;
+    const countWhere = countMock.mock.calls[0]?.[0]?.where;
+    expect(countWhere?.title).toEqual({
+      contains: "Sony",
+      mode: "insensitive",
+    });
+    // Every way a team member can hold an asset: custody (by team member or
+    // user id) and an ongoing or overdue booking (by either id).
+    expect(countWhere?.OR).toEqual([
+      {
+        custody: {
+          some: expect.objectContaining({ teamMemberId: { in: ["tm-1"] } }),
+        },
+      },
+      {
+        custody: {
+          some: expect.objectContaining({
+            custodian: { userId: { in: ["tm-1"] } },
+          }),
+        },
+      },
+      {
+        bookingAssets: {
+          some: {
+            booking: expect.objectContaining({
+              custodianTeamMemberId: { in: ["tm-1"] },
+            }),
+          },
+        },
+      },
+      {
+        bookingAssets: {
+          some: {
+            booking: expect.objectContaining({
+              custodianUserId: { in: ["tm-1"] },
+            }),
+          },
+        },
+      },
+    ]);
+    // The pager reads this count, so it must describe exactly the listed rows.
+    expect(countWhere).toEqual(listWhere);
+  });
+
+  it("loads the location alone when the caller passes an include", async () => {
+    const result = await getLocation({
+      id: "loc-1",
+      organizationId: "org-1",
+      include: { notes: { select: { id: true } } },
+    });
+
+    expect(findManyMock).not.toHaveBeenCalled();
+    expect(countMock).not.toHaveBeenCalled();
+    expect(result.totalAssetsWithinLocation).toBe(0);
+  });
+
+  it("counts without loading a page when the caller asks for no page", async () => {
+    countMock.mockResolvedValue(8);
+
+    const result = await getLocation({
+      id: "loc-1",
+      organizationId: "org-1",
+      withAssetsPage: false,
+    });
+
+    expect(findManyMock).not.toHaveBeenCalled();
+    expect(result.totalAssetsWithinLocation).toBe(8);
+    expect(result.assets).toEqual([]);
+  });
+
   it("lists every asset when the caller names no view", async () => {
     await getLocation({ id: "loc-1", organizationId: "org-1" });
 

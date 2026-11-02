@@ -5,6 +5,8 @@ import {
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
+import { createCustomField } from "@factories";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
@@ -42,6 +44,7 @@ import {
   createNote,
 } from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
@@ -830,6 +833,47 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+  });
+
+  it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
+    vi.mocked(getActiveCustomFields).mockResolvedValue([
+      createCustomField({ id: "cfmanual", name: "Manual", format: "LINK" }),
+    ]);
+    // why: createAsset proves the custom fields belong to the org.
+    vi.mocked(db.customField.findMany).mockResolvedValueOnce([
+      { id: "cfmanual" },
+    ] as never);
+
+    await duplicateAsset({
+      asset: makeSource({
+        customFields: [
+          {
+            customFieldId: "cfmanual",
+            value: { raw: "see shelf", valueText: "see shelf" },
+          },
+          {
+            customFieldId: "cfinactive",
+            value: { raw: "kept off", valueText: "kept off" },
+          },
+        ] as unknown as SourceAsset["customFields"],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        customFields: {
+          create: [
+            {
+              customFieldId: "cfmanual",
+              value: { raw: "see shelf", valueText: "see shelf" },
+            },
+          ],
+        },
+      }),
+    ]);
   });
 
   it("refuses to copy a quantity-tracked asset with no units in stock", async () => {
@@ -2287,6 +2331,7 @@ describe("bulkDeleteAssets — activity events", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -2351,6 +2396,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -2390,6 +2436,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -2445,6 +2492,7 @@ describe("bulkAssignAssetTags — activity events", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -3984,6 +4032,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   const checkOut = () =>
     bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -3997,6 +4046,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   const checkIn = () =>
     bulkCheckInAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4310,6 +4360,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4358,6 +4409,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4402,6 +4454,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4442,6 +4495,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4482,6 +4536,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         // why: `role` was optional pre-main; main made it required so every
@@ -4645,6 +4700,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4684,6 +4740,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4706,6 +4763,7 @@ describe("bulkUpdateAssetCategory", () => {
     await expect(
       bulkUpdateAssetCategory({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -4713,7 +4771,11 @@ describe("bulkUpdateAssetCategory", () => {
         // @ts-expect-error settings not relevant for this test
         settings: {},
       })
-    ).rejects.toThrow(ShelfError);
+    ).rejects.toMatchObject({
+      status: 404,
+      title: "Category not found",
+      message: expect.stringContaining("does not exist"),
+    });
   });
 });
 
@@ -4763,6 +4825,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -4814,6 +4877,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4855,6 +4919,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4905,6 +4970,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4945,6 +5011,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5022,6 +5089,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "available",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -5058,6 +5126,8 @@ describe("bulkUpdateAssetModel", () => {
       // The caller's access reaches the resolver unchanged, so a select-all
       // over a last audit date filter works for those allowed to see it.
       lastAuditDateAccess: "available",
+      // The caller's list scope reaches the resolver unchanged too.
+      bookableScope: null,
     });
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
@@ -5084,6 +5154,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -5108,6 +5179,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5144,6 +5216,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5172,6 +5245,7 @@ describe("bulkUpdateAssetModel", () => {
         locale: "en-US",
         currency: "USD",
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5200,6 +5274,7 @@ describe("bulkUpdateAssetModel", () => {
         locale: "en-US",
         currency: "USD",
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5230,6 +5305,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["foreign-asset-1", "foreign-asset-2"],
       organizationId: "org-1",
@@ -5249,6 +5325,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-US",
       currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: [],
       organizationId: "org-1",
@@ -5301,6 +5378,7 @@ describe("bulkAssignAssetTags", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5338,6 +5416,7 @@ describe("bulkAssignAssetTags", () => {
     await expect(
       bulkAssignAssetTags({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5364,6 +5443,7 @@ describe("bulkAssignAssetTags", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5394,6 +5474,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -5429,6 +5510,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: [],
       confirmation: "0",
       organizationId: "org-1",
@@ -5449,6 +5531,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1"],
       confirmation: "1",
       organizationId: "org-1",
@@ -5480,6 +5563,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "me",
         custodyAssign: "self",
@@ -5561,6 +5645,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1", "asset-2"],
@@ -5581,6 +5666,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // is false for the same reason — this must not page anyone.
     const caught = await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -5604,6 +5690,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // the gate itself did not fire and custody insertion was reached.
     await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -6265,15 +6352,16 @@ describe("getAssets search via UNION", () => {
     // no-args call); this suite always calls it with args, so the mock
     // is asserted non-null rather than widening the type in every test.
     const where = findManyMock.mock.calls[0][0]!.where!;
-    expect(where.OR).toEqual([{ id: { in: ["a1", "a2"] } }]);
-    // exactly one fetch — no fallback re-query
+    expect(where.AND).toEqual([{ id: { in: ["a1", "a2"] } }]);
+    expect(where.OR).toBeUndefined();
+    // exactly one fetch, no fallback re-query
     expect(findManyMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not run the UNION when there is no search term", async () => {
     await getAssets({ ...base, search: null });
     expect(queryRawMock).not.toHaveBeenCalled();
-    expect(findManyMock.mock.calls[0][0]!.where!.OR).toBeUndefined();
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toBeUndefined();
   });
 
   it("fail-closed: whitespace-only search matches nothing, no UNION", async () => {
@@ -6282,24 +6370,73 @@ describe("getAssets search via UNION", () => {
     expect(findManyMock.mock.calls[0][0]!.where!.id).toEqual({ in: [] });
   });
 
-  it("preserves filter OR-entanglement: uncategorized appends after the search id set", async () => {
+  it("narrows the search with uncategorized instead of adding to it", async () => {
     await getAssets({
       ...base,
       search: "chair",
       categoriesIds: ["uncategorized"],
     });
     const where = findManyMock.mock.calls[0][0]!.where!;
-    expect(where.OR).toEqual([
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
       { id: { in: ["a1", "a2"] } },
-      { categoryId: { in: ["uncategorized"] } },
-      { categoryId: null },
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
     ]);
+  });
+
+  it("narrows the search with a tag filter instead of adding to it", async () => {
+    await getAssets({ ...base, search: "chair", tagsIds: ["tag-1"] });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      { OR: [{ tags: { some: { id: { in: ["tag-1"] } } } }] },
+    ]);
+  });
+
+  it("keeps 'untagged' and picked tags in one group, ANDed with the search", async () => {
+    await getAssets({
+      ...base,
+      search: "chair",
+      tagsIds: ["untagged", "tag-1"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.AND).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      {
+        OR: [
+          { tags: { none: {} } },
+          { tags: { some: { id: { in: ["tag-1"] } } } },
+        ],
+      },
+    ]);
+  });
+
+  it("ANDs the custodian and without-location groups with the search", async () => {
+    await getAssets({
+      ...base,
+      search: "chair",
+      teamMemberIds: ["tm-1"],
+      locationIds: ["without-location"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toBeUndefined();
+    const groups = where.AND as Prisma.AssetWhereInput[];
+    expect(groups[0]).toEqual({ id: { in: ["a1", "a2"] } });
+    // One group per filter: location first, then custodian.
+    expect(groups).toHaveLength(3);
+    expect(groups[1].OR).toContainEqual({ assetLocations: { none: {} } });
+    expect(groups[2].OR).toContainEqual({
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
+    });
   });
 
   it("empty search-id set yields an empty id filter (matches nothing on its own)", async () => {
     queryRawMock.mockResolvedValue([]);
     await getAssets({ ...base, search: "zzz-no-match" });
-    expect(findManyMock.mock.calls[0][0]!.where!.OR).toEqual([
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toEqual([
       { id: { in: [] } },
     ]);
   });
@@ -6328,6 +6465,68 @@ describe("getAssets search via UNION", () => {
     // short-circuited before the asset fetch (both findMany and count)
     expect(findManyMock).not.toHaveBeenCalled();
     expect(countMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAssets filter groups without a search", () => {
+  const findManyMock = vi.mocked(db.asset.findMany);
+  const countMock = vi.mocked(db.asset.count);
+
+  beforeEach(() => {
+    findManyMock.mockReset().mockResolvedValue([]);
+    countMock.mockReset().mockResolvedValue(0);
+  });
+
+  const base = {
+    organizationId: "org_1",
+    page: 1,
+    perPage: 20,
+    orderBy: "createdAt" as const,
+    orderDirection: "desc" as const,
+  };
+
+  it("ANDs uncategorized, untagged and without-location as separate groups", async () => {
+    await getAssets({
+      ...base,
+      categoriesIds: ["uncategorized"],
+      tagsIds: ["untagged", "tag-1"],
+      locationIds: ["without-location"],
+    });
+    // why: findMany's args are typed optional; this path always passes them.
+    const where = findManyMock.mock.calls[0][0]!.where!;
+
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
+      {
+        OR: [
+          { tags: { none: {} } },
+          { tags: { some: { id: { in: ["tag-1"] } } } },
+        ],
+      },
+      {
+        OR: [
+          {
+            assetLocations: {
+              some: { locationId: { in: ["without-location"] } },
+            },
+          },
+          { assetLocations: { none: {} } },
+        ],
+      },
+    ]);
+  });
+
+  it("matches nothing for a refused custodian filter, even with 'without custody' beside it", async () => {
+    await getAssets({
+      ...base,
+      teamMemberIds: [CUSTODY_FILTER_REFUSED, "without-custody"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+
+    expect(where.AND).toContainEqual({ id: CUSTODY_FILTER_REFUSED });
   });
 });
 
@@ -6494,7 +6693,7 @@ describe("archiveAsset", () => {
           expect.objectContaining({
             bookingId: "b1",
             content: expect.stringContaining(
-              "This booking's reservation of **Sony A7** is now 1 unit short for its dates."
+              'This booking\'s reservation of {% name text="Sony A7" /%} is now 1 unit short for its dates.'
             ),
           }),
         ],
@@ -6502,6 +6701,41 @@ describe("archiveAsset", () => {
       },
       expect.anything()
     );
+  });
+
+  it("keeps a URL-shaped model name inside a name tag in the shortfall note", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    // why: a model named like a URL leaves "Shoot" one unit short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: URL_SHAPED_VALUE,
+          short: 1,
+        },
+      ]);
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+      confirmModelShortfall: true,
+    });
+
+    const [{ notes }] = vitest
+      .mocked(createSystemBookingNotes)
+      .mock.calls.at(-1)!;
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("writes an Activity note naming who archived the asset", async () => {
@@ -6827,6 +7061,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2", "a3"],
       settings: {} as never,
@@ -6875,6 +7110,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6902,6 +7138,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -6922,6 +7159,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6952,6 +7190,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6977,6 +7216,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -7004,6 +7244,7 @@ describe("bulkUnarchiveAssets", () => {
 
     await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -7029,6 +7270,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -7050,6 +7292,7 @@ describe("availability writes on archived assets (issue #382)", () => {
       id: "a1",
       organizationId: "org-1",
       availableToBook: false,
+      userId: "user-1",
     });
 
     // The pre-check gives the clear error; the WHERE closes the window where
@@ -7079,6 +7322,7 @@ describe("availability writes on archived assets (issue #382)", () => {
         id: "a1",
         organizationId: "org-1",
         availableToBook: false,
+        userId: "user-1",
       })
     ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
   });
@@ -7102,24 +7346,229 @@ describe("availability writes on archived assets (issue #382)", () => {
         id: "a1",
         organizationId: "org-1",
         availableToBook: false,
+        userId: "user-1",
       })
     ).rejects.not.toMatchObject({ title: "Asset is archived" });
   });
 
   it("skips assets archived after the bulk check", async () => {
+    // why: the before-state read inside the transaction; both assets are
+    // bookable, so both are candidates for the change.
+    vitest.mocked(db.asset.findMany).mockResolvedValueOnce([
+      { id: "a1", availableToBook: true },
+      { id: "a2", availableToBook: true },
+    ] as never);
+
     await bulkMarkAvailability({
+      userId: "user-1",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       type: "unavailable",
       settings: {} as never,
     });
 
+    // Both the read that picks the rows and the write leave archived rows out.
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ archivedAt: null }),
+      })
+    );
     expect(db.asset.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ archivedAt: null }),
       })
     );
+  });
+});
+
+describe("available for bookings: activity trail", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** The note's actor link for the user the tests act as. */
+  const actorLink = '{% link to="/settings/team/users/user-1" text="Sam" /%}';
+
+  /** Stubs the acting user, read once to build the note's actor link. */
+  function stubActor() {
+    // why: the note names the actor by display name, read from the user table.
+    vitest.mocked(db.user.findFirst).mockResolvedValueOnce({
+      firstName: "Samantha",
+      lastName: "Jones",
+      displayName: "Sam",
+    } as never);
+  }
+
+  it.each([
+    { from: false, to: true, word: "available" },
+    { from: true, to: false, word: "unavailable" },
+  ])(
+    "records one note and one event when the switch goes from $from to $to",
+    async ({ from, to, word }) => {
+      stubActor();
+      // why: the before-read inside the transaction; the asset holds `from`.
+      vitest
+        .mocked(db.asset.findUnique)
+        .mockResolvedValueOnce({ availableToBook: from } as never);
+
+      await updateAssetBookingAvailability({
+        id: "a1",
+        organizationId: "org-1",
+        availableToBook: to,
+        userId: "user-1",
+      });
+
+      expect(db.asset.update).toHaveBeenCalledWith({
+        where: { id: "a1", organizationId: "org-1", archivedAt: null },
+        data: { availableToBook: to },
+      });
+      expect(createNote).toHaveBeenCalledTimes(1);
+      expect(createNote).toHaveBeenCalledWith(
+        {
+          content: `${actorLink} marked the asset as ${word} for bookings.`,
+          type: "UPDATE",
+          userId: "user-1",
+          assetId: "a1",
+          organizationId: "org-1",
+        },
+        // The transaction client: the note commits with the change.
+        expect.anything()
+      );
+      expect(recordEvent).toHaveBeenCalledTimes(1);
+      expect(recordEvent).toHaveBeenCalledWith(
+        {
+          organizationId: "org-1",
+          actorUserId: "user-1",
+          action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+          entityType: "ASSET",
+          entityId: "a1",
+          assetId: "a1",
+          field: "availableToBook",
+          fromValue: from,
+          toValue: to,
+        },
+        expect.anything()
+      );
+    }
+  );
+
+  it("writes no note and no event when the switch is set to the value it holds", async () => {
+    stubActor();
+    // why: the before-read inside the transaction; already available.
+    vitest
+      .mocked(db.asset.findUnique)
+      .mockResolvedValueOnce({ availableToBook: true } as never);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("writes no note and no event when the asset is archived after the pre-check", async () => {
+    stubActor();
+    // why: the before-read inside the transaction excludes archived rows, so
+    // an asset archived after the pre-check reads back as missing.
+    vitest.mocked(db.asset.findUnique).mockResolvedValueOnce(null);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith({
+      where: { id: "a1", organizationId: "org-1", archivedAt: null },
+      select: { availableToBook: true },
+    });
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("records one note and one event per asset the bulk action actually changes", async () => {
+    stubActor();
+    // why: the before-state read inside the transaction. a2 is already
+    // available, so marking the selection available changes a1 and a3 only.
+    vitest.mocked(db.asset.findMany).mockResolvedValueOnce([
+      { id: "a1", availableToBook: false },
+      { id: "a2", availableToBook: true },
+      { id: "a3", availableToBook: false },
+    ] as never);
+
+    await bulkMarkAvailability({
+      userId: "user-1",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      organizationId: "org-1",
+      assetIds: ["a1", "a2", "a3"],
+      type: "available",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["a1", "a3"] },
+        organizationId: "org-1",
+        archivedAt: null,
+      },
+      data: { availableToBook: true },
+    });
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    expect(vitest.mocked(recordEvents).mock.calls[0]).toEqual([
+      ["a1", "a3"].map((assetId) => ({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+        entityType: "ASSET",
+        entityId: assetId,
+        assetId,
+        field: "availableToBook",
+        fromValue: false,
+        toValue: true,
+      })),
+      expect.anything(),
+    ]);
+    expect(createNotes).toHaveBeenCalledTimes(1);
+    expect(createNotes).toHaveBeenCalledWith(
+      {
+        content: `${actorLink} marked the asset as available for bookings.`,
+        type: "UPDATE",
+        userId: "user-1",
+        assetIds: ["a1", "a3"],
+        organizationId: "org-1",
+      },
+      expect.anything()
+    );
+  });
+
+  it("writes nothing when every selected asset already holds the value", async () => {
+    stubActor();
+    // why: the before-state read inside the transaction; already unavailable.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockResolvedValueOnce([{ id: "a1", availableToBook: false }] as never);
+
+    await bulkMarkAvailability({
+      userId: "user-1",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      organizationId: "org-1",
+      assetIds: ["a1"],
+      type: "unavailable",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
   });
 });
 
@@ -7153,6 +7602,7 @@ describe("bulk archive / reinstate — upstream errors", () => {
           assetIds: ["a1"],
           settings: {} as never,
           lastAuditDateAccess: "hidden",
+          bookableScope: null,
         })
       ).rejects.toMatchObject({
         message: "That filter can't be applied.",
@@ -7516,6 +7966,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     // downstream can tell the two cases apart.
     await bulkCheckInAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       custodyAssign: "anyone",
       assetIds: ["asset-1", "asset-2"],
@@ -7537,6 +7988,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     await expect(
       bulkCheckInAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         custodyAssign: "anyone",
         assetIds: ["asset-1", "asset-2"],
@@ -7577,6 +8029,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
 
     await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -7655,6 +8108,7 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
 
     await bulkUpdateAssetLocation({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-individual", "asset-qty"],
       organizationId: "org-1",
@@ -7694,6 +8148,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
     userId: "user-1",
     settings: {} as never,
     lastAuditDateAccess: "hidden" as const,
+    bookableScope: null,
   };
 
   it("only asks the database for QUANTITY_TRACKED assets in the caller's org", async () => {
@@ -7851,6 +8306,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
         userId: "user-1",
         settings: {} as never,
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         assetIds: ["asset-1"],
         minQuantity: 5,
       })
@@ -7938,5 +8394,35 @@ describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () =>
       preParsedFilters: [],
     });
     expect(sql).toContain('"completedAt"');
+  });
+});
+
+describe("getAdvancedPaginatedAndFilterableAssets - unknown filter value", () => {
+  beforeEach(() => {
+    vi.mocked(db.$queryRaw).mockClear();
+  });
+
+  it("rethrows the filter's 400 with its own message", async () => {
+    const statusFilter: Filter = {
+      name: "status",
+      type: "enum",
+      operator: "is",
+      value: "ARCHIVED",
+    };
+
+    const error = await getAdvancedPaginatedAndFilterableAssets({
+      request: new Request("http://localhost/assets"),
+      organizationId: "org-1",
+      settings: { ...ASSET_INDEX_SETTINGS, mode: "ADVANCED" },
+      filters: "status=is%3AARCHIVED",
+      preParsedFilters: [statusFilter],
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Unknown status "ARCHIVED"'),
+    });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 
 // why: stub location note creation to isolate location service tests from note side effects
 const locationNoteMocks = vi.hoisted(() => ({
@@ -128,8 +129,13 @@ vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
+// why: select-all expansion is covered by the asset list-where tests; here it
+// only has to yield a where so the org-scope assertion below is reached.
+vi.mock("~/modules/asset/list-where.server", () => ({
+  getAssetListWhereForSelectAll: vi.fn(() => Promise.resolve({})),
+}));
+
 vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: vi.fn(() => ({})),
   getLocationUpdateNoteContent: vi.fn(() => "asset note"),
   getKitLocationUpdateNoteContent: vi.fn(() => "kit asset note"),
 }));
@@ -264,6 +270,32 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("New Name"),
         })
       );
+    });
+  });
+
+  describe("updateLocation with URL-shaped values", () => {
+    it("keeps a URL-shaped name and address inside name tags", async () => {
+      dbMocks.location.findUniqueOrThrow.mockResolvedValueOnce({
+        id: "loc-1",
+        name: "Old Name",
+        description: null,
+        address: "Old St",
+        latitude: null,
+        longitude: null,
+        organizationId: "org-1",
+      });
+
+      await updateLocation({
+        id: "loc-1",
+        name: URL_SHAPED_VALUE,
+        address: URL_SHAPED_VALUE,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      const [{ content }] =
+        locationNoteMocks.createSystemLocationNote.mock.calls.at(-1)!;
+      expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
     });
   });
 

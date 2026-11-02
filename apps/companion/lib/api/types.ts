@@ -3,10 +3,12 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type { FieldLinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
   CustodySourceOption,
 } from "@shelf/quantity-control";
+import type { NotificationPreferences } from "../push/preferences";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -409,8 +411,21 @@ export type AssetDetail = {
       type: string;
       helpText: string | null;
       active: boolean;
+      /** Absent on servers older than the Link format. */
+      format?: MobileCustomFieldFormat;
     };
   }[];
+  /**
+   * Page titles and names people gave the links in this asset's values,
+   * keyed by custom field id. The server keys them because this app's URL
+   * implementation cannot reproduce link keys for every host. A chip whose
+   * field has no entry reads what the URL alone says.
+   *
+   * Mirrors `fieldLinkTitles` of
+   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. Absent on older
+   * servers.
+   */
+  fieldLinkTitles?: FieldLinkTitles;
   /**
    * Aggregated per-status quantity slices for QUANTITY_TRACKED assets.
    * Optional + nullable: absent on pre-quantity servers, `null` for INDIVIDUAL
@@ -1295,6 +1310,19 @@ export type BookingMutationResponse = {
    * servers that predate archiving.
    */
   droppedArchivedCount?: number;
+  /**
+   * Duplicate only: models the copy reserved fewer units of than the source
+   * had open, because the dates have fewer free or, when `failed`, because the
+   * reservation could not be written. Absent on other mutations and on servers
+   * that predate copying reservations.
+   */
+  reducedModelReservations?: {
+    assetModelId: string;
+    assetModelName: string;
+    requested: number;
+    reserved: number;
+    failed?: boolean;
+  }[];
 };
 
 /**
@@ -1907,6 +1935,19 @@ export type MobileCustomFieldType =
   | "AMOUNT"
   | "OPTION";
 
+/**
+ * How a TEXT custom field's value is read. `LINK` fields hold one web link:
+ * the server refuses any other value with a 400 whose message the edit
+ * screens show. `PLAIN` is every other field, of any type.
+ *
+ * Mirrors the `CustomFieldFormat` enum in
+ * packages/database/prisma/schema.prisma, sent by
+ * apps/webapp/app/routes/api+/mobile+/custom-fields.ts and
+ * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. The link rule
+ * itself is shared, not mirrored: both apps read it from `@shelf/links`.
+ */
+export type MobileCustomFieldFormat = "PLAIN" | "LINK";
+
 export type MobileCustomFieldDefinition = {
   id: string;
   name: string;
@@ -1914,6 +1955,8 @@ export type MobileCustomFieldDefinition = {
   helpText: string | null;
   required: boolean;
   options: string[] | null;
+  /** Absent on servers older than the Link format: read as `PLAIN`. */
+  format?: MobileCustomFieldFormat;
 };
 
 /**
@@ -2045,4 +2088,45 @@ export type AssetBookingsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+// ── Push notifications ─────────────────────────────────
+
+/**
+ * Body of `POST /api/mobile/push-token`: this device, for the signed-in
+ * person. Repeating it refreshes the server's `lastSeenAt`, and a token
+ * another person registered moves to the caller.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/push-token.ts}
+ */
+export type RegisterPushTokenPayload = {
+  /** The `ExponentPushToken[...]` string from `getExpoPushTokenAsync`. */
+  token: string;
+  platform: "IOS" | "ANDROID";
+  /** `expo-device` model name, at most 120 characters; null when unknown. */
+  deviceName: string | null;
+  /** This build's version, at most 20 characters; null when unknown. */
+  appVersion: string | null;
+};
+
+/** Answer of both `POST` and `DELETE /api/mobile/push-token`. */
+export type PushTokenResponse = { ok: true };
+
+/**
+ * Answer of `GET /api/mobile/notification-preferences`.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/notification-preferences.ts}
+ */
+export type NotificationPreferencesResponse = {
+  /** The four switches; all on for someone who never changed them. */
+  preferences: NotificationPreferences;
+  /** Whether any of the caller's workspaces' plans include push. */
+  pushAvailable: boolean;
+  /** Ids of the caller's workspaces whose plans include push. */
+  organizationsWithPush: string[];
+};
+
+/** Answer of `PUT /api/mobile/notification-preferences`: all four switches. */
+export type UpdateNotificationPreferencesResponse = {
+  preferences: NotificationPreferences;
 };

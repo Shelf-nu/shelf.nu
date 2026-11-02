@@ -12,7 +12,7 @@
  * @see {@link file://./heuristics.ts} rule-based proposal
  * @see {@link file://./apply.ts} turns a mapping into importer-ready CSV data
  */
-import { CustomFieldType } from "@prisma/client";
+import { CustomFieldFormat, CustomFieldType } from "@prisma/client";
 import { z } from "zod";
 import type { AssetCsvHeader } from "./fields";
 import { IMPORT_FIELD_NAMES } from "./fields";
@@ -53,7 +53,16 @@ export const MAX_CUSTOM_FIELD_NAME_LENGTH = 100;
 /** Where one source column goes. The review table edits exactly this. */
 export type ColumnTarget =
   | { kind: "field"; name: AssetCsvHeader }
-  | { kind: "customField"; name: string; type: CustomFieldType }
+  | {
+      kind: "customField";
+      name: string;
+      type: CustomFieldType;
+      /**
+       * `LINK` when the column's `cf:` header says `format:link`, so a new
+       * single-line text field is created as a Link field. Absent otherwise.
+       */
+      format?: CustomFieldFormat;
+    }
   | { kind: "skip" };
 
 /** One source column and the Shelf header it becomes. */
@@ -99,6 +108,7 @@ export const columnTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("customField"),
     name: customFieldNameSchema,
     type: z.nativeEnum(CustomFieldType),
+    format: z.nativeEnum(CustomFieldFormat).optional(),
   }),
   z.object({ kind: z.literal("skip") }),
 ]);
@@ -170,16 +180,22 @@ export function findDuplicateTargets(
 }
 
 /**
- * The CSV header a target becomes in the importer-ready file.
+ * The CSV header a target becomes in the importer-ready file. A Link-format
+ * single-line text target keeps its `format:link` segment.
  *
  * @param target - A non-skip column target
- * @returns The header text, for example `title` or `cf:Serial number, type:text`
+ * @returns The header text, for example `title`,
+ *   `cf:Serial number, type:text` or `cf:Manual, type:text, format:link`
  */
 export function headerForTarget(
   target: Exclude<ColumnTarget, { kind: "skip" }>
 ): string {
   if (target.kind === "field") return target.name;
-  return `cf:${target.name.trim()}, type:${target.type.toLowerCase()}`;
+  const header = `cf:${target.name.trim()}, type:${target.type.toLowerCase()}`;
+  const isLink =
+    target.type === CustomFieldType.TEXT &&
+    target.format === CustomFieldFormat.LINK;
+  return isLink ? `${header}, format:link` : header;
 }
 
 /**

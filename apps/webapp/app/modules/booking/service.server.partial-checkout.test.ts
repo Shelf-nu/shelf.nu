@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { onTestFinished } from "vitest";
 import type { Mock } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -20,6 +21,7 @@ import {
   createSystemBookingNotes,
 } from "~/modules/booking-note/service.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
+import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import {
   buildOverriddenReservationNotes,
@@ -684,6 +686,68 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
+  describe("first scan of an expired reservation", () => {
+    /** The reservation's 8-hour window ended three weeks ago. */
+    const expiredFrom = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000);
+    const expiredTo = new Date(expiredFrom.getTime() + 8 * 60 * 60 * 1000);
+    const expiredReservation = {
+      ...reservedBooking,
+      from: expiredFrom,
+      to: expiredTo,
+      originalFrom: null,
+      originalTo: null,
+    };
+
+    it("refuses the scan that made no choice, and writes nothing", async () => {
+      expect.assertions(3);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(expiredReservation);
+
+      await expect(
+        partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+      ).rejects.toThrow(/reserved period has already ended/);
+
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("lands in OVERDUE with the dates untouched when scanned out as overdue", async () => {
+      expect.assertions(1);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(expiredReservation);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+        intentChoice: CheckoutIntentEnum["without-adjusted-date"],
+      });
+
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: BookingStatus.OVERDUE } })
+      );
+    });
+
+    it("refuses a new end date from a batch, and writes nothing", async () => {
+      expect.assertions(2);
+      // why: a batch judges only its own items against the window; the whole
+      // booking's new window is the full check-out's job.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(expiredReservation);
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          assetIds: ["asset-1"],
+          intentChoice: CheckoutIntentEnum["with-new-end-date"],
+        })
+      ).rejects.toThrow(/Use Check out on the booking page/);
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+  });
+
   it("records one BOOKING_PARTIAL_CHECKOUT event per scanned asset", async () => {
     expect.assertions(1);
 
@@ -827,6 +891,75 @@ describe("partialCheckoutBooking", () => {
         content: expect.stringContaining("(scanned and selected on the web)"),
       })
     );
+  });
+
+  it("writes one check-out line per asset, with its own method, when the batch closes the booking through the full check-out", async () => {
+    expect.assertions(1);
+
+    // Every row of the reserved booking in one web batch, ba-2 ticked rather
+    // than scanned. The full check-out the batch hands over to writes each
+    // asset's line; the partial path's own "checked out via partial
+    // check-out" line must not appear as well.
+    const withSlices = {
+      ...reservedBooking,
+      bookingAssets: reservedBooking.bookingAssets.map((ba, i) => ({
+        ...ba,
+        id: `ba-${i + 1}`,
+        assetId: ba.asset.id,
+      })),
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(withSlices)
+      .mockResolvedValueOnce(withSlices)
+      .mockResolvedValue({ ...withSlices, status: BookingStatus.ONGOING });
+    // why: the full check-out reads the slices leaving now by their markers
+    // (an `OR` of never out, or out and fully back); none has left yet. Every
+    // other read keeps the suite's default.
+    const pivotRead = db.bookingAsset.findMany as unknown as Mock<
+      (args?: { where?: { OR?: unknown } }) => Promise<unknown>
+    >;
+    const pivotDefault = pivotRead.getMockImplementation();
+    pivotRead.mockImplementation((args) =>
+      args?.where?.OR
+        ? Promise.resolve(
+            withSlices.bookingAssets.map((ba) => ({
+              id: ba.id,
+              assetId: ba.assetId,
+              assetKitId: null,
+              quantity: 1,
+            }))
+          )
+        : pivotDefault?.(args) ?? Promise.resolve([])
+    );
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-2"],
+      },
+    });
+
+    const actor =
+      '{% link to="/settings/team/users/user-1" text="Test User" /%}';
+    const bookingLink =
+      '{% link to="/bookings/booking-1" text="Test Booking" /%}';
+    const checkOutLines = (createNotes as Mock).mock.calls
+      .map(([args]) => args as { content: string; assetIds: string[] })
+      .filter((args) => args.content.includes("checked out"))
+      .map((args) => ({ content: args.content, assetIds: args.assetIds }));
+    expect(checkOutLines).toEqual([
+      {
+        content: `${actor} checked out asset with ${bookingLink} (scanned on the web).`,
+        assetIds: ["asset-1", "asset-3"],
+      },
+      {
+        content: `${actor} checked out asset with ${bookingLink} (selected on the web).`,
+        assetIds: ["asset-2"],
+      },
+    ]);
   });
 
   it("records BOOKING_STATUS_CHANGED RESERVED → ONGOING on the batch that checks the booking out", async () => {
@@ -2478,7 +2611,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       const note = partialCheckoutNoteContent();
       // Kit slice labelled + slice-level totals; fully out → no "still booked".
       expect(note).toContain(
-        "· in kit Kittington (100 of 100 boxes checked out)"
+        '· in kit {% name text="Kittington" /%} (100 of 100 boxes checked out)'
       );
       expect(note).not.toContain("still booked");
     });
@@ -2676,6 +2809,47 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       expect(note).not.toContain('{% link to="javascript');
       // Still labelled as a kit slice (with the sanitized name).
       expect(note).toContain("in kit");
+    });
+
+    it("keeps a URL-shaped Kit.name inside a name tag in the checkout note", async () => {
+      // Kit.name is free-form user input; a name shaped like a URL must never
+      // reach the note as bare text, where it would become a link.
+      const evilKitName = URL_SHAPED_VALUE;
+      const booking = makeGlovesBooking();
+      // Poison the kit slice's (index 1 = ba-kit) kit name.
+      booking.bookingAssets[1].asset.assetKits = [
+        { id: "ak-kittington", kitId: "kit-1", kit: { name: evilKitName } },
+      ];
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      // In-tx kit-info read: no complete kit named, so the note's items body is
+      // the per-slice fragment (which carries the kit label under test).
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) => {
+          const ids = args?.where?.id?.in ?? [];
+          return Promise.resolve(
+            ids.map((id) => ({
+              id,
+              title: "Gloves",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+              assetKits: [],
+            }))
+          );
+        }
+      );
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-gloves", bookingAssetId: "ba-kit", quantity: 50 },
+        ],
+      });
+
+      const note = partialCheckoutNoteContent();
+      expect(note).toBeDefined();
+      expectValueOnlyInTag(note!, URL_SHAPED_VALUE, ["name"]);
     });
 
     /**

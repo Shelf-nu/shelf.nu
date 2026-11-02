@@ -109,4 +109,54 @@ describe("MarkdownViewer", () => {
       '{% link to="C:\\tmp" text="x" /%}'
     );
   });
+
+  describe("link chips", () => {
+    const renderComment = (content: string, allowExternalLinks: boolean) =>
+      render(
+        <MemoryRouter>
+          <MarkdownViewer
+            content={content}
+            allowExternalLinks={allowExternalLinks}
+            linkChips
+          />
+        </MemoryRouter>
+      );
+
+    it("shows a bare URL in a comment as a chip that opens in a new tab", () => {
+      const { container } = renderComment(
+        "Manual: https://docs.example.com/manual.pdf (rev B)",
+        true
+      );
+
+      const chip = container.querySelector(
+        'a[href^="https://docs.example.com/manual.pdf"]'
+      );
+      expect(chip).not.toBeNull();
+      expect(chip).toHaveAttribute("target", "_blank");
+      expect(container.textContent).toContain("(rev B)");
+    });
+
+    it("makes no chip where external links are not allowed", () => {
+      const { container } = renderComment(
+        "renamed to **https://evil.example/login**",
+        false
+      );
+
+      expect(container.querySelector("a")).toBeNull();
+      expect(container.textContent).toContain("https://evil.example/login");
+    });
+
+    it("shows a bare URL as text without linkChips", () => {
+      const { container } = render(
+        <MemoryRouter>
+          <MarkdownViewer
+            content="Manual: https://docs.example.com/manual.pdf"
+            allowExternalLinks
+          />
+        </MemoryRouter>
+      );
+
+      expect(container.querySelector("a")).toBeNull();
+    });
+  });
 });

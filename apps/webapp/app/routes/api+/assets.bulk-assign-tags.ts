@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkUpdateTagsSchema } from "~/components/assets/bulk-assign-tags-dialog";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkAssignAssetTags } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -80,6 +81,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       remove,
       settings,
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      bookableScope: resolveBookableListScope({ access, userId }),
       timeZone,
     });
 

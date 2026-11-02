@@ -12,6 +12,8 @@
  *  - pool join gate: the per-asset `pool` LATERAL joins a select-all only
  *    when its WHERE reads pool.* (a pool column filter or the low stock
  *    toggle), the same gate the index's cheap phase uses.
+ *  - list scope: a Base or Self Service caller's select-all, in either mode,
+ *    is limited to the assets their list shows (`bookableScope`).
  *  - `buildAdvancedFilteredAssetIdsQuery` — the raw-SQL shape guard
  *    (SHELF-WEBAPP-21X): raw SQL isn't typechecked, so a string assertion
  *    ensures location joins through the `AssetLocation` pivot and never
@@ -28,15 +30,18 @@ import {
   buildAdvancedFilteredAssetIdsQuery,
   resolveAssetIdsForBulkOperation,
 } from "./bulk-operations-helper.server";
+import { bookableListScopeWhere } from "./list-scope.server";
+import type { BookableListScope } from "./list-scope.server";
 import { parseFiltersWithHierarchy } from "./query.server";
 
-// why: the advanced select-all path issues a raw `$queryRaw`; stub it to avoid a
-// real DB and to return a tz-dependent id set (proving the tz reaches the SQL
-// and changes which rows match near a day boundary). This stub also covers the
-// module-scope db import that the `buildAdvancedFilteredAssetIdsQuery` suite
-// relies on (its pure builder never touches db at runtime).
+// why: the advanced select-all path issues a raw `$queryRaw` and the simple one
+// an `asset.findMany`; stub both to avoid a real DB, to return a tz-dependent
+// id set (proving the tz reaches the SQL and changes which rows match near a
+// day boundary), and to capture the simple-mode `where`. This stub also covers
+// the module-scope db import that the `buildAdvancedFilteredAssetIdsQuery`
+// suite relies on (its pure builder never touches db at runtime).
 vi.mock("~/database/db.server", () => ({
-  db: { $queryRaw: vi.fn() },
+  db: { $queryRaw: vi.fn(), asset: { findMany: vi.fn() } },
 }));
 
 // why: `parseFiltersWithHierarchy` hits the DB to resolve custom-field hierarchy;
@@ -98,6 +103,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
       lastAuditDateAccess: "available" as const,
+      bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -109,6 +115,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
       lastAuditDateAccess: "available" as const,
+      bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -132,6 +139,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
       lastAuditDateAccess: "available" as const,
+      bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -161,6 +169,7 @@ describe("resolveAssetIdsForBulkOperation - lastAuditDate gating", () => {
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
       lastAuditDateAccess,
+      bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams,
@@ -283,6 +292,7 @@ describe("resolveAssetIdsForBulkOperation - pool join gate", () => {
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
       lastAuditDateAccess: "available" as const,
+      bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams,
@@ -325,5 +335,108 @@ describe("resolveAssetIdsForBulkOperation - pool join gate", () => {
 
     expect(sentSql()).toContain(POOL_JOIN_MARKER);
     expect(sentSql()).toContain('a."minQuantity" IS NOT NULL');
+  });
+});
+
+describe("resolveAssetIdsForBulkOperation - list scope", () => {
+  /** A Base or Self Service member's scope (see `resolveBookableListScope`). */
+  const scope: BookableListScope = { holderUserId: "user-base" };
+
+  const simpleSettings = {
+    mode: "SIMPLE",
+    columns: [],
+  } as unknown as AssetIndexSettings;
+
+  const capturedQueries: Prisma.Sql[] = [];
+
+  const resolve = ({
+    settings,
+    currentSearchParams,
+    bookableScope,
+  }: {
+    settings: AssetIndexSettings;
+    currentSearchParams: string;
+    bookableScope: BookableListScope | null;
+  }) =>
+    resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
+      lastAuditDateAccess: "available" as const,
+      assetIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      currentSearchParams,
+      settings,
+      bookableScope,
+    });
+
+  /** The `where` the simple-mode select-all sent to `asset.findMany`. */
+  const simpleWhere = () =>
+    (
+      vi.mocked(db.asset.findMany).mock.calls[0]?.[0] as
+        | { where?: Prisma.AssetWhereInput }
+        | undefined
+    )?.where;
+
+  /** The SQL text of the one advanced query the resolution sent. */
+  const sentSql = () => capturedQueries[0]?.strings.join("?") ?? "";
+
+  beforeEach(() => {
+    capturedQueries.length = 0;
+    vi.mocked(db.asset.findMany).mockReset();
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      { id: "asset-1" },
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.$queryRaw).mockImplementation(((query: Prisma.Sql) => {
+      capturedQueries.push(query);
+      return Promise.resolve([{ id: "asset-1" }]);
+    }) as unknown as typeof db.$queryRaw);
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([createdAtFilter]);
+  });
+
+  it("limits a simple-mode select-all to the caller's list scope", async () => {
+    const ids = await resolve({
+      settings: simpleSettings,
+      currentSearchParams: "status=AVAILABLE",
+      bookableScope: scope,
+    });
+
+    expect(ids).toEqual(["asset-1"]);
+    expect(simpleWhere()?.organizationId).toBe("org-1");
+    expect(simpleWhere()?.AND).toContainEqual(bookableListScopeWhere(scope));
+  });
+
+  it("leaves a simple-mode select-all unscoped for a member who sees every asset", async () => {
+    await resolve({
+      settings: simpleSettings,
+      currentSearchParams: "status=AVAILABLE",
+      bookableScope: null,
+    });
+
+    expect(simpleWhere()?.organizationId).toBe("org-1");
+    expect(JSON.stringify(simpleWhere())).not.toContain("availableToBook");
+  });
+
+  it("limits an advanced-mode select-all to the caller's list scope", async () => {
+    const ids = await resolve({
+      settings: advancedSettings,
+      currentSearchParams: "createdAt=is:2026-07-20",
+      bookableScope: scope,
+    });
+
+    expect(ids).toEqual(["asset-1"]);
+    expect(capturedQueries).toHaveLength(1);
+    expect(sentSql()).toContain('a."availableToBook" = true');
+    expect(capturedQueries[0]?.values).toContain("user-base");
+  });
+
+  it("leaves an advanced-mode select-all unscoped for a member who sees every asset", async () => {
+    await resolve({
+      settings: advancedSettings,
+      currentSearchParams: "createdAt=is:2026-07-20",
+      bookableScope: null,
+    });
+
+    expect(capturedQueries).toHaveLength(1);
+    expect(sentSql()).not.toContain("availableToBook");
   });
 });

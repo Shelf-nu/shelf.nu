@@ -15,7 +15,8 @@ import type { AuditSchedulerData } from "./types";
 
 /**
  * 24-hour reminder handler
- * Sends reminder email to assignees and schedules the next reminder (4h)
+ * Sends the reminder email and push to assignees and schedules the next
+ * reminder (4h)
  */
 const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
@@ -39,15 +40,8 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    sendAuditReminderEmail({
-      audit,
-      assignees: audit.assignments,
-      hints: data.hints,
-      timeframe: "24 hours",
-      heading: "🔔 Audit due in 24 hours",
-    });
-
-    // Schedule 4h reminder
+    // Schedule the 4h reminder before notifying, so a scheduling failure
+    // that makes pg-boss retry does not notify twice
     const when4h = new Date(audit.dueDate.getTime() - 4 * 60 * 60 * 1000);
     await scheduleNextAuditJob({
       data: {
@@ -56,12 +50,20 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
       },
       when: when4h,
     });
+
+    sendAuditReminderEmail({
+      audit,
+      assignees: audit.assignments,
+      hints: data.hints,
+      reminder: "REMINDER_24H",
+    });
   }
 };
 
 /**
  * 4-hour reminder handler
- * Sends reminder email to assignees and schedules the next reminder (1h)
+ * Sends the reminder email and push to assignees and schedules the next
+ * reminder (1h)
  */
 const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
@@ -85,15 +87,8 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    sendAuditReminderEmail({
-      audit,
-      assignees: audit.assignments,
-      hints: data.hints,
-      timeframe: "4 hours",
-      heading: "🔔 Audit due in 4 hours",
-    });
-
-    // Schedule 1h reminder
+    // Schedule the 1h reminder before notifying, so a scheduling failure
+    // that makes pg-boss retry does not notify twice
     const when1h = new Date(audit.dueDate.getTime() - 1 * 60 * 60 * 1000);
     await scheduleNextAuditJob({
       data: {
@@ -102,12 +97,20 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
       },
       when: when1h,
     });
+
+    sendAuditReminderEmail({
+      audit,
+      assignees: audit.assignments,
+      hints: data.hints,
+      reminder: "REMINDER_4H",
+    });
   }
 };
 
 /**
  * 1-hour reminder handler
- * Sends reminder email to assignees and schedules the overdue notice
+ * Sends the reminder email and push to assignees and schedules the overdue
+ * notice
  */
 const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
@@ -131,15 +134,8 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    sendAuditReminderEmail({
-      audit,
-      assignees: audit.assignments,
-      hints: data.hints,
-      timeframe: "1 hour",
-      heading: "🔔 Audit due in 1 hour",
-    });
-
-    // Schedule overdue notice at due date time
+    // Schedule the overdue notice at the due date, before notifying, so a
+    // scheduling failure that makes pg-boss retry does not notify twice
     await scheduleNextAuditJob({
       data: {
         ...data,
@@ -147,12 +143,19 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
       },
       when: audit.dueDate,
     });
+
+    sendAuditReminderEmail({
+      audit,
+      assignees: audit.assignments,
+      hints: data.hints,
+      reminder: "REMINDER_1H",
+    });
   }
 };
 
 /**
  * Overdue notice handler
- * Sends overdue email to both creator and assignees
+ * Sends the overdue email and push to the creator and assignees
  * Does NOT change audit status (handled on frontend)
  */
 const overdueNotice = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {

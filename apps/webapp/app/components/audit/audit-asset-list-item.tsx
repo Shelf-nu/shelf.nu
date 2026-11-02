@@ -239,10 +239,14 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
         </Td>
       )}
       <Td>
-        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
+        {category ? (
+          <CategoryBadge category={category} linkToAssets />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
       <Td>
-        <ListItemTagsColumn tags={item.tags} />
+        <ListItemTagsColumn tags={item.tags} linkToAssets />
       </Td>
       {canRemoveAssets && (
         <Td className="text-right">

@@ -201,6 +201,8 @@ describe("api/assets/bulk-update-asset-model", () => {
         lastAuditDateAccess: "available",
         locale: expect.any(String),
         currency: "USD",
+        // An admin sees every asset, so the list scope is null.
+        bookableScope: null,
       });
     });
 

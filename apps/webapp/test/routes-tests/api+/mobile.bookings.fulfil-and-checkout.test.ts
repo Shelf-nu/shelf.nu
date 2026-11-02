@@ -14,6 +14,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { createBookingSettings } from "@factories";
 import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { action } from "~/routes/api+/mobile+/bookings.fulfil-and-checkout";
 
 // why: `data()` needs a router context; a plain Response carries the same
@@ -214,6 +215,20 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     expect(fulfilAndCheckOut).toHaveBeenLastCalledWith(
       expect.objectContaining({
         provenance: { surface: "phone", method: null },
+      })
+    );
+  });
+
+  it("keeps the stored dates: the phone never asks for a new end date", async () => {
+    await action(
+      createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })
+    );
+
+    // No early-start adjustment, and an expired reservation goes out as
+    // overdue, the same intent the phone's check-out routes send.
+    expect(fulfilAndCheckOut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkoutIntentChoice: CheckoutIntentEnum["without-adjusted-date"],
       })
     );
   });

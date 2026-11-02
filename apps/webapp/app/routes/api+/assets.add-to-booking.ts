@@ -7,6 +7,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
@@ -118,6 +119,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assetIds: finalAssetIds,
       // Re-checks the add rule against the locked booking status.
       access,
+      hints: getClientHint(request),
     });
 
     const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });

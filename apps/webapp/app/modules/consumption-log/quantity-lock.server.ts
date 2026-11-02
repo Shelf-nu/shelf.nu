@@ -90,3 +90,41 @@ export function lockAssetsForQuantityUpdate(
     FOR UPDATE
   `;
 }
+
+/**
+ * Row-locks every given asset in one statement, or throws if any is missing.
+ *
+ * The strict form of {@link lockAssetsForQuantityUpdate}: same single sorted,
+ * org-scoped `FOR UPDATE` statement (so the same global lock order), plus the
+ * 404 that {@link lockAssetForQuantityUpdate} throws when an id matches no row
+ * in the caller's organization. A foreign-org or deleted id therefore fails
+ * the whole call instead of being skipped. Empty input issues no query.
+ *
+ * Must be called within a `db.$transaction()` interactive transaction.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetIds - Assets to lock; duplicates are ignored
+ * @param organizationId - The caller's organization
+ * @throws {ShelfError} If any asset is not found in the caller's org (404)
+ */
+export async function lockEveryAssetForQuantityUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any, // Prisma interactive tx client (no clean type for extended clients)
+  assetIds: string[],
+  organizationId: string
+): Promise<void> {
+  const requestedCount = new Set(assetIds).size;
+  if (requestedCount === 0) return;
+
+  const rows = await lockAssetsForQuantityUpdate(tx, assetIds, organizationId);
+  const lockedCount = new Set((rows ?? []).map((row) => row.id)).size;
+
+  if (lockedCount < requestedCount) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset not found",
+      label: "Consumption Log",
+      status: 404,
+    });
+  }
+}

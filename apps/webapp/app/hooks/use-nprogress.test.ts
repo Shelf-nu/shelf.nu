@@ -17,6 +17,13 @@ describe("isFetcherExcludedFromProgress", () => {
     expect(isFetcherExcludedFromProgress("scan-history-kit:kit-1")).toBe(true);
   });
 
+  it("keeps the record arrows' neighbours load off the bar", () => {
+    // The arrows stay disabled while it loads.
+    expect(
+      isFetcherExcludedFromProgress("record-navigation-asset-asset-1")
+    ).toBe(true);
+  });
+
   it("keeps a listed fetcher off the bar", () => {
     expect(isFetcherExcludedFromProgress("add-note")).toBe(true);
   });

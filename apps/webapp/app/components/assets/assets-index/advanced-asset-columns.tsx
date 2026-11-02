@@ -8,10 +8,12 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import { RepeatIcon } from "lucide-react";
 import { Link, useLoaderData } from "react-router";
 import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
+import { TextWithLinks } from "~/components/links/text-with-links";
 import { LocationBadge } from "~/components/location/location-badge";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
@@ -37,6 +39,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import type { ListContextLinkState } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
@@ -44,15 +47,15 @@ import type {
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
+import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { formatCustodyList } from "~/modules/custody/utils";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
-import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
-import { isLink } from "~/utils/misc";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -80,11 +83,14 @@ import { CategoryBadge } from "../category-badge";
 export function AdvancedIndexColumn({
   column,
   item,
+  linkState,
 }: {
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
+  /** History state for the name link, so the asset page can step through this list. */
+  linkState?: ListContextLinkState;
 }) {
-  const { locale, currentOrganization, lastAuditDateAccess } =
+  const { locale, currentOrganization, lastAuditDateAccess, linkTitles } =
     useLoaderData<AssetIndexLoaderData>();
   const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
@@ -138,16 +144,14 @@ export function AdvancedIndexColumn({
               </PopoverContent>
             </PopoverPortal>
           </Popover>
-        ) : isLink(customFieldDisplayValue as string) ? (
-          <Button
-            role="link"
-            variant="link"
-            className="text-gray text-end font-normal underline hover:text-gray-600"
-            target="_blank"
-            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
-          >
-            {customFieldDisplayValue as string}
-          </Button>
+        ) : field.customField.type === CustomFieldType.TEXT ||
+          field.customField.type === CustomFieldType.OPTION ? (
+          // An option is free text an admin typed, so it can hold a link too.
+          <TextWithLinks
+            value={String(fieldValue.raw)}
+            titles={linkTitles}
+            compact
+          />
         ) : field.customField.type === CustomFieldType.AMOUNT ? (
           formatCurrency({
             value: fieldValue.raw as number,
@@ -188,7 +192,8 @@ export function AdvancedIndexColumn({
               <div className="min-w-0 flex-1 truncate">
                 <div className="flex items-center gap-1.5">
                   <Link
-                    to={item.id}
+                    to={LIST_DETAIL_PATH.asset(item.id)}
+                    state={linkState}
                     className="truncate font-medium underline hover:text-gray-600"
                     title={item.title}
                   >
@@ -798,7 +803,7 @@ function CategoryColumn({
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <CategoryBadge category={category} />
+      <CategoryBadge category={category} linkToAssets />
     </Td>
   );
 }
@@ -806,7 +811,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      <ListItemTagsColumn tags={tags} />
+      <ListItemTagsColumn tags={tags} linkToAssets />
     </Td>
   );
 }
@@ -1101,18 +1106,31 @@ function UpcomingReminderColumn({
     return <Td>No upcoming reminder</Td>;
   }
 
+  const recurrenceLabel = describeRecurrence(upcomingReminder);
+
   return (
     <Td>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
-            <DateS date={upcomingReminder.alertDateTime} includeTime />
+            <span className="flex items-center gap-1">
+              <DateS date={upcomingReminder.alertDateTime} includeTime />
+              {recurrenceLabel ? (
+                <RepeatIcon
+                  className="size-3 text-gray-400"
+                  aria-label="Recurring reminder"
+                />
+              ) : null}
+            </span>
           </Button>
         </TooltipTrigger>
 
         <TooltipContent className="max-w-[400px]">
           <p className="mb-1 font-bold">{upcomingReminder.name}</p>
           <p>{upcomingReminder.message.substring(0, 1000)}</p>
+          {recurrenceLabel ? (
+            <p className="mt-1 text-gray-500">Repeats: {recurrenceLabel}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
     </Td>
@@ -1191,10 +1209,12 @@ function UpcomingBookingsColumn({
                         start: booking.from,
                         end: booking.to,
                         custodian: {
+                          id: booking.custodianTeamMember?.id ?? null,
                           name: custodianName ?? "",
                           user: booking.custodianUser ?? null,
                         },
                         creator: {
+                          id: null,
                           name: booking.creator
                             ? resolveUserDisplayName(booking.creator)
                             : "Unknown",

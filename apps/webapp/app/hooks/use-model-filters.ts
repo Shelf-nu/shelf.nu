@@ -36,6 +36,16 @@ export type ModelFilterProps = {
 const GET_ALL_KEY = "getAll";
 
 /**
+ * Sends a filtered list back to its first page. A filter changes which rows
+ * the list holds, so the page the user was on can be past the end of the new
+ * result and would render as an empty list. Called on every URL change a
+ * filter makes; the other params stay as they are.
+ */
+function resetToFirstPage(params: URLSearchParams) {
+  params.delete("page");
+}
+
+/**
  * Determines if all data for the model is loaded
  */
 function isAllDataLoaded(
@@ -174,6 +184,7 @@ export function useModelFilters({
             } else {
               prev.set(model.name, value);
             }
+            resetToFirstPage(prev);
             return prev;
           },
           { preventScrollReset: true }
@@ -192,6 +203,7 @@ export function useModelFilters({
             } else {
               prev.append(model.name, value);
             }
+            resetToFirstPage(prev);
             return prev;
           },
           { preventScrollReset: true }
@@ -248,6 +260,7 @@ export function useModelFilters({
     if (selectionMode !== "none") {
       setSearchParams((prev) => {
         prev.delete(model.name);
+        resetToFirstPage(prev);
         return prev;
       });
     }
@@ -285,6 +298,7 @@ export function useModelFilters({
       } else {
         prev.set(model.name, items[0].id);
       }
+      resetToFirstPage(prev);
       return prev;
     });
   }

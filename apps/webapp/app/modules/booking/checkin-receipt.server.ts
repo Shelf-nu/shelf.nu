@@ -35,6 +35,8 @@ import type {
 import {
   buildCheckinReceipt,
   formatLatenessNote,
+  isRowCheckedIn,
+  resolveReceiptMoments,
   resolveSentUnits,
   summariseCheckinMethods,
 } from "./checkin-receipt";
@@ -84,17 +86,22 @@ export type CheckinReceiptDbResult = {
   plannedFrom: Date | null;
   plannedTo: Date | null;
   /**
-   * The earliest departure the slice markers still record, and who made it.
+   * The earliest departure a user is recorded making, from the slice markers
+   * that name a dispatcher ({@link resolveReceiptMoments}).
    *
-   * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure — sending a
-   * returned slice out again overwrites it — so on a re-dispatched booking this
+   * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure (sending a
+   * returned slice out again overwrites it), so on a re-dispatched booking this
    * is the earliest departure still on record, not the first one that ever
-   * happened. The sheet labels it "Checked out" for that reason.
+   * happened. The sheet labels it "Checked out" for that reason. `null` when no
+   * slice names its dispatcher.
    */
   checkedOutAt: Date | null;
-  /** Who sent that first slice out; `""` when the marker records none. */
+  /** Who made that departure. */
   checkedOutByName: string;
-  /** The recorded return moment; `null` when nothing recorded one. */
+  /**
+   * The booking's recorded return: its completion event, else the latest row
+   * moment while no row with returned units is undated; `null` otherwise.
+   */
   returnedAt: Date | null;
   /**
    * How the closing moment compares to the planned end — "on time", "early", or
@@ -103,10 +110,13 @@ export type CheckinReceiptDbResult = {
    * not finished or nothing recorded a moment.
    */
   latenessNote: CheckinLatenessNote | null;
-  /** Distinct receiving users, ordered by their first check-in. */
+  /**
+   * Distinct receiving users, ordered by their first check-in. Empty when a
+   * row with returned units records no receiver; the rows carry their own.
+   */
   checkedInByNames: string[];
   /**
-   * The one method line for the header when every returned row recorded the
+   * The one method line for the header when every checked-in row recorded the
    * same method; `null` when they differ or none recorded one.
    */
   checkedInHow: string | null;
@@ -180,73 +190,57 @@ export async function fetchCheckinReceiptData(
     // returns, and the slice projection behind its rows keeps only the columns
     // the checklist prints — so the markers this sheet is built on need their
     // own read.
-    const [
-      slices,
-      dispositionLogs,
-      checkInTimes,
-      checkinSessions,
-      dispatchEvents,
-    ] = await Promise.all([
-      db.bookingAsset.findMany({
-        where: { bookingId, booking: { organizationId } },
-        select: {
-          id: true,
-          assetId: true,
-          quantity: true,
-          assetKitId: true,
-          checkedOutAt: true,
-          checkedOutById: true,
-          checkedOutQuantity: true,
-          checkedInAt: true,
-          checkedInById: true,
-          asset: { select: { type: true } },
-        },
-      }),
-      db.consumptionLog.findMany({
-        where: {
-          bookingId,
-          booking: { organizationId },
-          category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
-        },
-        select: {
-          assetId: true,
-          bookingAssetId: true,
-          category: true,
-          quantity: true,
-          // A quantity slice returned in part never gets a check-in marker,
-          // so its log is the only record of when those units came back and
-          // who took them.
-          createdAt: true,
-          userId: true,
-        },
-      }),
-      resolveCheckInTimes([bookingId]),
-      // Progressive check-in sessions, for slices reconciled before the
-      // per-slice markers existed. The completion gate accepts a session at or
-      // after a slice's departure as proof an INDIVIDUAL asset came back, so
-      // the receipt reads them too: otherwise a booking the gate closed prints
-      // as still out.
-      db.partialBookingCheckin.findMany({
-        where: { bookingId, booking: { organizationId } },
-        select: {
-          assetIds: true,
-          checkinTimestamp: true,
-          checkedInById: true,
-        },
-      }),
-      // How each asset came back, and when it last left. Events carry no org
-      // column of their own beyond `organizationId`, so the booking's org
-      // scopes them.
-      db.activityEvent.findMany({
-        where: {
-          bookingId,
-          organizationId,
-          action: { in: [...CHECKIN_EVENT_ACTIONS, ...CHECKOUT_EVENT_ACTIONS] },
-        },
-        select: { assetId: true, action: true, occurredAt: true, meta: true },
-        orderBy: { occurredAt: "asc" },
-      }),
-    ]);
+    const [slices, dispositionLogs, checkInTimes, dispatchEvents] =
+      await Promise.all([
+        db.bookingAsset.findMany({
+          where: { bookingId, booking: { organizationId } },
+          select: {
+            id: true,
+            assetId: true,
+            quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
+            checkedOutById: true,
+            checkedOutQuantity: true,
+            checkedInAt: true,
+            checkedInById: true,
+            asset: { select: { type: true } },
+          },
+        }),
+        db.consumptionLog.findMany({
+          where: {
+            bookingId,
+            booking: { organizationId },
+            category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+          },
+          select: {
+            assetId: true,
+            bookingAssetId: true,
+            category: true,
+            quantity: true,
+            // A quantity slice returned in part never gets a check-in marker,
+            // so its log is the only record of when those units came back and
+            // who took them.
+            createdAt: true,
+            userId: true,
+          },
+        }),
+        resolveCheckInTimes([bookingId]),
+        // How each asset came back, and when it last left. Events carry no org
+        // column of their own beyond `organizationId`, so the booking's org
+        // scopes them.
+        db.activityEvent.findMany({
+          where: {
+            bookingId,
+            organizationId,
+            action: {
+              in: [...CHECKIN_EVENT_ACTIONS, ...CHECKOUT_EVENT_ACTIONS],
+            },
+          },
+          select: { assetId: true, action: true, occurredAt: true, meta: true },
+          orderBy: { occurredAt: "asc" },
+        }),
+      ]);
 
     // When each asset last left: the start of the dispatch the receipt prints
     // the return of. An asset with no check-out event (one dispatched before
@@ -313,27 +307,6 @@ export async function fetchCheckinReceiptData(
       const forAsset = checkedInHowEventsByAsset.get(event.assetId) ?? [];
       forAsset.push(phrase);
       checkedInHowEventsByAsset.set(event.assetId, forAsset);
-    }
-
-    // The most recent session naming each asset. Kept as a moment rather than a
-    // flag: a slice that departed twice has a session for the first trip whose
-    // asset id never leaves the list, and a bare set would let it reconcile the
-    // second departure too.
-    const latestSessionByAsset = new Map<
-      string,
-      { at: Date; byId: string | null }
-    >();
-    for (const session of checkinSessions) {
-      if (!session.checkinTimestamp) continue;
-      for (const assetId of session.assetIds) {
-        const seen = latestSessionByAsset.get(assetId);
-        if (!seen || session.checkinTimestamp > seen.at) {
-          latestSessionByAsset.set(assetId, {
-            at: session.checkinTimestamp,
-            byId: session.checkedInById ?? null,
-          });
-        }
-      }
     }
 
     // Attribution runs once per ASSET with all four categories together:
@@ -461,10 +434,6 @@ export async function fetchCheckinReceiptData(
               checkedOutQuantity: marker.checkedOutQuantity,
               checkedInAt: marker.checkedInAt,
               checkedInById: marker.checkedInById,
-              sessionCheckedInAt:
-                latestSessionByAsset.get(marker.assetId)?.at ?? null,
-              sessionCheckedInById:
-                latestSessionByAsset.get(marker.assetId)?.byId ?? null,
               returnRecords: returnRecordsBySlice.get(marker.id),
             },
           ]
@@ -481,41 +450,21 @@ export async function fetchCheckinReceiptData(
       isBookingFinished: isFinished,
     });
 
-    // The earliest departure still on record, and the person who made it. Both
-    // come from the same slice: a booking checked out in several passes has
-    // several dispatchers, and naming one against another's moment would be a
-    // claim nothing recorded.
-    const earliestCheckedOutSlice = slices
-      .filter((slice) => slice.checkedOutAt !== null)
-      .sort(
-        (a, b) =>
-          (a.checkedOutAt as Date).getTime() -
-          (b.checkedOutAt as Date).getTime()
-      )[0];
-
-    // Distinct receivers in the order they first received something, taken
-    // from the reconciled rows rather than the raw markers so the summary names
-    // exactly the people the rows below it name.
-    const checkedInUserIdsInOrder = [
-      ...new Set(
-        receipt.rows
-          .filter((row) => row.checkedInAt !== null)
-          .sort(
-            (a, b) =>
-              (a.checkedInAt as Date).getTime() -
-              (b.checkedInAt as Date).getTime()
-          )
-          .flatMap((row) => row.checkedInByIds)
-      ),
-    ];
+    // The header's departure, return and receivers, read from the reconciled
+    // rows rather than the raw markers so it never states more than the rows
+    // below it. The departures span every slice, printed or not.
+    const moments = resolveReceiptMoments({
+      rows: receipt.rows,
+      departures: slices,
+      completedAt: checkInTimes.get(bookingId) ?? null,
+    });
 
     // Ids read off the booking's own rows, not supplied by the caller.
     const markerUserIds = [
       ...new Set(
         [
-          earliestCheckedOutSlice?.checkedOutById ?? null,
+          moments.checkedOutById,
           ...slices.map((slice) => slice.checkedInById),
-          ...[...latestSessionByAsset.values()].map((s) => s.byId),
           ...dispositionLogs.map((log) => log.userId),
         ].filter((id): id is string => id !== null)
       ),
@@ -551,31 +500,14 @@ export async function fetchCheckinReceiptData(
             .map((id) => nameByUserId.get(id) ?? "")
             .filter((name) => name !== "")
             .join(", "),
-          // Only a row the sheet dates as returned says how it came back; a
-          // row still out has no return to describe.
-          checkedInHow:
-            row.checkedInAt !== null
-              ? checkedInHowByAsset.get(row.assetId) ?? null
-              : null,
+          // Only a checked-in row says how it came back, dated or not; a row
+          // still out has no return to describe.
+          checkedInHow: isRowCheckedIn(row)
+            ? checkedInHowByAsset.get(row.assetId) ?? null
+            : null,
         },
       ];
     });
-
-    // The recorded return: the status transition into COMPLETE. When no event
-    // was written, the latest moment the printed rows carry is the closest
-    // record there is. `Booking.updatedAt` is never a fallback — any later edit
-    // moves it.
-    //
-    // Read from the reconciled rows rather than the raw markers, so the summary
-    // can never be blank above rows that show a time. A legacy booking whose
-    // return survives only as a progressive session has no marker to find and
-    // no event either, and the rows resolve that session where the summary
-    // could not see it.
-    const latestRowCheckIn = receipt.rows.reduce<Date | null>((latest, row) => {
-      if (!row.checkedInAt) return latest;
-      return !latest || row.checkedInAt > latest ? row.checkedInAt : latest;
-    }, null);
-    const returnedAt = checkInTimes.get(bookingId) ?? latestRowCheckIn;
 
     const plannedTo = resolvePlannedEnd(booking);
 
@@ -586,7 +518,7 @@ export async function fetchCheckinReceiptData(
       ? getLatenessMs({
           status: booking.status,
           scheduledEnd: plannedTo,
-          checkInAt: returnedAt,
+          checkInAt: moments.returnedAt,
         })
       : null;
 
@@ -598,13 +530,13 @@ export async function fetchCheckinReceiptData(
       stamp: receipt.stamp,
       plannedFrom: resolvePlannedStart(booking),
       plannedTo,
-      checkedOutAt: earliestCheckedOutSlice?.checkedOutAt ?? null,
-      checkedOutByName: earliestCheckedOutSlice?.checkedOutById
-        ? nameByUserId.get(earliestCheckedOutSlice.checkedOutById) ?? ""
+      checkedOutAt: moments.checkedOutAt,
+      checkedOutByName: moments.checkedOutById
+        ? nameByUserId.get(moments.checkedOutById) ?? ""
         : "",
-      returnedAt,
+      returnedAt: moments.returnedAt,
       latenessNote: formatLatenessNote(latenessMs),
-      checkedInByNames: checkedInUserIdsInOrder
+      checkedInByNames: moments.checkedInByIds
         .map((id) => nameByUserId.get(id) ?? "")
         .filter((name) => name !== ""),
       checkedInHow: summariseCheckinMethods(rows),

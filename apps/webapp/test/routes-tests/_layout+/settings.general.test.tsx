@@ -10,13 +10,28 @@ import {
   updateOrganization,
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
+import {
+  createPdfDocument,
+  deletePdfDocument,
+  getPdfDocuments,
+  updatePdfDocument,
+} from "~/modules/pdf-document/service.server";
 import { action, loader } from "~/routes/_layout+/settings.general";
+import { ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   userHasActiveSubscription,
 } from "~/utils/stripe.server";
-import { canHideShelfBranding } from "~/utils/subscription.server";
+import {
+  canCustomizePdfDocuments,
+  canHideShelfBranding,
+} from "~/utils/subscription.server";
 
 // why: mock parseFormData to avoid actual file upload in tests
 vi.mock("@remix-run/form-data-parser", () => ({
@@ -31,7 +46,22 @@ vi.mock("~/database/db.server", () => ({
     organization: {
       count: vi.fn().mockResolvedValue(0),
     },
+    customField: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   },
+}));
+
+// why: the document rules run against the database and have their own tests
+// (`modules/pdf-document/service.server.test.ts`); this suite is about the
+// route's gate and how it reads the form.
+vi.mock("~/modules/pdf-document/service.server", () => ({
+  getPdfDocuments: vi.fn().mockResolvedValue([]),
+  createPdfDocument: vi.fn(),
+  updatePdfDocument: vi.fn(),
+  duplicatePdfDocument: vi.fn(),
+  setDefaultPdfDocument: vi.fn(),
+  deletePdfDocument: vi.fn(),
 }));
 
 // why: mock Stripe functions to avoid real Stripe API calls in tests
@@ -58,6 +88,8 @@ vi.mock("~/utils/roles.server", () => ({
 
 vi.mock("~/utils/subscription.server", () => ({
   canHideShelfBranding: vi.fn(),
+  canCustomizePdfDocuments: vi.fn(() => true),
+  canUseBookings: vi.fn(() => true),
 }));
 
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -743,5 +775,179 @@ describe("settings.general SSO settings write", () => {
         },
       })
     );
+  });
+});
+
+describe("settings.general PDF documents", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getOrganizationTierLimitMock.mockResolvedValue({ id: "tier_2" } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: baseOrganization(),
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      organizations: [baseOrganization()],
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+  });
+
+  function post(fields: [string, string][]) {
+    const body = new URLSearchParams(fields);
+    return action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    ) as Promise<{ init?: { status?: number } }>;
+  }
+
+  const documentForm = (customFieldIds: string[]): [string, string][] => [
+    ["intent", "save-document"],
+    ["documentId", "document-1"],
+    ["name", "  Client quote  "],
+    ["columns.image", "off"],
+    ["columns.quantity", "off"],
+    ["columns.quantity", "on"],
+    ["columns.kit", "on"],
+    ["columns.category", "on"],
+    ["columns.location", "off"],
+    ...customFieldIds.map((id, i): [string, string] => [
+      `customFieldIds[${i}]`,
+      id,
+    ]),
+    ["assetDescription", "off"],
+    ["groupBy", "category"],
+    ["sortBy", "name"],
+    ["bookingDescription", "off"],
+    ["totalValue", "on"],
+    ["signatureLines", "on"],
+  ];
+
+  it("lets only owners and admins change documents: the gate is general settings update", async () => {
+    const refusal = new ShelfError({
+      cause: null,
+      message: "You are not allowed to do this.",
+      label: "Permission",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+    requirePermissionMock.mockRejectedValue(refusal);
+
+    const response = await post([
+      ["intent", "delete-document"],
+      ["documentId", "document-1"],
+    ]);
+
+    expect(response.init?.status).toBe(403);
+    expect(deletePdfDocument).not.toHaveBeenCalled();
+    expect(requirePermissionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: PermissionEntity.generalSettings,
+        action: PermissionAction.update,
+      })
+    );
+    for (const role of [
+      OrganizationRoles.BASE,
+      OrganizationRoles.SELF_SERVICE,
+    ]) {
+      expect(
+        userHasPermission({
+          roles: [role],
+          entity: PermissionEntity.generalSettings,
+          action: PermissionAction.update,
+        })
+      ).toBe(false);
+    }
+  });
+
+  it("deletes a document in the caller's workspace only", async () => {
+    await post([
+      ["intent", "delete-document"],
+      ["documentId", "document-1"],
+    ]);
+
+    expect(deletePdfDocument).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      documentId: "document-1",
+    });
+  });
+
+  it("saves the form as the document's name and config, empty custom field slots dropped", async () => {
+    await post(documentForm(["cf-price", "none", "cf-serial"]));
+
+    expect(updatePdfDocument).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      documentId: "document-1",
+      name: "Client quote",
+      config: {
+        columns: {
+          image: false,
+          quantity: true,
+          kit: true,
+          category: true,
+          location: false,
+        },
+        customFieldIds: ["cf-price", "cf-serial"],
+        assetDescription: false,
+        groupBy: "category",
+        sortBy: "name",
+        bookingDescription: false,
+        totalValue: true,
+        signatureLines: true,
+      },
+    });
+  });
+
+  it("refuses a fourth custom field before anything is saved", async () => {
+    const response = await post(documentForm(["cf-1", "cf-2", "cf-3", "cf-4"]));
+
+    expect(response.init?.status).toBe(400);
+    expect(updatePdfDocument).not.toHaveBeenCalled();
+  });
+
+  it("refuses every document change on a plan without PDF documents", async () => {
+    vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
+
+    const added = await post([
+      ["intent", "add-document"],
+      ["name", "Client quote"],
+    ]);
+    const deleted = await post([
+      ["intent", "delete-document"],
+      ["documentId", "document-1"],
+    ]);
+
+    expect(added.init?.status).toBe(403);
+    expect(deleted.init?.status).toBe(403);
+    expect(createPdfDocument).not.toHaveBeenCalled();
+    expect(deletePdfDocument).not.toHaveBeenCalled();
+    vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
+  });
+
+  it("reads no documents for a plan without PDF documents", async () => {
+    vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
+
+    const response = (await loader(
+      createLoaderArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general"),
+        params: {},
+      })
+    )) as unknown as { data?: Record<string, unknown> };
+    const body = (response.data ?? response) as Record<string, unknown>;
+
+    expect(getPdfDocuments).not.toHaveBeenCalled();
+    expect(body.canCustomizePdfDocuments).toBe(false);
+    expect(body.pdfDocuments).toEqual([]);
+    vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
   });
 });

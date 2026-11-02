@@ -1,6 +1,7 @@
 import { BOOKING_METHOD } from "@shelf/labels";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
@@ -57,8 +58,9 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  * }
  *
  * Like the plain checkout endpoint, this is always a "without-adjusted-date"
- * checkout: mobile never sends a `checkoutIntentChoice`, so an early checkout
- * keeps the booking's original `from` rather than rewriting it to "now".
+ * checkout, sent explicitly: an early checkout keeps the booking's original
+ * `from`, and an expired reservation goes out as overdue, since the phone has
+ * no reschedule prompt (see `resolveExpiredCheckoutState`).
  *
  * @see {@link file://../../../modules/booking/fulfil-and-checkout.server.ts} — `fulfilAndCheckOut`
  * @see {@link file://./bookings.checkout.ts} — the plain (no model requests) checkout
@@ -170,11 +172,12 @@ export async function action({ request }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       hints,
+      seesAllBookings: access.bookings.seeAll,
       requireExplicitCheckout,
+      // See the route doc: the phone keeps the stored dates.
+      checkoutIntentChoice: CheckoutIntentEnum["without-adjusted-date"],
       // Pass the booking's own window: enables the full check-out's conflict
-      // guard without adjusting any dates (adjustment needs a
-      // checkoutIntentChoice, which mobile never sends → stays a
-      // "without-adjusted-date" checkout).
+      // guard without adjusting any dates.
       from: existingBooking.from,
       to: existingBooking.to,
       provenance: { surface: "phone", method: method ?? null },

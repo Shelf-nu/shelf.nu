@@ -58,6 +58,7 @@ import {
   bookingComplianceReport,
   overdueItemsReport,
 } from "./helpers.server";
+import type { DistributionAsset } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
 const TIMEFRAME: ResolvedTimeframe = {
@@ -593,6 +594,42 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     const noLocation = byLocation.find((b) => b.id === "without-location");
     expect(noLocation?.totalValue).toBe(12);
     expect(noLocation?.assetCount).toBe(1);
+  });
+
+  it("counts a manual row and a kit slice at one location once, capped at the stock", async () => {
+    // 100 pens at $1.50: all 100 placed by hand at Warehouse, and a 50-unit
+    // kit slice that also sits at Warehouse. Both rows describe the same
+    // physical units, so Warehouse holds 100 pens (one asset), not 150.
+    const assets: DistributionAsset[] = [
+      {
+        id: "a-pens",
+        categoryId: null,
+        assetModelId: null,
+        status: "AVAILABLE",
+        valuation: 1.5,
+        quantity: 100,
+        assetLocations: [
+          { quantity: 100, location: { id: "loc-1", name: "Warehouse" } },
+          { quantity: 50, location: { id: "loc-1", name: "Warehouse" } },
+        ],
+      },
+    ];
+    // The fixture is the narrow select the report reads; findMany's declared
+    // type is the full Asset row, so it is widened only at the mock boundary.
+    vi.mocked(db.asset.findMany).mockResolvedValue(
+      assets as unknown as Awaited<ReturnType<typeof db.asset.findMany>>
+    );
+
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
+
+    const warehouse = result.distributionBreakdown!.byLocation.find(
+      (b) => b.id === "loc-1"
+    );
+    expect(warehouse?.totalValue).toBe(150);
+    expect(warehouse?.assetCount).toBe(1);
   });
 
   it("reads the asset table once for all four breakdowns", async () => {

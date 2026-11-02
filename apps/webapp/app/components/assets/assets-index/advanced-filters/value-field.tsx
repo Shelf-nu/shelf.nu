@@ -791,32 +791,38 @@ function EnumField({
   }
 
   /**
-   * Scrolls the option identified by `index` into view. Called from the
-   * keyboard handler itself (no useEffect) so the scroll is tied to the
-   * user action rather than a state-change listener.
+   * Moves the keyboard highlight to the option at `index` and scrolls it into
+   * view. Called from the keyboard handler itself (no useEffect) so the
+   * scroll is tied to the user action rather than a state-change listener.
+   *
+   * Without a search box the option rows hold focus, and a focused row
+   * selects itself on Enter or Space, so focus moves with the highlight.
+   * With a search box focus stays in the box, so typing keeps working, and
+   * Enter picks the highlighted row through `handleKeyDown`.
    */
-  function scrollOptionIntoView(index: number) {
-    const selectedElement = document.getElementById(`enum-option-${index}`);
-    selectedElement?.scrollIntoView({ block: "nearest" });
+  function highlightOption(index: number) {
+    setSelectedIndex(index);
+    const optionElement = document.getElementById(`enum-option-${index}`);
+    if (!hasSearch) {
+      optionElement?.focus();
+    }
+    optionElement?.scrollIntoView({ block: "nearest" });
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown": {
         event.preventDefault();
-        const next =
+        highlightOption(
           selectedIndex < visibleOptions.length - 1
             ? selectedIndex + 1
-            : selectedIndex;
-        setSelectedIndex(next);
-        scrollOptionIntoView(next);
+            : selectedIndex
+        );
         break;
       }
       case "ArrowUp": {
         event.preventDefault();
-        const next = selectedIndex > 0 ? selectedIndex - 1 : selectedIndex;
-        setSelectedIndex(next);
-        scrollOptionIntoView(next);
+        highlightOption(selectedIndex > 0 ? selectedIndex - 1 : selectedIndex);
         break;
       }
       case " ": // Space key, unless it is typing into the search box
@@ -872,6 +878,19 @@ function EnumField({
               "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
             onKeyDown={handleKeyDown}
+            onOpenAutoFocus={(event) => {
+              // Without a search box, open on the highlighted option rather
+              // than the first focusable row, so focus and highlight agree.
+              // With no option to focus (an empty list), Radix keeps its
+              // default and focuses the popover itself.
+              if (hasSearch) return;
+              const option = document.getElementById(
+                `enum-option-${selectedIndex}`
+              );
+              if (!option) return;
+              event.preventDefault();
+              option.focus();
+            }}
           >
             {hasSearch ? (
               <div className="flex items-center border-b">
@@ -910,6 +929,9 @@ function EnumField({
                     role="button"
                     tabIndex={0}
                     onClick={() => handleOptionClick(option.id)}
+                    // Tab moves focus between rows too; keep the highlight on
+                    // the focused row.
+                    onFocus={() => setSelectedIndex(index)}
                     onKeyDown={handleActivationKeyPress(() =>
                       handleOptionClick(option.id)
                     )}

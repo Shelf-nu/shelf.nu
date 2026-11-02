@@ -70,6 +70,7 @@ import {
   wrapCustodianForNote,
   wrapKitsWithDataForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { oneDayFromNow, threeDaysFromNow } from "~/utils/one-week-from-now";
@@ -92,7 +93,11 @@ import {
   KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
   KITS_INCLUDE_FIELDS,
 } from "./types";
-import { getKitsWhereInput, isOwnKitImagePath } from "./utils.server";
+import {
+  getKitAnAssetLeaves,
+  getKitsWhereInput,
+  isOwnKitImagePath,
+} from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { ActivityEventInput } from "../activity-event/types";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
@@ -101,6 +106,8 @@ import {
   setCustodyDrivenAssetStatus,
 } from "../asset/custody-status.server";
 import type { LastAuditDateAccess } from "../asset/last-audit-date-access";
+import type { BookableListScope } from "../asset/list-scope.server";
+import { getAssetListWhereForSelectAll } from "../asset/list-where.server";
 import type {
   MoveAssetKitUnitsArgs,
   MoveUnitsResult,
@@ -109,7 +116,6 @@ import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
   applyArchivedFilter,
-  getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import type {
@@ -705,21 +711,24 @@ export async function removeKitSlicesFromPlanningBookings(
   type Group = {
     bookingId: string;
     organizationId: string;
+    kitId: string;
     kitName: string;
-    assetTitles: string[];
+    assets: Array<{ id: string; title: string }>;
   };
   const groups = new Map<string, Group>();
   for (const row of removed) {
     const key = `${row.bookingId}::${row.kitId}`;
+    const asset = { id: row.assetId, title: row.assetTitle };
     const existing = groups.get(key);
     if (existing) {
-      existing.assetTitles.push(row.assetTitle);
+      existing.assets.push(asset);
     } else {
       groups.set(key, {
         bookingId: row.bookingId,
         organizationId: row.organizationId,
+        kitId: row.kitId,
         kitName: row.kitName,
-        assetTitles: [row.assetTitle],
+        assets: [asset],
       });
     }
   }
@@ -733,29 +742,38 @@ export async function removeKitSlicesFromPlanningBookings(
     Array<{ bookingId: string; content: string }>
   >();
   for (const group of groups.values()) {
-    // Asset titles and the kit name are user-supplied and render as literal
-    // text in this Markdoc note.
-    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
+    // Asset titles and the kit name are user-supplied, so each goes inside a
+    // tag: a link to the asset or kit page, or a `name` tag for a deleted kit.
+    const assetLinks = group.assets.map((asset) =>
+      wrapLinkForNote(
+        `/assets/${asset.id}`,
+        stripMarkdocDelimiters(asset.title)
+      )
+    );
     const subjects =
-      safeTitles.length === 1
-        ? `**${safeTitles[0]}**`
-        : `**${safeTitles.length} assets** (${safeTitles
-            .map((t) => `*${t}*`)
-            .join(", ")})`;
+      assetLinks.length === 1
+        ? assetLinks[0]
+        : `**${assetLinks.length} assets** (${assetLinks.join(", ")})`;
     // `kit-deleted` names the subjects after the clause, so it takes the bare
     // verb; the membership wording already named them and needs the pronoun.
-    const verb = safeTitles.length === 1 ? "was" : "were";
-    const pronoun = safeTitles.length === 1 ? "it" : "they";
-    const safeKitName = stripMarkdocDelimiters(group.kitName);
+    const verb = assetLinks.length === 1 ? "was" : "were";
+    const pronoun = assetLinks.length === 1 ? "it" : "they";
+    const safeKitName =
+      reason === "kit-deleted" || !group.kitId
+        ? wrapNameForNote(group.kitName)
+        : wrapLinkForNote(
+            `/kits/${group.kitId}`,
+            stripMarkdocDelimiters(group.kitName)
+          );
     // The two paths differ in what actually happened: on `kit-deleted` the
     // asset never left the kit — the kit stopped existing. Saying "removed X
     // from kit Y" there would describe a membership edit that never occurred.
     const cause =
       reason === "kit-deleted"
-        ? `${actorLink} deleted kit **${safeKitName}**, so ${subjects} ${verb} removed from this booking`
+        ? `${actorLink} deleted kit ${safeKitName}, so ${subjects} ${verb} removed from this booking`
         : reason === "units-not-returned"
-        ? `${actorLink} checked in another booking where the last units of ${subjects} in kit **${safeKitName}** were not returned, so ${pronoun} ${verb} removed from this booking`
-        : `${actorLink} removed ${subjects} from kit **${safeKitName}**, so ${pronoun} ${verb} also removed from this booking`;
+        ? `${actorLink} checked in another booking where the last units of ${subjects} in kit ${safeKitName} were not returned, so ${pronoun} ${verb} removed from this booking`
+        : `${actorLink} removed ${subjects} from kit ${safeKitName}, so ${pronoun} ${verb} also removed from this booking`;
     const content = `${cause}. Nothing has been checked out yet, so the booking follows the kit's contents.`;
     const bucket = notesByOrg.get(group.organizationId);
     if (bucket) {
@@ -1331,33 +1349,46 @@ export async function emitAssetKitDetachmentNotes({
   // booking so we don't spam the booking activity feed.
   type Group = {
     bookingId: string;
+    kitId: string;
     kitName: string;
-    assetTitles: string[];
+    assets: Array<{ id: string; title: string }>;
   };
   const groups = new Map<string, Group>();
   for (const row of impact) {
     const key = `${row.bookingId}::${row.kitId}`;
+    const asset = { id: row.assetId, title: row.assetTitle };
     const existing = groups.get(key);
     if (existing) {
-      existing.assetTitles.push(row.assetTitle);
+      existing.assets.push(asset);
     } else {
       groups.set(key, {
         bookingId: row.bookingId,
+        kitId: row.kitId,
         kitName: row.kitName,
-        assetTitles: [row.assetTitle],
+        assets: [asset],
       });
     }
   }
   for (const group of groups.values()) {
-    // Asset titles and the kit name are user-supplied and render as literal
-    // text in this Markdoc note.
-    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
+    // Asset titles and the kit name are user-supplied, so each goes inside a
+    // tag: the assets and the kit (which keeps existing on a membership edit)
+    // link to their pages.
+    const assetLinks = group.assets.map((asset) =>
+      wrapLinkForNote(
+        `/assets/${asset.id}`,
+        stripMarkdocDelimiters(asset.title)
+      )
+    );
     const subjects =
-      safeTitles.length === 1
-        ? `**${safeTitles[0]}**`
-        : `**${safeTitles.length} assets** (${safeTitles
-            .map((t) => `*${t}*`)
-            .join(", ")})`;
+      assetLinks.length === 1
+        ? assetLinks[0]
+        : `**${assetLinks.length} assets** (${assetLinks.join(", ")})`;
+    const kitDisplay = group.kitId
+      ? wrapLinkForNote(
+          `/kits/${group.kitId}`,
+          stripMarkdocDelimiters(group.kitName)
+        )
+      : wrapNameForNote(group.kitName);
     // `createSystemBookingNote` doesn't accept a tx (matches the other
     // booking-note call sites). The note creates outside the kit-delete
     // tx; in the unlikely event the tx rolls back, the note is
@@ -1366,9 +1397,7 @@ export async function emitAssetKitDetachmentNotes({
     await createSystemBookingNote({
       bookingId: group.bookingId,
       organizationId,
-      content: `${actorLink} removed ${subjects} from kit **${stripMarkdocDelimiters(
-        group.kitName
-      )}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
+      content: `${actorLink} removed ${subjects} from kit ${kitDisplay}. The kit's booked slice has been converted to a standalone reservation in this booking.`,
     });
   }
 }
@@ -1469,20 +1498,27 @@ async function recordPlanningKitSliceCaps(
           const unitCount = (units: number) =>
             formatUnitCount(membership.asset, units) ?? String(units);
           return {
-            // Asset title and kit name are user-supplied literal text here.
-            title: stripMarkdocDelimiters(membership.asset.title),
-            kitName: stripMarkdocDelimiters(membership.kit.name),
+            // Asset title and kit name are user-supplied, so each goes inside
+            // a link tag to its page, never bare text.
+            title: wrapLinkForNote(
+              `/assets/${membership.assetId}`,
+              stripMarkdocDelimiters(membership.asset.title)
+            ),
+            kitName: wrapLinkForNote(
+              `/kits/${membership.kitId}`,
+              stripMarkdocDelimiters(membership.kit.name)
+            ),
             removed: unitCount(removed),
             remaining: unitCount(remaining),
           };
         });
         const cause =
           described.length === 1
-            ? `where **${described[0].removed}** of **${described[0].title}** in kit **${described[0].kitName}** were not returned, so this booking now holds **${described[0].remaining}** of it`
+            ? `where **${described[0].removed}** of ${described[0].title} in kit ${described[0].kitName} were not returned, so this booking now holds **${described[0].remaining}** of it`
             : `where kit units were not returned, so this booking now holds less of ${described
                 .map(
                   (item) =>
-                    `**${item.title}** in kit **${item.kitName}** (**${item.removed}** fewer, **${item.remaining}** left)`
+                    `${item.title} in kit ${item.kitName} (**${item.removed}** fewer, **${item.remaining}** left)`
                 )
                 .join(", ")}`;
         return {
@@ -2722,7 +2758,9 @@ export async function getPaginatedAndFilterableKits<
         take,
         where,
         include,
-        orderBy: { createdAt: "desc" },
+        // `id` breaks ties between kits created in the same instant, so a
+        // page boundary never moves between requests.
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       }),
       db.kit.count({ where }),
       // rows.
@@ -2998,10 +3036,11 @@ type KitForDeletion = {
  *         Custody rows after the cascade drop to `AVAILABLE`. Assets
  *         with surviving operator custody (Phase 2 multi-custodian)
  *         keep `IN_CUSTODY` so we don't lie about state.
- *   3. Outside the tx (best-effort, audit-only):
- *      a. Write asset notes — one `createNotes` call per in-custody
- *        kit so each group gets its kit's correct custodian.
- *      b. Delete each kit's stored image (see `deleteKitImage`).
+ *      d. Write one history line per member: the custody release line for
+ *         a member whose custody the deletion released, otherwise a line
+ *         saying the deletion removed it from the kit.
+ *   3. Outside the tx (best-effort): delete each kit's stored image (see
+ *      `deleteKitImage`).
  *
  * @param args.kits - Pre-fetched kits with the shape above. Caller is
  *   responsible for org-scoping the read.
@@ -3023,10 +3062,10 @@ async function performKitDeletion({
   const inCustodyKits = kits.filter((k) => !!k.custody);
   const allAssetIds = kits.flatMap((k) => k.assets.map((a) => a.id));
 
-  // Resolve the actor once for note text — only needed when at least
-  // one kit was in custody (an AVAILABLE kit emits nothing).
+  // Resolve the actor once for the member notes, written for every deleted
+  // kit that held assets.
   let actorLink = "";
-  if (inCustodyKits.length > 0) {
+  if (allAssetIds.length > 0) {
     const actor = await getUserByID(userId, {
       select: {
         firstName: true,
@@ -3037,11 +3076,15 @@ async function performKitDeletion({
     actorLink = wrapUserLinkForNote({ ...actor, id: userId });
   }
 
-  // Per-asset units released by the kit-delete, sourced from the inherited
+  // Units released per kit custody and asset, sourced from the inherited
   // Custody rows read inside the tx. Populated below; consumed by the
   // release notes written after the tx (which only have `k.assets`, not the
-  // Custody rows, in scope). Empty for INDIVIDUAL-only deletes.
-  const releasedQtyByAssetId = new Map<string, number | null>();
+  // Custody rows, in scope). Keyed by kit custody too: a quantity-tracked
+  // asset in two deleted kits holds a different count in each. Empty for
+  // INDIVIDUAL-only deletes.
+  const releasedQty = new Map<string, number | null>();
+  const releasedQtyKey = (kitCustodyId: string, assetId: string) =>
+    `${kitCustodyId}:${assetId}`;
 
   await db.$transaction(async (tx) => {
     const kitCustodyIds = inCustodyKits
@@ -3078,7 +3121,10 @@ async function performKitDeletion({
         // Record the released quantity per asset so the post-tx note can
         // name "custody of 50 units" without re-reading the Custody rows.
         for (const row of inheritedCustodyRows) {
-          releasedQtyByAssetId.set(row.assetId, row.quantity);
+          releasedQty.set(
+            releasedQtyKey(row.kitCustodyId!, row.assetId),
+            row.quantity
+          );
         }
 
         await recordEvents(
@@ -3108,46 +3154,29 @@ async function performKitDeletion({
       }
     }
 
-    // Activity events — one ASSET_KIT_CHANGED per asset that loses its
-    // kit on cascade. Emitted before the deleteMany so the AssetKit
-    // pivot rows are still readable for context if a future report
-    // needs them. Folded in from main's PR #2535 which emitted these
-    // inline in both `deleteKit` and `bulkDeleteKits`; the shared
-    // helper deduplicates that.
-    const kitByAssetId = new Map<string, KitForDeletion>();
-    // Asset shape (type) + the per-row AssetKit.quantity this asset held in
-    // the kit being deleted — both keyed by id for the cascade event meta.
-    const assetForEventById = new Map<
-      string,
-      KitForDeletion["assets"][number]
-    >();
-    for (const k of kits) {
-      for (const a of k.assets) {
-        kitByAssetId.set(a.id, k);
-        assetForEventById.set(a.id, a);
-      }
-    }
+    // Activity events: one ASSET_KIT_CHANGED per kit membership the cascade
+    // removes. A quantity-tracked asset in two deleted kits gets one event
+    // per kit, each naming that kit and its slice. Emitted before the
+    // deleteMany so the AssetKit pivot rows are still readable for context.
     if (allAssetIds.length > 0) {
       await recordEvents(
-        allAssetIds.map((assetId) => {
-          const sourceKit = kitByAssetId.get(assetId);
-          const asset = assetForEventById.get(assetId);
-          return {
+        kits.flatMap((k) =>
+          k.assets.map((asset) => ({
             organizationId,
             actorUserId: userId,
             action: "ASSET_KIT_CHANGED" as const,
             entityType: "ASSET" as const,
-            entityId: assetId,
-            assetId,
-            kitId: sourceKit?.id,
+            entityId: asset.id,
+            assetId: asset.id,
+            kitId: k.id,
             field: "kitId",
-            fromValue: sourceKit?.id ?? null,
+            fromValue: k.id,
             toValue: null,
             // Qty-tracked: the per-row AssetKit.quantity held in the deleted
-            // kit (NOT Asset.quantity); {} for INDIVIDUAL / unknown asset.
-            meta: asset ? { ...assetQtyMeta(asset, asset.kitQuantity) } : {},
-          };
-        }),
+            // kit (NOT Asset.quantity); {} for INDIVIDUAL.
+            meta: { ...assetQtyMeta(asset, asset.kitQuantity) },
+          }))
+        ),
         tx
       );
     }
@@ -3198,40 +3227,53 @@ async function performKitDeletion({
         organizationId
       );
     }
-  });
 
-  if (inCustodyKits.length > 0) {
-    // One note per asset (not one shared string per kit): qty-tracked assets
-    // each name their own released unit count ("custody of 50 units"), so the
-    // content differs per row. INDIVIDUAL assets keep the exact prior wording.
-    // why: org-scoping is implicit — `inCustodyKits`/`k.assets` are derived
-    // from the org-scoped kit reads at the call sites, never request input.
-    const noteData = inCustodyKits
-      .filter((k) => k.assets.length > 0)
-      .flatMap((k) => {
-        const custodianDisplay = k.custody?.custodian
-          ? wrapCustodianForNote({ teamMember: k.custody.custodian })
-          : "**Unknown Custodian**";
-        return k.assets.map((asset) => {
-          const count = formatUnitCount(
-            asset,
-            releasedQtyByAssetId.get(asset.id)
-          );
+    // One history line per member, per deleted kit, written with the delete
+    // so the two commit or roll back together. A member whose custody this
+    // deletion released gets the release line, naming the kit and its own
+    // released unit count ("custody of 50 units"). Every other member gets a
+    // line saying the deletion removed it from the kit: members of a kit with
+    // no custody, and members of an in-custody kit that held no inherited
+    // custody row (archived members, a quantity-tracked slice with no units
+    // in custody).
+    // why: org-scoping is implicit: `kits`/`k.assets` are derived from the
+    // org-scoped kit reads at the call sites, never request input.
+    const noteData = kits.flatMap((k) => {
+      // The kit is deleted, so its name is a `name` tag, not a link.
+      const kitName = wrapNameForNote(k.name);
+      const kitCustody = k.custody;
+      const custodianDisplay = kitCustody?.custodian
+        ? wrapCustodianForNote({ teamMember: kitCustody.custodian })
+        : "**Unknown Custodian**";
+      return k.assets.map((asset) => {
+        const releaseKey = kitCustody
+          ? releasedQtyKey(kitCustody.id, asset.id)
+          : null;
+        if (releaseKey && releasedQty.has(releaseKey)) {
+          const count = formatUnitCount(asset, releasedQty.get(releaseKey));
           const custodyPhrase = count ? `custody of ${count}` : "custody";
           return {
-            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${stripMarkdocDelimiters(
-              k.name
-            )}** was deleted.`,
+            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit ${kitName} was deleted.`,
             type: "UPDATE" as const,
             userId,
             assetId: asset.id,
           };
-        });
+        }
+        const count = formatUnitCount(asset, asset.kitQuantity);
+        return {
+          content: `${actorLink} deleted kit ${kitName}, which removed ${
+            count ?? "this asset"
+          } from it.`,
+          type: "UPDATE" as const,
+          userId,
+          assetId: asset.id,
+        };
       });
+    });
     if (noteData.length > 0) {
-      await db.note.createMany({ data: noteData });
+      await tx.note.createMany({ data: noteData });
     }
-  }
+  });
 
   const kitWithImages = kits.filter((k) => !!k.image);
   await Promise.all(
@@ -4387,12 +4429,15 @@ export async function bulkAssignKitCustody({
       const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianName)}**`;
+        : // Free-form fallback name, inside a `name` tag like every typed value.
+          wrapNameForNote(custodianName);
       await tx.note.createMany({
         data: custodyMembers.map((asset) => {
           const kitLink = asset.kit
-            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            ? wrapLinkForNote(
+                `/kits/${asset.kit.id}`,
+                stripMarkdocDelimiters(asset.kit.name)
+              )
             : "**Unknown Kit**";
           // For qty-tracked assets, name the unit count actually moved into
           // custody ("custody of 50 units"); INDIVIDUAL phrasing is unchanged.
@@ -6118,12 +6163,22 @@ export async function updateKitAssets({
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
+      /**
+       * Re-runs the picker list's own query, with the options its loader
+       * (`kits.$kitId.assets.manage-assets.tsx`) passes to
+       * `getPaginatedAndFilterableAssets`, so select-all adds exactly the
+       * assets the picker showed. That list refuses every custodian filter
+       * (`canSeeAllCustody: false` with no user), hence `[]`; it is not
+       * scoped to a role and shows active assets, ignoring low stock.
+       */
+      const assetsWhere = await getAssetListWhereForSelectAll({
         organizationId,
         currentSearchParams: searchParams.toString(),
-        // Reached from `updateKitAssets`, gated on kit write permissions
-        // (ADMIN/OWNER only), so no restricted viewer can supply this filter.
-        allowedTeamMemberIds: "all",
+        allowedTeamMemberIds: [],
+        bookableScope: null,
+        locationIdsOverride: undefined,
+        honorArchivedView: false,
+        honorLowStockFilter: false,
       });
 
       const allAssets = await db.asset.findMany({
@@ -6162,12 +6217,19 @@ export async function updateKitAssets({
           // unitOfMeasure labels the qty-tracked unit count in the custody
           // grant/release notes ("custody of 50 boxes").
           unitOfMeasure: true,
-          // Pull all of the asset's AssetKit rows. Pre-polish there was at
-          // most one (the @@unique held); post-polish a QUANTITY_TRACKED
-          // asset can be in multiple kits. We need:
+          // All of the asset's AssetKit rows: an INDIVIDUAL asset has at
+          // most one, a QUANTITY_TRACKED asset can be in several kits. We need:
           //   - kitId (cross-kit detection)
           //   - quantity (this kit's slice for qty-change diff)
-          assetKits: { select: { kitId: true, quantity: true } },
+          //   - kit name (the kit an INDIVIDUAL asset leaves, named in its
+          //     activity note)
+          assetKits: {
+            select: {
+              kitId: true,
+              quantity: true,
+              kit: { select: { id: true, name: true } },
+            },
+          },
           custody: true,
           assetLocations: {
             select: { location: { select: { id: true, name: true } } },
@@ -6188,6 +6250,17 @@ export async function updateKitAssets({
     const newlyAddedAssets = allAssetsForKit.filter(
       (asset) =>
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
+    );
+
+    /**
+     * The kit each newly-added asset leaves by joining this one, by asset id.
+     * Absent for a plain add. Named in the move note and the event `fromValue`.
+     */
+    const sourceKitByAssetId = new Map(
+      newlyAddedAssets.flatMap((asset) => {
+        const sourceKit = getKitAnAssetLeaves(asset, kit.id);
+        return sourceKit ? [[asset.id, sourceKit] as const] : [];
+      })
     );
 
     /**
@@ -6810,13 +6883,8 @@ export async function updateKitAssets({
       type: asset.type,
       unitOfMeasure: asset.unitOfMeasure,
       quantity: addedAssetKitQuantity(asset),
-      kit: asset.assetKits[0]?.kitId
-        ? // For freshly-attached assets we don't have the source kit's
-          // name in scope; the note helper's `currentKit` path only
-          // uses `id` + `name`, so fall back to "" for the latter — the
-          // helper still renders a sane link.
-          { id: asset.assetKits[0].kitId, name: "" }
-        : null,
+      // The kit it leaves, so a move reads "changed kit from A to B".
+      kit: sourceKitByAssetId.get(asset.id) ?? null,
     }));
     const removedAssetsForNotes = (addOnly ? [] : removedAssets).map(
       (asset) => ({
@@ -6888,9 +6956,8 @@ export async function updateKitAssets({
         assetId: asset.id,
         kitId: kit.id,
         field: "kitId",
-        // (the 1:1 FK). With the pivot, an asset already in another kit
-        // has its kit-id in `assetKits[0].kitId`.
-        fromValue: asset.assetKits[0]?.kitId ?? null,
+        // The kit an INDIVIDUAL asset leaves; null for a plain add.
+        fromValue: sourceKitByAssetId.get(asset.id)?.id ?? null,
         toValue: kit.id,
         // Qty-tracked: record the per-row AssetKit.quantity this asset now
         // holds in the kit (same value the pivot createMany wrote).
@@ -7714,18 +7781,33 @@ export async function updateKitAssets({
   }
 }
 
+/**
+ * Removes the selected assets from whatever kit holds them, releasing the
+ * custody each one inherited from its kit.
+ *
+ * @param args.assetIds - Asset ids, or `ALL_SELECTED_KEY` to act on every
+ *   asset the caller's list matches for `currentSearchParams`
+ * @param args.currentSearchParams - The asset list's query string, submitted
+ *   with the bulk action. The action posts to its own URL, so the request URL
+ *   does not carry the list's filters.
+ * @returns How many assets were detached from a kit
+ * @throws {ShelfError} When resolving the selection or the update fails
+ */
 export async function bulkRemoveAssetsFromKits({
   assetIds,
   organizationId,
   userId,
   request,
+  currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
 }: {
   assetIds: Asset["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
+  currentSearchParams: string | null | undefined;
   settings: AssetIndexSettings;
   /**
    * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
@@ -7733,6 +7815,12 @@ export async function bulkRemoveAssetsFromKits({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's asset list scope, from `resolveBookableListScope`. Select-all
+   * resolves to the assets the caller's list shows, so a bookable-only role
+   * never acts on assets outside it. `null` for a role that sees every asset.
+   */
+  bookableScope: BookableListScope | null;
 }) {
   try {
     const user = await getUserByID(userId, {
@@ -7749,7 +7837,6 @@ export async function bulkRemoveAssetsFromKits({
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
     // the user's tz (avoids an off-by-one for non-UTC users).
-    const searchParams = getCurrentSearchParams(request);
     const { timeZone } = await resolveUserFormatPrefsById(
       userId,
       getClientHint(request)
@@ -7757,13 +7844,14 @@ export async function bulkRemoveAssetsFromKits({
     const resolvedIds = await resolveAssetIdsForBulkOperation({
       assetIds,
       organizationId,
-      currentSearchParams: searchParams.toString(),
+      currentSearchParams,
       settings,
       timeZone,
       // Kit write permissions are ADMIN/OWNER-only, so the custodian filter
       // here can never come from a restricted viewer.
       allowedTeamMemberIds: "all",
       lastAuditDateAccess,
+      bookableScope,
     });
 
     // We pull the parent kit (today: ≤1 pivot row per asset) through
@@ -8099,6 +8187,7 @@ export async function bulkRemoveAssetsFromKits({
 
     return { removedFromKitCount };
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Failed to bulk remove assets from kits",

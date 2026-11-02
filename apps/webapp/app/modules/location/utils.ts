@@ -20,6 +20,35 @@ export const LOCATION_SORTING_OPTIONS = {
   assets: "Number of assets",
 } as const;
 
+/**
+ * Units of one asset that a location holds, for per-location value and
+ * counts.
+ *
+ * An asset can have several `AssetLocation` rows at one location: at most one
+ * manual row plus one kit-driven row per kit slice. The Location and Kit
+ * axes describe the same physical units (each is capped at `Asset.quantity`
+ * on its own), so a pool of 100 placed by hand here that also has a 50-unit
+ * kit slice here still holds 100 units, not 150. The rows are summed and
+ * capped at the stock.
+ *
+ * `getLocationTotalValuation` applies the same rule in SQL
+ * (`LEAST(COALESCE(a.quantity, 1), SUM(al.quantity))`); keep the two in step.
+ *
+ * @param stock - `Asset.quantity`; null for INDIVIDUAL assets, which count as 1
+ * @param placedQuantities - `AssetLocation.quantity` of every row for this asset at this location
+ * @returns The units at this location, never more than the stock
+ */
+export function getUnitsAtLocation({
+  stock,
+  placedQuantities,
+}: {
+  stock: number | null;
+  placedQuantities: number[];
+}): number {
+  const placed = placedQuantities.reduce((sum, quantity) => sum + quantity, 0);
+  return Math.min(stock ?? 1, placed);
+}
+
 /** Helper to safely display a value, showing a dash if empty */
 export function safeDisplay(value?: string | null) {
   return value?.trim() || "—";

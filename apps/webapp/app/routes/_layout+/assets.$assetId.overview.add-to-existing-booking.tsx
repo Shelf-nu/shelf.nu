@@ -32,6 +32,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -211,6 +212,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       quantities,
       // Re-checks the add rule against the locked booking status.
       access,
+      hints: getClientHint(request),
     });
 
     const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });

@@ -21,6 +21,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
@@ -34,6 +35,7 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
 import { useFormValidation } from "@/hooks/use-form-validation";
+import { markAssetChanged } from "@/lib/asset-refresh";
 import { PickerField } from "@/components/asset-edit/picker-field";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
@@ -92,7 +94,11 @@ export default function EditAssetScreen() {
   // screen can coordinate it with the category / location dropdowns).
   const [showTagsPicker, setShowTagsPicker] = useState(false);
 
-  const { isDirty } = useFormValidation({
+  // Set once the server accepts the edit, so leaving afterwards is not
+  // treated as abandoning unsaved changes.
+  const [didSave, setDidSave] = useState(false);
+
+  useFormValidation({
     title: form.title,
     description: form.description,
     selectedCategory: form.selectedCategory,
@@ -102,6 +108,7 @@ export default function EditAssetScreen() {
     customFields: form.customFields,
     originalAsset: form.originalAsset,
     isSubmitting: form.isSubmitting,
+    didSave,
   });
 
   const descriptionChanged =
@@ -161,6 +168,9 @@ export default function EditAssetScreen() {
     }
 
     form.setIsSubmitting(true);
+    // The payload below is a snapshot of the form; the form stays locked
+    // until the request answers, so no edit can land outside it.
+    Keyboard.dismiss();
 
     // Build payload with only changed fields
     const payload: Record<string, any> = { assetId };
@@ -236,6 +246,10 @@ export default function EditAssetScreen() {
       return;
     }
 
+    setDidSave(true);
+    // The asset detail and the assets list keep data they loaded earlier;
+    // this makes them refetch when the user lands back on them.
+    markAssetChanged(assetId);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert("Updated", `"${data.asset.title}" has been updated.`, [
       {
@@ -302,6 +316,9 @@ export default function EditAssetScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          // Every field (inputs, pickers, tags, custom fields) is locked
+          // while a save is in flight.
+          pointerEvents={form.isSubmitting ? "none" : "auto"}
         >
           {/* ── Title (required) ─────────────────────── */}
           <View style={styles.field}>
@@ -316,6 +333,7 @@ export default function EditAssetScreen() {
               placeholderTextColor={colors.placeholderText}
               returnKeyType="next"
               maxLength={100}
+              editable={!form.isSubmitting}
               accessibilityLabel={labelForRequired("Title")}
             />
             {form.title.length > 0 && form.title.trim().length < 2 && (
@@ -341,6 +359,7 @@ export default function EditAssetScreen() {
               multiline
               numberOfLines={3}
               textAlignVertical="top"
+              editable={!form.isSubmitting}
               accessibilityLabel="Description"
             />
             <CharacterCount
@@ -494,27 +513,19 @@ export default function EditAssetScreen() {
         {/* ── Bottom action bar ──────────────────────── */}
         <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={styles.cancelButton}
+            style={[
+              styles.cancelButton,
+              form.isSubmitting && styles.submitButtonDisabled,
+            ]}
             accessibilityLabel="Cancel editing"
             accessibilityRole="button"
-            onPress={() => {
-              if (isDirty) {
-                Alert.alert(
-                  "Discard Changes?",
-                  "You have unsaved changes. Are you sure you want to go back?",
-                  [
-                    { text: "Keep Editing", style: "cancel" },
-                    {
-                      text: "Discard",
-                      style: "destructive",
-                      onPress: () => router.back(),
-                    },
-                  ]
-                );
-              } else {
-                router.back();
-              }
-            }}
+            accessibilityState={{ disabled: form.isSubmitting }}
+            // Leaving is held off while a save is in flight; a disabled
+            // button says so instead of a tap that silently does nothing.
+            disabled={form.isSubmitting}
+            // The unsaved-changes guard in useFormValidation asks before
+            // leaving a dirty form; prompting here too would ask twice.
+            onPress={() => router.back()}
           >
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>

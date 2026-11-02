@@ -96,14 +96,23 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       CustomFieldSubmissionSchema
     );
 
-    const { name, helpText, required, type, active, options, categories } =
-      payload;
+    const {
+      name,
+      helpText,
+      required,
+      type,
+      format,
+      active,
+      options,
+      categories,
+    } = payload;
 
     await createCustomField({
       name,
       helpText,
       required,
       type,
+      format,
       active,
       organizationId,
       userId: authSession.userId,

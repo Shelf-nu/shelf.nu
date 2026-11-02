@@ -35,13 +35,13 @@ import { createNotes } from "~/modules/note/service.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
+  toCustomFieldZodSchema,
 } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { parseData } from "~/utils/http.server";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapCategoryForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
-import { slugify } from "~/utils/slugify";
 import type { AssetModelDefaults, ModelDefaultFill } from "./defaults";
 import {
   MODEL_DEFAULT_FIELD_TYPES,
@@ -819,7 +819,7 @@ export async function saveAssetModelCustomFieldDefaults(
 /** A custom field the model form offers a default for. */
 export type ModelDefaultFieldOption = Pick<
   CustomField,
-  "id" | "name" | "type" | "helpText" | "options"
+  "id" | "name" | "type" | "format" | "helpText" | "options"
 > & {
   /** Categories the field is limited to; empty means every category. */
   categories: { id: string; name: string }[];
@@ -849,6 +849,7 @@ export async function getModelDefaultFieldOptions({
       id: true,
       name: true,
       type: true,
+      format: true,
       helpText: true,
       options: true,
       categories: { select: { id: true, name: true } },
@@ -884,14 +885,11 @@ export function parseModelDefaultsFromFormData({
 
   const schema = mergedSchema({
     baseSchema: z.object({}),
-    customFields: submitted.map((field) => ({
-      id: field.id,
-      name: slugify(field.name),
-      helpText: field.helpText || "",
-      required: false,
-      type: field.type.toLowerCase() as "text",
-      options: field.options,
-    })),
+    // Every default is optional. A Link field validates as a web link, like
+    // on the asset form.
+    customFields: submitted.map((field) =>
+      toCustomFieldZodSchema({ ...field, required: false })
+    ),
   });
 
   const payload = parseData(formData, schema);

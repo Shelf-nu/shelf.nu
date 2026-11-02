@@ -290,6 +290,9 @@ export type AdvancedIndexAsset = Pick<
          * does not project a quantity. */
         quantity?: number;
         custodian: {
+          /** Team member id; null for a booking custodian with no team
+           * member row. */
+          id: string | null;
           name: string;
           user: {
             id: string;
@@ -312,7 +315,12 @@ export type AdvancedIndexAsset = Pick<
   })[];
   upcomingReminder?: Pick<
     AssetReminder,
-    "id" | "alertDateTime" | "name" | "message"
+    | "id"
+    | "alertDateTime"
+    | "name"
+    | "message"
+    | "recurrenceUnit"
+    | "recurrenceInterval"
   >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;

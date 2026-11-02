@@ -14,11 +14,16 @@
  * @see {@link file://./utils.server.ts}
  * @see {@link file://./../asset/utils.server.ts} getAssetsWhereInput, the twin
  */
+import { AssetType } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 
-import { getKitsWhereInput, isOwnKitImagePath } from "./utils.server";
+import {
+  getKitAnAssetLeaves,
+  getKitsWhereInput,
+  isOwnKitImagePath,
+} from "./utils.server";
 
 describe("getKitsWhereInput", () => {
   const organizationId = "org-1";
@@ -165,5 +170,51 @@ describe("isOwnKitImagePath", () => {
     ["the kit id in the uploader position", `${kitId}/${uploader}/image-1.jpg`],
   ])("refuses %s", (_label, path) => {
     expect(isOwnKitImagePath(path, kitId)).toBe(false);
+  });
+});
+
+describe("getKitAnAssetLeaves", () => {
+  const BOX_A = { id: "kit-a", name: "Box A" };
+
+  it("names the kit an individual asset leaves when it joins another kit", () => {
+    expect(
+      getKitAnAssetLeaves(
+        {
+          type: AssetType.INDIVIDUAL,
+          assetKits: [{ kitId: BOX_A.id, kit: BOX_A }],
+        },
+        "kit-b"
+      )
+    ).toEqual(BOX_A);
+  });
+
+  it("names none for a quantity-tracked asset, which keeps its other kits", () => {
+    expect(
+      getKitAnAssetLeaves(
+        {
+          type: AssetType.QUANTITY_TRACKED,
+          assetKits: [{ kitId: BOX_A.id, kit: BOX_A }],
+        },
+        "kit-b"
+      )
+    ).toBeNull();
+  });
+
+  it("names none for an asset in no kit or already in this kit", () => {
+    expect(
+      getKitAnAssetLeaves(
+        { type: AssetType.INDIVIDUAL, assetKits: [] },
+        "kit-b"
+      )
+    ).toBeNull();
+    expect(
+      getKitAnAssetLeaves(
+        {
+          type: AssetType.INDIVIDUAL,
+          assetKits: [{ kitId: "kit-b", kit: { id: "kit-b", name: "Box B" } }],
+        },
+        "kit-b"
+      )
+    ).toBeNull();
   });
 });

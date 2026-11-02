@@ -9,12 +9,13 @@
  * reading and the attribution and hands the result here, so every rule below is
  * unit-testable on its own.
  *
- * **The reference is the completion gate in `checkinBooking`**, which decides
- * whether a booking may close: it judges a slice by its own markers and by the
- * stored `checkedOutQuantity` counter. The booking page's progress bar answers a
- * different question — it derives "sent" from scan sessions and therefore reads
- * 0 for a booking checked out with the button. The receipt is the paper form of
- * what the gate judged, so it must not be aligned to the bar.
+ * **The reference is the check-in that closes a booking** (`checkinBooking`, and
+ * `isBookingFullyCheckedIn` behind the progressive one). It judges a slice by
+ * its own markers and by the stored `checkedOutQuantity` counter, never by scan
+ * sessions alone, and the receipt is the paper form of what it judged. Once it
+ * has closed the booking, the status is itself the record that every
+ * dispatched INDIVIDUAL item came back. Quantity units stay counted from the
+ * logs that accounted for them, because a booking can close with units pending.
  *
  * @see {@link file://./checkin-receipt.server.ts}
  * @see {@link file://./service.server.ts} — `checkinBooking`'s completion gate
@@ -25,6 +26,7 @@ import { AssetType } from "@prisma/client";
 
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
 import { COMPLIANCE_GRACE_PERIOD_MS, formatOverdueDuration } from "./lateness";
+import { isSliceOutByMarker } from "./slice-return";
 
 /**
  * Units attributed to one slice, split by what happened to them.
@@ -70,19 +72,6 @@ export type CheckinReceiptSlice = {
    */
   checkedInById: string | null;
   /**
-   * The most recent progressive check-in session naming this slice's ASSET, for
-   * rows reconciled before the per-slice markers existed.
-   *
-   * The completion gate accepts such a session as proof an INDIVIDUAL asset
-   * came back, so the receipt has to read it too or a legacy booking the gate
-   * closed prints as still out. Sessions are asset-grained and cannot express
-   * partial units, so they answer for INDIVIDUAL slices only; a quantity slice
-   * is settled by its attributed units instead.
-   */
-  sessionCheckedInAt?: Date | null;
-  /** Who ran that session. */
-  sessionCheckedInById?: string | null;
-  /**
    * Tagged RETURN entries naming THIS slice, in the order they were written.
    *
    * A quantity slice returned in part keeps `checkedInAt` null, because that
@@ -126,10 +115,11 @@ export type CheckinReceiptRowState =
  * `stillOut` always add back up to it.
  *
  * `checkedInAt` and `checkedInByIds` carry what dated this row's return, from
- * the slice marker, a progressive session, or the disposition logs naming the
- * slice. A slice that never left, or one dispatched again since its return,
- * carries nothing rather than a moment that would contradict the row it sits
- * on.
+ * the slice marker or the disposition logs naming the slice. A slice that never
+ * left, or one on a live booking dispatched again since its return, carries
+ * nothing rather than a moment that would contradict the row it sits on. A
+ * returned row that nothing dated carries nothing too, and prints a blank
+ * rather than a substitute.
  */
 export type CheckinReceiptRow = {
   bookingAssetId: string;
@@ -268,26 +258,47 @@ export type CheckinReceiptRowAsset = {
   checkedInHow: string | null;
 };
 
+/** The row fields that say whether, and when, a printed row was checked in. */
+type CheckedInRowFields = {
+  state: CheckinReceiptRowState;
+  checkedInAt: Date | null;
+};
+
 /**
- * The one method line the sheet's header prints when every row the sheet
- * dates as returned recorded the same method. Rows then do not repeat it.
+ * Whether a printed row has been checked in, in whole or in part: every unit
+ * is accounted for, or a log dates the units already back.
  *
- * `null` otherwise: when the returned rows disagree, when none recorded a
- * method, and also when one returned row recorded nothing (a return made
- * before methods were recorded, or by a phone bundle that declared none). In
- * every one of those cases the rows carry their own phrase instead, so the
- * header never claims a way of returning for an item whose way was not
- * recorded. Rows that never came back have no method to agree on and are
- * ignored.
+ * The rows that may say how they came back, and so the rows the header's
+ * method line has to agree across. A returned row that nothing dated counts:
+ * its check-in can record how even when no marker recorded when.
  *
- * @param rows - The printed rows, with their recorded method phrase and
- *   whether the sheet dates them as returned
+ * @param row - The printed row's state and check-in moment
+ * @returns `true` when the row has a check-in to describe
+ */
+export function isRowCheckedIn(row: CheckedInRowFields): boolean {
+  return row.state === "RETURNED" || row.checkedInAt !== null;
+}
+
+/**
+ * The one method line the sheet's header prints when every checked-in row
+ * ({@link isRowCheckedIn}) recorded the same method. Rows then do not repeat
+ * it.
+ *
+ * `null` otherwise: when the checked-in rows disagree, when none recorded a
+ * method, and also when one of them recorded nothing (a return made before
+ * methods were recorded, or by a phone bundle that declared none). In every one
+ * of those cases the rows carry their own phrase instead, so the header never
+ * claims a way of returning for an item whose way was not recorded. Rows that
+ * never came back have no method to agree on and are ignored.
+ *
+ * @param rows - The printed rows, with their recorded method phrase, state and
+ *   check-in moment
  * @returns The shared phrase, or `null`
  */
 export function summariseCheckinMethods(
-  rows: ReadonlyArray<{ checkedInHow: string | null; checkedInAt: Date | null }>
+  rows: ReadonlyArray<CheckedInRowFields & { checkedInHow: string | null }>
 ): string | null {
-  const returned = rows.filter((row) => row.checkedInAt !== null);
+  const returned = rows.filter(isRowCheckedIn);
   if (returned.length === 0) return null;
   if (returned.some((row) => row.checkedInHow === null)) return null;
   const phrases = new Set(returned.map((row) => row.checkedInHow));
@@ -352,20 +363,29 @@ export type CheckinReceiptView = {
   /** The agreed period, never the live one. `null` when neither end is set. */
   plannedFrom: string | null;
   plannedTo: string | null;
-  /** The first moment anything left on this booking. */
+  /**
+   * The earliest departure a user is recorded making; `null` when no slice
+   * names its dispatcher ({@link resolveReceiptMoments}).
+   */
   checkedOutAt: string | null;
-  /** Who sent that first slice out; `""` when the marker records none. */
+  /** Who made that departure. */
   checkedOutByName: string;
-  /** The recorded return moment; `null` when nothing recorded one. */
+  /**
+   * The booking's recorded return: its completion event, else the latest row
+   * moment while no row with returned units is undated; `null` otherwise.
+   */
   returnedAt: string | null;
   /** How that return compares to the planned end. */
   latenessNote: CheckinLatenessNote | null;
-  /** Distinct receiving users, ordered by their first check-in. */
+  /**
+   * Distinct receiving users, ordered by their first check-in. Empty when a
+   * row with returned units records no receiver; the rows carry their own.
+   */
   checkedInByNames: string[];
   /**
-   * How the items were checked in, when every row with a recorded method
-   * agrees ({@link summariseCheckinMethods}); otherwise `null` and each row
-   * prints its own.
+   * How the items were checked in, when every checked-in row, dated or not,
+   * recorded the same method ({@link summariseCheckinMethods}); otherwise
+   * `null` and each row prints its own.
    */
   checkedInHow: string | null;
 };
@@ -377,12 +397,16 @@ export type BuildCheckinReceiptArgs = {
   /**
    * Whether the booking has finished (COMPLETE or ARCHIVED).
    *
-   * Gates the legacy-session fallback. Progressive check-out keeps a slice's
-   * ORIGINAL `checkedOutAt` and only clears the check-in pair, so on a live
-   * booking a session from an earlier trip still sorts at or after the recorded
-   * departure and would read as a return for units that are out right now. A
-   * finished booking has already passed the completion gate, which is what
-   * makes the fallback safe there and nowhere else.
+   * A booking reaches COMPLETE only through a check-in that reconciles every
+   * dispatched INDIVIDUAL slice, and ARCHIVED only from COMPLETE or from a
+   * reservation nothing left on. So on a finished booking such a slice is
+   * returned whatever its markers say, its marker dates the return without
+   * being held to the departure, and with no marker the row prints a blank
+   * date and receiver (see {@link resolveCheckIn}).
+   *
+   * A QUANTITY_TRACKED slice is not settled by the status. A booking can close
+   * with units left pending and the status does not say how many, so its units
+   * and its marker are read exactly as on a live booking.
    */
   isBookingFinished: boolean;
   /**
@@ -407,9 +431,9 @@ type ResolvedCheckIn = {
   byIds: string[];
   /**
    * `true` when the moment came from disposition logs, which date only the
-   * units they record. A marker or a session dates the whole slice, so those
-   * print only once every unit is accounted for; a log prints as soon as it
-   * exists, because it is the record of the units already back.
+   * units they record. A marker dates the whole slice, so it prints only once
+   * every unit is accounted for; a log prints as soon as it exists, because it
+   * is the record of the units already back.
    */
   datesRecordedUnits: boolean;
 };
@@ -422,25 +446,31 @@ function distinctInOrder(ids: Array<string | null | undefined>): string[] {
 /**
  * What dated this row's return, or `null` when nothing did.
  *
- * Three records can answer, in order of how directly they speak for the slice.
+ * Two records can answer, in order of how directly they speak for the slice.
  *
  * 1. The slice marker, which means fully reconciled.
- * 2. For an INDIVIDUAL slice on a finished booking, the progressive session
- *    naming its asset — what the completion gate accepts for rows reconciled
- *    before the markers existed.
- * 3. For a QUANTITY_TRACKED slice, the RETURN logs that name it. Units
+ * 2. For a QUANTITY_TRACKED slice, the RETURN logs that name it. Units
  *    returned in part never set the marker, so without this a partial return
  *    prints with no date and no name against it. Write-offs are excluded: a
  *    consumed, lost or damaged unit was not handed to anybody.
  *
- * The first two are held to the departure they claim to answer: a moment beside
- * a row this receipt calls never checked out claims a return for units that
- * never moved, and one from an earlier trip beside a row it calls still out
- * contradicts the row it sits on.
+ * Nothing dates a slice that never left: a moment beside a row this receipt
+ * calls never checked out claims a return for units that never moved.
  *
- * Tier 3 is not, deliberately. The attributed unit counts beside it span every
- * log on the slice regardless of trip, so filtering the moment by departure
- * would date a different set of units from the one the row reports.
+ * The marker is held to the departure it claims to answer: a slice sent out
+ * again after a return is out now, and a moment from the earlier trip beside a
+ * row this receipt calls still out contradicts the row it sits on.
+ *
+ * The one exception is an INDIVIDUAL slice on a finished booking. Every
+ * check-out clears the return marker of a slice it sends out again, and the
+ * check-in that finished the booking reconciled every item still out, so there
+ * a departure marker dated after the recorded return is not a later trip. A
+ * quantity slice gets no such exception: its units are not settled by the
+ * status, so a marker older than its departure must not outrank the logs.
+ *
+ * Tier 2 is never held to the departure. The attributed unit counts beside it
+ * span every log on the slice regardless of trip, so filtering the moment by
+ * departure would date a different set of units from the one the row reports.
  */
 function resolveCheckIn(
   slice: CheckinReceiptSlice,
@@ -449,9 +479,12 @@ function resolveCheckIn(
   if (!slice.checkedOutAt) {
     return null;
   }
-  const departedAt = slice.checkedOutAt.getTime();
 
-  if (slice.checkedInAt && slice.checkedInAt.getTime() >= departedAt) {
+  if (
+    slice.checkedInAt &&
+    ((isBookingFinished && slice.assetType === AssetType.INDIVIDUAL) ||
+      !isSliceOutByMarker(slice))
+  ) {
     return {
       at: slice.checkedInAt,
       byIds: distinctInOrder([slice.checkedInById]),
@@ -460,9 +493,8 @@ function resolveCheckIn(
   }
 
   if (slice.assetType === AssetType.QUANTITY_TRACKED) {
-    // Sessions cannot express partial units, so they never settle a quantity
-    // slice. Its return logs can, and they carry both the moment and the
-    // person.
+    // The return logs carry both the moment and the person for the units they
+    // record.
     const records = slice.returnRecords ?? [];
     if (records.length === 0) {
       return null;
@@ -478,22 +510,6 @@ function resolveCheckIn(
           .map((record) => record.byId)
       ),
       datesRecordedUnits: true,
-    };
-  }
-
-  // On a live booking a session cannot be trusted at all: progressive
-  // check-out leaves the original departure in place, so one answering an
-  // earlier trip still passes the test above while the units are out again.
-  if (!isBookingFinished) {
-    return null;
-  }
-
-  const sessionAt = slice.sessionCheckedInAt;
-  if (sessionAt && sessionAt.getTime() >= departedAt) {
-    return {
-      at: sessionAt,
-      byIds: distinctInOrder([slice.sessionCheckedInById]),
-      datesRecordedUnits: false,
     };
   }
 
@@ -552,9 +568,13 @@ function buildRow(
   const isReconciledHere = reconciledBy !== null;
 
   // An INDIVIDUAL slice carries no disposition units: its whole obligation is
-  // the one item, and the markers alone say whether it came back.
+  // the one item. On a finished booking every item that went out came back,
+  // whether or not anything dated the return; on a live one the markers alone
+  // say whether it did.
   const returned = isQuantityTracked
     ? dispositions.returned
+    : isBookingFinished
+    ? sent
     : isReconciledHere
     ? 1
     : 0;
@@ -567,9 +587,9 @@ function buildRow(
   const state: CheckinReceiptRowState =
     sent === 0 ? "NEVER_CHECKED_OUT" : stillOut > 0 ? "STILL_OUT" : "RETURNED";
 
-  // A marker or a session dates the whole slice, so it prints only once every
-  // unit it sent is accounted for — otherwise the row states a return time
-  // beside an outstanding count and says two things at once. A disposition log
+  // A marker dates the whole slice, so it prints only once every unit it sent
+  // is accounted for: otherwise the row states a return time beside an
+  // outstanding count and says two things at once. A disposition log
   // dates only the units it records, so it prints as soon as it exists: on a
   // partly-returned row it is the moment the units already back came back.
   const printsCheckIn =
@@ -661,4 +681,107 @@ export function buildCheckinReceipt(
       : "All items accounted for";
 
   return { rows, totals, stamp };
+}
+
+/** One slice's departure marker, as {@link resolveReceiptMoments} reads it. */
+export type CheckinReceiptDeparture = {
+  checkedOutAt: Date | null;
+  /** Who sent the slice out; `null` when no user is recorded making it. */
+  checkedOutById: string | null;
+};
+
+/** The booking-level moments and people the sheet's header prints. */
+export type CheckinReceiptMoments = {
+  /** The earliest departure a user is recorded making; `null` when none is. */
+  checkedOutAt: Date | null;
+  /** Who made that departure. */
+  checkedOutById: string | null;
+  /** The booking's recorded return; `null` when nothing records it. */
+  returnedAt: Date | null;
+  /**
+   * The receiving users in the order they first received something; empty
+   * when a row with returned units records no receiver.
+   */
+  checkedInByIds: string[];
+};
+
+/** Arguments for {@link resolveReceiptMoments}. */
+export type ResolveReceiptMomentsArgs = {
+  /** The reconciled rows, as {@link buildCheckinReceipt} returns them. */
+  rows: CheckinReceiptRow[];
+  /** Every slice on the booking, printed or not. */
+  departures: CheckinReceiptDeparture[];
+  /** The booking's transition into COMPLETE, when an event recorded it. */
+  completedAt: Date | null;
+};
+
+/**
+ * The header's booking-level moments and people, derived from the reconciled
+ * rows so the header never states more than the rows below it.
+ *
+ * - **Checked out** is the earliest departure a user is recorded making. Every
+ *   check-out records who made it, so a departure marker naming no dispatcher
+ *   is a stand-in for a moment nobody recorded, and it can sit at or after the
+ *   return it precedes. It never supplies the line.
+ * - **Returned** is the completion event. Without one, the latest moment the
+ *   rows carry stands in, but only while no row with returned units is
+ *   undated: such a row came back at a moment nothing recorded, possibly after
+ *   every dated row, so the latest dated row would understate the return and
+ *   the lateness measured from it. A row whose units were all written off has
+ *   nothing returned to date and does not hold the line back.
+ * - **Checked in by** names the receivers only while every row with returned
+ *   units records one. Otherwise the header would name people above rows they
+ *   are not recorded receiving, so it stays empty and each row prints its own.
+ *
+ * `Booking.updatedAt` is never a fallback for any of them: any later edit moves
+ * it.
+ *
+ * @param args - The reconciled rows, every slice's departure marker, and the
+ *   completion event's moment
+ * @returns The header's departure, return and receivers
+ */
+export function resolveReceiptMoments({
+  rows,
+  departures,
+  completedAt,
+}: ResolveReceiptMomentsArgs): CheckinReceiptMoments {
+  // The moment and the dispatcher come from the same slice: a booking checked
+  // out in several passes has several dispatchers, and naming one against
+  // another's moment would be a claim nothing recorded.
+  let recordedDeparture: { at: Date; byId: string } | null = null;
+  for (const { checkedOutAt, checkedOutById } of departures) {
+    if (!checkedOutAt || !checkedOutById) continue;
+    if (!recordedDeparture || checkedOutAt < recordedDeparture.at) {
+      recordedDeparture = { at: checkedOutAt, byId: checkedOutById };
+    }
+  }
+
+  // Ordered by the moment each row came back, so receivers read in the order
+  // they first received something.
+  const datedRows = rows
+    .filter((row): row is CheckinReceiptRow & { checkedInAt: Date } =>
+      Boolean(row.checkedInAt)
+    )
+    .sort((a, b) => a.checkedInAt.getTime() - b.checkedInAt.getTime());
+  const rowsWithReturns = rows.filter((row) => row.returned > 0);
+
+  const latestRowCheckIn = datedRows[datedRows.length - 1]?.checkedInAt ?? null;
+  const returnedAt =
+    completedAt ??
+    (rowsWithReturns.every((row) => row.checkedInAt !== null)
+      ? latestRowCheckIn
+      : null);
+
+  const checkedInByIds = rowsWithReturns.every(
+    (row) => row.checkedInByIds.length > 0
+  )
+    ? distinctInOrder(datedRows.flatMap((row) => row.checkedInByIds))
+    : [];
+
+  return {
+    checkedOutAt: recordedDeparture?.at ?? null,
+    checkedOutById: recordedDeparture?.byId ?? null,
+    returnedAt,
+    checkedInByIds,
+  };
 }

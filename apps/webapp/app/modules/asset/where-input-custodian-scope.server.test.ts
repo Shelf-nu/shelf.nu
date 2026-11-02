@@ -33,16 +33,32 @@ const ORG = "org-1";
 const MINE = "tm-mine";
 const COLLEAGUE = "tm-colleague";
 
-/** Every id the asset custody clause ended up matching on. */
+/**
+ * Every id the asset custodian clause ended up matching on, across all four
+ * ways an asset can be held (custody by team member or by user, a booking
+ * custodian by team member or by user), wherever the clause sits in `where`.
+ */
 function custodianIdsInAssetWhere(
   where: ReturnType<typeof getAssetsWhereInput>
 ): string[] {
   const ids = new Set<string>();
+  const groups = [where.AND ?? []].flat();
+  const clauses = groups.flatMap((group) => [
+    group,
+    ...[group.OR ?? []].flat(),
+  ]);
 
-  for (const clause of where.OR ?? []) {
-    const custodyIds = clause.custody?.some?.teamMemberId;
-    if (custodyIds && typeof custodyIds === "object" && "in" in custodyIds) {
-      (custodyIds.in as string[]).forEach((id) => ids.add(id));
+  for (const clause of clauses) {
+    const booking = clause.bookingAssets?.some?.booking;
+    for (const filter of [
+      clause.custody?.some?.teamMemberId,
+      clause.custody?.some?.custodian?.userId,
+      booking?.custodianTeamMemberId,
+      booking?.custodianUserId,
+    ]) {
+      if (filter && typeof filter === "object" && "in" in filter) {
+        (filter.in as string[]).forEach((id) => ids.add(id));
+      }
     }
   }
 
@@ -163,10 +179,8 @@ describe("getAssetsWhereInput — a refusal survives sibling OR filters", () => 
     );
   }
 
-  // The three other filters that write to `where.OR`. Each one used to rescue
-  // a refused custodian filter: under OR semantics the refused branch matched
-  // nothing while the sibling matched plenty, so the query returned the
-  // sibling's rows instead of none.
+  // The three other filters that carry an OR group of their own. A refused
+  // custodian filter must still match nothing when combined with any of them.
   const siblingOrFilters = [
     ["uncategorized", `category=uncategorized`],
     ["untagged", `tag=untagged`],

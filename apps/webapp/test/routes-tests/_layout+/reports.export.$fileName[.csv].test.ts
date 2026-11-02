@@ -389,12 +389,14 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       },
       {
         reportId: "top-booked-kits",
-        // No filter controls on this page, so the only contract is that the
-        // export stays org-scoped. Listed rather than omitted: a row here is
-        // how the next person knows the case was considered.
-        query: "",
+        // Category and Location match the kit itself, so they travel as a
+        // kit filter rather than the asset predicate.
+        query: "category=cat-1&location=loc-1",
         mock: vi.mocked(topBookedKitsReport),
-        expected: { organizationId: "org-1" },
+        expected: {
+          organizationId: "org-1",
+          kitFilter: { categoryIds: ["cat-1"], locationIds: ["loc-1"] },
+        },
       },
       {
         reportId: "asset-inventory",
