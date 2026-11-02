@@ -121,11 +121,11 @@ function savedAsset(overrides: {
     valuation: null,
     customFields: [],
     ...overrides,
-  } as Awaited<ReturnType<typeof db.asset.findFirst>>);
+  } as unknown as Awaited<ReturnType<typeof db.asset.findFirst>>);
 }
 
 /** Posts the edit form with blank category, valuation and Brand. */
-function post(fields: Record<string, string> = {}) {
+async function post(fields: Record<string, string> = {}): Promise<Response> {
   // why: a URLSearchParams body, not FormData: happy-dom's multipart round
   // trip drops empty-valued fields, and blank fields are the subject here.
   const body = new URLSearchParams({
@@ -142,11 +142,12 @@ function post(fields: Record<string, string> = {}) {
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action({
+  // The action answers with a Response on every path these tests take.
+  return (await action({
     request,
     params: { assetId: "asset-1" },
     context: { getSession: () => ({ userId: "user-1" }) },
-  } as unknown as Parameters<typeof action>[0]);
+  } as unknown as Parameters<typeof action>[0])) as unknown as Response;
 }
 
 /** The single payload the action handed to `updateAsset`. */

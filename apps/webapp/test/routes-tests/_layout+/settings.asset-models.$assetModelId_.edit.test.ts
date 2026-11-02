@@ -114,7 +114,7 @@ function defaults(defaultValuation: number | null): AssetModelDefaults {
 }
 
 /** Posts the given fields to the action. */
-function post(fields: Record<string, string>) {
+async function post(fields: Record<string, string>): Promise<Response> {
   // why: a URLSearchParams body, not FormData: happy-dom's multipart round
   // trip drops empty-valued fields.
   const request = new Request(
@@ -125,11 +125,12 @@ function post(fields: Record<string, string>) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     }
   );
-  return action({
+  // The action answers with a Response on every path these tests take.
+  return (await action({
     request,
     params: { assetModelId: "model-1" },
     context: { getSession: () => ({ userId: "user-1" }) },
-  } as unknown as Parameters<typeof action>[0]);
+  } as unknown as Parameters<typeof action>[0])) as unknown as Response;
 }
 
 /** Posts a plain model save. */
