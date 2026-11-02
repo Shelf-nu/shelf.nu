@@ -13,6 +13,7 @@ import {
   getInitialPlacementNoteContent,
   getKitLocationUpdateNoteContent,
   getLocationUpdateNoteContent,
+  planCustomFieldValueWrites,
 } from "./utils.server";
 
 // @vitest-environment node
@@ -213,6 +214,55 @@ describe("compareCustomFieldValues", () => {
       const result = compareCustomFieldValues(oldValue, newValue, "TEXT");
       expect(result).toBe(true);
     });
+  });
+});
+
+describe("planCustomFieldValueWrites", () => {
+  const stored = [
+    { id: "val-a", customFieldId: "cf-a", value: { raw: "a", valueText: "a" } },
+    { id: "val-b", customFieldId: "cf-b", value: { raw: "b" } },
+  ];
+
+  it("creates a value for a field with no stored row", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-new", value: { raw: "n" } },
+      ])
+    ).toEqual({
+      toCreate: [{ customFieldId: "cf-new", value: { raw: "n" } }],
+      toUpdate: [],
+      toRemoveFieldIds: [],
+    });
+  });
+
+  it("updates a stored row only when its value differs", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-a", value: { valueText: "a", raw: "a" } },
+        { id: "cf-b", value: { raw: "changed" } },
+      ])
+    ).toEqual({
+      toCreate: [],
+      toUpdate: [{ valueId: "val-b", value: { raw: "changed" } }],
+      toRemoveFieldIds: [],
+    });
+  });
+
+  it("updates when only a part other than raw changed", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-a", value: { raw: "a", valueText: "A" } },
+      ]).toUpdate
+    ).toEqual([{ valueId: "val-a", value: { raw: "a", valueText: "A" } }]);
+  });
+
+  it("removes a cleared field only when it has a stored row", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-b", value: null },
+        { id: "cf-never-set", value: null },
+      ])
+    ).toEqual({ toCreate: [], toUpdate: [], toRemoveFieldIds: ["cf-b"] });
   });
 });
 

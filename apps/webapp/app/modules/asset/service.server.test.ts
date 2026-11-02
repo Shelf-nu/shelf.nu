@@ -3004,10 +3004,9 @@ describe("updateAsset custom-field writes", () => {
     });
   });
 
-  // Regression for Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF: persisting custom
-  // field values must not use a nested `upsert`, which makes Prisma issue a
-  // SELECT-then-write per field (N+1). New values become a single `create`,
-  // existing ones an `updateMany` keyed by the value-row id we already loaded
+  // Custom field values must not use a nested `upsert`, which makes Prisma
+  // issue a SELECT-then-write per field. New values become a single `create`,
+  // existing ones an `updateMany` keyed by the value-row id already loaded
   // (`updateMany` so a concurrently-deleted row matches zero rows instead of
   // throwing P2025 and aborting the whole save).
   it("creates new custom-field values and updates existing ones without a nested upsert", async () => {
@@ -3058,6 +3057,56 @@ describe("updateAsset custom-field writes", () => {
     ]);
     // Existence info is read in a single query, not once per field.
     expect(db.assetCustomFieldValue.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  // The form submits every field. Each nested `updateMany` entry and the
+  // nested `deleteMany` cost Prisma a lookup query, so only real changes may
+  // reach them.
+  it("writes only the fields whose value changed", async () => {
+    expect.assertions(3);
+
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "val-same",
+        customFieldId: "cf-same",
+        value: { raw: "kept", valueText: "kept" },
+        customField: { id: "cf-same", name: "Same", type: "TEXT" },
+      },
+      {
+        id: "val-cleared",
+        customFieldId: "cf-cleared",
+        value: { raw: "gone" },
+        customField: { id: "cf-cleared", name: "Cleared", type: "TEXT" },
+      },
+    ]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ id: "cf-same", name: "Same", type: "TEXT" }]
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      customFieldsValues: [
+        // Same value, keys in a different order.
+        { id: "cf-same", value: { valueText: "kept", raw: "kept" } },
+        // Cleared, and has a stored row.
+        { id: "cf-cleared", value: null },
+        // Empty, and never had a stored row.
+        { id: "cf-never-set", value: null },
+      ],
+    } as any);
+
+    const { customFields } = (db.asset.update as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0].data;
+
+    expect(customFields.updateMany).toBeUndefined();
+    expect(customFields.create).toBeUndefined();
+    expect(customFields.deleteMany).toEqual({
+      customFieldId: { in: ["cf-cleared"] },
+    });
   });
 });
 

@@ -350,6 +350,62 @@ export function compareCustomFieldValues(
   }
 }
 
+/** The custom-field writes an asset save has to make, split by kind. */
+export type CustomFieldValueWritePlan = {
+  /** Fields with a value and no stored row yet. */
+  toCreate: Array<{ customFieldId: string; value: ICustomFieldValueJson }>;
+  /** Stored rows whose value differs from the submitted one. */
+  toUpdate: Array<{ valueId: string; value: ICustomFieldValueJson }>;
+  /** Fields submitted empty that still have a stored row. */
+  toRemoveFieldIds: string[];
+};
+
+/**
+ * Decides which custom-field value rows an asset save must create, update or
+ * delete, given the rows already stored for the asset.
+ *
+ * The edit form submits every custom field, changed or not, and each nested
+ * update or delete costs Prisma a lookup query plus the write. So a field is
+ * only written when its stored value actually differs (compared in full, not
+ * just `raw`), and only deleted when a stored row exists. Each custom field
+ * has at most one value row per asset, so rows are keyed by `customFieldId`.
+ *
+ * @param existingValues - The asset's stored value rows
+ * @param formValues - The submitted values, keyed by custom field id (`id`);
+ *   a falsy `value` means the field was cleared
+ * @returns The writes to make, each list possibly empty
+ */
+export function planCustomFieldValueWrites(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: unknown;
+  }>,
+  formValues: Array<{ id: string; value: ICustomFieldValueJson | null }>
+): CustomFieldValueWritePlan {
+  const existingByFieldId = new Map(
+    existingValues.map((row) => [row.customFieldId, row])
+  );
+  const plan: CustomFieldValueWritePlan = {
+    toCreate: [],
+    toUpdate: [],
+    toRemoveFieldIds: [],
+  };
+
+  for (const { id: customFieldId, value } of formValues) {
+    const existing = existingByFieldId.get(customFieldId);
+    if (!value) {
+      if (existing) plan.toRemoveFieldIds.push(customFieldId);
+    } else if (!existing) {
+      plan.toCreate.push({ customFieldId, value });
+    } else if (!_.isEqual(existing.value, value)) {
+      plan.toUpdate.push({ valueId: existing.id, value });
+    }
+  }
+
+  return plan;
+}
+
 /**
  * Performs a quick scan to detect potential changes in custom field values.
  * This is an optimization function that uses basic comparison to avoid expensive
