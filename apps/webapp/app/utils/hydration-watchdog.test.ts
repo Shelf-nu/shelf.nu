@@ -118,6 +118,27 @@ function storedReport(): HydrationFailureReport | null {
 const isShowingScreen = () =>
   document.documentElement.hasAttribute(HYDRATION_FAILED_ATTRIBUTE);
 
+/** What the tab's visibility and automation flag read as, per test. */
+let visibility: DocumentVisibilityState = "visible";
+let automated = false;
+
+/** Shows or hides the tab, firing the event the browser would. */
+function setTabVisibility(state: DocumentVisibilityState) {
+  visibility = state;
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+// why: happy-dom reports every page as visible and as automated
+// (`navigator.webdriver` is true), so each test states both itself.
+Object.defineProperty(document, "visibilityState", {
+  configurable: true,
+  get: () => visibility,
+});
+Object.defineProperty(navigator, "webdriver", {
+  configurable: true,
+  get: () => automated,
+});
+
 beforeEach(() => {
   vi.useFakeTimers();
   sessionStorage.clear();
@@ -127,6 +148,8 @@ beforeEach(() => {
   document.documentElement.removeAttribute(UNSUPPORTED_BROWSER_ATTRIBUTE);
   vi.mocked(Sentry.captureMessage).mockClear();
   vi.mocked(Sentry.logger.info).mockClear();
+  visibility = "visible";
+  automated = false;
 });
 
 afterEach(() => {
@@ -338,6 +361,50 @@ describe("HYDRATION_WATCHDOG_SCRIPT: the page is slow to hydrate", () => {
     });
   });
 
+  it("does not count time while the tab is hidden", () => {
+    // A background tab or a restored session: nobody is looking yet.
+    visibility = "hidden";
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS * 5);
+    expect(isShowingScreen()).toBe(false);
+
+    // The clock starts once the tab is shown.
+    setTabVisibility("visible");
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+    expect(storedReport()).toMatchObject({ reason: "timeout", hidden: true });
+  });
+
+  it("pauses the clock while hidden and keeps the visible time already spent", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(15_000);
+    setTabVisibility("hidden");
+    vi.advanceTimersByTime(60_000);
+    setTabVisibility("visible");
+
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 15_000 - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+  });
+
+  it("records what the page looked like when it timed out", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      reason: "timeout",
+      hidden: false,
+      automated: false,
+      failedAfterMs: expect.any(Number),
+      bundleFilesLoaded: expect.any(Number),
+    });
+    expect(storedReport()).toHaveProperty("lastBundleFileMs");
+    expect(storedReport()).toHaveProperty("connection");
+  });
+
   it("removes the screen again if hydration completes late", () => {
     runWatchdog();
     vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
@@ -434,6 +501,7 @@ describe("markHydrated", () => {
         tags: {
           hydration_failure: "load-error",
           hydration_auto_reloaded: "yes",
+          hydration_tab_hidden: "no",
         },
         extra: expect.objectContaining({ failures: 2 }),
       })
@@ -454,9 +522,39 @@ describe("markHydrated", () => {
         tags: {
           hydration_failure: "timeout",
           hydration_auto_reloaded: "no",
+          hydration_tab_hidden: "no",
         },
       })
     );
+  });
+
+  it("tags a failure from a tab that had been hidden", () => {
+    runWatchdog();
+    setTabVisibility("hidden");
+    setTabVisibility("visible");
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        tags: expect.objectContaining({ hydration_tab_hidden: "yes" }),
+      })
+    );
+  });
+
+  it("sends nothing for a browser under automation", () => {
+    // Crawlers and link previewers fast-forward timers; their timeouts say
+    // nothing about users.
+    automated = true;
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
   });
 
   it("sends nothing after a clean load", () => {

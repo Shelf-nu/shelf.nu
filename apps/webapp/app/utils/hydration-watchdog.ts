@@ -14,9 +14,12 @@
  * - **load-error**: a module script, a `modulepreload` link or a dynamic
  *   `import()` of the bundle failed. The page reloads itself once; if the
  *   reload fails as well, the recovery screen is shown.
- * - **timeout**: nothing hydrated within {@link HYDRATION_TIMEOUT_MS}. The
- *   recovery screen is shown, without reloading, since a slow network would
- *   only start over. If hydration completes later the screen goes away again.
+ * - **timeout**: nothing hydrated within {@link HYDRATION_TIMEOUT_MS} of the
+ *   tab being visible. The recovery screen is shown, without reloading, since
+ *   a slow network would only start over. If hydration completes later the
+ *   screen goes away again. Time spent hidden (a background tab, a restored
+ *   session, a prerender) does not count: browsers deprioritise such tabs, and
+ *   nobody is waiting on them.
  *
  * Failing sets {@link HYDRATION_FAILED_ATTRIBUTE} on `<html>`, which
  * {@link HYDRATION_GATE_STYLES} turns into the recovery screen rendered by
@@ -56,7 +59,10 @@ export const HYDRATION_FAILURE_STORAGE_KEY = "shelf:hydration-failure";
  */
 export const HYDRATION_RELOADED_AT_STORAGE_KEY = "shelf:hydration-reloaded-at";
 
-/** How long a page may take to hydrate before the recovery screen is shown. */
+/**
+ * How long a page may take to hydrate, counting only time the tab is visible,
+ * before the recovery screen is shown.
+ */
 export const HYDRATION_TIMEOUT_MS = 20_000;
 
 /**
@@ -95,6 +101,21 @@ export type HydrationFailureReport = {
   reloadedAt: number | null;
   /** Consecutive failed loads in this tab since the last successful one. */
   failures: number;
+  // The fields below describe the page when it failed, to tell a slow network
+  // from a slow device or a tab nobody was looking at. Optional: a report
+  // stored by an older script has none of them.
+  /** The tab was hidden at some point before the failure. */
+  hidden?: boolean;
+  /** Milliseconds from navigation start to the failure. */
+  failedAfterMs?: number | null;
+  /** Script files from this origin that had finished downloading. */
+  bundleFilesLoaded?: number;
+  /** Milliseconds from navigation start until the last of them finished. */
+  lastBundleFileMs?: number | null;
+  /** `navigator.connection.effectiveType`, where the browser exposes it. */
+  connection?: string | null;
+  /** The browser is driven by automation (`navigator.webdriver`). */
+  automated?: boolean;
 };
 
 /**
@@ -126,6 +147,10 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   var settled = false;
   var failed = false;
   var timer;
+  // The timeout clock: it runs only while the tab is visible.
+  var remaining = ${HYDRATION_TIMEOUT_MS};
+  var clockStartedAt = null;
+  var wasHidden = document.visibilityState === "hidden";
   var KEY = "${HYDRATION_FAILURE_STORAGE_KEY}";
   var RELOADED_AT_KEY = "${HYDRATION_RELOADED_AT_STORAGE_KEY}";
   var ORIGIN = window.location.origin;
@@ -168,6 +193,35 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     return typeof url === "string" && url.indexOf(ORIGIN + "/") === 0;
   }
 
+  function diagnostics() {
+    var perf = window.performance;
+    var files = 0;
+    var last = null;
+    try {
+      var entries = perf.getEntriesByType("resource");
+      for (var i = 0; i < entries.length; i++) {
+        var name = String(entries[i].name).split("?")[0];
+        if (isOwnUrl(name) && name.slice(-3) === ".js") {
+          files++;
+          if (last === null || entries[i].responseEnd > last) {
+            last = entries[i].responseEnd;
+          }
+        }
+      }
+    } catch (e) {
+      files = 0;
+    }
+    var connection = navigator.connection && navigator.connection.effectiveType;
+    return {
+      hidden: wasHidden,
+      failedAfterMs: perf && perf.now ? Math.round(perf.now()) : null,
+      bundleFilesLoaded: files,
+      lastBundleFileMs: last === null ? null : Math.round(last),
+      connection: connection || null,
+      automated: navigator.webdriver === true
+    };
+  }
+
   function fail(reason, source) {
     if (settled || failed || root.hasAttribute("${UNSUPPORTED_BROWSER_ATTRIBUTE}")) {
       return;
@@ -186,6 +240,10 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       reloadedAt: (previous && previous.reloadedAt) || null,
       failures: ((previous && previous.failures) || 0) + 1
     };
+    var details = diagnostics();
+    for (var key in details) {
+      report[key] = details[key];
+    }
     var reloadedRecently = lastReload !== null && now - lastReload < ${HYDRATION_RELOAD_WINDOW_MS};
     if (reason === "load-error" && !reloadedRecently) {
       report.reloadedAt = now;
@@ -239,9 +297,38 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     }
   }
 
+  function startClock() {
+    if (settled || failed || clockStartedAt !== null) {
+      return;
+    }
+    clockStartedAt = Date.now();
+    timer = window.setTimeout(function () {
+      fail("timeout", null);
+    }, remaining);
+  }
+
+  function pauseClock() {
+    if (clockStartedAt === null) {
+      return;
+    }
+    window.clearTimeout(timer);
+    remaining -= Date.now() - clockStartedAt;
+    clockStartedAt = null;
+  }
+
+  function onVisibilityChange() {
+    if (document.visibilityState === "hidden") {
+      wasHidden = true;
+      pauseClock();
+    } else {
+      startClock();
+    }
+  }
+
   function stop() {
     settled = true;
     window.clearTimeout(timer);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("error", onError, true);
     window.removeEventListener("unhandledrejection", onRejection);
     document.removeEventListener("click", onClick);
@@ -251,9 +338,10 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   window.addEventListener("error", onError, true);
   window.addEventListener("unhandledrejection", onRejection);
   document.addEventListener("click", onClick);
-  timer = window.setTimeout(function () {
-    fail("timeout", null);
-  }, ${HYDRATION_TIMEOUT_MS});
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  if (!wasHidden) {
+    startClock();
+  }
 
   window.${WATCHDOG_GLOBAL} = {
     done: function () {
@@ -309,7 +397,9 @@ export function markHydrated(): void {
   window[WATCHDOG_GLOBAL]?.done();
 
   const report = consumeHydrationFailureReport();
-  if (!report) {
+  // A browser under automation (a crawler, a link previewer, a test runner)
+  // fast-forwards or starves timers, so its failures say nothing about users.
+  if (!report || report.automated) {
     return;
   }
 
@@ -335,6 +425,7 @@ export function markHydrated(): void {
     tags: {
       hydration_failure: report.reason,
       hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
+      hydration_tab_hidden: report.hidden ? "yes" : "no",
     },
     extra: { ...report, hydratedAfterMs },
   });
