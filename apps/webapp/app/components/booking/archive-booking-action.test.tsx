@@ -6,7 +6,7 @@
  * @see {@link file://./duplicate-booking-action.tsx}
  */
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ArchiveBookingAction } from "./archive-booking-action";
 import { DuplicateBookingAction } from "./duplicate-booking-action";
 
@@ -29,6 +29,8 @@ vi.mock("react-router", async () => {
 });
 
 describe("ArchiveBookingAction", () => {
+  beforeEach(() => submit.mockClear());
+
   it("submits intent=archive to /bookings/b1/overview", () => {
     render(<ArchiveBookingAction booking={{ id: "b1" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));

@@ -12,7 +12,7 @@
  * @see {@link file://./booking-quick-actions.tsx} the icon look this matches
  */
 import { forwardRef } from "react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
 import type { BookingActionDisabled } from "./booking-actions";
@@ -20,10 +20,14 @@ import type { BookingActionDisabled } from "./booking-actions";
 /** How an action presents itself: a row in a menu, or an icon button. */
 export type BookingActionTriggerVariant = "menu-item" | "icon";
 
-/** Props for {@link BookingActionTrigger}. */
+/**
+ * Props for {@link BookingActionTrigger}. The pass-through attributes are the
+ * ones every element has (`HTMLAttributes<HTMLElement>`), because the trigger
+ * renders a button or a link and `Button` accepts a different set for each.
+ */
 export type BookingActionTriggerProps = Omit<
-  ButtonHTMLAttributes<HTMLButtonElement>,
-  "disabled" | "type"
+  HTMLAttributes<HTMLElement>,
+  "children"
 > & {
   /** Menu row or icon button. */
   variant: BookingActionTriggerVariant;
@@ -47,7 +51,7 @@ const MENU_ITEM_CLASS =
  * @param props - See {@link BookingActionTriggerProps}
  */
 export const BookingActionTrigger = forwardRef<
-  HTMLButtonElement,
+  HTMLElement,
   BookingActionTriggerProps
 >(function BookingActionTrigger(
   { variant, label, icon, disabled = false, to, className, ...rest },

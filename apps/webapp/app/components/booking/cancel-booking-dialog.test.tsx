@@ -5,6 +5,7 @@
  *
  * @see {@link file://./cancel-booking-dialog.tsx}
  */
+import { forwardRef } from "react";
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +13,16 @@ import { CancelBookingDialog } from "./cancel-booking-dialog";
 
 /** What the mocked fetcher answers with; tests set it before rendering. */
 let mockData: unknown;
+
+/** A form that takes the ref `useZorm` hands the fetcher form. */
+const MockFetcherForm = forwardRef<HTMLFormElement, { children: ReactNode }>(
+  ({ children, ...props }, ref) => (
+    <form ref={ref} {...props}>
+      {children}
+    </form>
+  )
+);
+MockFetcherForm.displayName = "MockFetcherForm";
 
 // why: the real `useFetcher` and `fetcher.Form` need a data router, which a
 // component test does not mount. The form is a plain form with the same props.
@@ -24,18 +35,31 @@ vi.mock("react-router", async () => {
       state: "idle",
       data: mockData,
       submit: vi.fn(),
-      Form: ({ children, ...props }: { children: ReactNode }) => (
-        <form {...props}>{children}</form>
-      ),
+      Form: MockFetcherForm,
     }),
   };
 });
 
 /** Renders the dialog and opens it. */
 function renderOpen() {
-  render(<CancelBookingDialog booking={{ id: "b1", name: "Studio shoot" }} />);
+  const utils = render(
+    <CancelBookingDialog booking={{ id: "b1", name: "Studio shoot" }} />
+  );
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  return utils;
 }
+
+/** A refusal of the reason field, shaped like the action's validation error. */
+const REASON_REFUSAL = {
+  error: {
+    message: "Validation failed",
+    additionalData: {
+      validationErrors: {
+        cancellationReason: { message: "Reason is too long" },
+      },
+    },
+  },
+};
 
 describe("CancelBookingDialog", () => {
   it("posts intent=cancel with the reason to the booking's overview action", () => {
@@ -53,18 +77,22 @@ describe("CancelBookingDialog", () => {
   });
 
   it("shows the server's cancellationReason error from the fetcher", () => {
-    mockData = {
-      error: {
-        message: "Validation failed",
-        additionalData: {
-          validationErrors: {
-            cancellationReason: { message: "Reason is too long" },
-          },
-        },
-      },
-    };
-    renderOpen();
+    mockData = undefined;
+    const { rerender } = renderOpen();
+
+    // The refusal arrives while the dialog is open.
+    mockData = REASON_REFUSAL;
+    rerender(
+      <CancelBookingDialog booking={{ id: "b1", name: "Studio shoot" }} />
+    );
 
     expect(screen.getByText("Reason is too long")).toBeTruthy();
+  });
+
+  it("does not show an error that was already there when the dialog opened", () => {
+    mockData = REASON_REFUSAL;
+    renderOpen();
+
+    expect(screen.queryByText("Reason is too long")).toBeNull();
   });
 });

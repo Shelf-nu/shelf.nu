@@ -11,7 +11,7 @@
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
  */
 import { forwardRef } from "react";
-import type { ButtonHTMLAttributes } from "react";
+import type { HTMLAttributes } from "react";
 import { ArchiveIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -21,8 +21,8 @@ import type { BookingActionTriggerVariant } from "./booking-action-trigger";
 
 /** Props for {@link ArchiveBookingAction}. */
 type ArchiveBookingActionProps = Omit<
-  ButtonHTMLAttributes<HTMLButtonElement>,
-  "type" | "disabled"
+  HTMLAttributes<HTMLElement>,
+  "children"
 > & {
   booking: { id: string };
   /** Defaults to `"menu-item"`. */
@@ -36,7 +36,7 @@ type ArchiveBookingActionProps = Omit<
  * @param props.trigger - Menu row or icon button
  */
 export const ArchiveBookingAction = forwardRef<
-  HTMLButtonElement,
+  HTMLElement,
   ArchiveBookingActionProps
 >(function ArchiveBookingAction(
   { booking, trigger = "menu-item", ...rest },

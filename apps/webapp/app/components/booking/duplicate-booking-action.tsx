@@ -8,15 +8,15 @@
  * @see {@link file://./booking-action-trigger.tsx}
  */
 import { forwardRef } from "react";
-import type { ButtonHTMLAttributes } from "react";
+import type { HTMLAttributes } from "react";
 import { CopyIcon } from "lucide-react";
 import { BookingActionTrigger } from "./booking-action-trigger";
 import type { BookingActionTriggerVariant } from "./booking-action-trigger";
 
 /** Props for {@link DuplicateBookingAction}. */
 type DuplicateBookingActionProps = Omit<
-  ButtonHTMLAttributes<HTMLButtonElement>,
-  "type" | "disabled"
+  HTMLAttributes<HTMLElement>,
+  "children"
 > & {
   booking: { id: string };
   /** Defaults to `"menu-item"`. */
@@ -30,7 +30,7 @@ type DuplicateBookingActionProps = Omit<
  * @param props.trigger - Menu row or icon button
  */
 export const DuplicateBookingAction = forwardRef<
-  HTMLButtonElement,
+  HTMLElement,
   DuplicateBookingActionProps
 >(function DuplicateBookingAction(
   { booking, trigger = "menu-item", ...rest },

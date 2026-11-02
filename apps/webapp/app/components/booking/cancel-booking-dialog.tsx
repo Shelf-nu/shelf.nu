@@ -61,7 +61,9 @@ export function CancelBookingDialog({
 
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<typeof CancelBookingSchema>(
-    open ? fetcher.data?.error : undefined
+    // Only this opening's refusal: the keyed fetcher keeps its last response
+    // after the dialog closes, which must not reappear on the next opening.
+    outcome.status === "rejected" ? fetcher.data?.error : undefined
   );
 
   useEffect(() => {
