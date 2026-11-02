@@ -458,6 +458,10 @@ const WorkspacePermissionsEditForm = ({
         >
           Self service users
         </h4>
+        <p className="text-sm text-gray-600">
+          By default, Self service users book assets and check them out and in
+          for themselves, and see only their own bookings and custody.
+        </p>
         <FormRow
           rowLabel={`View custody`}
           subHeading={
@@ -515,6 +519,10 @@ const WorkspacePermissionsEditForm = ({
         </FormRow>
 
         <h4 className="border-t pt-5 text-text-md">Base users</h4>
+        <p className="text-sm text-gray-600">
+          By default, Base users request assets through bookings that an
+          Administrator or Manager checks out, and see only their own bookings.
+        </p>
         <FormRow
           rowLabel={`View custody`}
           subHeading={

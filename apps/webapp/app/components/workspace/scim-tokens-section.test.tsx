@@ -389,3 +389,32 @@ describe("WorkspaceScimTokensSection", () => {
     });
   });
 });
+
+describe("Permissions card", () => {
+  it("says what each restricted role does by default, above its switches", () => {
+    mockUseLoaderData.mockReturnValue(
+      createLoaderData({ type: "TEAM", managersCanEditAssets: false })
+    );
+
+    render(
+      <TooltipProvider>
+        <WorkspaceEditForms
+          name="Test Org"
+          currency="USD"
+          qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
+          showManagersSwitch
+        />
+      </TooltipProvider>
+    );
+
+    screen.getByText(
+      "By default, Managers run bookings, custody and audits for everyone, but cannot change the catalogue."
+    );
+    screen.getByText(
+      "By default, Self service users book assets and check them out and in for themselves, and see only their own bookings and custody."
+    );
+    screen.getByText(
+      "By default, Base users request assets through bookings that an Administrator or Manager checks out, and see only their own bookings."
+    );
+  });
+});
