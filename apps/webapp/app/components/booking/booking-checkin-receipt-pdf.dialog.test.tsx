@@ -26,6 +26,7 @@ describe("booking check-in receipt: which sort it loads with", () => {
           <BookingCheckinReceiptPDF
             booking={{ id: "booking-1", name: "Shoot" }}
             available
+            unavailableReason=""
             assetOrder={assetOrder}
             timeStamp={1757000000000}
           />

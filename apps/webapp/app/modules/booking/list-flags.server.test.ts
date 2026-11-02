@@ -483,33 +483,51 @@ describe("decorateBookingsForList", () => {
     itemsToCheckOut: string[];
   }) {
     findManyMock.mockImplementation(
-      ({ select }: { select: Record<string, unknown> }) => {
-        if ("status" in select) {
-          // The receipt lookup: nothing has been checked out, so no booking
-          // is printable.
-          return Promise.resolve([]);
+      ({
+        where,
+        select,
+      }: {
+        where: Record<string, unknown>;
+        select: Record<string, unknown>;
+      }) => {
+        if ("bookingAssets" in where) {
+          return Promise.resolve(unavailable.map((id) => ({ id })));
         }
-        if ("partialCheckins" in select) {
-          return Promise.resolve(
-            itemsToCheckOut.map((id) => ({
-              id,
+        if (!("partialCheckins" in select)) {
+          // The receipt lookup: booking-2 has been checked in.
+          return Promise.resolve([
+            {
+              id: "booking-2",
+              status: "COMPLETE",
               bookingAssets: [
                 {
-                  id: `${id}-slice`,
-                  assetId: `${id}-asset`,
-                  quantity: 1,
-                  assetKitId: null,
-                  checkedOutAt: null,
-                  checkedInAt: null,
-                  asset: { type: "INDIVIDUAL", status: "AVAILABLE" },
+                  assetId: "a",
+                  asset: { type: "INDIVIDUAL" },
+                  checkedOutAt: new Date(),
+                  checkedInAt: new Date(),
                 },
               ],
-              partialCheckouts: [],
-              partialCheckins: [],
-            }))
-          );
+            },
+          ]);
         }
-        return Promise.resolve(unavailable.map((id) => ({ id })));
+        return Promise.resolve(
+          itemsToCheckOut.map((id) => ({
+            id,
+            bookingAssets: [
+              {
+                id: `${id}-slice`,
+                assetId: `${id}-asset`,
+                quantity: 1,
+                assetKitId: null,
+                checkedOutAt: null,
+                checkedInAt: null,
+                asset: { type: "INDIVIDUAL", status: "AVAILABLE" },
+              },
+            ],
+            partialCheckouts: [],
+            partialCheckins: [],
+          }))
+        );
       }
     );
   }
@@ -539,6 +557,7 @@ describe("decorateBookingsForList", () => {
         hasStockConflict: false,
         hasUnavailableAssets: true,
         hasItemsToCheckOut: false,
+        canPrintCheckinReceipt: true,
       }),
     ]);
   });
@@ -563,35 +582,44 @@ describe("getBookingIdsWithCheckinReceipt", () => {
     logFindManyMock.mockReset();
   });
 
+  /** A slice of a booking: a quantity-tracked asset out and not yet in. */
+  const outSlice = (assetId: string, type = "QUANTITY_TRACKED") => ({
+    assetId,
+    asset: { type },
+    checkedOutAt: new Date(),
+    checkedInAt: null,
+  });
+
   it("flags canPrintCheckinReceipt per booking with one query", async () => {
     findManyMock.mockResolvedValue([
       {
         id: "returned",
         status: "ONGOING",
-        bookingAssets: [{ checkedOutAt: new Date(), checkedInAt: new Date() }],
+        bookingAssets: [
+          { ...outSlice("a", "INDIVIDUAL"), checkedInAt: new Date() },
+        ],
       },
-      {
-        id: "still-out",
-        status: "ONGOING",
-        bookingAssets: [{ checkedOutAt: new Date(), checkedInAt: null }],
-      },
+      { id: "still-out", status: "ONGOING", bookingAssets: [outSlice("b")] },
       {
         id: "part-returned-quantity",
         status: "ONGOING",
-        bookingAssets: [{ checkedOutAt: new Date(), checkedInAt: null }],
+        bookingAssets: [outSlice("c")],
       },
       {
         id: "archived-never-out",
         status: "ARCHIVED",
-        bookingAssets: [{ checkedOutAt: null, checkedInAt: null }],
+        bookingAssets: [
+          { ...outSlice("d"), checkedOutAt: null, checkedInAt: null },
+        ],
       },
     ]);
     logFindManyMock.mockResolvedValue([
-      { bookingId: "part-returned-quantity" },
+      { bookingId: "part-returned-quantity", assetId: "c" },
     ]);
+    const bookingIds = ["returned", "still-out", "part-returned-quantity"];
 
     const ids = await getBookingIdsWithCheckinReceipt({
-      bookingIds: ["returned", "still-out", "part-returned-quantity"],
+      bookingIds,
       organizationId: ORG_ID,
     });
 
@@ -600,11 +628,34 @@ describe("getBookingIdsWithCheckinReceipt", () => {
     expect(findManyMock).toHaveBeenCalledTimes(1);
     expect(logFindManyMock).toHaveBeenCalledTimes(1);
     expect(findManyMock.mock.calls[0][0].where).toMatchObject({
+      id: { in: bookingIds },
       organizationId: ORG_ID,
     });
     expect(logFindManyMock.mock.calls[0][0].where).toMatchObject({
+      bookingId: { in: bookingIds },
       booking: { organizationId: ORG_ID },
+      category: { in: expect.arrayContaining(["RETURN"]) },
     });
+  });
+
+  it("does not count a log whose asset is no longer on the booking", async () => {
+    findManyMock.mockResolvedValue([
+      {
+        id: "removed-asset",
+        status: "ONGOING",
+        bookingAssets: [outSlice("c")],
+      },
+    ]);
+    logFindManyMock.mockResolvedValue([
+      { bookingId: "removed-asset", assetId: "gone" },
+    ]);
+
+    const ids = await getBookingIdsWithCheckinReceipt({
+      bookingIds: ["removed-asset"],
+      organizationId: ORG_ID,
+    });
+
+    expect(ids.size).toBe(0);
   });
 
   it("runs no query for an empty page", async () => {

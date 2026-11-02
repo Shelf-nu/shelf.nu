@@ -100,7 +100,7 @@ export function checkinReceiptUnavailableReason(
 export const BookingCheckinReceiptPDF = ({
   booking,
   available,
-  unavailableReason = "Nothing has been checked in yet.",
+  unavailableReason,
   assetOrder,
   timeStamp,
   trigger = "menu-item",
@@ -110,7 +110,7 @@ export const BookingCheckinReceiptPDF = ({
     name: Booking["name"];
   };
   available: boolean;
-  unavailableReason?: string;
+  unavailableReason: string;
   assetOrder?: PdfAssetOrder;
   timeStamp: number;
   trigger?: BookingActionTriggerVariant;

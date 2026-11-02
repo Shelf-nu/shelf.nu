@@ -301,7 +301,8 @@ export async function getBookingIdsWithItemsToCheckOut({
  *
  * Applies {@link isCheckinReceiptAvailable}, the rule the booking page uses,
  * to each booking's slice markers and to whether any disposition log exists
- * for it (the same `ConsumptionLog` source as the overview loader's
+ * for one of the booking's current quantity-tracked assets (the same
+ * `ConsumptionLog` source and asset restriction as the overview loader's
  * `hasDispositionedUnits`). Two bounded queries per page, whatever the row
  * count: the bookings with their markers, and the distinct booking ids that
  * have a disposition log.
@@ -332,7 +333,14 @@ export async function getBookingIdsWithCheckinReceipt({
         select: {
           id: true,
           status: true,
-          bookingAssets: { select: { checkedOutAt: true, checkedInAt: true } },
+          bookingAssets: {
+            select: {
+              assetId: true,
+              checkedOutAt: true,
+              checkedInAt: true,
+              asset: { select: { type: true } },
+            },
+          },
         },
       }),
       dbOrTx.consumptionLog.findMany({
@@ -342,19 +350,39 @@ export async function getBookingIdsWithCheckinReceipt({
           booking: { organizationId },
           category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
         },
-        select: { bookingId: true },
-        distinct: ["bookingId"],
+        select: { bookingId: true, assetId: true },
+        distinct: ["bookingId", "assetId"],
       }),
     ]);
 
-    const dispositioned = new Set(dispositionLogs.map((log) => log.bookingId));
+    // Like the booking page, a log counts only while its asset is still a
+    // quantity-tracked asset on the booking: one removed since leaves no
+    // disposition to state.
+    const loggedAssetsByBooking = new Map<string, Set<string>>();
+    for (const log of dispositionLogs) {
+      if (!log.bookingId) continue;
+      const assets = loggedAssetsByBooking.get(log.bookingId) ?? new Set();
+      assets.add(log.assetId);
+      loggedAssetsByBooking.set(log.bookingId, assets);
+    }
+    const hasDisposition = (booking: (typeof bookings)[number]) => {
+      const logged = loggedAssetsByBooking.get(booking.id);
+      return (
+        !!logged &&
+        booking.bookingAssets.some(
+          (ba) =>
+            ba.asset.type === AssetType.QUANTITY_TRACKED &&
+            logged.has(ba.assetId)
+        )
+      );
+    };
     return new Set(
       bookings
         .filter((booking) =>
           isCheckinReceiptAvailable({
             status: booking.status,
             bookingAssets: booking.bookingAssets,
-            hasDispositionedUnits: dispositioned.has(booking.id),
+            hasDispositionedUnits: hasDisposition(booking),
           })
         )
         .map((booking) => booking.id)
