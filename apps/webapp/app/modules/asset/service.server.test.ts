@@ -5050,6 +5050,7 @@ describe("bulkUpdateAssetModel", () => {
       locale: "en-AU",
       currency: "AUD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
