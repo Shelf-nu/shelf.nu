@@ -9656,7 +9656,7 @@ describe("revertBookingToDraft", () => {
 
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1" },
-      // Reverting also clears any earlier approval — a re-reserved request
+      // Reverting also clears any earlier approval: a re-reserved request
       // must be approved again.
       data: {
         status: BookingStatus.DRAFT,

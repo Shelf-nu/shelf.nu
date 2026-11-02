@@ -728,6 +728,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckoutPerm,
       canCheckinPerm,
       canExtendPerm,
+      canApprovePerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
@@ -778,13 +779,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         entity: PermissionEntity.booking,
         action: PermissionAction.extend,
       }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.approve,
+      }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
     // Approval gate (v1 companion support): while a reservation request is
-    // pending, no one can check out — the server-side service guard refuses
+    // pending, no one can check out: the server-side service guard refuses
     // regardless of app version; this flag keeps the app from drawing the
     // button. Derived with the same shared helper the web + service use.
     const isPendingApproval = isBookingPendingApproval({
@@ -808,6 +816,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckoutByState &&
       canCheckoutPerm &&
       !isPendingApproval;
+    // Who may decide the request: the same `booking:approve` answer the web
+    // Approve button and the `approve-booking` intent resolve, so the phone
+    // never draws (or withholds) a decision the server would answer otherwise.
+    const canApprove = isPendingApproval && canApprovePerm;
     const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
@@ -1069,9 +1081,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
-        // True while this reservation request awaits an admin's approval —
-        // the app renders a "Pending approval" badge and hides checkout.
+        // True while this reservation request awaits a decision: the app
+        // renders a "Pending approval" badge and hides checkout.
         isPendingApproval,
+        canApprove,
       },
       checkedInAssetIds,
       // Which assets this booking actually sent out, from the slice markers.

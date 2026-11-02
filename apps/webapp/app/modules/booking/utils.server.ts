@@ -966,8 +966,8 @@ export function assertBookingIsOpen({
  * Refuses a checkout of a reservation request that has not been approved.
  *
  * Same doctrine as {@link assertBookingIsOpen}: the guard lives in the
- * SERVICE layer so every entry point — web dialog, the three mobile checkout
- * routes, a stale tab, a direct POST — hits it, instead of relying on which
+ * SERVICE layer so every entry point (web dialog, the three mobile checkout
+ * routes, a stale tab, a direct POST) hits it, instead of relying on which
  * buttons a UI chose to render.
  *
  * @throws {ShelfError} 400 when the booking is pending approval
@@ -990,7 +990,7 @@ export function assertBookingIsApproved({
       cause: null,
       title: "Approval required",
       message:
-        "This booking request has not been approved yet. An admin needs to approve it before the equipment can be checked out.",
+        "This booking request has not been approved yet. An administrator or manager needs to approve it before the equipment can be checked out.",
       additionalData: { bookingId, status },
       label,
       status: 400,

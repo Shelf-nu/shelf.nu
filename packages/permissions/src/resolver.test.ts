@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { Role2PermissionMap } from "./matrix";
+import type { OrganizationRole } from "./roles";
 import { roleHasPermission } from "./resolver";
 import { PermissionAction, PermissionEntity } from "./vocabulary";
 
@@ -294,8 +295,24 @@ describe("MANAGER matrix row", () => {
       "cancel",
       "extend",
       "export",
+      "approve",
     ]) {
       assert.equal(can("booking", action), true, action);
+    }
+  });
+
+  test("decides booking requests; the requesting roles cannot", () => {
+    assert.equal(can("booking", "approve"), true);
+    for (const role of ["SELF_SERVICE", "BASE"]) {
+      assert.equal(
+        roleHasPermission({
+          roles: [role as OrganizationRole],
+          entity: "booking" as PermissionEntity,
+          action: "approve" as PermissionAction,
+        }),
+        false,
+        role
+      );
     }
   });
 

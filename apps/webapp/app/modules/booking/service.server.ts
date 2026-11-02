@@ -112,7 +112,10 @@ import {
   assertCanDuplicateBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import {
+  canUserRemoveBookingAssets,
+  isPendingApprovalStatusFilter,
+} from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -2781,7 +2784,7 @@ export async function reserveBooking({
           }),
         buildHeading: () =>
           needsApproval
-            ? `Booking request for ${custodian} — waiting for approval`
+            ? `Booking request for ${custodian}, waiting for approval`
             : `Booking reservation for ${custodian}`,
         hints,
         actor,
@@ -3688,7 +3691,7 @@ export async function checkoutBooking({
     });
 
     // Approval gate: a pending reservation request (org requires approval,
-    // no approvedAt) cannot be checked out from ANY entry point — web
+    // no approvedAt) cannot be checked out from ANY entry point: web
     // dialog, mobile route, stale tab or direct POST all funnel through here.
     const checkoutApprovalSettings = await db.bookingSettings.findUnique({
       where: { organizationId },
@@ -10835,7 +10838,7 @@ export async function partialCheckoutBooking({
         let bookingStatusChanged = false;
         if (bookingFound.status === BookingStatus.RESERVED) {
           // Approval gate: a pending reservation request cannot start its
-          // checkout — this is the mobile scanner's entry point into ONGOING,
+          // checkout. This is the mobile scanner's entry point into ONGOING,
           // so the guard must live here, not just in the web dialog.
           const partialApprovalGate = await tx.bookingSettings.findUnique({
             where: { organizationId },
@@ -12624,7 +12627,7 @@ export async function markExistingReservationsApproved({
  * Only meaningful in orgs with `requireBookingApproval` on: stamps
  * `approvedAt`/`approvedById` on a RESERVED booking whose approval is still
  * missing, writes an activity note, and emails the custodian (and other
- * configured recipients). Status does not change — RESERVED already holds
+ * configured recipients). Status does not change: RESERVED already holds
  * the assets; approval only unlocks checkout.
  *
  * @param args.id - Booking to approve; must be RESERVED and unapproved.
@@ -12741,7 +12744,7 @@ export async function approveBooking({
           include: BOOKING_INCLUDE_FOR_EMAIL,
         });
 
-        // Not a status transition — the booking stays RESERVED — so this is a
+        // Not a status transition (the booking stays RESERVED), so this is a
         // plain system note.
         await createSystemBookingNote(
           {
@@ -12759,7 +12762,7 @@ export async function approveBooking({
       })
       .catch((cause: unknown) => {
         // Only "no row matched" means someone else approved first. Anything
-        // else — a lost connection, a failed note write — is a real failure and
+        // else (a lost connection, a failed note write) is a real failure and
         // must surface as one rather than as a reassuring race message.
         if (
           cause &&
@@ -13749,6 +13752,15 @@ export type BookingsWhereParams = {
   organizationId: Organization["id"];
   search?: string | null;
   statuses?: Booking["status"][] | null;
+  /**
+   * Only reservation requests still waiting for a decision: RESERVED, never
+   * approved, in a workspace whose settings require approval. Pending is
+   * derived, not a status (see `isBookingPendingApproval`), so it is resolved
+   * here in SQL the way the status filter is, never by hiding rows later.
+   * With the workspace toggle off nothing is pending, so the list is empty.
+   * Takes precedence over `statuses`.
+   */
+  pendingApproval?: boolean | null;
   /** Bookings holding any of these assets. Set this or `kitId`, not both. */
   assetIds?: Asset["id"][] | null;
   /**
@@ -13833,6 +13845,7 @@ export function buildBookingsWhere(
     userId,
     search,
     statuses,
+    pendingApproval,
     custodianScope,
     custodianTeamMemberIds,
     writableBy,
@@ -13972,7 +13985,16 @@ export function buildBookingsWhere(
 
   where.AND = andClauses;
 
-  if (statuses?.length) {
+  if (pendingApproval) {
+    // The same derivation as `isBookingPendingApproval`, expressed in SQL:
+    // the workspace toggle is read in the query itself, so switching it off
+    // empties this list the moment the derivation stops applying.
+    where.status = BookingStatus.RESERVED;
+    where.approvedAt = null;
+    where.organization = {
+      bookingSettings: { requireBookingApproval: true },
+    };
+  } else if (statuses?.length) {
     where.status = {
       in: statuses,
     };
@@ -14078,6 +14100,11 @@ export function getBookingsListWhereParams({
   custodianScope: BookingsWhereParams["custodianScope"];
 }): BookingsWhereParams {
   const { search, status, teamMemberIds, tags } = getParamsValues(searchParams);
+  // "Pending approval" rides the status picker but is not a BookingStatus, so
+  // `getParamsValues` drops it; read the raw value for that one case.
+  const pendingApproval = isPendingApprovalStatusFilter(
+    searchParams.get("status")
+  );
 
   const filters = {
     organizationId,
@@ -14086,6 +14113,7 @@ export function getBookingsListWhereParams({
     custodianScope,
     custodianTeamMemberIds: teamMemberIds,
     tags,
+    pendingApproval,
   };
 
   switch (list.kind) {

@@ -90,7 +90,7 @@ vitest.mock("~/database/db.server", () => {
       // suite exercises. String literal — this factory is hoisted.
       $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
       // why: the first-scan approval gate reads the org's
-      // `requireBookingApproval` through the tx. Default off — the approval
+      // `requireBookingApproval` through the tx. Default off: the approval
       // feature's own tests cover the pending branch.
       bookingSettings: {
         findUnique: vitest
@@ -606,7 +606,7 @@ describe("partialCheckoutBooking", () => {
   it("refuses the first partial scan of a pending-approval reservation", async () => {
     expect.assertions(2);
 
-    // Org requires approval and this reservation was never approved — the
+    // Org requires approval and this reservation was never approved, so the
     // scanner is the mobile entry point into ONGOING, so the guard must fire
     // here, not just in the web checkout dialog.
     (

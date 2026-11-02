@@ -1533,9 +1533,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
-      // `approve` is in no role's matrix entry, so only ADMIN/OWNER pass via
-      // the resolver short-circuit — Base/Self service cannot approve their
-      // own requests.
+      // Owner/Administrator (resolver short-circuit) and Manager (matrix row)
+      // decide requests; Base/Self service cannot approve their own.
       "approve-booking": PermissionAction.approve,
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,

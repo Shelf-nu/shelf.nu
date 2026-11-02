@@ -56,12 +56,12 @@ const ITEMS: Array<ProcessItem> = [
 
 /**
  * Copy for the Admin Review step when the workspace requires explicit
- * approval: the reservation is a REQUEST until an admin approves it, and the
- * user is told by email either way — so the sidebar must describe that, not
+ * approval: the reservation is a REQUEST until staff approve it, and the
+ * user is told by email either way, so the sidebar must describe that, not
  * the softer review-at-will flow.
  */
 const ADMIN_REVIEW_WITH_APPROVAL =
-  "Your booking is a request until an admin approves it. You will receive an email when it is approved, or when it is sent back to draft for changes. It cannot be checked out before approval.";
+  "Your booking is a request until an administrator or manager approves it. You will receive an email when it is approved, or when it is sent back to draft for changes. It cannot be checked out before approval.";
 
 export default function BookingProcessSidebar({
   className,

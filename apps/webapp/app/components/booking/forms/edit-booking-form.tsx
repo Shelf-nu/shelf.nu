@@ -245,7 +245,7 @@ function EditBookingFormInner({
 
   /**
    * Approval: while a reservation request is pending, the checkout controls
-   * are replaced — admins get an Approve button (approving is the next
+   * are replaced: approvers get an Approve button (approving is the next
    * logical step, and the server refuses checkout anyway), and Base /
    * Self-service custodians see only the "Pending approval" badge in the
    * header. Derived client-side from the same helper the server guard uses.
@@ -537,7 +537,7 @@ function EditBookingFormInner({
                 size="sm"
               >
                 {/* When the workspace requires approval, a Self-service
-                    user's Reserve is a REQUEST too — the button must say so,
+                    user's Reserve is a REQUEST too, so the button must say so,
                     or the pending state that follows reads as a failure. */}
                 {reservationIsRequest ||
                 (bookingCustodianIsSelf(roleAccess) &&

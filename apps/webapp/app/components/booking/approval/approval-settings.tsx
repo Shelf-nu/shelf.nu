@@ -70,10 +70,10 @@ export function ApprovalSettings({
             subHeading={
               <div>
                 When enabled, bookings reserved by Base and Self service users
-                wait for an admin&apos;s approval before they can be checked
-                out. The requested items are still held for the booking period.
-                Enabling this does not affect already-reserved bookings — only
-                new requests need approval.
+                wait for approval by an administrator or manager before they can
+                be checked out. The requested items are still held for the
+                booking period. Enabling this does not affect already-reserved
+                bookings: only new requests need approval.
               </div>
             }
             className="border-b-0 pb-[10px] pt-0"

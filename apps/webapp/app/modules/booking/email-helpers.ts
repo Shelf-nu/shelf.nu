@@ -181,12 +181,12 @@ export const bookingRequestReceivedEmailContent = ({
 
   return baseBookingTextEmailContent({
     ...args,
-    emailContent: `Booking request for ${args.custodian} — waiting for admin approval. The requested items are held for the booking period, and an admin will review the request before check-out.${modelRequestsBlock}`,
+    emailContent: `Booking request for ${args.custodian}, waiting for approval. The requested items are held for the booking period, and an administrator or manager will review the request before check-out.${modelRequestsBlock}`,
   });
 };
 
 /**
- * Sent to the custodian (and other recipients) when an admin approves a
+ * Sent to the custodian (and other recipients) when an approver approves a
  * pending reservation request.
  */
 export const bookingApprovedEmailContent = (args: BasicEmailContentArgs) =>

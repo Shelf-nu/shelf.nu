@@ -1122,12 +1122,19 @@ export type BookingDetail = {
    */
   hasAlreadyBookedAssets?: boolean;
   /**
-   * True while this reservation request awaits an admin's approval
-   * (workspace has `requireBookingApproval` on and the booking has no
-   * `approvedAt`). Optional for rolling-deploy safety: an older server omits
-   * it, and absent must read as `false` so nothing is hidden.
+   * True while this reservation request awaits a decision (workspace has
+   * `requireBookingApproval` on and the booking has no `approvedAt`).
+   * Optional for rolling-deploy safety: an older server omits it, and absent
+   * must read as `false` so nothing is hidden.
    */
   isPendingApproval?: boolean;
+  /**
+   * Whether this caller may approve the pending request: the server's
+   * `booking:approve` answer (Owner, Administrator, Manager), false unless
+   * {@link isPendingApproval}. Display-only until the app grows an Approve
+   * action; absent on an older server.
+   */
+  canApprove?: boolean;
   /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview

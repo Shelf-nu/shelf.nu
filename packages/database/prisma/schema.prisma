@@ -1918,7 +1918,7 @@ model Booking {
   // Approval of the reservation request. Stamped at reserve time when the
   // org does not require approval for the reserving role (self-approved),
   // or by an explicit Approve action when it does. NULL on a RESERVED
-  // booking whose org requires approval = pending approval (derived — there
+  // booking whose org requires approval = pending approval (derived, there
   // is no PENDING status). Cleared when the booking is reverted to draft.
   approvedAt   DateTime? @db.Timestamptz(3)
   approvedBy   User?     @relation("bookingApprover", fields: [approvedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
@@ -1964,7 +1964,7 @@ model BookingSettings {
 
   // When true, bookings reserved by BASE / SELF_SERVICE users need explicit
   // approval before they can be checked out. Approval is data on the booking
-  // (approvedAt/approvedById), NOT a status — RESERVED stays the only held
+  // (approvedAt/approvedById), NOT a status: RESERVED stays the only held
   // state and conflict semantics are unchanged.
   requireBookingApproval Boolean @default(false)
 

@@ -72,9 +72,9 @@ export function BookingStatusBadge({
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-72">
               <p>
-                This booking request is waiting for an admin&apos;s approval.
-                The items are held for the booking period, but they cannot be
-                checked out until the request is approved.
+                This booking request is waiting for approval by an administrator
+                or manager. The items are held for the booking period, but they
+                cannot be checked out until the request is approved.
               </p>
             </TooltipContent>
           </Tooltip>

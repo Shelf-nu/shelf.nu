@@ -270,6 +270,8 @@ const LIST_URLS = [
   "status=ALL",
   "status=RESERVED",
   "status=reserved",
+  "status=PENDING_APPROVAL",
+  "s=camera&status=PENDING_APPROVAL&teamMember=tm-1",
   "teamMember=tm-1&teamMember=tm-2",
   "tag=t-1",
   "tag=untagged",
@@ -320,6 +322,47 @@ describe.each(LIST_PAGES)("select all matches the list on $name", (page) => {
           AND: [await listWhere(page, qs, access), MINE_TO_WRITE],
         });
       }
+    );
+  });
+});
+
+describe("the Pending approval filter", () => {
+  /** RESERVED, never approved, in a workspace that requires approval. */
+  const PENDING_APPROVAL = {
+    status: BookingStatus.RESERVED,
+    approvedAt: null,
+    organization: { bookingSettings: { requireBookingApproval: true } },
+  };
+
+  it("resolves to never-approved reservations in a workspace that requires approval, in SQL", async () => {
+    expect(
+      await listWhere(BOOKINGS_INDEX, "status=PENDING_APPROVAL", ADMIN)
+    ).toEqual({
+      organizationId: ORG,
+      AND: [ONLY_MY_DRAFTS],
+      ...PENDING_APPROVAL,
+    });
+  });
+
+  it("keeps the other filters, which can only narrow it", async () => {
+    expect(
+      await listWhere(
+        BOOKINGS_INDEX,
+        "status=PENDING_APPROVAL&teamMember=tm-1",
+        ADMIN
+      )
+    ).toEqual({
+      organizationId: ORG,
+      AND: [ONLY_MY_DRAFTS, { custodianTeamMemberId: { in: ["tm-1"] } }],
+      ...PENDING_APPROVAL,
+    });
+  });
+
+  it("is not a status: a lowercase value resolves the same way", async () => {
+    expect(
+      await listWhere(BOOKINGS_INDEX, "status=pending_approval", ADMIN)
+    ).toEqual(
+      await listWhere(BOOKINGS_INDEX, "status=PENDING_APPROVAL", ADMIN)
     );
   });
 });

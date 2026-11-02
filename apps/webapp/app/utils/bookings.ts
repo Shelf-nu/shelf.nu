@@ -8,12 +8,30 @@ import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
 /**
- * Whether a booking is a reservation request still waiting for an admin's
- * approval. Derived — there is no PENDING status: a RESERVED booking with no
+ * Whether a booking is a reservation request still waiting for an approver's
+ * approval. Derived, since there is no PENDING status: a RESERVED booking with no
  * `approvedAt` in an org that requires approval is pending. Client-safe; the
  * server-side checkout guard (`assertBookingIsApproved`) derives from this
  * same function so UI and service can never disagree.
  */
+/**
+ * The `?status=` value of the bookings list filter that lists reservation
+ * requests still waiting for a decision. Not a `BookingStatus`: pending is
+ * derived (see {@link isBookingPendingApproval}), so the list resolves it
+ * server-side into "RESERVED, never approved, in a workspace that requires
+ * approval" rather than matching a column.
+ */
+export const PENDING_APPROVAL_STATUS_FILTER = "PENDING_APPROVAL";
+
+/**
+ * @returns `true` when a raw `?status=` value asks for pending requests
+ */
+export function isPendingApprovalStatusFilter(
+  raw: string | null | undefined
+): boolean {
+  return raw?.toUpperCase() === PENDING_APPROVAL_STATUS_FILTER;
+}
+
 export function isBookingPendingApproval({
   status,
   approvedAt,

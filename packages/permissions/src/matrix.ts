@@ -319,6 +319,10 @@ export const Role2PermissionMap: {
       PermissionAction.cancel,
       PermissionAction.extend,
       PermissionAction.export,
+      // Reservation requests from Base / Self service members wait for a
+      // decision when the workspace requires approval; a Manager runs the
+      // bookings desk, so the decision is theirs as much as an Administrator's.
+      PermissionAction.approve,
     ],
     [PermissionEntity.bookingNote]: [
       PermissionAction.read,
