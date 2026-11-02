@@ -109,11 +109,14 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useStyles();
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  // The active server's advertised version. Every answer is a new object, so a
+  // re-check that returns the same version still re-runs the native attempt
+  // (one that found no store update may succeed later in the session).
+  const [answer, setAnswer] = useState<{ version: string | null }>({
+    version: null,
+  });
+  const latestVersion = answer.version;
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
-  // Bumped on every server answer, so a re-check that returns the same version
-  // can still retry a native attempt that found no store update.
-  const [answerCount, setAnswerCount] = useState(0);
   const [nativeOutcome, setNativeOutcome] =
     useState<NativeUpdateOutcome | null>(null);
   // Launch-wide: the native UI was shown or found unavailable, so nothing new
@@ -142,7 +145,7 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
         // Credential refreshes and renames keep the URL, and the answer.
         answeredBaseUrl = baseUrl;
         answeredAt = 0;
-        setLatestVersion(null);
+        setAnswer({ version: null });
       }
       void fetchLatestCompanionVersion().then((latest) => {
         // Drop an answer from a server the user has since left, and a failed
@@ -150,8 +153,7 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
         if (!mounted || latest === undefined) return;
         if (getActiveServer().baseUrl !== baseUrl) return;
         answeredAt = Date.now();
-        setLatestVersion(latest);
-        setAnswerCount((count) => count + 1);
+        setAnswer({ version: latest });
       });
     };
 
@@ -196,7 +198,7 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
         nativeInFlightRef.current = false;
       }
     })();
-  }, [latestVersion, answerCount]);
+  }, [answer]);
 
   const visible =
     isBannerFallbackActive(nativeOutcome) &&
