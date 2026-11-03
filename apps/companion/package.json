@@ -89,6 +89,13 @@
       "exclude": [
         "@react-native-async-storage/async-storage"
       ]
+    },
+    "autolinking": {
+      "exclude": [
+        "react-native-reanimated",
+        "react-native-worklets",
+        "react-native-gesture-handler"
+      ]
     }
   }
 }

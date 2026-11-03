@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Alert } from "react-native";
 import { usePreventRemove } from "expo-router";
 import { valuationFromInput } from "@/lib/asset-valuation";
@@ -79,8 +79,11 @@ export function useFormValidation({
 
   // Rules (held while saving, released after a save) in lib/edit-leave-guard.ts
   const guard = editLeaveGuard({ isDirty, didSave, isSubmitting });
+  // Set when the user discards, so the guard drops in the same render that
+  // `repeat` lifts it and replays the blocked navigation.
+  const [leaving, setLeaving] = useState(false);
 
-  usePreventRemove(guard.hold, ({ repeat }) => {
+  usePreventRemove(guard.hold && !leaving, ({ repeat }) => {
     if (!guard.prompt) return;
     Alert.alert(
       "Discard Changes?",
@@ -90,8 +93,10 @@ export function useFormValidation({
         {
           text: "Discard",
           style: "destructive",
-          // Lifts the guard and replays the blocked navigation
-          onPress: repeat,
+          onPress: () => {
+            setLeaving(true);
+            repeat();
+          },
         },
       ]
     );
