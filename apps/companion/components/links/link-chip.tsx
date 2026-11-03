@@ -2,16 +2,19 @@
  * LinkChip: a stored link shown as a tappable card row, the phone's version
  * of the web app's link chip. Kind icon, the main words (a title, a file name
  * or the kind), a muted line naming the kind and where it lives, and an
- * "opens elsewhere" glyph. Tapping opens the link through `openExternalLink`.
+ * "opens elsewhere" glyph. Tapping opens the link through `openLink` (the
+ * in-app browser for another website); a long-press shows Copy link and
+ * Share. At least 44pt tall, so it is the link's full-size touch target
+ * wherever it sits under text.
  *
  * @see {@link file://../../lib/custom-field-links.ts} `linkChip` builds the model
- * @see {@link file://../../lib/navigation.ts} `openExternalLink`
+ * @see {@link file://../../lib/link-actions.ts} `openLink`, `showLinkMenu`
  */
 import { memo, useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { LinkChipModel } from "@/lib/custom-field-links";
-import { openExternalLink } from "@/lib/navigation";
+import { openLink, showLinkMenu } from "@/lib/link-actions";
 import { borderRadius, fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
 import { useTheme } from "@/lib/theme-context";
@@ -32,14 +35,17 @@ export const LinkChip = memo(function LinkChip({
   const { colors } = useTheme();
   const styles = useStyles();
   const { url } = chip;
-  const open = useCallback(() => void openExternalLink(url), [url]);
+  const open = useCallback(() => void openLink(url), [url]);
+  const showMenu = useCallback(() => showLinkMenu(url), [url]);
 
   return (
     <Pressable
       onPress={open}
+      onLongPress={showMenu}
       style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
       accessibilityRole="link"
       accessibilityLabel={chip.label}
+      accessibilityHint="Opens the link. Long-press to copy or share it."
     >
       <View style={styles.iconBox}>
         <LinkIcon icon={chip.icon} size={18} color={colors.iconActive} />

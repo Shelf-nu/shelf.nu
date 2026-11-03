@@ -32,6 +32,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -76,7 +77,7 @@ export function EvidenceViewer({
   const renderNote = useCallback(
     (note: AuditEvidenceNote) => (
       <View key={note.id} style={styles.note}>
-        <Text style={styles.noteContent}>{note.content}</Text>
+        <LinkedParagraph text={note.content} style={styles.noteContent} />
         <Text style={styles.noteMeta}>
           {/* why: the account can be deleted while its evidence survives, so
               the author is nullable. Naming the gap beats an empty gap. */}

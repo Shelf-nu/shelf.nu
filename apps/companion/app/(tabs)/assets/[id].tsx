@@ -68,6 +68,7 @@ import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CodeSection } from "@/components/shared/code-section";
@@ -778,9 +779,12 @@ export default function AssetDetailScreen() {
             </View>
           )}
 
-          {asset.description && (
-            <Text style={styles.description}>{asset.description}</Text>
-          )}
+          {asset.description ? (
+            <LinkedParagraph
+              text={asset.description}
+              style={styles.description}
+            />
+          ) : null}
 
           {/* ── Quantity (QUANTITY_TRACKED assets only) ── */}
           {isQtyTracked && totalQuantityLabel && (

@@ -136,7 +136,7 @@ function parseDeepLink(url: string): ParsedLink {
  * @param qrId - the scanned or linked QR code id
  * @param origin - origin the link carried, when it had one
  */
-async function resolveQrAndNavigate(qrId: string, origin?: string) {
+export async function resolveQrAndNavigate(qrId: string, origin?: string) {
   if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
     void openShelfWebUrl(`${origin}/qr/${qrId}`);
     return;

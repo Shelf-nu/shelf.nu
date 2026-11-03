@@ -41,6 +41,7 @@ import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 import { CharacterCount } from "@/components/shared/character-count";
+import { LinkedText } from "@/components/links/linked-text";
 import { valuationFromInput } from "@/lib/asset-valuation";
 import {
   ASSET_DESCRIPTION_MAX_LENGTH,
@@ -495,7 +496,10 @@ export default function EditAssetScreen() {
                         <Text style={styles.required}> *</Text>
                       ) : null}
                       {cf.helpText ? (
-                        <Text style={styles.helpText}> — {cf.helpText}</Text>
+                        <LinkedText
+                          text={` - ${cf.helpText}`}
+                          style={styles.helpText}
+                        />
                       ) : null}
                     </Text>
                     <CustomFieldInput

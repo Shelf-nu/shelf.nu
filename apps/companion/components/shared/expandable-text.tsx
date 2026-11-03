@@ -7,7 +7,9 @@
  * less" clips it again. Use it for free text, where a few line breaks can hide
  * most of what was written; the `local-rules/no-clipped-user-text` lint rule
  * points clipped user text here. `label` names the text for screen readers,
- * so the toggle reads "Show more description" or "Show more note".
+ * so the toggle reads "Show more description" or "Show more note". Links in
+ * the text are tappable (`LinkedText`); pass `segments` when the caller has
+ * already read them.
  *
  * Overflow is measured on a hidden, unclipped copy laid out at the same width
  * and style. The clipped Text's own `onTextLayout` cannot answer it: Android
@@ -25,14 +27,18 @@
 import { memo, useCallback, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import type { StyleProp, TextLayoutEvent, TextStyle } from "react-native";
+import type { TextSegment } from "@shelf/links";
 import { fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
+import { LinkedText } from "../links/linked-text";
 
 /**
  * Text clipped to `numberOfLines`, expandable when it overflows.
  *
  * @param props - Component props.
  * @param props.text - The text to show.
+ * @param props.segments - The text's link runs, when already read; their
+ *   `text` joined must equal `text`, which the overflow is measured on.
  * @param props.label - What the text is, for screen readers ("description",
  *   "note"). The toggle is announced as "Show more <label>".
  * @param props.numberOfLines - Lines shown while collapsed.
@@ -43,12 +49,14 @@ import { createStyles } from "@/lib/create-styles";
  */
 export const ExpandableText = memo(function ExpandableText({
   text,
+  segments,
   label,
   numberOfLines,
   style,
   testID,
 }: {
   text: string;
+  segments?: readonly TextSegment[];
   label: string;
   numberOfLines: number;
   style?: StyleProp<TextStyle>;
@@ -65,13 +73,13 @@ export const ExpandableText = memo(function ExpandableText({
 
   return (
     <View>
-      <Text
+      <LinkedText
+        text={text}
+        segments={segments}
         style={style}
         numberOfLines={expanded ? undefined : numberOfLines}
         testID={testID}
-      >
-        {text}
-      </Text>
+      />
       {/* Reports again whenever its lines change: new text or a new width.
           Trailing whitespace is left out: Android can lay out a final line
           break as an empty extra line, which would ask for a toggle that

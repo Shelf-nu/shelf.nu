@@ -8,11 +8,20 @@
  * `value` or `name` attribute, so a tag the webapp adds later still reads as
  * its words instead of leaving a gap in the sentence.
  *
+ * `markdocToSegments` reads the same note as text and link runs: each `link`
+ * tag (a booking, kit, asset or person the note names) links to its page on
+ * the connected Shelf server, a Markdown `[label](https://...)` link reads as
+ * its label, and every other URL or bare domain in the text links as typed.
+ *
  * Pure (no React Native, Expo or `@/` imports) so it runs under Node's test
  * runner.
  *
  * @see {@link file://./../components/asset-detail/notes-section.tsx}
+ * @see {@link file://./text-links.ts} `findTextLinks`
  */
+
+import type { TextSegment } from "@shelf/links";
+import { findTextLinks } from "./text-links";
 
 /** How the caller formats the parts that depend on the user's preferences. */
 export interface NoteTextFormatters {
@@ -84,4 +93,83 @@ export function markdocToPlainText(
       .replace(/\s+/g, " ")
       .trim()
   );
+}
+
+/** A Markdoc `link` tag, with its attributes in group 1. */
+const LINK_TAG = /{%\s*link\s+([^%]*?)\/%}/g;
+
+/** A Markdown link to an http(s) URL: label in group 1, URL in group 2. */
+const MARKDOWN_LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi;
+
+/**
+ * Stand-in for a held link while the rest of the note is flattened: a
+ * private-use character pair around the link's index, which no note contains
+ * and no step of `markdocToPlainText` rewrites.
+ */
+const HELD_LINK = /\uE000(\d+)\uE001/g;
+
+/** One attribute of a Markdoc tag, or undefined when the tag has none. */
+function tagAttribute(attributes: string, name: string): string | undefined {
+  return new RegExp(`\\b${name}="([^"]*)"`).exec(attributes)?.[1];
+}
+
+/** `to` resolved against the Shelf server, when that makes an http(s) URL. */
+function absoluteUrl(to: string, shelfBaseUrl: string): string | null {
+  try {
+    const url = new URL(to, shelfBaseUrl);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads an activity note as text and link runs, for a note shown with
+ * tappable links.
+ *
+ * @param content - The note's stored Markdoc source
+ * @param format - Date and status formatting from the user's preferences
+ * @param shelfBaseUrl - Base URL of the connected Shelf server; a `link`
+ *   tag's relative `to` resolves against it
+ * @returns The runs in order; their `text` joined reads exactly as
+ *   `markdocToPlainText` does, except that a Markdown link reads as its label
+ */
+export function markdocToSegments(
+  content: string,
+  format: NoteTextFormatters,
+  shelfBaseUrl: string
+): readonly TextSegment[] {
+  const held: { text: string; url: string }[] = [];
+  const hold = (text: string, url: string) =>
+    `\uE000${held.push({ text, url }) - 1}\uE001`;
+
+  const withHeldLinks = content
+    .replace(LINK_TAG, (tag, attributes: string) => {
+      const text = tagAttribute(attributes, "text");
+      const to = tagAttribute(attributes, "to");
+      const url = to === undefined ? null : absoluteUrl(to, shelfBaseUrl);
+      if (text === undefined || url === null) return tag;
+      return hold(text.replace(/&quot;/g, '"'), url);
+    })
+    .replace(MARKDOWN_LINK, (_match, text: string, url: string) =>
+      hold(text.replace(/\*\*/g, ""), url)
+    );
+
+  const plain = markdocToPlainText(withHeldLinks, format);
+  const segments: TextSegment[] = [];
+  let cursor = 0;
+  for (const match of plain.matchAll(HELD_LINK)) {
+    if (match.index > cursor) {
+      segments.push(...findTextLinks(plain.slice(cursor, match.index)));
+    }
+    const link = held[Number(match[1])];
+    segments.push({ type: "link", text: link.text, url: link.url });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < plain.length) {
+    segments.push(...findTextLinks(plain.slice(cursor)));
+  }
+  return segments;
 }

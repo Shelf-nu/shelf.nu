@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { markdocToPlainText } from "./note-plain-text";
+import { markdocToPlainText, markdocToSegments } from "./note-plain-text";
 
 const format = {
   date: (iso: string) => `date(${iso})`,
@@ -73,5 +73,84 @@ test("known tags keep their own reading", () => {
       format
     ),
     "3 assets added on date(2026-10-30), now reserved"
+  );
+});
+
+const BASE = "https://app.shelf.nu";
+
+test("a link tag links to its page on the connected server", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      `${SAM} checked out via {% link to="/bookings/bk-1" text="Shoot &quot;B&quot;" /%}.`,
+      format,
+      BASE
+    ),
+    [
+      {
+        type: "link",
+        text: "Sam Lee",
+        url: "https://app.shelf.nu/settings/team/users/u-1",
+      },
+      { type: "text", text: " checked out via " },
+      {
+        type: "link",
+        text: 'Shoot "B"',
+        url: "https://app.shelf.nu/bookings/bk-1",
+      },
+      { type: "text", text: "." },
+    ]
+  );
+});
+
+test("a typed note links its URLs and bare domains", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      "Manual: https://canon.com/r5.pdf, spares at adorama.com",
+      format,
+      BASE
+    ),
+    [
+      { type: "text", text: "Manual: " },
+      {
+        type: "link",
+        text: "https://canon.com/r5.pdf",
+        url: "https://canon.com/r5.pdf",
+      },
+      { type: "text", text: ", spares at " },
+      { type: "link", text: "adorama.com", url: "https://adorama.com" },
+    ]
+  );
+});
+
+test("a Markdown link reads as its label", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      "See [the **manual**](https://x.com/m.pdf) first",
+      format,
+      BASE
+    ),
+    [
+      { type: "text", text: "See " },
+      { type: "link", text: "the manual", url: "https://x.com/m.pdf" },
+      { type: "text", text: " first" },
+    ]
+  );
+});
+
+test("the segments read like the plain text when nothing is a link", () => {
+  const content = `Status {% booking_status status="RESERVED" /%} on {% date value="2026-01-02" /%}`;
+  assert.deepEqual(markdocToSegments(content, format, BASE), [
+    { type: "text", text: markdocToPlainText(content, format) },
+  ]);
+});
+
+test("a link tag without a usable target reads as its text", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      '{% link to="javascript:x" text="Kit A" /%} moved',
+      format,
+      BASE
+    ),
+    [{ type: "text", text: "Kit A moved" }]
   );
 });

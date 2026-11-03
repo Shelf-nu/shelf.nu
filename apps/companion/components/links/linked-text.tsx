@@ -1,53 +1,88 @@
 /**
- * LinkedText: text with every http(s) URL in it tappable, the rest left as
- * typed. "Manual: https://x.com/a (rev B)" links only the URL.
+ * LinkedText: text with every web link in it tappable, the rest left as
+ * typed. "Manual: https://x.com/a (rev B)" links only the URL, and a bare
+ * domain such as "canon.com/r5.pdf" links too.
  *
- * URLs are found by `segmentText` from `@shelf/links`, the same detector the
- * web app links custom field values with. Markdown is not interpreted: a
- * `[label](url)` reads as typed, with its URL tappable.
+ * Links are found by `findTextLinks` (`lib/text-links.ts`), which builds on
+ * `segmentText` from `@shelf/links`, the detector the web app links custom
+ * field values with. A caller that already has the runs (an activity note,
+ * whose Markdoc `link` tags name Shelf pages) passes `segments` instead.
  *
+ * A tap opens the link through `openLink`: a Shelf screen the app has, or
+ * the in-app browser. A long-press shows Copy link and Share, except in
+ * selectable text, where it selects text as everywhere else. Link runs are
+ * Shelf orange (`primaryText`, AA on every surface) and keep the text's font
+ * metrics, so a clipped copy measured without links wraps identically.
+ *
+ * @see {@link file://./linked-paragraph.tsx} text plus link chips
  * @see {@link file://./text-with-links.tsx}
- * @see {@link file://../../lib/navigation.ts} `openExternalLink`
+ * @see {@link file://../../lib/link-actions.ts} `openLink`, `showLinkMenu`
  */
 import { memo, useMemo } from "react";
 import { Text } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
-import { segmentText } from "@shelf/links";
-import { openExternalLink } from "@/lib/navigation";
+import type { TextSegment } from "@shelf/links";
+import { openLink, showLinkMenu } from "@/lib/link-actions";
+import { findTextLinks } from "@/lib/text-links";
 import { createStyles } from "@/lib/create-styles";
 
 /**
- * One `Text` with each URL run as a nested, underlined, pressable `Text`.
+ * One `Text` with each link run as a nested, pressable `Text`.
  *
  * @param props - Component props.
- * @param props.text - The value to show.
- * @param props.style - Style of the whole text; link runs add color and an
- *   underline on top of it.
+ * @param props.text - The value to show. Ignored when `segments` is given.
+ * @param props.segments - The text and link runs to show, when the caller
+ *   has already read them.
+ * @param props.style - Style of the whole text; link runs add the link
+ *   color on top of it.
  * @param props.numberOfLines - Lines shown before the text is clipped.
+ * @param props.selectable - Whether the text can be selected and copied.
+ * @param props.testID - Test id of the outer text.
  * @returns The text element.
  */
 export const LinkedText = memo(function LinkedText({
   text,
+  segments,
   style,
   numberOfLines,
+  selectable,
+  testID,
 }: {
-  text: string;
+  text?: string;
+  segments?: readonly TextSegment[];
   style?: StyleProp<TextStyle>;
   numberOfLines?: number;
+  selectable?: boolean;
+  testID?: string;
 }) {
   const styles = useStyles();
-  const segments = useMemo(() => segmentText(text), [text]);
+  const runs = useMemo(
+    () => segments ?? findTextLinks(text ?? ""),
+    [segments, text]
+  );
 
   return (
-    <Text style={style} numberOfLines={numberOfLines}>
-      {segments.map((segment, index) =>
+    <Text
+      style={style}
+      numberOfLines={numberOfLines}
+      selectable={selectable}
+      testID={testID}
+    >
+      {runs.map((segment, index) =>
         segment.type === "link" ? (
           <Text
-            // why: segments come from one string and never reorder
+            // why: runs come from one string and never reorder
             key={index}
             style={styles.link}
-            onPress={() => void openExternalLink(segment.url)}
+            onPress={() => void openLink(segment.url)}
+            // why: in selectable text a long-press starts the system's text
+            // selection, and a second menu on top of its Copy callout is
+            // noise; the link's chip (LinkedParagraph) still has the menu.
+            onLongPress={
+              selectable ? undefined : () => showLinkMenu(segment.url)
+            }
             accessibilityRole="link"
+            accessibilityHint={selectable ? undefined : LINK_HINT}
           >
             {segment.text}
           </Text>
@@ -59,9 +94,9 @@ export const LinkedText = memo(function LinkedText({
   );
 });
 
+/** What a link does beyond its role, for screen readers. */
+const LINK_HINT = "Opens the link. Long-press to copy or share it.";
+
 const useStyles = createStyles((colors) => ({
-  link: {
-    color: colors.primaryText,
-    textDecorationLine: "underline",
-  },
+  link: { color: colors.primaryText },
 }));

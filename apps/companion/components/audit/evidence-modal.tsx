@@ -33,6 +33,7 @@ import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import type { ScannedItem } from "@/hooks/use-audit-init";
+import { LinkedText } from "@/components/links/linked-text";
 
 // Lazy-load native image modules below all imports (keeps import/first happy)
 // to avoid a crash when the native module isn't present in the current build.
@@ -506,7 +507,10 @@ export function EvidenceModal({
 
                 {existing.notes.map((note) => (
                   <View key={note.id} style={styles.existingNote}>
-                    <Text style={styles.existingNoteText}>{note.content}</Text>
+                    <LinkedText
+                      text={note.content}
+                      style={styles.existingNoteText}
+                    />
                     <Text style={styles.existingNoteMeta}>
                       {note.authorName ?? "Unknown"}
                     </Text>

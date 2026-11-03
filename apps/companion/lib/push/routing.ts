@@ -100,9 +100,15 @@ export const NOT_A_DETAIL: Record<
 
 /**
  * The native destination of a matched resource path, or null when a push
- * must not open it.
+ * (or a tapped Shelf link, see `../open-link.ts`) must not open it.
+ *
+ * @param path - The resource and id `matchResourcePath` read.
+ * @returns The tab and nested route to open, or null.
  */
-function toDestination({ resource, id }: ResourcePath): PushDestination | null {
+export function toDestination({
+  resource,
+  id,
+}: ResourcePath): PushDestination | null {
   switch (resource) {
     case "bookings":
       if (id && NOT_A_DETAIL.bookings.includes(id)) return null;

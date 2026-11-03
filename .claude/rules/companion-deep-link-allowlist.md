@@ -24,8 +24,10 @@ they MUST stay in sync. Touch one → check the other three.
 | 4   | `apps/companion/lib/deep-links.ts`                                    | a `case "locations":` in `parseDeepLink` + `navigateToLink` (custom-scheme links)      |
 
 **The claimed host** (`app.shelf.nu`) is also written in
-`apps/companion/lib/open-link.ts` (`CLAIMED_WEB_HOST`), which keeps a stored
-link to a claimed host in the in-app browser. Change it with `app.json`.
+`apps/companion/lib/open-link.ts` (`CLAIMED_WEB_HOST`), which sends a tapped
+link on a claimed host to the app screen its path names (through
+`matchResourcePath`) or else the in-app browser, never `Linking.openURL`.
+Change it with `app.json`.
 
 **Division of labour:** HTTPS universal links are routed natively by
 expo-router via the `+native-intent.ts` rewrite (#3). The JS hook (#4) only
