@@ -30,6 +30,30 @@ describe("LazyLoadBoundary", () => {
     expect(await screen.findByText("Calendar")).toBeInTheDocument();
   });
 
+  it("shows the failure message when the loaded component crashes", async () => {
+    // why: React logs every error a boundary catches; the crash is expected.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    function Crashes(): never {
+      throw new Error("render crash");
+    }
+    const Loaded = lazy(() => Promise.resolve({ default: Crashes }));
+
+    render(
+      <LazyLoadBoundary loading={<p>Loading</p>} failed={<p>Failed</p>}>
+        <Loaded />
+      </LazyLoadBoundary>
+    );
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "render crash" }),
+      { tags: { source: "lazy-load-boundary" } }
+    );
+    consoleError.mockRestore();
+  });
+
   it("shows the failure message when the chunk does not load", async () => {
     // why: React logs every error a boundary catches; the failure is expected.
     const consoleError = vi

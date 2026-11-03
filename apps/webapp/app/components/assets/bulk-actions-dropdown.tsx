@@ -80,6 +80,7 @@ function BulkDownloadQrPlaceholder({
       <Dialog
         open={open}
         onClose={onClose}
+        ariaLabel="Download QR codes"
         title={
           <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
             <DownloadIcon />
@@ -292,7 +293,10 @@ function ConditionalDropdown() {
               open={isBulkDownloadQrOpen}
               onClose={closeBulkDownloadQr}
             >
-              <Spinner />
+              <div role="status" className="flex flex-col items-center gap-2">
+                <Spinner />
+                <span className="sr-only">Loading the QR code download</span>
+              </div>
             </BulkDownloadQrPlaceholder>
           }
           failed={
