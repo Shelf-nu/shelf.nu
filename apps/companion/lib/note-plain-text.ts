@@ -10,8 +10,9 @@
  *
  * `markdocToSegments` reads the same note as text and link runs: each `link`
  * tag (a booking, kit, asset or person the note names) links to its page on
- * the connected Shelf server, a Markdown `[label](https://...)` link reads as
- * its label, and every other URL or bare domain in the text links as typed.
+ * the connected Shelf server, a value someone typed stays text, a comment's
+ * Markdown `[label](https://...)` link reads as its label, and every other
+ * URL or bare domain in the text links as typed.
  *
  * Pure (no React Native, Expo or `@/` imports) so it runs under Node's test
  * runner.
@@ -98,74 +99,120 @@ export function markdocToPlainText(
 /** A Markdoc `link` tag, with its attributes in group 1. */
 const LINK_TAG = /{%\s*link\s+([^%]*?)\/%}/g;
 
-/** A Markdown link to an http(s) URL: label in group 1, URL in group 2. */
-const MARKDOWN_LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi;
+/** A Markdoc `name` tag, with its attributes in group 1. */
+const NAME_TAG = /{%\s*name\s+([^%]*?)\/%}/g;
 
 /**
- * Stand-in for a held link while the rest of the note is flattened: a
- * private-use character pair around the link's index, which no note contains
+ * A Markdown link to an http(s) URL: label in group 1, URL in group 2. The
+ * URL may hold balanced parentheses (`.../Mercury_(planet)`).
+ */
+const MARKDOWN_LINK =
+  /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/gi;
+
+/**
+ * Stand-in for a held run while the rest of the note is flattened: a
+ * private-use character pair around the run's index, which no note contains
  * and no step of `markdocToPlainText` rewrites.
  */
-const HELD_LINK = /\uE000(\d+)\uE001/g;
+const HELD_RUN = /\uE000(\d+)\uE001/g;
 
 /** One attribute of a Markdoc tag, or undefined when the tag has none. */
 function tagAttribute(attributes: string, name: string): string | undefined {
   return new RegExp(`\\b${name}="([^"]*)"`).exec(attributes)?.[1];
 }
 
-/** `to` resolved against the Shelf server, when that makes an http(s) URL. */
-function absoluteUrl(to: string, shelfBaseUrl: string): string | null {
+/** Text from a tag attribute or a Markdown label, cleaned like a note. */
+function cleanRunText(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * `to` resolved against the Shelf server, when that makes a page on that
+ * server. A `link` tag names a Shelf page, so a `to` on any other host
+ * opens nothing.
+ */
+function shelfPageUrl(to: string, shelfBaseUrl: string): string | null {
   try {
-    const url = new URL(to, shelfBaseUrl);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.href
-      : null;
+    const base = new URL(shelfBaseUrl);
+    const url = new URL(to, base);
+    return url.origin === base.origin ? url.href : null;
   } catch {
     return null;
   }
+}
+
+/** How much of a note may link outside Shelf. */
+export interface NoteLinkOptions {
+  /**
+   * True for a comment a person wrote, whose Markdown `[label](url)` links
+   * read as their label. False for a system note, where any Markdown in it
+   * came from a value someone typed (a name, a custom field value) and must
+   * not become a link that hides where it goes. The web app draws the same
+   * line (`allowExternalLinks` on comments only).
+   */
+  allowExternalLinks: boolean;
 }
 
 /**
  * Reads an activity note as text and link runs, for a note shown with
  * tappable links.
  *
+ * - A `link` tag links to its page on the connected Shelf server.
+ * - A `name` tag (a value someone typed) is plain text, unless the note's
+ *   writer marked it `chips=true` (a custom field value), whose URLs link
+ *   as typed, as on the web.
+ * - A Markdown link reads as its label and links, in comments only.
+ * - Every other URL or bare domain in the text links as typed.
+ *
  * @param content - The note's stored Markdoc source
  * @param format - Date and status formatting from the user's preferences
  * @param shelfBaseUrl - Base URL of the connected Shelf server; a `link`
  *   tag's relative `to` resolves against it
+ * @param options - Whether the note may link outside Shelf
  * @returns The runs in order; their `text` joined reads exactly as
  *   `markdocToPlainText` does, except that a Markdown link reads as its label
  */
 export function markdocToSegments(
   content: string,
   format: NoteTextFormatters,
-  shelfBaseUrl: string
+  shelfBaseUrl: string,
+  options: NoteLinkOptions
 ): readonly TextSegment[] {
-  const held: { text: string; url: string }[] = [];
-  const hold = (text: string, url: string) =>
-    `\uE000${held.push({ text, url }) - 1}\uE001`;
+  const held: TextSegment[] = [];
+  const hold = (run: TextSegment) => `\uE000${held.push(run) - 1}\uE001`;
 
-  const withHeldLinks = content
+  let source = content
     .replace(LINK_TAG, (tag, attributes: string) => {
       const text = tagAttribute(attributes, "text");
       const to = tagAttribute(attributes, "to");
-      const url = to === undefined ? null : absoluteUrl(to, shelfBaseUrl);
+      const url = to === undefined ? null : shelfPageUrl(to, shelfBaseUrl);
       if (text === undefined || url === null) return tag;
-      return hold(text.replace(/&quot;/g, '"'), url);
+      return hold({ type: "link", text: cleanRunText(text), url });
     })
-    .replace(MARKDOWN_LINK, (_match, text: string, url: string) =>
-      hold(text.replace(/\*\*/g, ""), url)
+    .replace(NAME_TAG, (tag, attributes: string) => {
+      const text = tagAttribute(attributes, "text");
+      if (text === undefined || /\bchips=true\b/.test(attributes)) return tag;
+      return hold({ type: "text", text: cleanRunText(text) });
+    });
+  if (options.allowExternalLinks) {
+    source = source.replace(
+      MARKDOWN_LINK,
+      (_match, text: string, url: string) =>
+        hold({ type: "link", text: cleanRunText(text), url })
     );
+  }
 
-  const plain = markdocToPlainText(withHeldLinks, format);
+  const plain = markdocToPlainText(source, format);
   const segments: TextSegment[] = [];
   let cursor = 0;
-  for (const match of plain.matchAll(HELD_LINK)) {
+  for (const match of plain.matchAll(HELD_RUN)) {
     if (match.index > cursor) {
       segments.push(...findTextLinks(plain.slice(cursor, match.index)));
     }
-    const link = held[Number(match[1])];
-    segments.push({ type: "link", text: link.text, url: link.url });
+    segments.push(held[Number(match[1])]);
     cursor = match.index + match[0].length;
   }
   if (cursor < plain.length) {

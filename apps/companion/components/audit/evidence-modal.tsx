@@ -510,6 +510,7 @@ export function EvidenceModal({
                     <LinkedText
                       text={note.content}
                       style={styles.existingNoteText}
+                      inModal
                     />
                     <Text style={styles.existingNoteMeta}>
                       {note.authorName ?? "Unknown"}

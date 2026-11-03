@@ -61,7 +61,8 @@ breaks web login / password reset / invites for everyone with the app.
 ❌ **Never `Linking.openURL` a claimed path.** A web-fallback to a claimed URL
 (e.g. `https://app.shelf.nu/qr/...`) is re-intercepted by Android App Links and
 re-opens the app → infinite loop. Use `openShelfWebUrl()` (`lib/navigation.ts`,
-in-app browser) instead — today only the QR not-resolvable fallback needs it.
+in-app browser) instead. Every web page the app opens goes through it,
+tapped links included (`openLink` in `lib/link-actions.ts`).
 
 ✅ Allowlist mirrors a real native screen, is path-scoped (trailing slash so
 index pages aren't claimed), has a `+native-intent` mapping for cold starts,

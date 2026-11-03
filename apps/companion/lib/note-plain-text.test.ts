@@ -77,13 +77,16 @@ test("known tags keep their own reading", () => {
 });
 
 const BASE = "https://app.shelf.nu";
+const COMMENT = { allowExternalLinks: true };
+const SYSTEM = { allowExternalLinks: false };
 
 test("a link tag links to its page on the connected server", () => {
   assert.deepEqual(
     markdocToSegments(
       `${SAM} checked out via {% link to="/bookings/bk-1" text="Shoot &quot;B&quot;" /%}.`,
       format,
-      BASE
+      BASE,
+      SYSTEM
     ),
     [
       {
@@ -102,12 +105,13 @@ test("a link tag links to its page on the connected server", () => {
   );
 });
 
-test("a typed note links its URLs and bare domains", () => {
+test("a typed comment links its URLs and bare domains", () => {
   assert.deepEqual(
     markdocToSegments(
       "Manual: https://canon.com/r5.pdf, spares at adorama.com",
       format,
-      BASE
+      BASE,
+      COMMENT
     ),
     [
       { type: "text", text: "Manual: " },
@@ -122,12 +126,13 @@ test("a typed note links its URLs and bare domains", () => {
   );
 });
 
-test("a Markdown link reads as its label", () => {
+test("a comment's Markdown link reads as its cleaned label", () => {
   assert.deepEqual(
     markdocToSegments(
-      "See [the **manual**](https://x.com/m.pdf) first",
+      "See [the  **manual**](https://x.com/m.pdf) first",
       format,
-      BASE
+      BASE,
+      COMMENT
     ),
     [
       { type: "text", text: "See " },
@@ -137,9 +142,99 @@ test("a Markdown link reads as its label", () => {
   );
 });
 
+test("a Markdown link URL may hold balanced parentheses", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      "[Mercury](https://en.wikipedia.org/wiki/Mercury_(planet)) is hot",
+      format,
+      BASE,
+      COMMENT
+    ),
+    [
+      {
+        type: "link",
+        text: "Mercury",
+        url: "https://en.wikipedia.org/wiki/Mercury_(planet)",
+      },
+      { type: "text", text: " is hot" },
+    ]
+  );
+});
+
+test("a system note never hides an outside link behind a typed label", () => {
+  // A name someone typed is shown as text, Markdown and all, as on the web.
+  const segments = markdocToSegments(
+    `${SAM} set custodian to {% name text="[Verify your account](https://evil.example)" /%}.`,
+    format,
+    BASE,
+    SYSTEM
+  );
+  assert.equal(
+    segments.some(
+      (segment) =>
+        segment.type === "link" && segment.url.includes("evil.example")
+    ),
+    false
+  );
+  assert.equal(
+    segments.map((segment) => segment.text).join(""),
+    "Sam Lee set custodian to [Verify your account](https://evil.example)."
+  );
+});
+
+test("a typed name that looks like a domain stays text", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      'Renamed to {% name text="Shoot at canon.com" /%}',
+      format,
+      BASE,
+      SYSTEM
+    ),
+    [
+      { type: "text", text: "Renamed to " },
+      { type: "text", text: "Shoot at canon.com" },
+    ]
+  );
+});
+
+test("a value marked chips=true links its URL, as on the web", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      `${SAM} set {% name text="Manual" /%} to {% name text="https://example.com/m.pdf" chips=true /%}.`,
+      format,
+      BASE,
+      SYSTEM
+    ).filter((segment) => segment.type === "link"),
+    [
+      {
+        type: "link",
+        text: "Sam Lee",
+        url: "https://app.shelf.nu/settings/team/users/u-1",
+      },
+      {
+        type: "link",
+        text: "https://example.com/m.pdf",
+        url: "https://example.com/m.pdf",
+      },
+    ]
+  );
+});
+
+test("a link tag pointing off the Shelf server reads as its text", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      '{% link to="https://evil.example/login" text="Kit A" /%} moved',
+      format,
+      BASE,
+      SYSTEM
+    ),
+    [{ type: "text", text: "Kit A moved" }]
+  );
+});
+
 test("the segments read like the plain text when nothing is a link", () => {
   const content = `Status {% booking_status status="RESERVED" /%} on {% date value="2026-01-02" /%}`;
-  assert.deepEqual(markdocToSegments(content, format, BASE), [
+  assert.deepEqual(markdocToSegments(content, format, BASE, SYSTEM), [
     { type: "text", text: markdocToPlainText(content, format) },
   ]);
 });
@@ -147,9 +242,10 @@ test("the segments read like the plain text when nothing is a link", () => {
 test("a link tag without a usable target reads as its text", () => {
   assert.deepEqual(
     markdocToSegments(
-      '{% link to="javascript:x" text="Kit A" /%} moved',
+      '{% link to="javascript:x" text="Kit   **A**" /%} moved',
       format,
-      BASE
+      BASE,
+      SYSTEM
     ),
     [{ type: "text", text: "Kit A moved" }]
   );

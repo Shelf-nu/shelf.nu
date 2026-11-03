@@ -22,10 +22,12 @@
 import { segmentText, type TextSegment } from "@shelf/links";
 
 /**
- * Top-level domains a bare domain may end in. Kept to common generic and
- * country domains; ones that double as file extensions people type next to
- * a file name (`.md`, `.py`, `.sh`, `.rs`, `.pl`, `.zip`, `.mov`) and the
- * ambiguous `.in` are left out, so those still need `https://` to link.
+ * Top-level domains a bare domain may end in, typed in lowercase. Kept to
+ * common generic and country domains. Left out, so they still need
+ * `https://` to link: ones that double as file extensions (`.ai`, `.app`,
+ * `.md`, `.py`, `.sh`, `.rs`, `.pl`, `.zip`, `.mov`) and ones that are
+ * English words a missed space after a full stop turns into a domain
+ * (`.at`, `.be`, `.in`, `.is`, `.it`, `.me`, `.no`, `.us`).
  */
 const BARE_DOMAIN_TLDS = new Set([
   "com",
@@ -38,15 +40,11 @@ const BARE_DOMAIN_TLDS = new Set([
   "io",
   "co",
   "nu",
-  "app",
   "dev",
-  "ai",
-  "me",
   "info",
   "biz",
   "tv",
   "uk",
-  "us",
   "ca",
   "au",
   "nz",
@@ -54,18 +52,13 @@ const BARE_DOMAIN_TLDS = new Set([
   "de",
   "fr",
   "nl",
-  "be",
   "lu",
   "ch",
-  "at",
   "es",
   "pt",
-  "it",
   "se",
-  "no",
   "dk",
   "fi",
-  "is",
   "eu",
   "bg",
   "ro",
@@ -99,6 +92,12 @@ const BARE_DOMAIN =
 const BLOCKED_BEFORE = /[a-z0-9@._/:\\-]/i;
 
 /**
+ * A match followed by one of these is part of a longer word or an e-mail
+ * address: "lens.de-fogged", "acme.com@example.org".
+ */
+const BLOCKED_AFTER = /[a-z0-9@_-]/i;
+
+/**
  * The link `segmentText` reads in `https://<candidate>`: the candidate
  * without its trailing sentence punctuation or unbalanced closing bracket,
  * as a parsed link. Null when nothing linkable is left.
@@ -120,11 +119,11 @@ function segmentBareDomains(text: string): TextSegment[] {
     const start = match.index;
     const before = start > 0 ? text[start - 1] : "";
     if (before && BLOCKED_BEFORE.test(before)) continue;
-    const tld = match[1].toLowerCase();
+    // A capitalised "domain" is a missed space: "damaged.No charger".
+    const tld = match[1];
     if (!BARE_DOMAIN_TLDS.has(tld)) continue;
-    // "info@acme.com" is an e-mail address, not a link to "acme.com" ...
-    // and neither is "acme.com" in "acme.com@example.org".
-    if (text[start + match[0].length] === "@") continue;
+    const after = text[start + match[0].length] ?? "";
+    if (after && BLOCKED_AFTER.test(after)) continue;
 
     const link = readBareDomain(match[0]);
     // The TLD must survive trimming: "acme.com." ends at "acme.com".
@@ -162,14 +161,4 @@ export function findTextLinks(text: string): readonly TextSegment[] {
   return segmentText(text).flatMap((segment) =>
     segment.type === "text" ? segmentBareDomains(segment.text) : [segment]
   );
-}
-
-/**
- * Whether text has at least one link in it, explicit or a bare domain.
- *
- * @param text - Text a person typed.
- * @returns True when {@link findTextLinks} finds a link run.
- */
-export function hasTextLink(text: string): boolean {
-  return findTextLinks(text).some((segment) => segment.type === "link");
 }

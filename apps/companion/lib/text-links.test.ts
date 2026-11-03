@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { findTextLinks, hasTextLink } from "./text-links";
+import { findTextLinks } from "./text-links";
 
 /** The link runs as `[typed text, url]` pairs, in order. */
 function links(text: string) {
@@ -69,6 +69,8 @@ test("file names, versions and abbreviations stay text", () => {
     "the script deploy.sh",
     "built with Node.js",
     "photos.zip attached",
+    "the logo.ai file",
+    "built in Xcode.app",
   ]) {
     assert.deepEqual(links(text), [], text);
   }
@@ -76,6 +78,23 @@ test("file names, versions and abbreviations stay text", () => {
 
 test("an e-mail address is not read as a domain", () => {
   assert.deepEqual(links("mail lab@acme.com or john.smith@acme.co.uk"), []);
+  // The local part ends in a listed domain, so only the "@" after it tells.
+  assert.deepEqual(links("write to sales.co@acme.com"), []);
+});
+
+test("a missed space after a full stop does not make a link", () => {
+  for (const text of [
+    "Lens returned damaged.No charger",
+    "Fixed it.It works now",
+    "Checked twice.Com port is fine",
+    "send it.no rush",
+  ]) {
+    assert.deepEqual(links(text), [], text);
+  }
+});
+
+test("a domain followed by more word characters is not linked", () => {
+  assert.deepEqual(links("lens.de-fogged and rig.com_backup"), []);
 });
 
 test("a domain glued to another word or path is not linked", () => {
@@ -95,10 +114,4 @@ test("a port and query on a bare domain survive", () => {
       "https://intranet.acme.com:8443/wiki?page=2",
     ],
   ]);
-});
-
-test("hasTextLink answers for explicit and bare links only", () => {
-  assert.equal(hasTextLink("call 555-0100"), false);
-  assert.equal(hasTextLink("shelf.nu"), true);
-  assert.equal(hasTextLink("http://localhost:3000/assets/1"), true);
 });

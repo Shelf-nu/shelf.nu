@@ -77,7 +77,11 @@ export function EvidenceViewer({
   const renderNote = useCallback(
     (note: AuditEvidenceNote) => (
       <View key={note.id} style={styles.note}>
-        <LinkedParagraph text={note.content} style={styles.noteContent} />
+        <LinkedParagraph
+          text={note.content}
+          style={styles.noteContent}
+          inModal
+        />
         <Text style={styles.noteMeta}>
           {/* why: the account can be deleted while its evidence survives, so
               the author is nullable. Naming the gap beats an empty gap. */}

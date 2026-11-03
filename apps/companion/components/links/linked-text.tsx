@@ -11,8 +11,9 @@
  * A tap opens the link through `openLink`: a Shelf screen the app has, or
  * the in-app browser. A long-press shows Copy link and Share, except in
  * selectable text, where it selects text as everywhere else. Link runs are
- * Shelf orange (`primaryText`, AA on every surface) and keep the text's font
- * metrics, so a clipped copy measured without links wraps identically.
+ * Shelf orange (`primaryText`, AA on every surface) and underlined, and keep
+ * the text's font metrics, so a clipped copy measured without links wraps
+ * identically.
  *
  * @see {@link file://./linked-paragraph.tsx} text plus link chips
  * @see {@link file://./text-with-links.tsx}
@@ -21,8 +22,8 @@
 import { memo, useMemo } from "react";
 import { Text } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
-import type { TextSegment } from "@shelf/links";
-import { openLink, showLinkMenu } from "@/lib/link-actions";
+import { segmentText, type TextSegment } from "@shelf/links";
+import { LINK_HINT, useLinkHandlers } from "@/lib/link-actions";
 import { findTextLinks } from "@/lib/text-links";
 import { createStyles } from "@/lib/create-styles";
 
@@ -37,6 +38,10 @@ import { createStyles } from "@/lib/create-styles";
  *   color on top of it.
  * @param props.numberOfLines - Lines shown before the text is clipped.
  * @param props.selectable - Whether the text can be selected and copied.
+ * @param props.bareDomains - Whether a bare domain links too. False for
+ *   custom field values, which link only http(s) URLs, as on the web.
+ * @param props.inModal - True inside a React Native `Modal`, where a Shelf
+ *   screen link opens its web page instead.
  * @param props.testID - Test id of the outer text.
  * @returns The text element.
  */
@@ -46,6 +51,8 @@ export const LinkedText = memo(function LinkedText({
   style,
   numberOfLines,
   selectable,
+  bareDomains = true,
+  inModal,
   testID,
 }: {
   text?: string;
@@ -53,12 +60,17 @@ export const LinkedText = memo(function LinkedText({
   style?: StyleProp<TextStyle>;
   numberOfLines?: number;
   selectable?: boolean;
+  bareDomains?: boolean;
+  inModal?: boolean;
   testID?: string;
 }) {
   const styles = useStyles();
+  const { open, showMenu } = useLinkHandlers({ inModal });
   const runs = useMemo(
-    () => segments ?? findTextLinks(text ?? ""),
-    [segments, text]
+    () =>
+      segments ??
+      (bareDomains ? findTextLinks(text ?? "") : segmentText(text ?? "")),
+    [segments, text, bareDomains]
   );
 
   return (
@@ -74,13 +86,11 @@ export const LinkedText = memo(function LinkedText({
             // why: runs come from one string and never reorder
             key={index}
             style={styles.link}
-            onPress={() => void openLink(segment.url)}
+            onPress={() => open(segment.url)}
             // why: in selectable text a long-press starts the system's text
             // selection, and a second menu on top of its Copy callout is
             // noise; the link's chip (LinkedParagraph) still has the menu.
-            onLongPress={
-              selectable ? undefined : () => showLinkMenu(segment.url)
-            }
+            onLongPress={selectable ? undefined : () => showMenu(segment.url)}
             accessibilityRole="link"
             accessibilityHint={selectable ? undefined : LINK_HINT}
           >
@@ -94,9 +104,8 @@ export const LinkedText = memo(function LinkedText({
   );
 });
 
-/** What a link does beyond its role, for screen readers. */
-const LINK_HINT = "Opens the link. Long-press to copy or share it.";
-
 const useStyles = createStyles((colors) => ({
-  link: { color: colors.primaryText },
+  // why: underlined as well as orange, so a link is not told apart by
+  // colour alone (WCAG 1.4.1); an underline leaves the line metrics alone.
+  link: { color: colors.primaryText, textDecorationLine: "underline" },
 }));

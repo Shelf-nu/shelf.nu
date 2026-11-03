@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { router, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
+import { openPastStaleLock } from "./browser-lock";
 import { lightColors } from "./theme-colors";
 
 /**
@@ -84,17 +85,16 @@ const IN_APP_BROWSER_OPTIONS: WebBrowser.WebBrowserOpenOptions = {
  * web fallbacks loop-safe on both platforms.
  *
  * @param url - the absolute http(s) URL to open
+ * A session iOS never released (see `./browser-lock.ts`) is released and
+ * the page opened once more, so a link never silently opens nothing.
+ *
  * @returns the `WebBrowser.openBrowserAsync` result, once the browser is
  *   dismissed
  */
-export async function openShelfWebUrl(url: string) {
-  const result = await WebBrowser.openBrowserAsync(url, IN_APP_BROWSER_OPTIONS);
-  if (result.type !== WebBrowser.WebBrowserResultType.LOCKED) return result;
-  // why: on iOS the module answers "locked" while it holds a session, and a
-  // session whose presentation never completed (a tap while a share sheet or
-  // action sheet is still animating away) is never released, so every later
-  // link would silently open nothing. Releasing it and retrying once opens
-  // the page; a browser that really is showing just stays on top.
-  await WebBrowser.dismissBrowser().catch(() => undefined);
-  return WebBrowser.openBrowserAsync(url, IN_APP_BROWSER_OPTIONS);
+export function openShelfWebUrl(url: string) {
+  return openPastStaleLock(
+    () => WebBrowser.openBrowserAsync(url, IN_APP_BROWSER_OPTIONS),
+    () => WebBrowser.dismissBrowser(),
+    WebBrowser.WebBrowserResultType.LOCKED
+  );
 }

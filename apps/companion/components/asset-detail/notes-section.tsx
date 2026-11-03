@@ -143,9 +143,12 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
           // wording change in @shelf/labels reaches this preview too.
           status: formatStatus,
         },
-        getActiveServer().baseUrl
+        getActiveServer().baseUrl,
+        // A comment's Markdown links read as their labels; a system note's
+        // typed values never hide an outside link (as on the web).
+        { allowExternalLinks: !isUpdate }
       ),
-    [note.content, prefs]
+    [note.content, prefs, isUpdate]
   );
 
   return (

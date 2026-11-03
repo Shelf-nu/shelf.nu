@@ -92,11 +92,12 @@ test("text around a link is not a chip", () => {
   assert.equal(linkChip("see the binder", undefined), null);
 });
 
-test("a value needs link room when a URL or bare domain appears in it", () => {
+test("a value needs link room when a URL appears anywhere in it", () => {
   assert.equal(containsLink("https://x.com/a"), true);
   assert.equal(containsLink("Manual: https://x.com/a (rev B)"), true);
   assert.equal(containsLink("Shelf 3, bin 12"), false);
-  assert.equal(containsLink("www.example.com/manual.pdf"), true);
-  assert.equal(containsLink("see manual.pdf in the binder"), false);
+  // A bare domain links in notes and descriptions, not in custom fields,
+  // which link exactly as on the web.
+  assert.equal(containsLink("www.example.com/manual.pdf"), false);
   assert.equal(containsLink("javascript:alert(1)"), false);
 });

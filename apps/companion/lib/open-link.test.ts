@@ -106,11 +106,55 @@ test("the connected self-hosted server counts as Shelf, port included", () => {
   );
 });
 
+test("a cloud link seen while self-hosted stays in the browser, untouched", () => {
+  // Its id belongs to Shelf's cloud, not to the server the app is reading.
+  // Linking.openURL of a claimed path would be intercepted and reopen the app.
+  assert.deepEqual(
+    resolveLinkOpening(
+      "https://app.shelf.nu/assets/as_1/overview",
+      SELF_HOSTED
+    ),
+    {
+      opener: "browser",
+      url: "https://app.shelf.nu/assets/as_1/overview",
+    }
+  );
+});
+
 test("a claimed host typed in capitals is still Shelf", () => {
   assert.equal(
     resolveLinkOpening("https://App.Shelf.NU/qr/qr_1", SELF_HOSTED)?.opener,
     "qr"
   );
+  assert.equal(
+    resolveLinkOpening("https://App.Shelf.NU/kits/kt_1", CLOUD)?.opener,
+    "screen"
+  );
+});
+
+test("a link naming another workspace stays on the web", () => {
+  const url = "https://app.shelf.nu/assets/as_9?orgId=org_B";
+  assert.deepEqual(resolveLinkOpening(url, CLOUD, { currentOrgId: "org_A" }), {
+    opener: "browser",
+    url,
+  });
+  assert.equal(
+    resolveLinkOpening(url, CLOUD, { currentOrgId: "org_B" })?.opener,
+    "screen"
+  );
+});
+
+test("inside a modal, app screens open as web pages", () => {
+  for (const url of [
+    "https://app.shelf.nu/assets/as_1",
+    "https://app.shelf.nu/qr/qr_1",
+  ]) {
+    assert.deepEqual(
+      resolveLinkOpening(url, CLOUD, { screens: false }),
+      { opener: "browser", url },
+      url
+    );
+  }
 });
 
 test("Shelf pages the app has no screen for open untouched in the browser", () => {

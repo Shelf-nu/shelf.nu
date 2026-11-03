@@ -1,7 +1,7 @@
 /**
  * How custom field values with web links read on the asset screen.
  *
- * Every rule about the URL itself (provider, kind, chip words)
+ * Every rule about the URL itself (detection, provider, kind, chip words)
  * comes from `@shelf/links`, the same package the web app reads links with.
  * This module only applies it to what the mobile asset detail payload
  * carries: a value that is exactly one link becomes a chip, titled from
@@ -18,11 +18,11 @@
 import {
   linkChipText,
   parseLink,
+  segmentText,
   type ChipText,
   type LinkIconId,
   type LinkTitle,
 } from "@shelf/links";
-import { hasTextLink } from "./text-links";
 
 /** Everything a link chip draws: its words, its icon and the URL it opens. */
 export type LinkChipModel = ChipText & {
@@ -55,13 +55,13 @@ export function linkChip(
 }
 
 /**
- * Whether a text value has at least one link in it (an http(s) URL or a
- * bare domain such as `canon.com/r5.pdf`), so its row needs room for a chip
- * or tappable links.
+ * Whether a text value has at least one http(s) URL in it, so its row needs
+ * room for a chip or tappable links. Bare domains do not count: a custom
+ * field value links exactly as it does on the web.
  *
  * @param value - The stored text value.
  * @returns True when the value holds a link anywhere.
  */
 export function containsLink(value: string): boolean {
-  return hasTextLink(value);
+  return segmentText(value).some((segment) => segment.type === "link");
 }

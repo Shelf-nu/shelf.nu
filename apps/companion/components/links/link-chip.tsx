@@ -14,7 +14,7 @@ import { memo, useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { LinkChipModel } from "@/lib/custom-field-links";
-import { openLink, showLinkMenu } from "@/lib/link-actions";
+import { LINK_HINT, useLinkHandlers } from "@/lib/link-actions";
 import { borderRadius, fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
 import { useTheme } from "@/lib/theme-context";
@@ -25,18 +25,22 @@ import { LinkIcon } from "./link-icon";
  *
  * @param props - Component props.
  * @param props.chip - What to draw and open, from `linkChip`.
+ * @param props.inModal - True inside a React Native `Modal`.
  * @returns The pressable chip.
  */
 export const LinkChip = memo(function LinkChip({
   chip,
+  inModal,
 }: {
   chip: LinkChipModel;
+  inModal?: boolean;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const { url } = chip;
-  const open = useCallback(() => void openLink(url), [url]);
-  const showMenu = useCallback(() => showLinkMenu(url), [url]);
+  const links = useLinkHandlers({ inModal });
+  const open = useCallback(() => links.open(url), [links, url]);
+  const showMenu = useCallback(() => links.showMenu(url), [links, url]);
 
   return (
     <Pressable
@@ -45,7 +49,7 @@ export const LinkChip = memo(function LinkChip({
       style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
       accessibilityRole="link"
       accessibilityLabel={chip.label}
-      accessibilityHint="Opens the link. Long-press to copy or share it."
+      accessibilityHint={LINK_HINT}
     >
       <View style={styles.iconBox}>
         <LinkIcon icon={chip.icon} size={18} color={colors.iconActive} />

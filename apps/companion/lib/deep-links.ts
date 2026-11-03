@@ -133,10 +133,20 @@ function parseDeepLink(url: string): ParsedLink {
  * active server would report "not found" for a code that is perfectly valid
  * where it came from.
  *
+ * A deep link the OS delivers is a camera scan of a label, so it records the
+ * scan like the in-app scanner does. A QR link tapped in text someone wrote
+ * is not a scan: it passes `recordScan: false` and resolves through the
+ * non-recording lookup, so tapping it leaves no scan, location or note.
+ *
  * @param qrId - the scanned or linked QR code id
  * @param origin - origin the link carried, when it had one
+ * @param options - `recordScan: false` for a link tapped in the app
  */
-export async function resolveQrAndNavigate(qrId: string, origin?: string) {
+export async function resolveQrAndNavigate(
+  qrId: string,
+  origin?: string,
+  { recordScan = true }: { recordScan?: boolean } = {}
+) {
   if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
     void openShelfWebUrl(`${origin}/qr/${qrId}`);
     return;
@@ -149,8 +159,9 @@ export async function resolveQrAndNavigate(qrId: string, origin?: string) {
     // getScanCoordinates never shows a permission prompt (only the scanner
     // primes permission), returns within ~1.5s, and null simply means the
     // scan is recorded without coordinates.
-    const coordinates = await getScanCoordinates();
-    const { data, error } = await api.qr(qrId, undefined, coordinates);
+    const { data, error } = recordScan
+      ? await api.qr(qrId, undefined, await getScanCoordinates())
+      : await api.getScannedItem(qrId);
     if (!error && data?.qr?.asset?.id) {
       pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
       return;

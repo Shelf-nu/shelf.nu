@@ -9,7 +9,7 @@
  * behind a link reads as a document, not a raw URL. A text that is nothing
  * but one such link shows only its chip. Links to Shelf itself (a booking a
  * note names, `app.shelf.nu/assets/...`) stay inline: they open an app
- * screen, not a document.
+ * screen, not a document. The rule lives in `lib/paragraph-links.ts`.
  *
  * Use this for any user text that can hold a link. Single-line custom field
  * values use `TextWithLinks`, which titles a chip from the stored page title.
@@ -22,8 +22,7 @@ import { memo, useMemo } from "react";
 import { View } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
 import type { TextSegment } from "@shelf/links";
-import { linkChip, type LinkChipModel } from "@/lib/custom-field-links";
-import { isExternalLink } from "@/lib/open-link";
+import { paragraphLinks } from "@/lib/paragraph-links";
 import { getActiveServer } from "@/lib/server/active-server";
 import { findTextLinks } from "@/lib/text-links";
 import { spacing } from "@/lib/constants";
@@ -32,40 +31,21 @@ import { ExpandableText } from "../shared/expandable-text";
 import { LinkChip } from "./link-chip";
 import { LinkedText } from "./linked-text";
 
-/** Chips under one text at most; a longer list of links stays inline only. */
-const MAX_CHIPS = 6;
-
-/**
- * The chips for the links to other websites in some runs, one per URL, in
- * the order they appear.
- */
-function externalChips(runs: readonly TextSegment[]): LinkChipModel[] {
-  const serverUrl = getActiveServer().baseUrl;
-  const seen = new Set<string>();
-  const chips: LinkChipModel[] = [];
-  for (const run of runs) {
-    if (run.type !== "link" || seen.has(run.url)) continue;
-    if (!isExternalLink(run.url, serverUrl)) continue;
-    seen.add(run.url);
-    const chip = linkChip(run.url, undefined);
-    if (chip) chips.push(chip);
-  }
-  return chips.slice(0, MAX_CHIPS);
-}
-
 /**
  * Text with tappable links and a chip per outside link.
  *
  * @param props - Component props.
- * @param props.text - The text to show. Ignored when `segments` is given,
- *   except as the measured copy of an expandable text.
+ * @param props.text - The text to show. Ignored when `segments` is given.
  * @param props.segments - The text and link runs, when the caller has read
  *   them (an activity note).
  * @param props.style - Text style.
  * @param props.expandable - Clip the text to `numberOfLines` with a "Show
  *   more" toggle; `label` names the text for screen readers.
  * @param props.selectable - Whether the text can be selected and copied.
- * @param props.testID - Test id of the text.
+ * @param props.inModal - True inside a React Native `Modal`, where a Shelf
+ *   screen link opens its web page instead.
+ * @param props.testID - Test id of the text (of the chip's wrapper when the
+ *   chip stands in for the text).
  * @returns The text and its chips.
  */
 export const LinkedParagraph = memo(function LinkedParagraph({
@@ -74,6 +54,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   style,
   expandable,
   selectable,
+  inModal,
   testID,
 }: {
   text: string;
@@ -81,20 +62,18 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   style?: StyleProp<TextStyle>;
   expandable?: { label: string; numberOfLines: number };
   selectable?: boolean;
+  inModal?: boolean;
   testID?: string;
 }) {
   const styles = useStyles();
   const runs = useMemo(() => segments ?? findTextLinks(text), [segments, text]);
-  const chips = useMemo(() => externalChips(runs), [runs]);
-
-  // Nothing but one outside link: its chip says it all.
-  const visible = runs.filter(
-    (run) => run.type === "link" || run.text.trim() !== ""
+  const { chips, onlyChip } = useMemo(
+    () => paragraphLinks(runs, getActiveServer().baseUrl),
+    [runs]
   );
-  const onlyChip = visible.length === 1 && chips.length === 1;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID={onlyChip ? testID : undefined}>
       {onlyChip ? null : expandable ? (
         <ExpandableText
           text={runs.map((run) => run.text).join("")}
@@ -102,6 +81,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
           label={expandable.label}
           numberOfLines={expandable.numberOfLines}
           style={style}
+          inModal={inModal}
           testID={testID}
         />
       ) : (
@@ -109,13 +89,14 @@ export const LinkedParagraph = memo(function LinkedParagraph({
           segments={runs}
           style={style}
           selectable={selectable}
+          inModal={inModal}
           testID={testID}
         />
       )}
       {chips.length > 0 ? (
         <View style={styles.chips}>
           {chips.map((chip) => (
-            <LinkChip key={chip.url} chip={chip} />
+            <LinkChip key={chip.url} chip={chip} inModal={inModal} />
           ))}
         </View>
       ) : null}
