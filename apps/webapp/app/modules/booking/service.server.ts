@@ -47,6 +47,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
   kitsWithoutActiveAssetsRefusal,
 } from "@shelf/labels";
+import type { RolePolicy } from "@shelf/permissions";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
@@ -132,6 +133,10 @@ import {
 import {
   canUserRemoveBookingAssets,
   isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  BOOKING_APPROVAL_ENABLED_WHERE,
 } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -2251,6 +2256,7 @@ export async function reserveBooking({
   organizationId,
   hints,
   alertsOrgOnReservation,
+  actorApprovalSetting,
   tags,
   userId,
   seesAllBookings = false,
@@ -2274,6 +2280,12 @@ export async function reserveBooking({
      * caller's `notifications.reservationAlertsAdmins`.
      */
     alertsOrgOnReservation: boolean;
+    /**
+     * The reserving member's `access.policy.bookings.approvalSetting`. Decides
+     * whether this reservation lands as a request: Base and Self service each
+     * have their own approval switch, everyone else reserves approved.
+     */
+    actorApprovalSetting?: RolePolicy["bookings"]["approvalSetting"] | null;
     tags: { id: string }[];
     userId?: User["id"];
     /**
@@ -2446,8 +2458,8 @@ export async function reserveBooking({
     }
 
     /**
-     * Approval: when the org requires it, a reservation made by a BASE /
-     * SELF_SERVICE user goes into RESERVED as a pending request
+     * Approval: when the workspace requires it for the actor's role, a
+     * reservation made by a BASE / SELF_SERVICE user goes into RESERVED as a pending request
      * (`approvedAt: null`) and an admin must approve it before checkout.
      * Every other reservation is self-approved in the same write, so
      * `approvedAt` is populated on all post-feature reservations and the
@@ -2457,16 +2469,14 @@ export async function reserveBooking({
      */
     const approvalSettings = await db.bookingSettings.findUnique({
       where: { organizationId },
-      select: { requireBookingApproval: true },
+      select: BOOKING_APPROVAL_SWITCHES_SELECT,
     });
-    // Scope = the same members whose reservation triggers the workspace
-    // broadcast (`notifications.reservationAlertsAdmins`: BASE and SELF_SERVICE
-    // in `@shelf/permissions` policies). One flag, one story: the people whose
-    // reservations staff get told about are the people whose reservations
-    // wait for staff.
-    const needsApproval = Boolean(
-      approvalSettings?.requireBookingApproval && alertsOrgOnReservation
-    );
+    // Each requesting role has its own switch: Base (on by default) and Self
+    // service (off by default). Everyone else reserves approved.
+    const needsApproval = roleReservesAsRequest({
+      approvalSetting: actorApprovalSetting,
+      settings: approvalSettings,
+    });
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.RESERVED,
@@ -3382,9 +3392,9 @@ async function checkoutBookingWritesWithinTx(
   // fulfilModelRequestsAndCheckout), no matter what the pre-tx reads said.
   const approvalGate = await tx.bookingSettings.findUnique({
     where: { organizationId },
-    select: { requireBookingApproval: true },
+    select: BOOKING_APPROVAL_SWITCHES_SELECT,
   });
-  if (approvalGate?.requireBookingApproval) {
+  if (isBookingApprovalEnabled(approvalGate)) {
     const approvalRow = await tx.booking.findUnique({
       where: { id: bookingId, organizationId },
       select: { status: true, approvedAt: true },
@@ -4363,14 +4373,15 @@ export async function checkoutBooking({
     // under the row lock, inside the transaction).
     const checkoutApprovalSettings = await db.bookingSettings.findUnique({
       where: { organizationId },
-      select: { requireBookingApproval: true },
+      select: BOOKING_APPROVAL_SWITCHES_SELECT,
     });
     if (
       isBookingPendingApproval({
         status: bookingFound.status,
         approvedAt: bookingFound.approvedAt,
-        requireBookingApproval:
-          checkoutApprovalSettings?.requireBookingApproval ?? false,
+        requireBookingApproval: isBookingApprovalEnabled(
+          checkoutApprovalSettings
+        ),
       }) &&
       !(await approvalOnCheckout({ actorUserId: userId, organizationId }))
     ) {
@@ -11681,7 +11692,7 @@ export async function partialCheckoutBooking({
             const [partialApprovalGate, approvalRow] = await Promise.all([
               tx.bookingSettings.findUnique({
                 where: { organizationId },
-                select: { requireBookingApproval: true },
+                select: BOOKING_APPROVAL_SWITCHES_SELECT,
               }),
               tx.booking.findUnique({
                 where: { id, organizationId },
@@ -11707,7 +11718,7 @@ export async function partialCheckoutBooking({
                 status: approvalRow.status,
                 approvedAt: approvalRow.approvedAt ?? null,
                 requireBookingApproval:
-                  partialApprovalGate?.requireBookingApproval ?? false,
+                  isBookingApprovalEnabled(partialApprovalGate),
               })
             ) {
               // An approver's first scan approves the request in the same
@@ -13466,7 +13477,7 @@ export async function cancelBooking({
 /**
  * Approves a pending booking reservation request.
  *
- * Only meaningful in orgs with `requireBookingApproval` on: stamps
+ * Only meaningful in orgs with approval on for a role: stamps
  * `approvedAt`/`approvedById` on a RESERVED booking whose approval is still
  * missing, writes an activity note, and emails the custodian (and other
  * configured recipients). Status does not change: RESERVED already holds
@@ -13492,7 +13503,7 @@ export async function approveBooking({
     const [settings, bookingFound] = await Promise.all([
       db.bookingSettings.findUnique({
         where: { organizationId },
-        select: { requireBookingApproval: true },
+        select: BOOKING_APPROVAL_SWITCHES_SELECT,
       }),
       db.booking
         .findUniqueOrThrow({
@@ -13510,7 +13521,7 @@ export async function approveBooking({
         }),
     ]);
 
-    if (!settings?.requireBookingApproval) {
+    if (!isBookingApprovalEnabled(settings)) {
       throw new ShelfError({
         cause: null,
         label,
@@ -15115,7 +15126,7 @@ export function buildBookingsWhere(
     where.status = BookingStatus.RESERVED;
     where.approvedAt = null;
     where.organization = {
-      bookingSettings: { requireBookingApproval: true },
+      bookingSettings: BOOKING_APPROVAL_ENABLED_WHERE,
     };
   }
 
@@ -16622,12 +16633,13 @@ export async function getBookingsForCalendar(params: {
       }),
       db.bookingSettings.findUnique({
         where: { organizationId },
-        select: { requireBookingApproval: true },
+        select: BOOKING_APPROVAL_SWITCHES_SELECT,
       }),
     ]);
 
-    const requireBookingApproval =
-      calendarApprovalSettings?.requireBookingApproval ?? false;
+    const requireBookingApproval = isBookingApprovalEnabled(
+      calendarApprovalSettings
+    );
 
     const events = bookings
       .filter((booking) => booking.from && booking.to)

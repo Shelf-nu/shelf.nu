@@ -46,7 +46,11 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import type { CountableModelRequest } from "~/utils/booking-model-requests";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
-import { canWriteBooking, isBookingPendingApproval } from "~/utils/bookings";
+import {
+  canWriteBooking,
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -229,7 +233,7 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
     isPendingApproval: isBookingPendingApproval({
       status: booking.status,
       approvedAt: booking.approvedAt ?? null,
-      requireBookingApproval: bookingSettings.requireBookingApproval,
+      requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
     }),
     canApprove: userHasPermission({
       roles,

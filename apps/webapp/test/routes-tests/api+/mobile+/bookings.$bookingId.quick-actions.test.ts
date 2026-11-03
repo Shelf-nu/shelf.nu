@@ -214,7 +214,8 @@ async function approvalFlagsFor({
 
 describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
   const requiresApproval = createBookingSettings({
-    requireBookingApproval: true,
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: true,
   });
   // One individual asset on the row: check-out needs at least one item.
   const pendingRow = {
@@ -290,7 +291,10 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
   it("reads nothing as pending while the workspace does not require approval", async () => {
     const flags = await approvalFlagsFor({
       roles: [OrganizationRoles.MANAGER],
-      settings: switches(),
+      settings: createBookingSettings({
+        requireApprovalForBase: false,
+        requireApprovalForSelfService: false,
+      }),
       row: pendingRow,
       approver: true,
     });

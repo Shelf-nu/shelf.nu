@@ -9,6 +9,7 @@ import {
   PENDING_APPROVAL_BOOKINGS_FILTER,
 } from "~/modules/booking/constants";
 import type { RouteHandleWithName } from "~/modules/types";
+import { isBookingApprovalEnabled } from "~/utils/bookings";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -25,7 +26,7 @@ import When from "../when/when";
  * approved) only when the workspace requires approval, placed right after
  * RESERVED, the status it narrows. See `bookingStatusFilterWhereParams`.
  *
- * @param requireBookingApproval - The workspace's approval toggle
+ * @param requireBookingApproval - Approval is on for at least one role
  * @returns The picker's items, in display order
  */
 function statusItemsFor(
@@ -60,7 +61,7 @@ export default function BookingFilters({
 }: BookingFiltersProps) {
   const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
-  const { requireBookingApproval } = useBookingSettings();
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
   const matches = useMatches();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];

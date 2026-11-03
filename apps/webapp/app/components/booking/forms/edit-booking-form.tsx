@@ -30,6 +30,8 @@ import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import {
   bookingCustodianIsSelf,
   isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
 } from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
@@ -247,7 +249,8 @@ function EditBookingFormInner({
    * Self-service custodians see only the "Pending approval" badge in the
    * header. Derived client-side from the same helper the server guard uses.
    */
-  const isPendingApprovalRequired = useBookingSettings().requireBookingApproval;
+  const approvalSwitches = useBookingSettings();
+  const isPendingApprovalRequired = isBookingApprovalEnabled(approvalSwitches);
   const isPendingApproval = isBookingPendingApproval({
     status,
     approvedAt: loaderBooking.approvedAt ?? null,
@@ -573,8 +576,10 @@ function EditBookingFormInner({
                     user's Reserve is a REQUEST too, so the button must say so,
                     or the pending state that follows reads as a failure. */}
                 {reservationIsRequest ||
-                (bookingCustodianIsSelf(roleAccess) &&
-                  isPendingApprovalRequired)
+                roleReservesAsRequest({
+                  approvalSetting: roleAccess.policy.bookings.approvalSetting,
+                  settings: approvalSwitches,
+                })
                   ? "Request reservation"
                   : "Reserve"}
               </Button>

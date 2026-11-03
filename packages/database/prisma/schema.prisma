@@ -2049,11 +2049,16 @@ model BookingSettings {
   // calendar and don't check out/in). Reuses autoArchiveDays for the delay.
   autoArchiveExpiredReservations Boolean @default(false)
 
-  // When true, bookings reserved by BASE / SELF_SERVICE users need explicit
-  // approval before they can be checked out. Approval is data on the booking
-  // (approvedAt/approvedById), NOT a status: RESERVED stays the only held
-  // state and conflict semantics are unchanged.
-  requireBookingApproval Boolean @default(false)
+  // Booking approval, per requesting role. When on for a role, a reservation
+  // made by a member of that role lands as a request (approvedAt null) that an
+  // owner, administrator or manager approves before the gear goes out.
+  // Approval is data on the booking (approvedAt/approvedById), NOT a status:
+  // RESERVED stays the only held state and conflict semantics are unchanged.
+  // Base is on by default: a Base member never checks out themself, so the
+  // hand-over was always the approval and this only makes it visible.
+  // Self service is off by default: that role is trusted to serve itself.
+  requireApprovalForBase        Boolean @default(true)
+  requireApprovalForSelfService Boolean @default(false)
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in

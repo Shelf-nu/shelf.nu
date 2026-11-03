@@ -69,7 +69,11 @@ import {
   canWriteBooking,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
-import { isBookingPendingApproval } from "~/utils/bookings";
+import {
+  isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+} from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -800,7 +804,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isPendingApproval = isBookingPendingApproval({
       status: booking.status,
       approvedAt: booking.approvedAt,
-      requireBookingApproval: bookingSettings.requireBookingApproval ?? false,
+      requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
     });
     // Seeing a booking (the workspace see-toggles) never grants writing it:
     // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
@@ -829,8 +833,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // its success message as a request instead of a done reservation.
     const reservationNeedsApproval =
       booking.status === BookingStatus.DRAFT &&
-      (bookingSettings.requireBookingApproval ?? false) &&
-      access.policy.notifications.reservationAlertsAdmins;
+      roleReservesAsRequest({
+        approvalSetting: access.policy.bookings.approvalSetting,
+        settings: bookingSettings,
+      });
     const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.

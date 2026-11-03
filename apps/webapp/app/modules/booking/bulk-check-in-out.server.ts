@@ -44,7 +44,10 @@ import {
 } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
-import { isBookingPendingApproval } from "~/utils/bookings";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -406,7 +409,7 @@ export async function bulkCheckoutBookings(
       isBookingPendingApproval({
         status: booking.status,
         approvedAt: booking.approvedAt,
-        requireBookingApproval: bookingSettings.requireBookingApproval,
+        requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
       })
     );
     if (

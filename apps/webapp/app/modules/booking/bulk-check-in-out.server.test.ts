@@ -253,7 +253,10 @@ describe("bulkCheckoutBookings", () => {
     // why: the service would refuse the pending one on its own, but only
     // when its turn came, after the others were already checked out.
     settingsMock.mockResolvedValueOnce(
-      createBookingSettings({ requireBookingApproval: true })
+      createBookingSettings({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      })
     );
     findManyMock.mockResolvedValue([
       selected("b1", BookingStatus.RESERVED, { approvedAt: new Date() }),
@@ -279,7 +282,10 @@ describe("bulkCheckoutBookings", () => {
     );
     vi.mocked(hasPermission).mockResolvedValueOnce(true);
     settingsMock.mockResolvedValueOnce(
-      createBookingSettings({ requireBookingApproval: true })
+      createBookingSettings({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      })
     );
     findManyMock.mockResolvedValue([
       selected("b1", BookingStatus.RESERVED, { approvedAt: new Date() }),

@@ -23,7 +23,10 @@ import {
   canAssignModelUnits,
   countUnassignedModelUnits,
 } from "~/utils/booking-model-requests";
-import { isBookingPendingApproval } from "~/utils/bookings";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
@@ -173,7 +176,7 @@ export default function ListBookingsContent({
   item,
   extraProps,
 }: ListBookingsContentProps) {
-  const { requireBookingApproval } = useBookingSettings();
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
 
   return (
     <>

@@ -153,7 +153,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
-        "updateRequireBookingApproval",
+        "updateBookingApproval",
         "updateAutoArchiveToggle",
         "updateAutoArchiveExpiredToggle",
         "updateAutoArchiveDays",
@@ -234,35 +234,40 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return data(payload({ success: true }), { status: 200 });
       }
-      case "updateRequireBookingApproval": {
-        const { requireBookingApproval } = parseData(
-          formData,
-          ApprovalSettingsSchema,
-          {
+      case "updateBookingApproval": {
+        const { requireApprovalForBase, requireApprovalForSelfService } =
+          parseData(formData, ApprovalSettingsSchema, {
             additionalData: {
               intent,
               organizationId,
               formData: Object.fromEntries(formData),
             },
-          }
-        );
+          });
 
         // No sweep of existing reservations: every reservation written while
-        // the switch is off carries `approvedAt` from `reserveBooking`, and the
+        // a switch is off carries `approvedAt` from `reserveBooking`, and the
         // bookings that predate the feature were stamped by migration
-        // 20261102150100. Only genuine requests (made while the switch was on
+        // 20261102150100. Only genuine requests (made while a switch was on
         // and never decided) have no stamp, and those are pending again the
-        // moment the switch comes back on, which is what they are.
+        // moment a switch comes back on, which is what they are.
         await updateBookingSettings({
           organizationId,
-          requireBookingApproval,
+          requireApprovalForBase,
+          requireApprovalForSelfService,
         });
 
+        const gated = [
+          requireApprovalForBase ? "Base" : null,
+          requireApprovalForSelfService ? "Self service" : null,
+        ].filter(Boolean);
         sendNotification({
           title: "Settings updated",
-          message: requireBookingApproval
-            ? "Booking approval is now required for new requests from Base and Self service users"
-            : "Booking approval is no longer required",
+          message:
+            gated.length > 0
+              ? `New reservations by ${gated.join(
+                  " and "
+                )} users now wait for approval`
+              : "Booking approval is off: every reservation is final at once",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -695,9 +700,13 @@ export default function GeneralPage() {
         header={{
           title: "Booking approval",
           subHeading:
-            "Control whether booking requests from Base and Self service users need approval by an administrator or manager before check-out.",
+            "Choose which roles' reservations wait for an administrator or manager to say yes before the gear goes out.",
         }}
-        defaultValue={bookingSettings.requireBookingApproval}
+        defaultValues={{
+          requireApprovalForBase: bookingSettings.requireApprovalForBase,
+          requireApprovalForSelfService:
+            bookingSettings.requireApprovalForSelfService,
+        }}
       />
 
       {/* Explicit check-in settings form */}

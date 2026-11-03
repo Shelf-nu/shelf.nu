@@ -93,12 +93,13 @@ vitest.mock("~/database/db.server", () => {
       // it per test. String literal — this factory is hoisted.
       $queryRaw: vitest.fn().mockResolvedValue([{ status: "RESERVED" }]),
       // why: the first-scan approval gate reads the org's
-      // `requireBookingApproval` through the tx. Default off: the approval
+      // approval switches through the tx. Default off: the approval
       // feature's own tests cover the pending branch.
       bookingSettings: {
-        findUnique: vitest
-          .fn()
-          .mockResolvedValue({ requireBookingApproval: false }),
+        findUnique: vitest.fn().mockResolvedValue({
+          requireApprovalForBase: false,
+          requireApprovalForSelfService: false,
+        }),
       },
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
@@ -518,7 +519,10 @@ describe("partialCheckoutBooking", () => {
     // persistently, so put the defaults back (switch off, row still RESERVED).
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ requireBookingApproval: false });
+    ).mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    });
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
       { status: BookingStatus.RESERVED },
     ]);
@@ -633,7 +637,10 @@ describe("partialCheckoutBooking", () => {
     // here, not just in the web checkout dialog.
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ requireBookingApproval: true });
+    ).mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
@@ -662,7 +669,10 @@ describe("partialCheckoutBooking", () => {
     vitest.mocked(hasPermission).mockResolvedValue(true);
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ requireBookingApproval: true });
+    ).mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
@@ -743,7 +753,10 @@ describe("partialCheckoutBooking", () => {
     // was cleared (revert + re-reserve) while the scan was in flight.
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ requireBookingApproval: true });
+    ).mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ ...reservedBooking, approvedAt: new Date() });

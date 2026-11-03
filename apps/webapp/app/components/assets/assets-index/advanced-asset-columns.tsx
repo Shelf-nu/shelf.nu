@@ -53,7 +53,10 @@ import { formatCustodyList } from "~/modules/custody/utils";
 import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
-import { isBookingPendingApproval } from "~/utils/bookings";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -1149,7 +1152,7 @@ function UpcomingBookingsColumn({
   // A reservation request still waiting for a decision is drawn in the
   // pending palette here as on the calendar, so the asset index tells staff
   // the booking is not settled without opening it.
-  const { requireBookingApproval } = useBookingSettings();
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
     organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route

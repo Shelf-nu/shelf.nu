@@ -60,11 +60,12 @@ vi.mock("~/modules/working-hours/service.server", () => ({
 vi.mock("~/modules/booking-settings/service.server", async () => {
   const { createBookingSettings } = await import("@factories");
   return {
-    getBookingSettingsForOrganization: vi
-      .fn()
-      .mockImplementation(async () =>
-        createBookingSettings({ requireBookingApproval: true })
-      ),
+    getBookingSettingsForOrganization: vi.fn().mockImplementation(async () =>
+      createBookingSettings({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      })
+    ),
   };
 });
 // why: the action loads the acting user for its notes; no database here.

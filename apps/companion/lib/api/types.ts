@@ -1155,8 +1155,8 @@ export type BookingDetail = {
    */
   hasAlreadyBookedAssets?: boolean;
   /**
-   * True while this reservation request awaits a decision (workspace has
-   * `requireBookingApproval` on and the booking has no `approvedAt`).
+   * True while this reservation request awaits a decision (the workspace
+   * requires approval for a role and the booking has no `approvedAt`).
    * Optional for rolling-deploy safety: an older server omits it, and absent
    * must read as `false` so nothing is hidden.
    */

@@ -34,7 +34,10 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import type { RouteHandleWithName } from "~/modules/types";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { isBookingPendingApproval } from "~/utils/bookings";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -147,11 +150,10 @@ export default function AssetDetailsPage() {
     "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
-  const { requireBookingApproval } = useBookingSettings();
   const isPendingApproval = isBookingPendingApproval({
     status: booking.status,
     approvedAt: booking.approvedAt,
-    requireBookingApproval,
+    requireBookingApproval: isBookingApprovalEnabled(useBookingSettings()),
   });
   const recordNavigation = useRecordNavigation({
     entity: "booking",

@@ -2,6 +2,7 @@ import { Close } from "@radix-ui/react-dialog";
 import type { LucideIcon } from "lucide-react";
 import { ArrowLeft, ArrowRight, ClockIcon, InfoIcon } from "lucide-react";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { isBookingApprovalEnabled } from "~/utils/bookings";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -66,7 +67,7 @@ const ADMIN_REVIEW_WITH_APPROVAL =
 export default function BookingProcessSidebar({
   className,
 }: BookingProcessSidebarProps) {
-  const { requireBookingApproval } = useBookingSettings();
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
 
   const items = ITEMS.map((item) =>
     item.id === "admin-review" && requireBookingApproval

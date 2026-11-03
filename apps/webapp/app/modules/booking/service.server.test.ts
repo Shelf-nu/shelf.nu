@@ -4285,7 +4285,8 @@ describe("reserveBooking", () => {
         db.booking.update.mockResolvedValue(reservedRead);
         //@ts-expect-error missing vitest type
         db.bookingSettings.findUnique.mockResolvedValue({
-          requireBookingApproval: true,
+          requireApprovalForBase: true,
+          requireApprovalForSelfService: true,
         });
         installTxEligibility({
           sliceCount: 1,
@@ -4315,12 +4316,12 @@ describe("reserveBooking", () => {
         vitest.mocked(getBookingNotificationRecipients).mockResolvedValue([]);
       });
 
-      it("lands a Base or Self-service reservation as a pending request", async () => {
-        // why: `alertsOrgOnReservation` is the caller's policy flag for the
-        // roles whose reservations wait for a decision.
+      it("lands a Base reservation as a pending request", async () => {
+        // why: the actor's role picks the switch; Base is gated here.
         await reserveBooking({
           ...mockReserveParams,
           alertsOrgOnReservation: true,
+          actorApprovalSetting: "base",
           userId: "user-2",
         });
 
@@ -4341,6 +4342,7 @@ describe("reserveBooking", () => {
         await reserveBooking({
           ...mockReserveParams,
           alertsOrgOnReservation: false,
+          actorApprovalSetting: "none",
           userId: "admin-1",
         });
 
@@ -4356,15 +4358,19 @@ describe("reserveBooking", () => {
         );
       });
 
-      it("approves every reservation in the same write while the workspace does not require approval", async () => {
+      it("approves a Self service reservation while only the Base switch is on", async () => {
+        // why: each role has its own switch; the default (Base on, Self
+        // service off) gates Base only.
         //@ts-expect-error missing vitest type
         db.bookingSettings.findUnique.mockResolvedValue({
-          requireBookingApproval: false,
+          requireApprovalForBase: true,
+          requireApprovalForSelfService: false,
         });
 
         await reserveBooking({
           ...mockReserveParams,
           alertsOrgOnReservation: true,
+          actorApprovalSetting: "selfService",
           userId: "user-2",
         });
 
@@ -5220,7 +5226,8 @@ describe("checkoutBooking", () => {
     // go ONGOING with nobody having decided it.
     //@ts-expect-error missing vitest type
     db.bookingSettings.findUnique.mockResolvedValueOnce({
-      requireBookingApproval: true,
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
     });
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
@@ -5262,7 +5269,8 @@ describe("checkoutBooking", () => {
     vitest.mocked(hasPermission).mockResolvedValue(true);
     //@ts-expect-error missing vitest type
     db.bookingSettings.findUnique.mockResolvedValue({
-      requireBookingApproval: true,
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
     });
     const pendingBooking = {
       ...mockBookingData,
@@ -11065,7 +11073,10 @@ describe("approveBooking", () => {
     approvedAt?: Date | null;
   }) {
     //@ts-expect-error missing vitest type
-    db.bookingSettings.findUnique.mockResolvedValue({ requireBookingApproval });
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: requireBookingApproval,
+      requireApprovalForSelfService: requireBookingApproval,
+    });
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       id: "booking-1",

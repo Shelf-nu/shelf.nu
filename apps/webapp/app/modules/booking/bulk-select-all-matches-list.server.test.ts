@@ -26,6 +26,7 @@ import { db } from "~/database/db.server";
 import { loader as assetTabLoader } from "~/routes/_layout+/assets.$assetId.bookings";
 import { loader as indexLoader } from "~/routes/_layout+/bookings._index";
 import { loader as kitTabLoader } from "~/routes/_layout+/kits.$kitId.bookings";
+import { BOOKING_APPROVAL_ENABLED_WHERE } from "~/utils/bookings";
 import { createFilterCookie } from "~/utils/cookies.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { RoleAccess } from "~/utils/permissions/role-access";
@@ -67,9 +68,10 @@ vitest.mock("~/database/db.server", () => ({
     // workspace does not require approval; the lockstep cases below need the
     // filter kept, so the workspace requires it unless a case says otherwise.
     bookingSettings: {
-      findUnique: vitest
-        .fn()
-        .mockResolvedValue({ requireBookingApproval: true }),
+      findUnique: vitest.fn().mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      }),
     },
   },
 }));
@@ -340,7 +342,7 @@ describe("the Pending approval filter", () => {
   const PENDING_APPROVAL = {
     status: BookingStatus.RESERVED,
     approvedAt: null,
-    organization: { bookingSettings: { requireBookingApproval: true } },
+    organization: { bookingSettings: BOOKING_APPROVAL_ENABLED_WHERE },
   };
 
   it("resolves to never-approved reservations in a workspace that requires approval, in SQL", async () => {
@@ -371,9 +373,10 @@ describe("the Pending approval filter", () => {
     // why: with the switch off the picker has no such option, so the filter
     // would show "All" over an empty list; the loader redirects to the
     // unfiltered list instead, keeping the rest of the query.
-    vitest
-      .mocked(db.bookingSettings.findUnique)
-      .mockResolvedValueOnce({ requireBookingApproval: false } as never);
+    vitest.mocked(db.bookingSettings.findUnique).mockResolvedValueOnce({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    } as never);
     requirePermissionMock.mockResolvedValue({
       organizationId: ORG,
       access: ADMIN,
@@ -407,9 +410,10 @@ describe("the Pending approval filter", () => {
   it("expires a saved filter cookie that only held the stale status", async () => {
     // why: a cookie holding only status=PENDING_APPROVAL would otherwise
     // restore the status on the next visit and loop back to this redirect.
-    vitest
-      .mocked(db.bookingSettings.findUnique)
-      .mockResolvedValueOnce({ requireBookingApproval: false } as never);
+    vitest.mocked(db.bookingSettings.findUnique).mockResolvedValueOnce({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    } as never);
     requirePermissionMock.mockResolvedValue({
       organizationId: ORG,
       access: ADMIN,

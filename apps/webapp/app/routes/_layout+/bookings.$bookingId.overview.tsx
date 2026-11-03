@@ -119,7 +119,10 @@ import {
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
-import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import {
+  calculateTotalValueOfAssets,
+  isBookingApprovalEnabled,
+} from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -1857,6 +1860,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
           alertsOrgOnReservation:
             access.policy.notifications.reservationAlertsAdmins,
+          actorApprovalSetting: access.policy.bookings.approvalSetting,
           tags,
           userId,
           seesAllBookings: access.bookings.seeAll,
@@ -1864,9 +1868,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // A reservation request reads as a request, not a done deal: the
         // service left `approvedAt` empty because the workspace requires
-        // approval for this member's reservations.
+        // approval for this member's role.
         const isPendingRequest =
-          bookingSettings.requireBookingApproval && booking.approvedAt === null;
+          isBookingApprovalEnabled(bookingSettings) &&
+          booking.approvedAt === null;
         sendNotification({
           title: isPendingRequest ? "Request sent" : "Booking reserved",
           message: isPendingRequest

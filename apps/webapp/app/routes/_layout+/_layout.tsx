@@ -67,6 +67,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { isBookingApprovalEnabled } from "~/utils/bookings";
 import {
   expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
@@ -331,7 +332,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      * nobody sees a number they cannot act on.
      */
     const pendingApprovalCount =
-      bookingSettings.requireBookingApproval &&
+      isBookingApprovalEnabled(bookingSettings) &&
       (await hasPermission({
         organizationId,
         userId,

@@ -48,7 +48,11 @@ import {
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { bookingCustodianIsSelf } from "~/utils/bookings";
+import {
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  bookingCustodianIsSelf,
+  isBookingApprovalEnabled,
+} from "~/utils/bookings";
 import {
   createFilterCookie,
   serializeFilterCookieForUrl,
@@ -141,9 +145,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ) {
       const approvalSettings = await db.bookingSettings.findUnique({
         where: { organizationId },
-        select: { requireBookingApproval: true },
+        select: BOOKING_APPROVAL_SWITCHES_SELECT,
       });
-      if (!approvalSettings?.requireBookingApproval) {
+      if (!isBookingApprovalEnabled(approvalSettings)) {
         const cleaned = new URLSearchParams(searchParams);
         cleaned.delete("status");
         // The page number belonged to the filtered list; the unfiltered one

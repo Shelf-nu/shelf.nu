@@ -54,6 +54,11 @@ type RolePolicyShape = {
     bypassTimeLimits: boolean;
     /** Which workspace explicit check-out/in switch applies; "none" = exempt or not covered. */
     explicitScanSetting: "admin" | "selfService" | "none";
+    /**
+     * Which workspace booking-approval switch gates this role's reservations;
+     * "none" = this role's reservations are approved on the spot.
+     */
+    approvalSetting: "base" | "selfService" | "none";
     /** Delete is limited to DRAFT bookings. */
     deleteOnlyDrafts: boolean;
     /** The booking custodian picker is fixed to the user themself. */
@@ -166,6 +171,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "none",
+      approvalSetting: "none",
       deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
@@ -208,6 +214,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
+      approvalSetting: "none",
       deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
@@ -255,6 +262,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
+      approvalSetting: "none",
       deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
@@ -299,6 +307,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: true,
       bypassTimeLimits: false,
       explicitScanSetting: "selfService",
+      approvalSetting: "selfService",
       deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
@@ -341,6 +350,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: false,
       explicitScanSetting: "none",
+      approvalSetting: "base",
       deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
