@@ -56,8 +56,8 @@ A route that shares an entity/action pair with a path a switch opens, but must
 stay closed to that role, opts out with `matrixOnly: true`
 (`requirePermission`, `requireMobilePermission`, `hasPermission`,
 `userHasPermission`, `roleHasPermission`), which answers from the matrix
-alone. The bulk asset edits other than location do this. See
-`docs/manager-edit-switch.md` at the repository root.
+alone. The bulk asset edits other than location do this. Every such check is
+classified in `apps/webapp/test/routes-tests/manager-edit-switch.route-registry.test.ts`.
 
 ## Effective access
 
