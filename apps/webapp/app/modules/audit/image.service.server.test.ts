@@ -572,6 +572,29 @@ describe("uploadAuditImage returnParsedFormData", () => {
       expect(resolveUserFormatPrefsById).toHaveBeenCalledWith("user-1", hints);
     });
 
+    it("keeps the date, in the browser's zone, when the preference lookup fails", async () => {
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:15:00" }));
+      vi.mocked(resolveUserFormatPrefsById).mockRejectedValueOnce(
+        new Error("pool timeout")
+      );
+      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(db.auditImage.create).mockImplementation(
+        (args) => ({ id: "img-1", ...args.data }) as never
+      );
+
+      await uploadAuditImage({
+        request: new Request("https://app.test/upload", { method: "POST" }),
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        uploadedById: "user-1",
+        uploadedVia: "web",
+        hints: { locale: "nl-NL", timeZone: "Europe/Amsterdam" },
+      });
+
+      // 09:15 in Amsterdam (UTC+2 on 21 October).
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T07:15:00Z"));
+    });
+
     it("reads a phone photo's offset-less date in the zone its device declared", async () => {
       // why: Android never reports an offset, and a phone-only user may have
       // no saved zone; the photo was taken on the device, so its zone decides.
@@ -615,6 +638,28 @@ describe("uploadAuditImage returnParsedFormData", () => {
       await upload("phone");
 
       expect(storedCapturedAt()).toEqual(new Date("2026-10-21T01:30:00Z"));
+    });
+
+    it("takes the capture time from the first image part only", async () => {
+      // why: the record is made for the first `image` part, so a later part's
+      // date must never land on it.
+      const first = await jpeg({ DateTimeOriginal: "2026:10:21 09:00:00" });
+      const second = await jpeg({ DateTimeOriginal: "2026:01:01 00:00:00" });
+      vi.mocked(parseFileFormData).mockImplementation(async (args) => {
+        await args.inspectOriginal?.(first);
+        await args.inspectOriginal?.(second);
+        const parsed = new FormData();
+        parsed.append(
+          "image",
+          JSON.stringify({ originalPath: "org-1/audits/audit-1/p.jpg" })
+        );
+        return parsed;
+      });
+
+      await upload();
+
+      // 09:00 in the uploader's zone (America/New_York, UTC-4 in October).
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:00:00Z"));
     });
 
     it("ignores the phone app's date fields on a web upload", async () => {

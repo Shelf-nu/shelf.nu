@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "./constants";
+import { createFileFromAsyncIterable } from "./create-buffer-from-async-iterable";
 import { cropImage } from "./crop-image";
 import { delay } from "./delay";
 import { SUPABASE_URL } from "./env";
@@ -379,11 +380,7 @@ async function withOriginalInspected(
   fileData: AsyncIterable<Uint8Array>,
   inspect: InspectOriginal
 ): Promise<AsyncIterable<Uint8Array>> {
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of fileData) {
-    chunks.push(chunk);
-  }
-  const original = Buffer.concat(chunks);
+  const original = await createFileFromAsyncIterable(fileData);
 
   // why: only a format `cropImage` accepts reaches an inspector. The upload
   // handler admits any image/* type, and the image libraries behind an

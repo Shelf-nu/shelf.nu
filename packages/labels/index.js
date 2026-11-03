@@ -885,7 +885,7 @@ export const AUDIT_PHOTO_OLD_AFTER_MS = 24 * 60 * 60 * 1000;
  * nothing can be hovered.
  */
 export const AUDIT_PHOTO_KEY =
-  "Each photo shows how it reached Shelf (Shelf app camera, photo library or web upload) and when it was taken. Old photo: taken more than a day before its asset was scanned (or, for photos of the whole audit, before the audit started). No date: the photo carries no capture time.";
+  "Each photo shows how it reached Shelf (Shelf app camera, photo library, web upload or phone app) and when it was taken. Old photo: taken more than a day before its asset was scanned (for photos of the whole audit, before the audit started) or before it was uploaded, whichever came first. No date: the photo carries no capture time.";
 
 /** A duration in the largest whole unit a reader would use. */
 function describeGap(ms) {

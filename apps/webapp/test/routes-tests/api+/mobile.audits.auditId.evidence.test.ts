@@ -274,14 +274,17 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       expect(json.general.images[0].assetScannedAt).toBeNull();
     });
 
-    it("asks the database for the capture time", async () => {
+    it("asks the database for the capture time and the asset's scan", async () => {
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
+      // The mocked rows carry every field whatever the select asks for, so
+      // only the select itself shows the scan time is fetched.
       expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           select: expect.objectContaining({
             capturedAt: true,
             captureSource: true,
+            auditAsset: { select: { scannedAt: true } },
           }),
         })
       );

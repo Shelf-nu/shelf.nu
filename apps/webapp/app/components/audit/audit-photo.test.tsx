@@ -159,6 +159,43 @@ describe("AuditPhoto", () => {
     );
   });
 
+  it("shows the full sentence for a photo alone in its group", () => {
+    // why: a single photo opens the preview without navigation, which reads
+    // the tile's own caption rather than the group's.
+    render(<AuditPhoto image={undated} alt="Photo of Camera" disablePortal />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open preview for Photo of Camera" })
+    );
+
+    const dialogText = screen
+      .getAllByRole("dialog")
+      .map((dialog) => dialog.textContent)
+      .join(" ");
+    expect(dialogText).toContain("Photo library · time taken unknown");
+  });
+
+  it("names each photo in the preview by its own caption", () => {
+    render(
+      <AuditPhoto
+        image={{ ...known, description: "Front scratch" }}
+        images={[
+          { ...known, description: "Front scratch" },
+          { ...undated, description: "Serial plate" },
+        ]}
+        alt="Front scratch"
+        disablePortal
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open preview for Front scratch" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    expect(screen.getAllByAltText("Serial plate").length).toBeGreaterThan(0);
+  });
+
   it("shows the full sentence and flag for the photo open in the preview", () => {
     render(
       <AuditPhoto

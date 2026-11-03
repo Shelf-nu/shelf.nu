@@ -40,6 +40,8 @@ export type AuditPhotoImage = {
   id: string;
   imageUrl: string;
   thumbnailUrl?: string | null;
+  /** The uploader's caption; names the photo in the preview when present */
+  description?: string | null;
   /** When the photo was taken; null when unknown. A string once serialized. */
   capturedAt: Date | string | null;
   /** How the photo reached Shelf; null when unknown. */
@@ -142,6 +144,8 @@ export function AuditPhotoSourceIcon({
   return (
     <Icon
       className={tw("shrink-0", className)}
+      role="img"
+      aria-hidden={false}
       aria-label={description.sourceLabel ?? undefined}
     />
   );
@@ -227,7 +231,8 @@ export function AuditPhoto({
           id: img.id,
           imageUrl: img.imageUrl,
           thumbnailUrl: img.thumbnailUrl || img.imageUrl,
-          alt,
+          // Each photo in the preview keeps its own name; `alt` names the tile.
+          alt: img.description || alt,
           caption: (
             <AuditPhotoPreviewLine
               image={img}

@@ -17,6 +17,7 @@ import {
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   getFileUploadPath,
   parseFileFormData,
@@ -209,11 +210,22 @@ export async function uploadAuditImage({
             ? deviceTimeZoneFromPhoneForm(fileData)
             : null;
         if (deviceZone) return deviceZone;
-        const prefs = await resolveUserFormatPrefsById(
-          uploadedById,
-          hints ?? getClientHint(request)
-        );
-        return prefs.timeZone;
+        const requestHints = hints ?? getClientHint(request);
+        try {
+          const prefs = await resolveUserFormatPrefsById(
+            uploadedById,
+            requestHints
+          );
+          return prefs.timeZone;
+        } catch (cause) {
+          // why: a failed preference lookup must not drop a good date; the
+          // browser's own zone is the next best reading of a wall-clock time.
+          Logger.warn({
+            message: "Could not read the uploader's time zone for a photo",
+            cause,
+          });
+          return requestHints.timeZone;
+        }
       },
     });
 

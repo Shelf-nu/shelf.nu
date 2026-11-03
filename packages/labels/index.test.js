@@ -871,3 +871,12 @@ test("audit photo labels carry no dashes", () => {
     assert.doesNotMatch(text, /[\u2013\u2014]/);
   }
 });
+
+test("the printed key names every way a photo can reach Shelf", () => {
+  for (const label of Object.values(AUDIT_PHOTO_SOURCE_LABELS)) {
+    assert.ok(
+      AUDIT_PHOTO_KEY.toLowerCase().includes(label.toLowerCase()),
+      label
+    );
+  }
+});
