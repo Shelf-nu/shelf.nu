@@ -22,7 +22,6 @@ import {
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
@@ -94,13 +93,14 @@ function AuditScannerContent() {
    */
   const [screenWidth, setScreenWidth] = useState(0);
   /**
-   * Height to weigh it against: the window's less the bottom tab bar (zero
-   * when the tab bar is a sidebar), which is the screen's own height with the
-   * keyboard closed. Measured heights shrink while the Android keyboard is
-   * up, and judging by them would move the list beside the camera, and back,
-   * while a code is being typed; neither of these changes with the keyboard.
+   * Height to weigh it against: the window's, which the keyboard never
+   * changes. The screen's measured height shrinks while the Android keyboard
+   * is up, and judging by it would move the list beside the camera, and back,
+   * while a code is being typed. Above a bottom tab bar the screen is a little
+   * shorter than the window, so a near-square screen stays stacked, the
+   * phone layout.
    */
-  const screenHeight = useWindowDimensions().height - useBottomTabBarHeight();
+  const { height: screenHeight } = useWindowDimensions();
   /**
    * Whether the list sits beside the camera, and which insets each part keeps
    * clear of: an iPhone Duo's status-bar rail or a turned foldable's camera
