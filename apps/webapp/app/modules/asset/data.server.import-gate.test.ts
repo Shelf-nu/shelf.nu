@@ -106,6 +106,11 @@ vi.mock("./service.server", async (importOriginal) => ({
     Promise.resolve(assets)
   ),
 }));
+// why: the export gate reads the workspace owner's tier from the database.
+vi.mock("../tier/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getOrganizationTierLimit: vi.fn(() => Promise.resolve(null)),
+}));
 // why: same, for the simple loader's other parallel reads.
 vi.mock("../tag/service.server", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
