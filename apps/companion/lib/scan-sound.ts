@@ -17,6 +17,8 @@ const SOUND_KEY = "shelf_scan_sound_enabled";
 let soundObject: AudioPlayer | null = null;
 let isEnabled = true; // default ON
 let loaded = false;
+/** The load in flight, shared so concurrent callers create one player. */
+let loading: Promise<void> | null = null;
 
 /** Load persisted preference (call once on app start) */
 export async function loadScanSoundPreference(): Promise<boolean> {
@@ -45,8 +47,15 @@ export function isScanSoundEnabled(): boolean {
 }
 
 /** Pre-load the sound for instant playback */
-async function ensureLoaded(): Promise<void> {
-  if (loaded && soundObject) return;
+function ensureLoaded(): Promise<void> {
+  if (loaded && soundObject) return Promise.resolve();
+  loading ??= loadSound().finally(() => {
+    loading = null;
+  });
+  return loading;
+}
+
+async function loadSound(): Promise<void> {
   try {
     // The bleep plays with the ringer silenced, mixes with other audio on
     // iOS and ducks it on Android.

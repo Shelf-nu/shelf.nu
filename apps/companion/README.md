@@ -416,5 +416,5 @@ reads them as off, which only under-offers.
 | API Client | Custom fetch wrapper with caching |
 | Scanner    | expo-camera (QR + barcode types)  |
 | E2E Tests  | Maestro                           |
-| iOS Min    | iOS 15.1                          |
+| iOS Min    | iOS 16.4                          |
 | Node       | >= 24.22.1                        |
