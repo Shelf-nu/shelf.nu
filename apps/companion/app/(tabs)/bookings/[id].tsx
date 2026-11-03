@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatPersonName } from "@/lib/person-name";
 import { TagChip } from "@/components/tag-chip";
@@ -30,7 +30,6 @@ import {
   consumeBookingDirty,
   markBookingsListDirty,
 } from "@/lib/booking-refresh";
-import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -1808,7 +1807,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             <Text style={styles.searchEmpty}>
               No assets match &ldquo;{searchTerm.trim()}&rdquo;
             </Text>
-          ) : null
+          ) : undefined
         }
         ListHeaderComponent={
           <View style={styles.header}>
@@ -2917,7 +2916,7 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: spacing.md,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.overlayDark,
     justifyContent: "center",
     alignItems: "center",

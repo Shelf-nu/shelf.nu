@@ -17,7 +17,7 @@
 
 import type { ReactElement, ReactNode } from "react";
 import { View } from "react-native";
-import type { ParamListBase, RouteProp } from "@react-navigation/native";
+import type { ParamListBase, RouteProp } from "expo-router/react-navigation";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { useContentGutter } from "@/lib/use-content-gutter";

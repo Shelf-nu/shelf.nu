@@ -31,12 +31,18 @@ module.exports = function swiftConcurrencyFix(config) {
       end
     end`;
 
-      // Insert before the closing `end` of post_install
+      // Insert right after the react_native_post_install(...) call. Its
+      // arguments hold calls of their own (`ccache_enabled?(...)`), so the
+      // pattern allows one level of nested parentheses.
       if (!podfile.includes("SWIFT_STRICT_CONCURRENCY")) {
-        podfile = podfile.replace(
-          /(\s*react_native_post_install\([^)]*\))\s*\n(\s*end\s*\nend)/,
-          `$1\n${patch}\n$2`
-        );
+        const postInstallCall =
+          /(react_native_post_install\((?:[^()]|\([^()]*\))*\))/;
+        if (!postInstallCall.test(podfile)) {
+          throw new Error(
+            "[swift-concurrency-fix] react_native_post_install(...) not found in the Podfile"
+          );
+        }
+        podfile = podfile.replace(postInstallCall, `$1\n${patch}`);
         fs.writeFileSync(podfilePath, podfile, "utf8");
       }
 

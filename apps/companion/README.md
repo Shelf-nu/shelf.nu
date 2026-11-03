@@ -10,7 +10,7 @@
 
 ## What Is This?
 
-A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with **Expo SDK 54 + React Native + TypeScript**. It gives field teams mobile access to assets, scanning, audits, and bookings — all powered by the existing Shelf webapp backend.
+A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with **Expo SDK 58 + React Native + TypeScript**. It gives field teams mobile access to assets, scanning, audits, and bookings — all powered by the existing Shelf webapp backend.
 
 ### Features
 
@@ -408,7 +408,7 @@ reads them as off, which only under-offers.
 
 | Layer      | Technology                        |
 | ---------- | --------------------------------- |
-| Framework  | Expo SDK 54 + React Native 0.81   |
+| Framework  | Expo SDK 58 + React Native 0.88   |
 | Routing    | Expo Router 6 (file-based)        |
 | Language   | TypeScript 5.9                    |
 | Auth       | Supabase Auth + SecureStore       |

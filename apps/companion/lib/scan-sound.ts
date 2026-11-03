@@ -3,13 +3,18 @@
  * Respects user preference stored in AsyncStorage.
  * Can be toggled in Settings.
  */
-import { Audio } from "expo-av";
+import { Platform } from "react-native";
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  type AudioPlayer,
+} from "expo-audio";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const SOUND_KEY = "shelf_scan_sound_enabled";
 
-let soundObject: Audio.Sound | null = null;
+let soundObject: AudioPlayer | null = null;
 let isEnabled = true; // default ON
 let loaded = false;
 
@@ -43,17 +48,20 @@ export function isScanSoundEnabled(): boolean {
 async function ensureLoaded(): Promise<void> {
   if (loaded && soundObject) return;
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
+    // The bleep plays with the ringer silenced, mixes with other audio on
+    // iOS and ducks it on Android.
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode:
+        Platform.OS === "android" ? "duckOthers" : "mixWithOthers",
     });
 
-    const { sound } = await Audio.Sound.createAsync(
+    const player = createAudioPlayer(
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require("@/assets/sounds/scan-bleep.wav"),
-      { shouldPlay: false, volume: 0.6 }
+      require("@/assets/sounds/scan-bleep.wav")
     );
-    soundObject = sound;
+    player.volume = 0.6;
+    soundObject = player;
     loaded = true;
   } catch {
     // Audio not available — haptics will still work
@@ -81,8 +89,8 @@ async function playAudio(): Promise<void> {
   try {
     await ensureLoaded();
     if (soundObject) {
-      await soundObject.setPositionAsync(0);
-      await soundObject.playAsync();
+      await soundObject.seekTo(0);
+      soundObject.play();
     }
   } catch {
     // Silent degradation
@@ -119,7 +127,7 @@ export async function preloadScanSound(): Promise<void> {
 /** Cleanup (call on app unmount if needed) */
 export async function unloadScanSound(): Promise<void> {
   if (soundObject) {
-    await soundObject.unloadAsync();
+    soundObject.remove();
     soundObject = null;
     loaded = false;
   }

@@ -10,6 +10,7 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
+  type TextInputInstance,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -34,7 +35,7 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useStyles();
-  const passwordRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInputInstance>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

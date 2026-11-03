@@ -7,15 +7,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
-  InteractionManager,
   Linking,
   Platform,
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
@@ -2335,7 +2333,8 @@ function ScannerContent() {
                     // navigation transition into an endless render-commit
                     // loop (JS thread pegged at ~125% CPU, network
                     // callbacks starve) — verified by process sampling.
-                    InteractionManager.runAfterInteractions(() => {
+                    // requestIdleCallback runs once the dismissal settles.
+                    requestIdleCallback(() => {
                       pushIntoTab(
                         "/(tabs)/bookings",
                         `/(tabs)/bookings/${bookingId}`
@@ -2457,7 +2456,7 @@ function ScannerContent() {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          InteractionManager.runAfterInteractions(() => {
+          requestIdleCallback(() => {
             pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
           });
         },
@@ -2715,7 +2714,7 @@ function ScannerContent() {
                     // falls through history and can land on Home. Deferred
                     // past the alert dismissal (same render-loop wedge as
                     // the add path — see handleBookingAdd).
-                    InteractionManager.runAfterInteractions(() => {
+                    requestIdleCallback(() => {
                       pushIntoTab(
                         "/(tabs)/bookings",
                         `/(tabs)/bookings/${bookingId}`
@@ -2845,7 +2844,7 @@ function ScannerContent() {
               // a tab screen falls through history and can land on Home.
               // Deferred past the alert dismissal (same render-loop wedge as
               // the add path — see handleBookingAdd).
-              InteractionManager.runAfterInteractions(() => {
+              requestIdleCallback(() => {
                 pushIntoTab(
                   "/(tabs)/bookings",
                   `/(tabs)/bookings/${bookingId}`
@@ -3647,7 +3646,7 @@ const useStyles = createStyles((colors) => ({
   },
   // Paused overlay
   pausedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.8)",
     justifyContent: "center",
     alignItems: "center",
@@ -3672,7 +3671,7 @@ const useStyles = createStyles((colors) => ({
 
   // Overlay
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   controlButtons: {
     flexDirection: "row",

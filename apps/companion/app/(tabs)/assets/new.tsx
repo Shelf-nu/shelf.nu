@@ -29,8 +29,7 @@ import {
   ActionSheetIOS,
 } from "react-native";
 import { Image } from "expo-image";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, usePreventRemove } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -285,7 +284,7 @@ export default function CreateAssetScreen() {
   // ── Unsaved changes guard ─────────────────────
   // Track whether the form was submitted successfully (skip guard on success)
   const didSubmitRef = useRef(false);
-  const navigation = useNavigation();
+  const [leaving, setLeaving] = useState(false);
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
@@ -296,30 +295,24 @@ export default function CreateAssetScreen() {
     !!imageUri ||
     Object.values(customFieldValues).some((v) => v.trim() !== "");
 
-  useEffect(() => {
-    if (!hasUnsavedChanges || didSubmitRef.current) return;
-
-    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      // If nothing changed or already submitted, allow navigation
-      if (!hasUnsavedChanges || didSubmitRef.current) return;
-
-      e.preventDefault();
-      Alert.alert(
-        "Discard changes?",
-        "You have unsaved changes. Are you sure you want to leave?",
-        [
-          { text: "Keep Editing", style: "cancel" },
-          {
-            text: "Discard",
-            style: "destructive",
-            onPress: () => navigation.dispatch(e.data.action),
-          },
-        ]
-      );
-    });
-
-    return unsubscribe;
-  }, [navigation, hasUnsavedChanges]);
+  // `repeat` lifts the guard and replays the blocked navigation. `leaving`
+  // drops the guard in the same render, so the hook does not see it still set.
+  usePreventRemove(hasUnsavedChanges && !leaving, ({ repeat }) => {
+    const leave = () => {
+      setLeaving(true);
+      repeat();
+    };
+    // A submitted form leaves freely
+    if (didSubmitRef.current) return leave();
+    Alert.alert(
+      "Discard changes?",
+      "You have unsaved changes. Are you sure you want to leave?",
+      [
+        { text: "Keep Editing", style: "cancel" },
+        { text: "Discard", style: "destructive", onPress: leave },
+      ]
+    );
+  });
 
   // ── Filtered picker lists ───────────────────────
   const filteredCategories = categorySearch

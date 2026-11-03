@@ -4,6 +4,12 @@ import { useTheme } from "./theme-context";
 import type { Colors, Shadows } from "./theme-colors";
 
 /**
+ * What `StyleSheet.create` accepts, read off `create` itself: React Native's
+ * strict TypeScript API exports no named type for it.
+ */
+type NamedStyles = Parameters<typeof StyleSheet.create>[0];
+
+/**
  * Factory that turns a style-factory function into a hook.
  *
  * Usage:
@@ -20,15 +26,13 @@ import type { Colors, Shadows } from "./theme-colors";
  *
  * The returned hook re-creates the StyleSheet only when the theme changes.
  */
-export function createStyles<
-  T extends StyleSheet.NamedStyles<T> | StyleSheet.NamedStyles<any>,
->(
-  factory: (colors: Colors, shadows: Shadows) => T | StyleSheet.NamedStyles<T>
+export function createStyles<T extends NamedStyles>(
+  factory: (colors: Colors, shadows: Shadows) => T
 ) {
-  return function useStyles(): T {
+  return function useStyles(): Readonly<T> {
     const { colors, shadows } = useTheme();
     return useMemo(
-      () => StyleSheet.create(factory(colors, shadows) as T),
+      () => StyleSheet.create(factory(colors, shadows)),
       [colors, shadows]
     );
   };

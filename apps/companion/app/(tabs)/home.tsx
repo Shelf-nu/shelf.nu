@@ -7,11 +7,11 @@ import {
   StyleSheet,
   RefreshControl,
   TouchableOpacity,
+  type ScrollViewInstance,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
+import { useRouter, useFocusEffect, useScrollToTop } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -55,7 +55,7 @@ function HomeContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
 
   const fetchDashboard = useCallback(async () => {

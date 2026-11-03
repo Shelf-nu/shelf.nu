@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Alert } from "react-native";
-import { useNavigation, usePreventRemove } from "@react-navigation/native";
+import { usePreventRemove } from "expo-router";
 import { valuationFromInput } from "@/lib/asset-valuation";
 import { editLeaveGuard } from "@/lib/edit-leave-guard";
 import type { AssetDetail, Category, Location, Tag } from "@/lib/api";
@@ -46,8 +46,6 @@ export function useFormValidation({
   isSubmitting,
   didSave,
 }: FormValidationArgs): void {
-  const navigation = useNavigation();
-
   const isDirty = useMemo(() => {
     if (!originalAsset) return false;
     if (title.trim() !== originalAsset.title) return true;
@@ -82,7 +80,7 @@ export function useFormValidation({
   // Rules (held while saving, released after a save) in lib/edit-leave-guard.ts
   const guard = editLeaveGuard({ isDirty, didSave, isSubmitting });
 
-  usePreventRemove(guard.hold, ({ data }) => {
+  usePreventRemove(guard.hold, ({ repeat }) => {
     if (!guard.prompt) return;
     Alert.alert(
       "Discard Changes?",
@@ -92,7 +90,8 @@ export function useFormValidation({
         {
           text: "Discard",
           style: "destructive",
-          onPress: () => navigation.dispatch(data.action),
+          // Lifts the guard and replays the blocked navigation
+          onPress: repeat,
         },
       ]
     );

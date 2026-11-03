@@ -24,8 +24,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, usePreventRemove } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingTag } from "@/lib/api";
@@ -142,7 +141,7 @@ function EditBookingContent() {
   }, [id, currentOrg]);
 
   // ── Unsaved-changes guard (only after a REAL edit) ─────
-  const navigation = useNavigation();
+  const [leaving, setLeaving] = useState(false);
 
   // Compare the current form against the loaded snapshot so the discard prompt
   // only appears when something actually changed (and never on load-error).
@@ -156,22 +155,22 @@ function EditBookingContent() {
       [...selectedTagIds].sort().join(",") !== snap.tagIds
     : false;
 
-  useEffect(() => {
-    if (isLoading || !hasUnsavedChanges) return;
-    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      if (didSubmitRef.current || !hasUnsavedChanges) return;
-      e.preventDefault();
+  // `repeat` lifts the guard and replays the blocked navigation. `leaving`
+  // drops the guard in the same render, so the hook does not see it still set.
+  usePreventRemove(
+    !isLoading && hasUnsavedChanges && !leaving,
+    ({ repeat }) => {
+      const leave = () => {
+        setLeaving(true);
+        repeat();
+      };
+      if (didSubmitRef.current) return leave();
       Alert.alert("Discard changes?", "Your edits won't be saved.", [
         { text: "Keep Editing", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => navigation.dispatch(e.data.action),
-        },
+        { text: "Discard", style: "destructive", onPress: leave },
       ]);
-    });
-    return unsubscribe;
-  }, [navigation, isLoading, hasUnsavedChanges]);
+    }
+  );
 
   // ── Date pickers ────────────────────────────────
   const closeFromPicker = useCallback(() => setShowFromPicker(false), []);
