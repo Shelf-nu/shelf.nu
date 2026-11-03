@@ -195,7 +195,7 @@ export const bookingRequestReceivedEmailContent = ({
 export const bookingApprovedEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
     ...args,
-    emailContent: `Your booking request has been approved: "${args.bookingName}". The equipment can now be checked out for your booking period.`,
+    emailContent: `The booking request for ${args.custodian} has been approved: "${args.bookingName}". The equipment can now be checked out for the booking period.`,
   });
 
 /**

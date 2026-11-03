@@ -92,7 +92,11 @@ export function BookingStatusBadge({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger>
-            <Badge color="#B54708" withDot={false}>
+            <Badge
+              color={BADGE_COLORS.orange.bg}
+              textColor={BADGE_COLORS.orange.text}
+              withDot={false}
+            >
               <span className="block whitespace-nowrap">Pending approval</span>
             </Badge>
           </TooltipTrigger>

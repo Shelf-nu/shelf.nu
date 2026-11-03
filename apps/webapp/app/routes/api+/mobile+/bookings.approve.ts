@@ -38,7 +38,7 @@ const BodySchema = z.object({
 /**
  * Approves one pending reservation request.
  *
- * @returns `{ booking: { id, status, approvedAt } }` on success; a 400 from
+ * @returns `{ booking: { id, name, status, approvedAt } }` on success; a 400 from
  *   the service when the booking is not a pending request
  */
 export async function action({ request }: ActionFunctionArgs) {
@@ -87,6 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({
       booking: {
         id: approved.id,
+        name: approved.name,
         status: approved.status,
         approvedAt: approved.approvedAt,
       },

@@ -43,27 +43,32 @@ export function availabilityEventClassNames(
 }
 
 /**
+ * The bar palette of a reservation request still waiting for a decision:
+ * orange and dashed, so it reads as "not settled yet" next to the solid blue
+ * of an approved reservation. The hex values are `BADGE_COLORS.orange`
+ * (bg #FFF3E0, text #B54708) spelled out, because Tailwind only emits a
+ * class it can read as a literal.
+ */
+const PENDING_APPROVAL_CLASSES = [
+  "md:!text-[#B54708]",
+  "md:bg-[#FFF3E0]",
+  "md:border-[#F9C98A]",
+  "md:!border-dashed",
+  "[&_.fc-daygrid-event-dot]:!border-[#B54708]",
+  "[&_.fc-list-event-dot]:!border-[#B54708]",
+  "md:focus:!bg-[#FDE7C8]",
+];
+
+/**
  * Tailwind classes for a calendar bar of the given booking status.
  * @param status - The status the bar is drawn as (see `calendarDisplayStatus`)
  * @param oneDayEvent - True renders the dot-style, transparent one-day variant
  * @param viewType - FullCalendar view type; time-grid views add the hover class
+ * @param options - `pendingApproval` draws the bar as a reservation request
+ *   waiting for a decision (see `isBookingPendingApproval`) instead of in its
+ *   status palette
  * @returns The class list for the bar element
  */
-/**
- * The bar palette of a reservation request still waiting for a decision:
- * amber, dashed, so it reads as "not settled yet" next to the solid blue of
- * an approved reservation. Same hues as the "Pending approval" badge.
- */
-const PENDING_APPROVAL_CLASSES = [
-  "md:!text-[#B54708]",
-  "md:bg-[#FFFAEB]",
-  "md:border-[#FEDF89]",
-  "md:!border-dashed",
-  "[&_.fc-daygrid-event-dot]:!border-[#B54708]",
-  "[&_.fc-list-event-dot]:!border-[#B54708]",
-  "md:focus:!bg-[#FEF0C7]",
-];
-
 export function getStatusClasses(
   status: BookingStatus,
   oneDayEvent: boolean = false,

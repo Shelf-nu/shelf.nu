@@ -2005,6 +2005,8 @@ model Booking {
   // or by an explicit Approve action when it does. NULL on a RESERVED
   // booking whose org requires approval = pending approval (derived, there
   // is no PENDING status). Cleared when the booking is reverted to draft.
+  // Bookings that predate the feature were stamped once by migration
+  // 20261102150100_backfill_booking_approval; `approvedById` is empty there.
   approvedAt   DateTime? @db.Timestamptz(3)
   approvedBy   User?     @relation("bookingApprover", fields: [approvedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   approvedById String?
@@ -3063,6 +3065,9 @@ enum ActivityAction {
   BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
+  // A reservation request approved for check-out; the booking stays RESERVED,
+  // so this is the only structured trace of the decision.
+  BOOKING_APPROVED
 
   // Booking — model-level reservations (Book-by-Model). The reserved
   // `AssetModel` travels in `meta.assetModelId` because ActivityEvent has no

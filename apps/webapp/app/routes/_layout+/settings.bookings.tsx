@@ -42,11 +42,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
-import {
-  markExistingReservationsApproved,
-  scheduleExpiryArchiveForExistingReservations,
-  getUnapprovedReservationIds,
-} from "~/modules/booking/service.server";
+import { scheduleExpiryArchiveForExistingReservations } from "~/modules/booking/service.server";
 import {
   getBookingSettingsForOrganization,
   updateAlwaysNotifyTeamMembers,
@@ -251,45 +247,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         );
 
-        // Read before the setting commits. The two writes are separate, so a
-        // reservation made in between is a real pending request; sweeping by
-        // these ids (never by date) keeps it out of the stamp below.
-        const reservationsBeforeSwitch = requireBookingApproval
-          ? await getUnapprovedReservationIds({ organizationId })
-          : [];
-
+        // No sweep of existing reservations: every reservation written while
+        // the switch is off carries `approvedAt` from `reserveBooking`, and the
+        // bookings that predate the feature were stamped by migration
+        // 20261102150100. Only genuine requests (made while the switch was on
+        // and never decided) have no stamp, and those are pending again the
+        // moment the switch comes back on, which is what they are.
         await updateBookingSettings({
           organizationId,
           requireBookingApproval,
         });
-
-        // Enabling must not retro-flag existing reservations as pending:
-        // stamp everything RESERVED at the moment of the switch as approved, so
-        // approval only applies to requests made from this point on.
-        if (requireBookingApproval) {
-          // The setting is already committed. A sweep failure must not report
-          // the settings update as failed, but it does leave every pre-existing
-          // reservation retro-flagged as pending, so it is logged rather than
-          // swallowed. Same handling as the auto-archive backlog below.
-          try {
-            await markExistingReservationsApproved({
-              organizationId,
-              userId: authSession.userId,
-              bookingIds: reservationsBeforeSwitch,
-            });
-          } catch (cause) {
-            Logger.error(
-              new ShelfError({
-                cause,
-                message:
-                  "Booking approval was enabled, but existing reservations could not be marked approved. They will show as pending until this is re-run.",
-                additionalData: { organizationId },
-                label: "Booking Settings",
-                shouldBeCaptured: true,
-              })
-            );
-          }
-        }
 
         sendNotification({
           title: "Settings updated",

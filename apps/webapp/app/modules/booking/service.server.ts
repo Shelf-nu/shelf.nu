@@ -11537,9 +11537,16 @@ export async function partialCheckoutBooking({
             where: { organizationId },
             select: { requireBookingApproval: true },
           });
+          // The row is re-read through `tx` like the full check-out gate does:
+          // a revert that cleared the approval after the pre-tx read must
+          // still refuse this first scan.
+          const approvalRow = await tx.booking.findUnique({
+            where: { id, organizationId },
+            select: { status: true, approvedAt: true },
+          });
           assertBookingIsApproved({
-            status: bookingFound.status,
-            approvedAt: bookingFound.approvedAt,
+            status: approvalRow?.status ?? bookingFound.status,
+            approvedAt: approvalRow?.approvedAt ?? bookingFound.approvedAt,
             requireBookingApproval:
               partialApprovalGate?.requireBookingApproval ?? false,
             bookingId: id,
@@ -13276,87 +13283,6 @@ export async function cancelBooking({
 }
 
 /**
- * The ids of every RESERVED, not-yet-approved booking in the org right now.
- * Read BEFORE the approval setting is turned on, so the sweep that follows
- * stamps exactly the reservations that existed when the switch flipped and
- * never a request made in the gap between the two writes. Keyed by id, not
- * by creation date: a draft can be older than the switch and still be
- * reserved after it, and that reservation is a real request.
- *
- * @param args.organizationId - The workspace about to require approval
- * @returns The booking ids to hand to {@link markExistingReservationsApproved}
- */
-export async function getUnapprovedReservationIds({
-  organizationId,
-}: {
-  organizationId: Organization["id"];
-}): Promise<string[]> {
-  try {
-    const rows = await db.booking.findMany({
-      where: {
-        organizationId,
-        status: BookingStatus.RESERVED,
-        approvedAt: null,
-      },
-      select: { id: true },
-    });
-    return rows.map((row) => row.id);
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      label,
-      message:
-        "Something went wrong while reading the reservations that predate the approval setting.",
-      additionalData: { organizationId },
-    });
-  }
-}
-
-/**
- * Stamps the given RESERVED, not-yet-approved bookings as approved. Run when
- * the org ENABLES `requireBookingApproval`, with the ids read by
- * {@link getUnapprovedReservationIds} before the setting was written, so the
- * toggle only applies to NEW requests: without this, every pre-existing
- * reservation (including ones admins made before the feature existed, which
- * have no `approvedAt`) would flip to pending the moment the setting turns on.
- * The status and approval guards stay in the write, so a booking that moved
- * on or was approved by hand in between is left alone.
- */
-export async function markExistingReservationsApproved({
-  organizationId,
-  userId,
-  bookingIds,
-}: {
-  organizationId: Organization["id"];
-  userId: User["id"];
-  /** Reservations that existed before the setting was turned on. */
-  bookingIds: string[];
-}) {
-  if (bookingIds.length === 0) {
-    return { count: 0 };
-  }
-  try {
-    return await db.booking.updateMany({
-      where: {
-        id: { in: bookingIds },
-        organizationId,
-        status: BookingStatus.RESERVED,
-        approvedAt: null,
-      },
-      data: { approvedAt: new Date(), approvedById: userId },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      label,
-      message:
-        "Something went wrong while marking existing reservations as approved.",
-      additionalData: { organizationId },
-    });
-  }
-}
-
-/**
  * Approves a pending booking reservation request.
  *
  * Only meaningful in orgs with `requireBookingApproval` on: stamps
@@ -13480,7 +13406,7 @@ export async function approveBooking({
         });
 
         // Not a status transition (the booking stays RESERVED), so this is a
-        // plain system note.
+        // plain system note, paired with the structured event reports count.
         await createSystemBookingNote(
           {
             bookingId: updated.id,
@@ -13489,6 +13415,17 @@ export async function approveBooking({
               ...approver,
               id: userId,
             })} approved the booking request`,
+          },
+          tx
+        );
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_APPROVED",
+            entityType: "BOOKING",
+            entityId: updated.id,
+            bookingId: updated.id,
           },
           tx
         );
@@ -13558,7 +13495,7 @@ export async function approveBooking({
               customEmailFooter: approvedBooking.organization.customEmailFooter,
             }),
           buildHeading: () =>
-            `Your booking request has been approved: "${approvedBooking.name}"`,
+            `Booking request approved for ${custodian}: "${approvedBooking.name}"`,
           hints,
           actor,
           actorUserId: userId,
@@ -14991,7 +14928,9 @@ export function buildBookingsWhere(
   if (pendingApprovalOnly) {
     // The same derivation as `isBookingPendingApproval`, expressed in SQL:
     // the workspace toggle is read in the query itself, so switching it off
-    // empties this list the moment the derivation stops applying.
+    // empties this list the moment the derivation stops applying. A request
+    // whose end date passed stays in this list, drawn Expired, so a decision
+    // is still visible; only the sidebar count leaves it out.
     where.status = BookingStatus.RESERVED;
     where.approvedAt = null;
     where.organization = {
@@ -16449,60 +16388,63 @@ export async function getBookingsForCalendar(params: {
   }
 
   try {
-    const { bookings } = await getBookings({
-      // The bookings index's filters, narrowed to the visible date range.
-      ...getBookingsListWhereParams({
-        list: { kind: "index" },
-        searchParams,
-        organizationId,
-        userId,
-        custodianScope: selfServiceData?.custodianScope ?? null,
+    // The approval switch rides along with the bookings read: a pending
+    // request is drawn apart from a settled one, so the calendar tells staff
+    // where a decision is waiting without opening it.
+    const [{ bookings }, calendarApprovalSettings] = await Promise.all([
+      getBookings({
+        // The bookings index's filters, narrowed to the visible date range.
+        ...getBookingsListWhereParams({
+          list: { kind: "index" },
+          searchParams,
+          organizationId,
+          userId,
+          custodianScope: selfServiceData?.custodianScope ?? null,
+        }),
+        page: 1,
+        bookingFrom: startDate,
+        bookingTo: endDate,
+        // Calendar events carry no asset data — the mapping below projects
+        // booking scalars, two names and the tags — so the per-booking asset
+        // subtree is pure transfer cost here.
+        includeAssets: false,
+        // Only `bookings` is read below; skip the COUNT companion query.
+        skipCount: true,
+        extraInclude: {
+          // Narrow selects: the mapping reads `name` off the team member and
+          // the display-name fields + picture off the two users. `true` pulled
+          // whole `User` rows (every column, per booking, per request).
+          custodianTeamMember: { select: { id: true, name: true } },
+          custodianUser: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
+          creator: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
+          tags: TAG_WITH_COLOR_SELECT,
+        },
+        // Every booking in the window, not a page of them. `takeAll` ignores
+        // `perPage`, which is why the old `perPage: 1000` was already dead.
+        takeAll: true,
       }),
-      page: 1,
-      bookingFrom: startDate,
-      bookingTo: endDate,
-      // Calendar events carry no asset data — the mapping below projects
-      // booking scalars, two names and the tags — so the per-booking asset
-      // subtree is pure transfer cost here.
-      includeAssets: false,
-      // Only `bookings` is read below; skip the COUNT companion query.
-      skipCount: true,
-      extraInclude: {
-        // Narrow selects: the mapping reads `name` off the team member and
-        // the display-name fields + picture off the two users. `true` pulled
-        // whole `User` rows (every column, per booking, per request).
-        custodianTeamMember: { select: { id: true, name: true } },
-        custodianUser: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
-          },
-        },
-        creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
-          },
-        },
-        tags: TAG_WITH_COLOR_SELECT,
-      },
-      // Every booking in the window, not a page of them. `takeAll` ignores
-      // `perPage`, which is why the old `perPage: 1000` was already dead.
-      takeAll: true,
-    });
+      db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: { requireBookingApproval: true },
+      }),
+    ]);
 
-    // A pending reservation request is drawn apart from a settled one, so the
-    // calendar tells staff where a decision is waiting without opening it.
-    const calendarApprovalSettings = await db.bookingSettings.findUnique({
-      where: { organizationId },
-      select: { requireBookingApproval: true },
-    });
     const requireBookingApproval =
       calendarApprovalSettings?.requireBookingApproval ?? false;
 

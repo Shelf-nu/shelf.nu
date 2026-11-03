@@ -344,6 +344,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               organizationId,
               status: BookingStatus.RESERVED,
               approvedAt: null,
+              // A request whose end date passed is dead, not waiting: the
+              // Expired option lists it, the count does not.
+              to: { gte: new Date() },
             },
           })
         : 0;

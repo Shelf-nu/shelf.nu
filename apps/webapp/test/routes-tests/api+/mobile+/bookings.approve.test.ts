@@ -80,6 +80,7 @@ describe("POST /api/mobile/bookings/approve", () => {
     } as never);
     vi.mocked(approveBooking).mockResolvedValue({
       id: "booking-1",
+      name: "Camera kit",
       status: "RESERVED",
       approvedAt: new Date("2026-11-02T12:00:00.000Z"),
     } as never);

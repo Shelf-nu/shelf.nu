@@ -16,6 +16,7 @@ import type {
   ChildNavItem,
   ParentNavItem as ParentNavItemType,
 } from "~/hooks/use-sidebar-nav-items";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
 import {
   SidebarMenuButton,
@@ -142,7 +143,11 @@ function NestedRouteRenderer({
             {nested.badge?.show && nested.badge.count ? (
               <span
                 aria-label={`${nested.badge.count} waiting`}
-                className="rounded-full bg-[#FFFAEB] px-2 py-0.5 text-xs font-semibold tabular-nums text-[#B54708]"
+                className="rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums"
+                style={{
+                  backgroundColor: BADGE_COLORS.orange.bg,
+                  color: BADGE_COLORS.orange.text,
+                }}
               >
                 {nested.badge.count}
               </span>

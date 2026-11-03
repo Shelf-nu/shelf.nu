@@ -18,7 +18,9 @@ export const EXPIRED_BOOKINGS_FILTER = "EXPIRED" as const;
  * derived (see `isBookingPendingApproval`), not a stored status, so like
  * Expired it lives beside the enum. `getParamsValues` accepts it as a status,
  * and `buildBookingsWhere` turns it into `status = RESERVED AND approvedAt IS
- * NULL AND the workspace requires approval`.
+ * NULL AND the workspace requires approval`. A request whose end passed stays
+ * listed (drawn Expired) so the decision is not lost; the sidebar count alone
+ * leaves it out.
  */
 export const PENDING_APPROVAL_BOOKINGS_FILTER = "PENDING_APPROVAL" as const;
 

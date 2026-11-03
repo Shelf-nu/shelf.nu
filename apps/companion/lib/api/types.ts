@@ -1164,8 +1164,9 @@ export type BookingDetail = {
   /**
    * Whether this caller may approve the pending request: the server's
    * `booking:approve` answer (Owner, Administrator, Manager), false unless
-   * {@link isPendingApproval}. Display-only until the app grows an Approve
-   * action; absent on an older server.
+   * {@link isPendingApproval}. The booking screen offers "Approve request"
+   * only when true; the approve endpoint enforces the permission on its own.
+   * Absent on an older server.
    */
   canApprove?: boolean;
   /**
