@@ -184,7 +184,7 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
         <input type="hidden" name="returnJson" value="true" />
       </fetcher.Form>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-end gap-2">
         {checkOut.visible ? (
           busy ? (
             <BusyActionButton {...ACTIONS.checkOut} />
