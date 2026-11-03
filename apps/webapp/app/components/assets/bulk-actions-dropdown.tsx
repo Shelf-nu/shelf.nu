@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, useState } from "react";
 import { KIT_MEMBERS_CUSTODY_BLOCKED_REASON } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
@@ -21,6 +21,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
@@ -32,7 +33,6 @@ import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkCustomFieldUpdateDialog from "./bulk-custom-field-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
-import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
@@ -52,6 +52,11 @@ import {
 } from "../shared/dropdown";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
+
+/* Lazy: the dialog renders every selected asset's QR label for the download,
+ * and the label lives in the code preview module with its barcode scanner.
+ * It loads the first time someone opens it. */
+const BulkDownloadQrDialog = lazy(() => import("./bulk-download-qr-dialog"));
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -79,6 +84,9 @@ function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
   const [isBulkDownloadQrOpen, setIsBulkDownloadQrOpen] = useState(false);
+  /* Mounted from the first opening on: the dialog stays mounted between
+   * openings so it can drop a download that resolves after it closed. */
+  const [hasOpenedBulkDownloadQr, setHasOpenedBulkDownloadQr] = useState(false);
 
   const {
     ref: dropdownRef,
@@ -242,12 +250,16 @@ function ConditionalDropdown() {
         <BulkAddToAuditDialog />
       </When>
 
-      <BulkDownloadQrDialog
-        isDialogOpen={isBulkDownloadQrOpen}
-        onClose={() => {
-          setIsBulkDownloadQrOpen(false);
-        }}
-      />
+      {hasOpenedBulkDownloadQr ? (
+        <LazyLoadBoundary loading={null} failed={null}>
+          <BulkDownloadQrDialog
+            isDialogOpen={isBulkDownloadQrOpen}
+            onClose={() => {
+              setIsBulkDownloadQrOpen(false);
+            }}
+          />
+        </LazyLoadBoundary>
+      ) : null}
 
       <When
         truthy={userHasPermission({
@@ -312,6 +324,7 @@ function ConditionalDropdown() {
             <DropdownMenuItem
               onClick={() => {
                 closeMenu();
+                setHasOpenedBulkDownloadQr(true);
                 setIsBulkDownloadQrOpen(true);
               }}
               className="border-b py-1 lg:p-0"
