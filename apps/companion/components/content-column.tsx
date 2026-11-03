@@ -15,20 +15,22 @@
  * The wrapper also keeps the screen clear of the window's side insets: an
  * iPhone Duo's status-bar rail (about 84 pt down the left or right edge when
  * open sideways or in Split View) and an Android foldable's camera cutout
- * when the device is turned. It measures its own overlap with them natively,
- * so a rail already covered by the tab sidebar adds nothing, and the left and
- * right sides are padded separately. Phones held upright have no side insets.
+ * when the device is turned. Each side is padded by its own inset, less what
+ * the tab sidebar already covers (see `tabScreenInsets`), so a rail behind
+ * the sidebar adds nothing. Computed in JS rather than by a native
+ * `SafeAreaView`, which would copy the window's insets whatever the sidebar
+ * covers. Phones held upright have no side insets.
  *
  * @see lib/content-column.ts for the column widths
  */
 
 import type { ReactElement, ReactNode } from "react";
 import { View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import type { ParamListBase, RouteProp } from "@react-navigation/native";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { useContentGutter } from "@/lib/use-content-gutter";
+import { useTabScreenInsets } from "@/lib/use-safe-edges";
 
 /** Props for {@link ContentColumn}. */
 type ContentColumnProps = {
@@ -50,21 +52,23 @@ function ContentColumn({
   // Only decides the background: the column itself is centred by layout.
   const isWide = useContentGutter(maxWidth) > 0;
   const { colors } = useTheme();
+  // Side edges only: the header and the tab bar own the top and bottom.
+  const { left, right } = useTabScreenInsets();
 
   return (
-    // Side edges only: the header and the tab bar own the top and bottom.
-    <SafeAreaView
-      edges={["left", "right"]}
+    <View
       style={{
         flex: 1,
         alignItems: "center",
+        paddingLeft: left,
+        paddingRight: right,
         // The space either side shows the app background. Phones have none,
         // so they keep the transparent wrapper and look exactly as before.
         backgroundColor: isWide ? colors.background : undefined,
       }}
     >
       <View style={{ flex: 1, width: "100%", maxWidth }}>{children}</View>
-    </SafeAreaView>
+    </View>
   );
 }
 

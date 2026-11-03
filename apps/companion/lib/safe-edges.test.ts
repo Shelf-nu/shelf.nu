@@ -1,3 +1,8 @@
+/**
+ * Tests for the safe-area maths in `safe-edges.ts`: which insets a tab screen
+ * meets beside the tab bar or sidebar, the overlay top offset, sheet centring
+ * between asymmetric side insets, and the scanner's camera and list split.
+ */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 

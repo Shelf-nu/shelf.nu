@@ -26,9 +26,10 @@ const OVERLAY_MIN_TOP = Platform.OS === "ios" ? 60 : 40;
  * insets less what the tab bar or sidebar already covers. Follows rotation
  * and window resizes.
  *
- * For tab screens that sit outside the content column (the scanners). A
- * full-window `Modal` covers the tab bar too, so it reads the window's own
- * insets (`useOverlayEdges()` with no argument, `useCentredSheetSpan`).
+ * Used by the content column and by the tab screens outside it (the
+ * scanners). A full-window `Modal` covers the tab bar too, so it reads the
+ * window's own insets (`useOverlayEdges()` with no argument,
+ * `useCentredSheetSpan`).
  */
 export function useTabScreenInsets(): EdgeInsets {
   const insets = useSafeAreaInsets();

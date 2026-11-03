@@ -1,3 +1,7 @@
+/**
+ * Tests for where the scanner's closed "Enter code" pill sits: its usual
+ * offset, lower on a short screen, or the top strip when it cannot fit.
+ */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
