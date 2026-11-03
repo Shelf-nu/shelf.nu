@@ -13,6 +13,7 @@
       "bundleIdentifier": "com.shelf.companion",
       "associatedDomains": ["applinks:app.shelf.nu"],
       "infoPlist": {
+        "AppStoreID": "6765639874",
         "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
         "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits.",
         "NSLocationWhenInUseUsageDescription": "Shelf records where assets were scanned so your team can see each item's last known location."

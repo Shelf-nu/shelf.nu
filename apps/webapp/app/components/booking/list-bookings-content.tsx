@@ -152,6 +152,11 @@ type ListBookingsContentProps = {
      * OVERDUE row offers "Check out remaining".
      */
     hasItemsToCheckOut?: boolean;
+    /**
+     * Set by the same decorator: true when something has been checked in, so
+     * the row's check-in receipt entry is enabled.
+     */
+    canPrintCheckinReceipt?: boolean;
   };
   /**
    * History state for the row link, so the booking page can step through
@@ -309,7 +314,13 @@ export default function ListBookingsContent({
 
       {/* Row actions, by status and the viewer's reach */}
       <Td>
-        <BookingQuickActions booking={item} />
+        <BookingQuickActions
+          booking={{
+            ...item,
+            custodianTeamMemberUserId: item.custodianTeamMember?.userId ?? null,
+            assetCount: item._count.bookingAssets,
+          }}
+        />
       </Td>
     </>
   );

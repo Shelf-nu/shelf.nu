@@ -776,7 +776,8 @@ const SidebarMenuSubButton = forwardRef<
       data-size={size}
       data-active={isActive}
       className={tw(
-        "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground outline-none ring-primary-500 aria-disabled:pointer-events-none aria-disabled:opacity-50  focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+        // why: min-h (not h) so a label that wraps grows the row instead of being clipped
+        "flex min-h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 py-1 leading-tight text-sidebar-foreground outline-none ring-primary-500 aria-disabled:pointer-events-none aria-disabled:opacity-50  focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
         "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
         size === "sm" && "text-xs",
         size === "md" && "text-sm",

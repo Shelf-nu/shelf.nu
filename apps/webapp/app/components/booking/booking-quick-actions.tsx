@@ -1,9 +1,9 @@
 /**
- * The Actions column of one bookings-list row: compact icon buttons with a
- * tooltip each, the bookings twin of the assets index's `AssetQuickActions`.
- * New row actions belong here, in the same icon-button shape.
+ * The Quick actions column of one bookings-list row: compact icon buttons with
+ * a tooltip each (the bookings twin of the assets index's `AssetQuickActions`),
+ * followed by a ⋯ menu holding the rest of the booking page's Actions menu.
  *
- * Today it holds check-out and check-in, so an operator can move a booking
+ * The icons are check-out and check-in, so an operator can move a booking
  * along without opening it, the way the booking header does, with the same
  * dialogs and the same server action:
  *
@@ -16,11 +16,20 @@
  *
  * A button is hidden when the viewer lacks the grant for it, when the
  * workspace requires the explicit (scan or select) flow for the viewer's role
- * in that direction, or when the viewer may not write this booking at all (a
- * member held to their own bookings, on someone else's), since the server
- * refuses the one-click action in each case. A RESERVED booking with reserved
+ * in that direction, or when the viewer neither writes every booking nor holds
+ * this one. The rules live in {@link resolveBookingActions}; the server
+ * refuses the one-click action in each case too. A RESERVED booking with reserved
  * model units no asset is assigned to yet keeps its Check out button
  * disabled: the booking page's fulfil scanner is where those are assigned.
+ *
+ * The ⋯ menu offers, each only when {@link resolveBookingActions} shows it:
+ * extend, cancel, archive, duplicate, then (after a divider) the booking
+ * document and the check-in receipt. It never offers revert to draft, delete
+ * or manage notifications: those stay on the booking page. The PDFs list
+ * assets in the server's default order, and the extend dialog fetches its own
+ * reservation horizon when it opens. The receipt entry is shown disabled with
+ * the rule's reason until something has been checked in. A row where the
+ * viewer may do nothing renders nothing at all.
  *
  * Each row posts through its own fetcher form to the booking's overview
  * action, which owns the permission check, the explicit-mode guard, the asset
@@ -30,75 +39,45 @@
  * chose. A refusal reaches the operator as the toast the action's error path
  * sends; the row has no space for an inline error and shows none.
  *
- * @see {@link file://./list-bookings-content.tsx} renders this in the Actions column
+ * @see {@link file://./booking-actions.ts} decides which buttons show
+ * @see {@link file://./booking-actions-menu.tsx} the ⋯ menu
+ * @see {@link file://./actions-dropdown.tsx} the booking page's menu, which this mirrors
+ * @see {@link file://./list-bookings-content.tsx} renders this in the Quick actions column
  * @see {@link file://./../assets/assets-index/asset-quick-actions.tsx} the assets index twin
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
  * @see {@link file://./checkout-dialog.tsx} and {@link file://./checkin-dialog.tsx}
  */
 import type { ReactNode } from "react";
-import { BookingStatus } from "@prisma/client";
 import { ArrowRightFromLineIcon, LogInIcon, LogOutIcon } from "lucide-react";
 import { useFetcher } from "react-router";
-import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useOrganizationRoles } from "~/hooks/use-organization-roles";
-import { useRoleAccess } from "~/hooks/use-role-access";
-import { useUserData } from "~/hooks/use-user-data";
-import type { CountableModelRequest } from "~/utils/booking-model-requests";
-import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
-import {
-  canWriteBooking,
-  isBookingApprovalEnabled,
-  isBookingPendingApproval,
-} from "~/utils/bookings";
 import type { DataOrErrorResponse } from "~/utils/http.server";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { isExplicitScanRequired } from "~/utils/permissions/role-access";
+import { ArchiveBookingAction } from "./archive-booking-action";
+import { BookingActionTrigger } from "./booking-action-trigger";
+import { useBookingActions } from "./booking-actions";
+import type { BookingActionsBooking } from "./booking-actions";
+import { BookingActionsMenu } from "./booking-actions-menu";
+import { BookingDocumentEntries } from "./booking-document-entries";
+import { CancelBookingDialog } from "./cancel-booking-dialog";
 import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
-import { Button } from "../shared/button";
+import { DuplicateBookingAction } from "./duplicate-booking-action";
+import ExtendBookingDialog from "./extend-booking-dialog";
 
-/** What the row buttons read off a bookings-list row. */
-export type BookingQuickActionsBooking = {
+/**
+ * What the row buttons read off a bookings-list row: the rules' inputs
+ * ({@link BookingActionsBooking}) plus what the dialogs and the form need.
+ */
+export type BookingQuickActionsBooking = BookingActionsBooking & {
   id: string;
   name: string;
-  status: BookingStatus;
   from: Date | string | null;
-  to: Date | string | null;
-  /** Who created the booking and who holds it: the two ways to own it. */
-  creatorId: string;
-  custodianUserId: string | null;
-  /** Reserved model units, to disable Check out while some are unassigned. */
-  modelRequests: CountableModelRequest[];
-  /**
-   * Whether the booking's "Check out remaining" would find something to send,
-   * as the list loader resolved it by the server's own rule. Decides "Check out remaining" on a booking that is
-   * underway. Absent on a loader that does not resolve it, which reads as
-   * "nothing left to check out".
-   */
-  hasItemsToCheckOut?: boolean;
-  /**
-   * When the reservation was approved; null on a request still waiting for a
-   * decision, which offers no check-out while the workspace requires approval.
-   */
-  approvedAt?: Date | string | null;
 };
 
 /** Props for {@link BookingQuickActions}. */
 type BookingQuickActionsProps = {
   booking: BookingQuickActionsBooking;
 };
-
-/** Why a RESERVED booking's Check out is disabled while model units are unassigned. */
-export const ASSIGN_UNITS_FIRST_REASON =
-  "Open the booking to assign the reserved units first.";
-
-/** The heading of that reason's hover card, naming the blocked action. */
-const CHECK_OUT_BLOCKED_TITLE = "Can't check out yet";
 
 /** Each action's tooltip and accessible name, and its icon. */
 const ACTIONS = {
@@ -110,67 +89,26 @@ const ACTIONS = {
   checkIn: { label: "Check in", icon: <LogInIcon className="size-4" /> },
 } satisfies Record<string, { label: string; icon: ReactNode }>;
 
+/** Why a row's icon buttons are disabled while its request runs. */
+const BUSY_REASON = "Updating this booking...";
+
 /**
  * Stands in for an action's dialog trigger while the row's request runs: the
- * same icon button, disabled, so the cell keeps its shape and one click
+ * same icon trigger, disabled, so the cell keeps its shape and one click
  * cannot post twice.
+ *
+ * @param props.label - The action's accessible name and tooltip
+ * @param props.icon - The action's icon
  */
 function BusyActionButton({ label, icon }: { label: string; icon: ReactNode }) {
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="secondary"
-      className="p-2"
-      aria-label={label}
-      disabled
-    >
-      {icon}
-    </Button>
+    <BookingActionTrigger
+      variant="icon"
+      label={label}
+      icon={icon}
+      disabled={{ reason: BUSY_REASON }}
+    />
   );
-}
-
-/**
- * Decides which buttons a row offers, from the booking and the viewer.
- *
- * Pure, so the table above is pinned by a test; the component only renders
- * what this returns.
- *
- * @param args.booking - The row
- * @param args.canCheckOut - The viewer holds `booking:checkout` and is not held to explicit check-out
- * @param args.canCheckIn - The viewer holds `booking:checkin` and is not held to explicit check-in
- * @returns Which of the three buttons to render
- */
-export function resolveCheckInOutActions({
-  booking,
-  canCheckOut,
-  canCheckIn,
-  isPendingApproval = false,
-  canApprove = false,
-}: {
-  booking: Pick<BookingQuickActionsBooking, "status" | "hasItemsToCheckOut">;
-  canCheckOut: boolean;
-  canCheckIn: boolean;
-  /**
-   * A reservation request still waiting for a decision: the server refuses
-   * its check-out to anyone who may not approve, so the row offers the
-   * button only to an approver, whose check-out approves the request.
-   */
-  isPendingApproval?: boolean;
-  /** The viewer holds `booking:approve`. */
-  canApprove?: boolean;
-}): { checkOut: boolean; checkOutRemaining: boolean; checkIn: boolean } {
-  const isReserved = booking.status === BookingStatus.RESERVED;
-  const isUnderway =
-    booking.status === BookingStatus.ONGOING ||
-    booking.status === BookingStatus.OVERDUE;
-
-  return {
-    checkOut: isReserved && canCheckOut && (!isPendingApproval || canApprove),
-    checkOutRemaining:
-      isUnderway && canCheckOut && booking.hasItemsToCheckOut === true,
-    checkIn: isUnderway && canCheckIn,
-  };
 }
 
 /**
@@ -180,10 +118,7 @@ export function resolveCheckInOutActions({
  * @param props.booking - The row, see {@link BookingQuickActionsBooking}
  */
 export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
-  const roles = useOrganizationRoles();
-  const roleAccess = useRoleAccess();
-  const bookingSettings = useBookingSettings();
-  const userId = useUserData()?.id;
+  const actions = useBookingActions(booking);
 
   const fetcher = useFetcher<DataOrErrorResponse>();
   const formId = `booking-row-check-in-out-${booking.id}`;
@@ -194,63 +129,32 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
    */
   const busy = useDisabled(fetcher);
 
-  // The same rule the action's `validateBookingOwnership` guard applies; the
-  // server still decides.
-  const canWriteThisBooking =
-    userId !== undefined &&
-    canWriteBooking({ booking, userId, access: roleAccess });
-  if (!canWriteThisBooking) {
+  const {
+    checkOut,
+    checkOutRemaining,
+    checkIn,
+    extend,
+    cancel,
+    archive,
+    duplicate,
+    bookingDocument,
+    checkinReceipt,
+  } = actions;
+  const hasMenuEntries =
+    extend.visible ||
+    cancel.visible ||
+    archive.visible ||
+    duplicate.visible ||
+    bookingDocument.visible ||
+    checkinReceipt.visible;
+  if (
+    !checkOut.visible &&
+    !checkOutRemaining.visible &&
+    !checkIn.visible &&
+    !hasMenuEntries
+  ) {
     return null;
   }
-
-  const canCheckOut =
-    userHasPermission({
-      roles,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.checkout,
-    }) &&
-    !isExplicitScanRequired({
-      access: roleAccess,
-      settings: bookingSettings,
-      direction: "checkout",
-    });
-  const canCheckIn =
-    userHasPermission({
-      roles,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.checkin,
-    }) &&
-    !isExplicitScanRequired({
-      access: roleAccess,
-      settings: bookingSettings,
-      direction: "checkin",
-    });
-
-  const buttons = resolveCheckInOutActions({
-    booking,
-    canCheckOut,
-    canCheckIn,
-    isPendingApproval: isBookingPendingApproval({
-      status: booking.status,
-      approvedAt: booking.approvedAt ?? null,
-      requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
-    }),
-    canApprove: userHasPermission({
-      roles,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.approve,
-    }),
-  });
-  if (!buttons.checkOut && !buttons.checkOutRemaining && !buttons.checkIn) {
-    return null;
-  }
-
-  const unassignedUnits = countUnassignedModelUnits(booking.modelRequests);
-  // The hover card names the action, since the row's buttons are icons only.
-  const checkOutDisabled =
-    unassignedUnits > 0
-      ? { title: CHECK_OUT_BLOCKED_TITLE, reason: ASSIGN_UNITS_FIRST_REASON }
-      : false;
 
   const dialogBooking = {
     id: booking.id,
@@ -280,8 +184,8 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
         <input type="hidden" name="returnJson" value="true" />
       </fetcher.Form>
 
-      <div className="flex items-center gap-2">
-        {buttons.checkOut ? (
+      <div className="flex items-center justify-end gap-2">
+        {checkOut.visible ? (
           busy ? (
             <BusyActionButton {...ACTIONS.checkOut} />
           ) : (
@@ -291,12 +195,12 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
               intent="checkOut"
               variant="icon"
               {...ACTIONS.checkOut}
-              disabled={checkOutDisabled}
+              disabled={checkOut.disabled}
             />
           )
         ) : null}
 
-        {buttons.checkOutRemaining ? (
+        {checkOutRemaining.visible ? (
           busy ? (
             <BusyActionButton {...ACTIONS.checkOutRemaining} />
           ) : (
@@ -313,7 +217,7 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
           )
         ) : null}
 
-        {buttons.checkIn ? (
+        {checkIn.visible ? (
           busy ? (
             <BusyActionButton {...ACTIONS.checkIn} />
           ) : (
@@ -324,6 +228,37 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
               {...ACTIONS.checkIn}
             />
           )
+        ) : null}
+
+        {/* No row-level click handler needs guarding: the list row navigates
+            through its links and bulk selection is its own checkbox. */}
+        {hasMenuEntries ? (
+          <BookingActionsMenu trigger="icon">
+            {extend.visible ? (
+              <ExtendBookingDialog
+                booking={{
+                  id: booking.id,
+                  from: dialogBooking.from,
+                  to: dialogBooking.to,
+                }}
+              />
+            ) : null}
+            {cancel.visible ? (
+              <CancelBookingDialog
+                booking={{ id: booking.id, name: booking.name }}
+              />
+            ) : null}
+            {archive.visible ? (
+              <ArchiveBookingAction booking={{ id: booking.id }} />
+            ) : null}
+            {duplicate.visible ? (
+              <DuplicateBookingAction booking={{ id: booking.id }} />
+            ) : null}
+            <BookingDocumentEntries
+              booking={{ id: booking.id, name: booking.name }}
+              actions={{ bookingDocument, checkinReceipt }}
+            />
+          </BookingActionsMenu>
         ) : null}
       </div>
     </>
