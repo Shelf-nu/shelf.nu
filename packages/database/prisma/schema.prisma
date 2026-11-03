@@ -979,6 +979,10 @@ model Location {
   @@index([organizationId, parentId])
   // Trigram index for substring search from the asset-list search bar
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_name_trgm_idx")
+  // Trigram indexes for the locations index search, which also matches
+  // description and address with ILIKE '%term%'
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_description_trgm_idx")
+  @@index([address(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_address_trgm_idx")
 }
 
 // Master data for roles
@@ -1483,9 +1487,11 @@ model AssetModelCustomFieldDefault {
   // back-relation on `CustomField` pushes the extended client's generics past
   // TS's recursion limit (TS2321) in `organization/service.server`. Services
   // read the field rows with a second query keyed on these ids. Because the
-  // schema does not describe the FK, `prisma migrate dev` reports it as drift
-  // and proposes dropping it: remove that statement from any generated
-  // migration, or the cascade on field delete is lost.
+  // schema does not describe the FK, `prisma migrate dev` treats it as drift
+  // and generates a drop for it. `pnpm db:prepare-migration` then runs
+  // `src/post-migration.ts`, which strips that drop because the FK is listed in
+  // `PROTECTED_FOREIGN_KEYS` (`src/protected-indexes.ts`). Plain
+  // `prisma migrate dev` keeps the drop.
   customFieldId String
 
   createdAt DateTime @default(now())
