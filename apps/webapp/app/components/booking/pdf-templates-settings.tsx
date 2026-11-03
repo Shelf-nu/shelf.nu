@@ -540,7 +540,7 @@ function EditTemplateDialog({
               id={`${idPrefix}-total-value`}
               name="totalValue"
               label="Total assets value"
-              description="The value of everything on the template."
+              description="The value of everything on the PDF."
               defaultChecked={config.totalValue}
             />
             <TemplateSwitch

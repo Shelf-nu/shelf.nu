@@ -177,7 +177,7 @@ describe("booking checklist PDF — Code column", () => {
     });
 
     // why: `getByText` alone would pass if the code were printed in the Name
-    // column, or anywhere else on the template. The column is the claim.
+    // column, or anywhere else on the PDF. The column is the claim.
     expect(codeCell()).toHaveTextContent("SAM-0001");
   });
 
