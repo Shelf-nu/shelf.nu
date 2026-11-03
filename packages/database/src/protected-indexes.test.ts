@@ -142,7 +142,10 @@ function replayForeignKeyStatements(
   // drops a key and adds it again must leave it in place.
   const statements =
     /ADD CONSTRAINT\s+"([^"]+)"\s+FOREIGN KEY|DROP CONSTRAINT\s+(?:IF EXISTS\s+)?"([^"]+)"|RENAME CONSTRAINT\s+"([^"]+)"\s+TO\s+"([^"]+)"/gi;
-  for (const [, added, dropped, renamedFrom, renamedTo] of sql.matchAll(
+  // Hand-written migrations explain themselves in `--` comments; a statement
+  // quoted in one never ran.
+  const code = sql.replace(/--.*$/gm, "");
+  for (const [, added, dropped, renamedFrom, renamedTo] of code.matchAll(
     statements
   )) {
     if (added) {
@@ -173,6 +176,18 @@ test("keeps a foreign key that a migration drops and adds again", () => {
   );
 
   assert.equal(live.get("Location_imageId_fkey"), "second");
+});
+
+test("ignores constraint statements inside SQL comments", () => {
+  const live = new Map<string, string>([["Location_imageId_fkey", "first"]]);
+
+  replayForeignKeyStatements(
+    '-- An earlier draft ran: ALTER TABLE "Location" DROP CONSTRAINT "Location_imageId_fkey";\nSELECT 1;',
+    "second",
+    live
+  );
+
+  assert.equal(live.get("Location_imageId_fkey"), "first");
 });
 
 test("removes a foreign key that a migration adds and drops again", () => {
