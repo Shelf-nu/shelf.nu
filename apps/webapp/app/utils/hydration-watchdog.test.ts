@@ -512,6 +512,23 @@ describe("HYDRATION_WATCHDOG_SCRIPT: the page is slow to hydrate", () => {
     });
   });
 
+  it("names no missing files when the requested files cannot be read", () => {
+    runWatchdog(fakePerformance());
+    // why: a document the script cannot query is hard to produce in happy-dom.
+    const query = vi
+      .spyOn(document, "querySelectorAll")
+      .mockImplementation(() => {
+        throw new Error("not supported");
+      });
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+    query.mockRestore();
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesExpected: null,
+      missingBundleFiles: null,
+    });
+  });
+
   it("names at most a handful of unfinished files", () => {
     for (let i = 0; i < MAX_MISSING_BUNDLE_FILES + 5; i++) {
       document.head.appendChild(

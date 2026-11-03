@@ -135,8 +135,8 @@ export type HydrationFailureReport = {
   /**
    * Paths of requested files with no finished download yet, up to
    * {@link MAX_MISSING_BUNDLE_FILES}. A download that stalls raises no error,
-   * so this is the only trace it leaves. `null` when the finished downloads
-   * could not be read in full, which would list loaded files as missing.
+   * so this is the only trace it leaves. `null` when the requested files or
+   * the finished downloads could not be read in full: the list would be wrong.
    */
   missingBundleFiles?: string[] | null;
   /** Milliseconds from navigation start until the last of them finished. */
@@ -292,6 +292,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       }
     } catch (e) {
       expected = null;
+      missing = null;
     }
     // Without every finished download to compare with, loaded files would be
     // listed as missing.
