@@ -142,9 +142,9 @@ function replayForeignKeyStatements(
   // drops a key and adds it again must leave it in place.
   const statements =
     /ADD CONSTRAINT\s+"([^"]+)"\s+FOREIGN KEY|DROP CONSTRAINT\s+(?:IF EXISTS\s+)?"([^"]+)"|RENAME CONSTRAINT\s+"([^"]+)"\s+TO\s+"([^"]+)"/gi;
-  // Hand-written migrations explain themselves in `--` comments; a statement
-  // quoted in one never ran.
-  const code = sql.replace(/--.*$/gm, "");
+  // Hand-written migrations explain themselves in comments; a statement quoted
+  // in one never ran.
+  const code = sql.replace(/\/\*[\s\S]*?\*\/|--.*$/gm, "");
   for (const [, added, dropped, renamedFrom, renamedTo] of code.matchAll(
     statements
   )) {
@@ -182,7 +182,11 @@ test("ignores constraint statements inside SQL comments", () => {
   const live = new Map<string, string>([["Location_imageId_fkey", "first"]]);
 
   replayForeignKeyStatements(
-    '-- An earlier draft ran: ALTER TABLE "Location" DROP CONSTRAINT "Location_imageId_fkey";\nSELECT 1;',
+    [
+      '-- An earlier draft ran: ALTER TABLE "Location" DROP CONSTRAINT "Location_imageId_fkey";',
+      '/* Do not run: ALTER TABLE "Location" DROP CONSTRAINT "Location_imageId_fkey"; */',
+      "SELECT 1;",
+    ].join("\n"),
     "second",
     live
   );
@@ -211,8 +215,10 @@ test("removes a foreign key that a migration adds and drops again", () => {
  * database names, so a model's `@@map` and a field's `@map` apply.
  */
 function foreignKeysDescribedBySchema(
-  schema = fs.readFileSync(path.join(prismaDir, "schema.prisma"), "utf8")
+  source = fs.readFileSync(path.join(prismaDir, "schema.prisma"), "utf8")
 ) {
+  // A relation in a `//` or `///` comment is not part of the schema.
+  const schema = source.replace(/\/\/.*$/gm, "");
   const names = new Set<string>();
   for (const [, model, body] of schema.matchAll(
     /^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm
@@ -258,6 +264,17 @@ test("names schema foreign keys after database table and column names", () => {
     [...foreignKeysDescribedBySchema(schema)].sort(),
     ["Note_owner_id_fkey", "comments_noteId_fkey", "note_tag_fk"].sort()
   );
+});
+
+test("ignores relations inside schema comments", () => {
+  const schema = [
+    "model Note {",
+    "  ownerId String",
+    "  // owner User @relation(fields: [ownerId], references: [id])",
+    "}",
+  ].join("\n");
+
+  assert.deepEqual([...foreignKeysDescribedBySchema(schema)], []);
 });
 
 test("every foreign key the migrations create is in the schema or protected", () => {
