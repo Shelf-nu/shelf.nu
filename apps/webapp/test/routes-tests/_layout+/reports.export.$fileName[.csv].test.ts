@@ -643,6 +643,7 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
           description: activityType === "ARCHIVED" ? "Archived" : "Reinstated",
           performedBy: "Sam Operative",
         })),
+        totalRows: 2,
       } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
 
       const response = (await loader(
