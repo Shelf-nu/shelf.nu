@@ -1,4 +1,4 @@
-import type { ReactElement, KeyboardEvent } from "react";
+import type { ComponentProps, ReactElement, KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
@@ -166,14 +166,13 @@ export default function AssetCustomFields({
 
       return (
         <>
-          <MarkdownEditor
+          <MultilineCustomFieldEditor
             key={inputKey(field.id)}
             name={`cf-${field.id}`}
             label={field.name}
             defaultValue={value ? String(value) : ""}
             placeholder={field.helpText ?? field.name}
             disabled={disabled}
-            maxLength={5000}
           />
           {error ? (
             <p className="mt-1 text-sm text-error-500">{error}</p>
@@ -324,6 +323,26 @@ export default function AssetCustomFields({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The multiline custom field editor of the asset form.
+ *
+ * The editor rebuilds its text whenever its `defaultValue` changes, so it is
+ * handed the value it mounted with and never a later one: a re-render that
+ * computes a different initial value would otherwise wipe what the user
+ * typed. A picked model's pre-fill reaches it by remounting it through `key`.
+ *
+ * @param props.defaultValue - The text the editor starts from
+ */
+function MultilineCustomFieldEditor({
+  defaultValue,
+  ...props
+}: Omit<ComponentProps<typeof MarkdownEditor>, "maxLength" | "ref">) {
+  const [initialValue] = useState(defaultValue);
+  return (
+    <MarkdownEditor {...props} defaultValue={initialValue} maxLength={5000} />
   );
 }
 

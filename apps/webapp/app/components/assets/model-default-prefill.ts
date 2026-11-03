@@ -107,7 +107,8 @@ export function planModelPrefill({
   for (const key of keys) {
     const read = readCurrent(key);
     // The multiline editor always submits its text with a trailing newline,
-    // so a blank one reads "\n". Compare without it.
+    // so a blank one reads "\n", and it reads line breaks as LF where a stored
+    // value keeps the CRLF of the form post. Compare normalized text.
     const current = read === null ? null : withoutTrailingNewlines(read);
     const ours = previous.values[key];
     const isFree =
@@ -131,9 +132,12 @@ export function planModelPrefill({
   return { values, versions };
 }
 
-/** A form value without the line breaks a multiline editor appends. */
+/**
+ * A form value with LF line breaks and without the trailing ones a multiline
+ * editor appends, so editor text and a stored value compare equal.
+ */
 function withoutTrailingNewlines(value: string) {
-  return value.replace(/\n+$/, "");
+  return value.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
 }
 
 /**

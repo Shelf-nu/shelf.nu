@@ -219,6 +219,28 @@ describe("planModelPrefill", () => {
     expect(prefillVersion(afterB, "brand")).toBe(2);
   });
 
+  it("treats a stored multiline default ending in CRLF as untouched when the editor reads LF", () => {
+    // A form post stores line breaks as CRLF; the editor reads them back as LF.
+    const crlfModel: PrefillModel = {
+      defaultValuation: null,
+      customFieldDefaults: [
+        {
+          customFieldId: "brand",
+          value: { raw: "Notes A\r\n", valueMultiLineText: "Notes A\r\n" },
+        },
+      ],
+    };
+    const afterA = pick({ model: crlfModel, form: { brand: "\n" } });
+
+    const afterB = pick({
+      previous: afterA,
+      model: modelB,
+      form: { brand: "Notes A\n" },
+    });
+
+    expect(afterB.values.brand).toBe("Siemens");
+  });
+
   it("does not remount a multiline editor whose text only differs by the newline", () => {
     const afterA = pick({ model: modelA, form: { brand: "\n" } });
 
