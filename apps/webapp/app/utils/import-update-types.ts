@@ -307,6 +307,8 @@ export type AssetForUpdate = {
   description: string | null;
   sequentialId: string | null;
   valuation: number | null;
+  /** Read when the asset joins a model, to fill only an empty category. */
+  categoryId: string | null;
   availableToBook: boolean;
   /**
    * Asset type — needed by the qty-tracked update parser to decide

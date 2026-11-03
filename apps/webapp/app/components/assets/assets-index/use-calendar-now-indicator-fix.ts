@@ -43,8 +43,10 @@ export function useCalendarNowIndicatorFix({
    * fallback would still see `false` 200ms after the fast path had already run
    * and would switch the view and scroll to now a second time.
    *
-   * It marks the attempt, not its completion. A calendar API that never
-   * materialises is therefore not retried.
+   * It marks an attempt in flight or done. It is cleared again when the
+   * attempt cannot finish: no calendar API yet, or a cleanup cancelled its
+   * timers. React StrictMode in development runs that cleanup right after
+   * mount, and a flag left set would keep the calendar on its loading overlay.
    */
   const hasStartedViewSwitchRef = useRef(false);
 
@@ -76,17 +78,20 @@ export function useCalendarNowIndicatorFix({
     const timer1 = setTimeout(() => {
       removeTimer(timer1);
       const calendarApi = calendarRef.current?.getApi();
-      if (calendarApi) {
-        calendarApi.changeView(targetView);
-        setCalendarView(targetView);
-
-        const timer2 = setTimeout(() => {
-          removeTimer(timer2);
-          setIsCalendarReady(true);
-          scrollToNow();
-        }, 150);
-        addTimer(timer2);
+      if (!calendarApi) {
+        // Let the next mount callback try again.
+        hasStartedViewSwitchRef.current = false;
+        return;
       }
+      calendarApi.changeView(targetView);
+      setCalendarView(targetView);
+
+      const timer2 = setTimeout(() => {
+        removeTimer(timer2);
+        setIsCalendarReady(true);
+        scrollToNow();
+      }, 150);
+      addTimer(timer2);
     }, 50);
     addTimer(timer1);
   }, [
@@ -123,9 +128,13 @@ export function useCalendarNowIndicatorFix({
     [resources, switchToTargetView, addTimer, removeTimer]
   );
 
-  // Cleanup function
+  /**
+   * Cancels the pending timers. An attempt they belonged to never finished, so
+   * the next mount callback may start the switch again.
+   */
   const cleanup = useCallback(() => {
     clearAllTimers();
+    hasStartedViewSwitchRef.current = false;
   }, [clearAllTimers]);
 
   return {

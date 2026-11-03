@@ -2,7 +2,7 @@
  * `@shelf/permissions`, how far a membership reaches.
  *
  * `resolveRoleAccess` folds a membership's policy with the workspace's
- * visibility toggles into one `RoleAccess` object. Servers compute it once per
+ * visibility toggles and permission switches into one `RoleAccess` object. Servers compute it once per
  * request; clients receive the same object from the layout loader, so the UI
  * and the server read one answer.
  */
@@ -11,6 +11,8 @@ import { ROLE_POLICIES, ROLES_BY_RANK } from "./policies";
 import { resolveRole } from "./resolve-role";
 import type { OrganizationRole } from "./roles";
 import { ROLE_LABELS } from "./roles";
+import type { WorkspaceGrantSettings } from "./workspace-grants";
+import { pickWorkspaceGrants } from "./workspace-grants";
 
 /** The workspace toggles that widen restricted roles' own-scopes. */
 export type WorkspaceAccessSettings = {
@@ -31,6 +33,11 @@ export type RoleAccess = {
   audits: { seeAll: boolean };
   /** OWNER is anywhere in the membership. */
   ownsWorkspace: boolean;
+  /**
+   * The workspace's permission switches. Pass them as `workspace` to
+   * `roleHasPermission` so a matrix check sees what the owner switched on.
+   */
+  workspaceGrants: WorkspaceGrantSettings;
 };
 
 /** The workspace's explicit check-out / check-in switches. */
@@ -83,7 +90,8 @@ export function isWorkspaceOwner(
  * Resolves a membership's reach.
  *
  * @param args.roles - Every role on the membership (unknown/empty -> BASE)
- * @param args.workspace - The workspace's visibility toggles
+ * @param args.workspace - The workspace's visibility toggles and permission
+ *   switches; a wider organization row is fine, only these fields are read
  * @returns The resolved access
  */
 export function resolveRoleAccess({
@@ -91,7 +99,7 @@ export function resolveRoleAccess({
   workspace,
 }: {
   roles: readonly string[] | undefined;
-  workspace: WorkspaceAccessSettings;
+  workspace: WorkspaceAccessSettings & WorkspaceGrantSettings;
 }): RoleAccess {
   const role = resolveRole(roles);
   const policy = ROLE_POLICIES[role];
@@ -111,6 +119,7 @@ export function resolveRoleAccess({
     },
     audits: { seeAll: policy.audits.scope === "all" },
     ownsWorkspace: isWorkspaceOwner(roles),
+    workspaceGrants: pickWorkspaceGrants(workspace),
   };
 }
 

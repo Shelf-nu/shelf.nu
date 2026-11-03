@@ -2,7 +2,7 @@
  * Role access for the companion: how far the signed-in member reaches in the
  * current workspace, resolved by `@shelf/permissions` exactly as the server
  * resolves it (`resolveRoleAccess`: the membership's highest-rank role folded
- * with the workspace's visibility toggles).
+ * with the workspace's visibility toggles and permission switches).
  *
  * Cosmetic only: it decides which affordances to show. Every mobile endpoint
  * enforces the same rules on the server. Not a mirror: it calls the shared
@@ -33,6 +33,7 @@ export type OrganizationAccessFields = Pick<Organization, "roles"> &
       | "baseUserCanSeeBookings"
       | "selfServiceCanSeeCustody"
       | "baseUserCanSeeCustody"
+      | "managersCanEditAssets"
     >
   >;
 
@@ -54,6 +55,7 @@ export function accessForOrganization(
       baseUserCanSeeBookings: org?.baseUserCanSeeBookings === true,
       selfServiceCanSeeCustody: org?.selfServiceCanSeeCustody === true,
       baseUserCanSeeCustody: org?.baseUserCanSeeCustody === true,
+      managersCanEditAssets: org?.managersCanEditAssets === true,
     },
   });
 }
