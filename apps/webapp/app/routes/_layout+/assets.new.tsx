@@ -20,6 +20,10 @@ import {
 } from "~/modules/asset/service.server";
 import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import {
+  fillAssetFormDataFromModel,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
+import {
   getAssetModel,
   getAssetModels,
 } from "~/modules/asset-model/service.server";
@@ -97,7 +101,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         category: searchParams.get("category"),
       }),
       estimateNextSequentialId(organizationId),
-      getAssetModels({ organizationId, page: 1, perPage: 100 }),
+      getAssetModels({
+        organizationId,
+        page: 1,
+        perPage: 100,
+        withCustomFieldDefaults: true,
+      }),
     ]);
 
     return payload({
@@ -157,6 +166,36 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const formData = await clonedRequest.formData();
 
+    const isBulkSubmit = isBulkCreate(formData.get("bulk"));
+    if (isBulkSubmit) {
+      // Bulk create stays closed to the workspace switches: they open
+      // single-asset creation only. Checked before any other work, so a
+      // refused submit reads nothing.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.create,
+        matrixOnly: true,
+      });
+    }
+
+    /**
+     * An asset joining a model gets the model's defaults in its empty fields.
+     * Filled before validation, so the category decides which custom fields
+     * load and a required field the model fills passes.
+     */
+    const joiningModelId = formData.get("assetModelId");
+    if (typeof joiningModelId === "string" && joiningModelId) {
+      const model = await getAssetModelDefaults({
+        assetModelId: joiningModelId,
+        organizationId,
+      });
+      if (model) {
+        fillAssetFormDataFromModel({ formData, model });
+      }
+    }
+
     const customFields = await getActiveCustomFields({
       organizationId,
       category: formData.get("category") as string | null,
@@ -166,18 +205,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     // tightens assetModelId + nameTemplate + count when `bulk=1`). Both
     // remain `ZodObject`s so `mergedSchema` can still layer the
     // category-driven custom fields on top.
-    const isBulkSubmit = isBulkCreate(formData.get("bulk"));
-    if (isBulkSubmit) {
-      // Bulk create stays closed to the workspace switches: they open
-      // single-asset creation only.
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.create,
-        matrixOnly: true,
-      });
-    }
     const FormSchema = mergedSchema({
       // Cast the union to the base schema's type — `mergedSchema`'s
       // generic expects a single ZodObject shape. The bulk variant is

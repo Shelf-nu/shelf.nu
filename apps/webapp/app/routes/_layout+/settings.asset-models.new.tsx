@@ -2,7 +2,8 @@
  * Route: New Asset Model
  *
  * Full-page form for creating a new asset model. Loads categories for the
- * DynamicSelect and the organisation currency for the valuation prefix.
+ * DynamicSelect, the organisation currency for the valuation prefix, and the
+ * custom fields the model can hold a default value for.
  *
  * @see {@link file://./../../components/asset-model/form.tsx}
  */
@@ -12,6 +13,11 @@ import AssetModelForm, {
   AssetModelFormSchema,
 } from "~/components/asset-model/form";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
+import {
+  getModelDefaultFieldOptions,
+  parseModelDefaultsFromFormData,
+  saveAssetModelCustomFieldDefaults,
+} from "~/modules/asset-model/defaults.server";
 import {
   createAssetModel,
   deleteAssetModel,
@@ -42,12 +48,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
-      {
-        organizationId,
-        request,
-      }
-    );
+    const [{ categories, totalCategories }, modelDefaultFields] =
+      await Promise.all([
+        getCategoriesForCreateAndEdit({ organizationId, request }),
+        getModelDefaultFieldOptions({ organizationId }),
+      ]);
 
     const header = { title };
 
@@ -56,6 +61,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       categories,
       totalCategories,
       currency: currentOrganization?.currency,
+      modelDefaultFields,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -88,13 +94,17 @@ export async function action({ context, request }: LoaderFunctionArgs) {
      */
     const clonedRequest = request.clone();
 
-    const parsedData = parseData(
-      await clonedRequest.formData(),
-      AssetModelFormSchema,
-      {
-        additionalData: { userId, organizationId },
-      }
-    );
+    const formData = await clonedRequest.formData();
+    const parsedData = parseData(formData, AssetModelFormSchema, {
+      additionalData: { userId, organizationId },
+    });
+
+    // Validated before anything is written, so a bad default never leaves a
+    // half-created model behind.
+    const customFieldDefaults = parseModelDefaultsFromFormData({
+      formData,
+      fields: await getModelDefaultFieldOptions({ organizationId }),
+    });
 
     const assetModel = await createAssetModel({
       ...parsedData,
@@ -103,8 +113,8 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     });
 
     /**
-     * Runs after the create so the image is stored under the new model's id.
-     * No-ops when the user didn't pick a file.
+     * Runs after the create so the defaults and the image are stored under the
+     * new model's id. The image upload no-ops when the user didn't pick a file.
      *
      * A failure here (file rejected, storage or signing error) would otherwise
      * leave the model committed while the action reports an error — the user
@@ -112,6 +122,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
      * row back so the failure the user is told about is the truth.
      */
     try {
+      await saveAssetModelCustomFieldDefaults({
+        assetModelId: assetModel.id,
+        organizationId,
+        defaults: customFieldDefaults,
+      });
       await updateAssetModelImage({
         request,
         assetModelId: assetModel.id,

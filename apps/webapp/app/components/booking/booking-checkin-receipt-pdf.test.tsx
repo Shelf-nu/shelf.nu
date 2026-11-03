@@ -20,6 +20,7 @@ import type {
   CheckinReceiptView,
   CheckinReceiptViewRow,
 } from "~/modules/booking/checkin-receipt";
+import { isCheckinReceiptAvailable } from "~/modules/booking/checkin-receipt-availability";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -28,6 +29,7 @@ import type {
 import {
   BookingCheckinReceiptPDF,
   BookingCheckinReceiptPreview,
+  checkinReceiptUnavailableReason,
 } from "./booking-checkin-receipt-pdf";
 
 // why: the header renders `DateS`, which reads the acting user's format prefs
@@ -76,13 +78,6 @@ vi.mock("react-router", async () => {
     }),
   };
 });
-
-// why: the entry reads the booking page's sort out of the URL. There is no
-// router-provided query string here, and the sort plays no part in whether the
-// entry is offered.
-vi.mock("~/hooks/search-params", () => ({
-  useSearchParams: () => [new URLSearchParams(), vi.fn()],
-}));
 
 /** A returned individual row, the ordinary case every override starts from. */
 function row(
@@ -381,7 +376,11 @@ describe("booking check-in receipt — the sheet", () => {
   });
 });
 
-/** Renders the Actions-menu entry for a booking in the given shape. */
+/**
+ * Renders the Actions-menu entry for a booking in the given shape, disabled
+ * the way the booking page decides it: the receipt rule, and the page's
+ * specific reason when the rule refuses.
+ */
 function renderEntry(
   booking: {
     status: BookingStatus;
@@ -395,9 +394,12 @@ function renderEntry(
   return render(
     <MemoryRouter>
       <BookingCheckinReceiptPDF
-        booking={{ id: "booking-1", name: "Shoot", ...booking }}
-        hasDispositionedUnits={hasDispositionedUnits}
-        timeStamp={1757000000000}
+        booking={{ id: "booking-1", name: "Shoot" }}
+        disabled={
+          !isCheckinReceiptAvailable({ ...booking, hasDispositionedUnits }) && {
+            reason: checkinReceiptUnavailableReason(booking.bookingAssets),
+          }
+        }
       />
     </MemoryRouter>
   );

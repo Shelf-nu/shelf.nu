@@ -84,6 +84,8 @@ const MATRIX_ONLY = [
   "routes/api+/assets.bulk-update-custom-field.ts",
   "routes/api+/assets.bulk-update-reorder-point.ts",
   "routes/api+/generate-sequential-ids.tsx",
+  // "Fill empty fields" writes the model's defaults to every linked asset.
+  "routes/_layout+/settings.asset-models.$assetModelId_.edit.tsx",
 ];
 
 /** One permission check as written in the source. */

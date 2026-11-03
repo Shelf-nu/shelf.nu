@@ -222,6 +222,15 @@ vi.mock("~/modules/asset-model/service.server", () => ({
   getAssetModels: vi.fn(async () => ({ assetModels: [], totalAssetModels: 0 })),
 }));
 
+// why: an asset joining a model reads the model's defaults from the
+// database; the model here has none, so the form is left as submitted.
+vi.mock("~/modules/asset-model/defaults.server", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("~/modules/asset-model/defaults.server")
+  >()),
+  getAssetModelDefaults: vi.fn(async () => null),
+}));
+
 // why: activity notes are database writes with their own coverage.
 vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(async () => ({})),
