@@ -12,6 +12,9 @@
  * whose custody, which audits, which limits apply, and who hears about what,
  * folded with the workspace's visibility toggles.
  *
+ * Also owns `WORKSPACE_GRANTS`: the permissions an owner can add to a role
+ * with a workspace switch, which `roleHasPermission` unions with the matrix.
+ *
  * Consumed by:
  * - webapp server validator (~/utils/permissions/permission.validator.server.ts)
  * - webapp client UI gating (~/utils/permissions/permission.validator.client.ts)
@@ -38,6 +41,16 @@ export type { OrganizationRole } from "./roles";
 export { PermissionAction, PermissionEntity } from "./vocabulary";
 export { Role2PermissionMap } from "./matrix";
 export { roleHasPermission } from "./resolver";
+export {
+  NO_WORKSPACE_GRANTS,
+  WORKSPACE_GRANTS,
+  pickWorkspaceGrants,
+  workspaceGrantedActions,
+} from "./workspace-grants";
+export type {
+  WorkspaceGrantSetting,
+  WorkspaceGrantSettings,
+} from "./workspace-grants";
 export {
   BOOKING_STATUS_NAMES,
   INVITABLE_ROLES,

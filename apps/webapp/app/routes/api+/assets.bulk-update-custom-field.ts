@@ -49,6 +49,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+      // Bulk edits other than location stay closed to the workspace switches.
+      matrixOnly: true,
     });
 
     const customFields = await getBulkSettableCustomFields({ organizationId });
@@ -87,6 +89,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+      // Bulk edits other than location stay closed to the workspace switches.
+      matrixOnly: true,
     });
 
     // Needed to resolve "select all" in advanced mode.

@@ -636,7 +636,9 @@ export default function DynamicSelect({
               </When>
 
               <When truthy={typeof extraContentNode !== "undefined"}>
-                <div className="border-t px-3 pb-3">{extraContentNode}</div>
+                <div className="border-t px-3 pb-3 empty:hidden">
+                  {extraContentNode}
+                </div>
               </When>
             </PopoverContent>
           </PopoverPortal>

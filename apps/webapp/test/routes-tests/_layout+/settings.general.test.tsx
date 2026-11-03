@@ -8,6 +8,8 @@ import {
   getOrganizationAdmins,
   transferOwnership,
   updateOrganization,
+  updateOrganizationManagersCanEditAssets,
+  updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { action, loader } from "~/routes/_layout+/settings.general";
@@ -48,6 +50,7 @@ vi.mock("~/modules/organization/service.server", () => ({
   getOrganizationAdmins: vi.fn(),
   transferOwnership: vi.fn(),
   updateOrganization: vi.fn(),
+  updateOrganizationManagersCanEditAssets: vi.fn(),
   updateOrganizationPermissions: vi.fn(),
 }));
 
@@ -55,7 +58,10 @@ vi.mock("~/modules/tier/service.server", () => ({
   getOrganizationTierLimit: vi.fn(),
 }));
 
-vi.mock("~/utils/roles.server", () => ({
+// why: requirePermission resolves the session's workspace from cookies and the
+// database; the owner assertion stays real because it is under test.
+vi.mock("~/utils/roles.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/roles.server")>()),
   requirePermission: vi.fn(),
 }));
 
@@ -596,10 +602,13 @@ describe("settings.general transfer-ownership authorization", () => {
     });
   }
 
-  function mockRole(role: OrganizationRoles) {
+  function mockRole(
+    role: OrganizationRoles,
+    type: OrganizationType = OrganizationType.TEAM
+  ) {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
-      currentOrganization: baseOrganization(),
+      currentOrganization: { ...baseOrganization(), type },
       role,
       access: accessFor([role]),
       organizations: [baseOrganization()],
@@ -780,5 +789,122 @@ describe("settings.general PDF templates moved to Settings > Bookings", () => {
     )) as { init?: { status?: number } };
 
     expect(response.init?.status).toBe(400);
+  });
+});
+
+describe("settings.general managers switch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getOrganizationTierLimitMock.mockResolvedValue({
+      id: "tier_2",
+      canHideShelfBranding: true,
+    } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  function mockRole(
+    role: OrganizationRoles,
+    type: OrganizationType = OrganizationType.TEAM
+  ) {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: { ...baseOrganization(), type },
+      role,
+      access: accessFor([role]),
+      organizations: [baseOrganization()],
+      userOrganizations: [{ organization: { id: "org-1" }, roles: [role] }],
+      canUseBarcodes: false,
+    } as any);
+  }
+
+  function post(fields: Record<string, string>) {
+    const body = new URLSearchParams(fields);
+    return action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    ) as Promise<{ init?: { status?: number } | null }>;
+  }
+
+  it("lets the OWNER switch it on", async () => {
+    mockRole(OrganizationRoles.OWNER);
+
+    const response = await post({
+      intent: "updateManagersCanEditAssets",
+      managersCanEditAssets: "on",
+    });
+
+    expect(response.init?.status).toBe(200);
+    expect(updateOrganizationManagersCanEditAssets).toHaveBeenCalledWith({
+      id: "org-1",
+      managersCanEditAssets: true,
+    });
+  });
+
+  it("reads an unsubmitted switch as off", async () => {
+    mockRole(OrganizationRoles.OWNER);
+
+    await post({ intent: "updateManagersCanEditAssets" });
+
+    expect(updateOrganizationManagersCanEditAssets).toHaveBeenCalledWith({
+      id: "org-1",
+      managersCanEditAssets: false,
+    });
+  });
+
+  it("answers an ADMIN with 403 and leaves the switch alone", async () => {
+    // ADMIN passes requirePermission (generalSettings:update); only the owner
+    // assertion in the action stops this.
+    mockRole(OrganizationRoles.ADMIN);
+
+    const response = await post({
+      intent: "updateManagersCanEditAssets",
+      managersCanEditAssets: "on",
+    });
+
+    expect(response.init?.status).toBe(403);
+    expect(updateOrganizationManagersCanEditAssets).not.toHaveBeenCalled();
+  });
+
+  it("answers the OWNER of a personal workspace with 400 and leaves the switch alone", async () => {
+    mockRole(OrganizationRoles.OWNER, OrganizationType.PERSONAL);
+
+    const response = await post({
+      intent: "updateManagersCanEditAssets",
+      managersCanEditAssets: "on",
+    });
+
+    expect(response.init?.status).toBe(400);
+    expect(updateOrganizationManagersCanEditAssets).not.toHaveBeenCalled();
+  });
+
+  it("never writes the switch from the ADMIN-saveable visibility form", async () => {
+    mockRole(OrganizationRoles.ADMIN);
+
+    await post({
+      intent: "permissions",
+      id: "org-1",
+      selfServiceCanSeeCustody: "on",
+      // A crafted extra field: the visibility intent must ignore it.
+      managersCanEditAssets: "on",
+    });
+
+    expect(updateOrganizationPermissions).toHaveBeenCalledWith({
+      id: "org-1",
+      configuration: {
+        selfServiceCanSeeCustody: true,
+        selfServiceCanSeeBookings: false,
+        baseUserCanSeeCustody: false,
+        baseUserCanSeeBookings: false,
+      },
+    });
+    expect(updateOrganizationManagersCanEditAssets).not.toHaveBeenCalled();
   });
 });

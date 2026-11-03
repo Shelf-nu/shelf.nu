@@ -10,14 +10,14 @@
  * @see {@link file://./role-access.ts}
  */
 import { OrganizationRoles } from "@prisma/client";
-import type { WorkspaceAccessSettings } from "~/utils/permissions/role-access";
 import { accessFor } from "./role-access";
 
 /**
  * A `getMobileUserContext` return value.
  *
  * @param overrides.roles - Every role on the membership (defaults to ADMIN)
- * @param overrides.workspace - Visibility toggles to switch on; the rest stay off
+ * @param overrides.workspace - Visibility toggles and permission switches to
+ *   switch on; the rest stay off
  * @param overrides.canUseBarcodes - Defaults to `true`
  * @param overrides.canUseAudits - Defaults to `true`
  * @returns The context, with `access` resolved from the roles and toggles
@@ -25,7 +25,7 @@ import { accessFor } from "./role-access";
 export function mobileUserContext(
   overrides: {
     roles?: OrganizationRoles[];
-    workspace?: Partial<WorkspaceAccessSettings>;
+    workspace?: Parameters<typeof accessFor>[1];
     canUseBarcodes?: boolean;
     canUseAudits?: boolean;
   } = {}

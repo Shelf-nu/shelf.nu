@@ -29,6 +29,7 @@ import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
@@ -198,6 +199,20 @@ export const NewAssetFormSchema = z.object({
       "Unit of measure may not contain Markdoc syntax (`{%` / `%}`)"
     ),
 });
+
+/**
+ * Whether a `bulk` query param or form field asks for bulk create from a
+ * model. The page link sends `1`; `true` is accepted too. The new-asset
+ * loader, its action and the page all decide through this one function, so
+ * the bulk gate (`matrixOnly: true`) and the bulk schema can never disagree
+ * about what counts as bulk.
+ *
+ * @param value - The raw `bulk` value, `null` when absent
+ * @returns `true` for `"1"` or `"true"`
+ */
+export function isBulkCreate(value: FormDataEntryValue | null): boolean {
+  return value === "1" || value === "true";
+}
 
 /**
  * Bulk-create variant of `NewAssetFormSchema`. Extends the base shape
@@ -396,6 +411,8 @@ const AssetFormInner = ({
   );
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);
+  /** "Create new" shortcuts show only to members who may create that entity. */
+  const canCreateInline = useInlineCreatePermissions();
   const disabled = isFormProcessing(navigation.state);
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
@@ -1322,14 +1339,16 @@ const AssetFormInner = ({
             <p>
               Make it unique. Each asset can have 1 category. It will show on
               your index.{" "}
-              <Button
-                to="/categories/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create categories
-              </Button>
+              {canCreateInline.category ? (
+                <Button
+                  to="/categories/new"
+                  variant="link-gray"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                >
+                  Create categories
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -1377,14 +1396,16 @@ const AssetFormInner = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Button
-                to="/tags/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create tags
-              </Button>
+              {canCreateInline.tag ? (
+                <Button
+                  to="/tags/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create tags
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -1403,14 +1424,16 @@ const AssetFormInner = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Button
-                to="/locations/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create locations
-              </Button>
+              {canCreateInline.location ? (
+                <Button
+                  to="/locations/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create locations
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"

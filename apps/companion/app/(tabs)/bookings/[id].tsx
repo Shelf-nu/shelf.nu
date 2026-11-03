@@ -1634,6 +1634,7 @@ function BookingDetailScreen({ id }: { id: string }) {
           // Reinstating uses the web's archive grant (admins and owners).
           canReinstate: userHasPermission({
             roles: currentOrg?.roles,
+            workspace: currentOrg,
             entity: "asset",
             action: "archive",
           }),
@@ -1719,6 +1720,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     canPartialCheckout &&
     userHasPermission({
       roles: currentOrg?.roles,
+      workspace: currentOrg,
       entity: "booking",
       action: "checkout",
     }) &&

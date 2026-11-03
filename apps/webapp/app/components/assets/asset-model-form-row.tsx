@@ -22,6 +22,7 @@
  *
  * @see {@link file://./form.tsx} consumer
  */
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -54,6 +55,9 @@ export function AssetModelFormRow({
   onChange,
   error,
 }: AssetModelFormRowProps) {
+  /** "Create" shortcuts show only to members who may create asset models. */
+  const canCreateAssetModel = useInlineCreatePermissions().assetModel;
+
   return (
     <FormRow
       rowLabel="Asset Model"
@@ -62,14 +66,16 @@ export function AssetModelFormRow({
         <p>
           Assign a model to group similar assets together. When an asset joins a
           model, the model's defaults fill its empty fields.{" "}
-          <Button
-            to="/settings/asset-models/new"
-            variant="link-gray"
-            className="text-gray-600 underline"
-            target="_blank"
-          >
-            Create asset models
-          </Button>
+          {canCreateAssetModel ? (
+            <Button
+              to="/settings/asset-models/new"
+              variant="link-gray"
+              className="text-gray-600 underline"
+              target="_blank"
+            >
+              Create asset models
+            </Button>
+          ) : null}
         </p>
       }
       className="border-b-0 pb-[10px]"

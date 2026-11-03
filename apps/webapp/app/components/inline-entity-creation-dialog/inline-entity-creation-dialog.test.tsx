@@ -1,7 +1,22 @@
+import { OrganizationRoles } from "@prisma/client";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MemberRoles } from "~/utils/permissions/member-roles";
+import { withWorkspaceGrants } from "~/utils/permissions/member-roles";
 import InlineEntityCreationDialog from "./inline-entity-creation-dialog";
+
+/** The roles `useOrganizationRoles` returns for the current render. */
+const caller = vi.hoisted(() => ({
+  roles: undefined as MemberRoles | undefined,
+}));
+
+// why: the real hook reads the `_layout` route loader, which needs a data
+// router; the roles it returns, carrying the switches, decide whether the
+// dialog offers itself.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => caller.roles,
+}));
 
 // why: Mock NewCategoryForm to avoid router dependencies and test dialog behavior in isolation
 vi.mock("../category/new-category-form", () => ({
@@ -60,6 +75,52 @@ vi.mock("../location/form", () => ({
 describe("InlineEntityCreationDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    caller.roles = withWorkspaceGrants([OrganizationRoles.ADMIN], {
+      managersCanEditAssets: false,
+    });
+  });
+
+  describe("Who is offered the create entry", () => {
+    const TYPES = ["category", "location", "assetModel"] as const;
+
+    it.each(TYPES)("offers an Administrator the %s create entry", (type) => {
+      render(
+        <InlineEntityCreationDialog
+          title="Create"
+          buttonLabel="Create new"
+          type={type}
+        />
+      );
+
+      expect(
+        screen.getByRole("button", { name: "Create new" })
+      ).toBeInTheDocument();
+    });
+
+    it.each(
+      TYPES.flatMap((type) => [
+        [type, true],
+        [type, false],
+      ]) as [(typeof TYPES)[number], boolean][]
+    )(
+      "renders nothing for a Manager: %s, switch on %s",
+      (type, managersCanEditAssets) => {
+        caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+          managersCanEditAssets,
+        });
+
+        const { container } = render(
+          <InlineEntityCreationDialog
+            title="Create"
+            buttonLabel="Create new"
+            type={type}
+          />
+        );
+
+        expect(container).toBeEmptyDOMElement();
+        expect(screen.queryByRole("button")).toBeNull();
+      }
+    );
   });
 
   describe("Button and Dialog visibility", () => {

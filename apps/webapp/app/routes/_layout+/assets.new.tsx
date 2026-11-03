@@ -5,6 +5,7 @@ import { data, redirect, redirectDocument, useLoaderData } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   AssetForm,
+  isBulkCreate,
   NewAssetBulkFormSchema,
   NewAssetFormSchema,
 } from "~/components/assets/form";
@@ -69,6 +70,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.create,
+      // The bulk-create page (`?bulk=1`) stays closed to the workspace
+      // switches: they open single-asset creation only.
+      matrixOnly: isBulkCreate(new URL(request.url).searchParams.get("bulk")),
     });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
@@ -162,6 +166,20 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const formData = await clonedRequest.formData();
 
+    const isBulkSubmit = isBulkCreate(formData.get("bulk"));
+    if (isBulkSubmit) {
+      // Bulk create stays closed to the workspace switches: they open
+      // single-asset creation only. Checked before any other work, so a
+      // refused submit reads nothing.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.create,
+        matrixOnly: true,
+      });
+    }
+
     /**
      * An asset joining a model gets the model's defaults in its empty fields.
      * Filled before validation, so the category decides which custom fields
@@ -187,8 +205,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     // tightens assetModelId + nameTemplate + count when `bulk=1`). Both
     // remain `ZodObject`s so `mergedSchema` can still layer the
     // category-driven custom fields on top.
-    const isBulkSubmit =
-      formData.get("bulk") === "1" || formData.get("bulk") === "true";
     const FormSchema = mergedSchema({
       // Cast the union to the base schema's type — `mergedSchema`'s
       // generic expects a single ZodObject shape. The bulk variant is
@@ -386,11 +402,11 @@ export default function NewAssetPage() {
   // Get category from URL params or use the default passed prop
   const categoryFromUrl = searchParams.get("category");
 
-  // Bulk-create mode flag — set via `?bulk=1` query param from the
+  // Bulk-create mode flag, set via `?bulk=1` query param from the
   // `+New` Popover dropdown on /assets, or from the asset form itself
   // when the user enables bulk-create after selecting a model. The
   // page header label and the form's field layout both branch on this.
-  const bulkMode = searchParams.get("bulk") === "1";
+  const bulkMode = isBulkCreate(searchParams.get("bulk"));
 
   return (
     <div className="relative">

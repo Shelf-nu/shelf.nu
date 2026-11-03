@@ -88,6 +88,7 @@ function renderMenu({
         baseUserCanSeeBookings: false,
         selfServiceCanSeeCustody: false,
         baseUserCanSeeCustody: false,
+        managersCanEditAssets: false,
       },
     })
   );
