@@ -6,10 +6,8 @@
  * a chronological table of recent asset events with semantic activity-type
  * badges and a plain-words description of each change.
  *
- * Extracted from the monolithic reports route during the
- * `reports.$reportId.tsx` decomposition. The route owns data fetching,
- * loader/action wiring, and row-click navigation; this component only
- * renders the report body it is handed.
+ * The route owns data fetching, loader/action wiring, and row-click
+ * navigation; this component only renders the report body it is handed.
  *
  * @see {@link file://./../../routes/_layout+/reports.$reportId.tsx}
  * @see {@link file://./report-table.tsx}
@@ -28,8 +26,8 @@ import type { AssetActivityRow, ReportKpi } from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
 
 /**
- * Column definitions for the Asset Activity table, hoisted to module
- * scope. Same loop fix as IDLE_ASSETS_COLUMNS.
+ * Column definitions for the Asset Activity table. They live at module scope
+ * so the table receives the same array on every render.
  */
 const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
   {
@@ -88,9 +86,14 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
     accessorKey: "description",
     header: "Details",
     // Table cells never wrap; this one does, so a long change such as
-    // "Location changed: Main warehouse → Unit 4, Leeds" stays readable.
+    // "Location changed: Main warehouse → Unit 4, Leeds" stays readable. A
+    // rewritten asset description can run to pages, so three lines show and
+    // the rest is in the tooltip and the CSV.
     cell: ({ row }) => (
-      <span className="block min-w-48 max-w-xs whitespace-normal text-gray-700">
+      <span
+        className="line-clamp-3 block min-w-48 max-w-xs whitespace-normal text-gray-700"
+        title={row.original.description}
+      >
         {row.original.description}
       </span>
     ),

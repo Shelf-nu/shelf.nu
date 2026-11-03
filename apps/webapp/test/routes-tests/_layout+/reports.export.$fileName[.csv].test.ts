@@ -17,7 +17,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import {
-  assetActivityExportRows,
+  assetActivityReport,
   assetDistributionReport,
   assetInventoryReport,
   assetUtilizationReport,
@@ -72,7 +72,8 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   topBookedKitsReport: vi.fn(),
   assetInventoryReport: vi.fn(),
   assetUtilizationReport: vi.fn(),
-  assetActivityExportRows: vi.fn(),
+  assetActivityReport: vi.fn(),
+  ACTIVITY_EXPORT_MAX_ROWS: 200_000,
   monthlyBookingTrendsReport: vi.fn(),
 }));
 
@@ -429,8 +430,9 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       {
         reportId: "asset-activity",
         query: "asset=asset-1&category=cat-1",
-        mock: vi.mocked(assetActivityExportRows),
+        mock: vi.mocked(assetActivityReport),
         expected: {
+          allRows: true,
           assetId: "asset-1",
           assetFilter: filterCarrying({ categoryIds: ["cat-1"] }),
         },
@@ -461,8 +463,6 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       for (const { mock } of cases()) {
         mock.mockResolvedValue(emptyPayload());
       }
-      // The activity export returns its rows directly, without a payload.
-      vi.mocked(assetActivityExportRows).mockResolvedValue([]);
       // Distribution builds its CSV from a breakdown rather than from rows.
       vi.mocked(assetDistributionReport).mockResolvedValue({
         ...emptyPayload<AssetDistributionRow>(),
@@ -691,25 +691,49 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     });
   });
   describe("asset-activity", () => {
-    it("writes readable references and the names on both sides of a change", async () => {
-      // The file-wide prefs mock carries placeholder formats; this case prints
-      // dates, so it uses the real default preferences.
+    /** Runs the activity export over `rows` and returns the file's lines. */
+    const exportLines = async (rows: object[], totalRows = rows.length) => {
+      // The file-wide prefs mock carries placeholder formats; these cases
+      // print dates, so they use the real default preferences.
       vi.mocked(resolveUserFormatPrefsById).mockResolvedValueOnce(
         HARDCODED_DEFAULT_PREFS
       );
-      vi.mocked(assetActivityExportRows).mockResolvedValue([
-        {
-          occurredAt: new Date("2026-08-20T09:30:00.000Z"),
-          assetId: "classet1",
-          samId: "SAM-0042",
-          qrId: "cm4qr42",
-          assetName: "Pallet 17",
-          activityType: "LOCATION_CHANGED",
-          description: "Location changed: Leeds unit → Hull depot",
-          changedFrom: "Leeds unit",
-          changedTo: "Hull depot",
-          performedBy: "Sam Operative",
-        },
+      vi.mocked(assetActivityReport).mockResolvedValue({
+        rows,
+        totalRows,
+      } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
+          ),
+          params: { fileName: "asset-activity" },
+          context,
+        })
+      )) as unknown as Response;
+      return (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+    };
+
+    const moveRow = {
+      occurredAt: new Date("2026-08-20T09:30:00.000Z"),
+      assetId: "classet1",
+      samId: "SAM-0042",
+      qrId: "cm4qr42",
+      assetName: "Pallet 17",
+      activityType: "LOCATION_CHANGED",
+      description: "Location changed: Leeds unit → Hull depot",
+      changedFrom: "Leeds unit",
+      changedTo: "Hull depot",
+      performedBy: "Sam Operative",
+    };
+
+    it("writes readable references and the names on both sides of a change", async () => {
+      const lines = await exportLines([
+        moveRow,
         {
           occurredAt: new Date("2026-08-19T08:00:00.000Z"),
           assetId: "classet2",
@@ -722,31 +746,26 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
           changedTo: null,
           performedBy: null,
         },
-      ] as Awaited<ReturnType<typeof assetActivityExportRows>>);
+      ]);
 
-      const response = (await loader(
-        createLoaderArgs({
-          request: new Request(
-            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
-          ),
-          params: { fileName: "asset-activity" },
-          context,
-        })
-      )) as unknown as Response;
-      const rows = (await response.text())
-        .replace(/^\uFEFF/, "")
-        .trim()
-        .split("\n");
-
-      expect(rows[0]).toBe(
+      expect(lines[0]).toBe(
         "Date,Asset ID,SAM ID,QR Code ID,Asset Name,Activity Type,Description,From,To,Performed By"
       );
-      expect(rows[1]).toBe(
+      expect(lines[1]).toBe(
         '"08/20/2026, 9:30 AM",classet1,SAM-0042,cm4qr42,Pallet 17,Location changed,Location changed: Leeds unit → Hull depot,Leeds unit,Hull depot,Sam Operative'
       );
       // No change, no references: those cells stay empty.
-      expect(rows[2]).toBe(
+      expect(lines[2]).toBe(
         '"08/19/2026, 8:00 AM",classet2,,,Pallet 18,Asset created,Asset created,,,System'
+      );
+      expect(lines).toHaveLength(3);
+    });
+
+    it("ends a file cut at the ceiling with a line saying so", async () => {
+      const lines = await exportLines([moveRow], 250_000);
+
+      expect(lines.at(-1)).toBe(
+        '"Export stopped at 200,000 of 250,000 rows. Narrow the date range to export the rest."'
       );
     });
   });

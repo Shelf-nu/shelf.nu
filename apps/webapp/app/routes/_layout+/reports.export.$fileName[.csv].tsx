@@ -24,7 +24,8 @@ import {
   topBookedKitsReport,
   assetInventoryReport,
   assetUtilizationReport,
-  assetActivityExportRows,
+  ACTIVITY_EXPORT_MAX_ROWS,
+  assetActivityReport,
   assetDistributionReport,
   monthlyBookingTrendsReport,
   type BookingComplianceSortColumn,
@@ -67,7 +68,8 @@ import { assertUserCanUseReports } from "~/utils/subscription.server";
 /**
  * Builds the report named by `?reportId` as a CSV download, applying the same
  * filters as the report page but reading up to 10,000 rows instead of one page.
- * The Asset Activity Summary reads every event in the timeframe instead.
+ * The Asset Activity Summary reads every event in the timeframe instead, up
+ * to its own ceiling.
  *
  * @returns The CSV as an attachment, or the failure with its status: 400 without
  *   a report id, 404 for an unknown report, 403 for one that does not export or
@@ -307,13 +309,18 @@ export const loader = async ({
       }
 
       case "asset-activity": {
-        const rows = await assetActivityExportRows({
+        const reportData = await assetActivityReport({
           organizationId,
           timeframe,
           assetId: reportFilters.assetId ?? undefined,
           assetFilter: reportFilters.assetFilter,
+          allRows: true,
         });
-        csvString = generateAssetActivityCsv(rows, formatPrefs);
+        csvString = generateAssetActivityCsv(
+          reportData.rows,
+          reportData.totalRows,
+          formatPrefs
+        );
         break;
       }
 
@@ -767,6 +774,7 @@ function generateAssetUtilizationCsv(rows: AssetUtilizationRow[]): string {
  */
 function generateAssetActivityCsv(
   rows: AssetActivityRow[],
+  totalRows: number,
   prefs: ResolvedFormatPrefs
 ): string {
   const headers = [
@@ -797,6 +805,17 @@ function generateAssetActivityCsv(
     row.changedTo || "",
     row.performedBy || "System",
   ]);
+
+  // An export that reached its ceiling says so rather than ending silently.
+  if (rows.length < totalRows) {
+    csvRows.push([
+      `Export stopped at ${ACTIVITY_EXPORT_MAX_ROWS.toLocaleString(
+        "en-US"
+      )} of ${totalRows.toLocaleString(
+        "en-US"
+      )} rows. Narrow the date range to export the rest.`,
+    ]);
+  }
 
   return buildCsv(headers, csvRows);
 }
