@@ -468,6 +468,9 @@ export async function action({ request }: ActionFunctionArgs) {
           from: previousLocation,
           to: location,
           quantity: placedQuantity,
+          // The replace dropped the whole placement there, not just the
+          // units it placed at the new location.
+          fromQuantity: previousQuantity,
         },
       ],
       actor: user,

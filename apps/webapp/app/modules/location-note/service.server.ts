@@ -112,6 +112,12 @@ export type AssetLocationMove = {
    * Only named in the note for a QUANTITY_TRACKED asset moving alone.
    */
   quantity?: number | null;
+  /**
+   * Units that left `from`, when that differs from `quantity`: a replace that
+   * drops a 10-unit placement and places 4 elsewhere took 10 away from the
+   * source. Defaults to `quantity`.
+   */
+  fromQuantity?: number | null;
 };
 
 /**
@@ -195,7 +201,10 @@ export async function createAssetLocationMoveNotes({
       type: "UPDATE",
       userId: actor.id,
       content: `${userLink} removed ${assetMarkup(
-        group,
+        group.map((move) => ({
+          ...move,
+          quantity: move.fromQuantity ?? move.quantity,
+        })),
         "removed"
       )} from ${formatLocationLink(from!)}.${movedTo}`,
     });

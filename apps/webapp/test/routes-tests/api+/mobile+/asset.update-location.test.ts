@@ -682,7 +682,8 @@ describe("location activity log", () => {
         locationId: "loc-storage",
         type: "UPDATE",
         userId: "user-1",
-        content: `${actor} removed 4 pcs of ${cords} from ${storage}. Moved to ${van}.`,
+        // All 10 units left Storage; 4 of them were placed at the Van.
+        content: `${actor} removed 10 pcs of ${cords} from ${storage}. Moved to ${van}.`,
       },
     ]);
   });
@@ -741,7 +742,8 @@ describe("location activity log", () => {
         locationId: "loc-storage",
         type: "UPDATE",
         userId: "user-1",
-        content: `${actor} removed 10 pcs of ${cords} from ${storage}. Moved to ${van}.`,
+        // Storage held 6 of the 10; the other 4 were already at the Van.
+        content: `${actor} removed 6 pcs of ${cords} from ${storage}. Moved to ${van}.`,
       },
     ]);
   });
