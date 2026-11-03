@@ -397,17 +397,28 @@ export async function duplicatePdfTemplate({
 /**
  * Proves every custom field a template names is a live field of the workspace
  * that is not deleted. Every custom field type prints: most as a column, a
- * multi-line text in the description row.
+ * multi-line text in the description row. An inactive field cannot be newly
+ * chosen, but one the template already prints may stay.
  *
- * @throws {ShelfError} 400 when there are too many, or one is foreign or
- *   deleted
+ * @param tx - The surrounding transaction
+ * @param params.organizationId - The caller's workspace
+ * @param params.customFieldIds - The fields the saved template names
+ * @param params.allowedInactiveIds - Fields that may stay inactive (the ones
+ *   the stored template already prints)
+ * @throws {ShelfError} 400 when there are too many, or one is foreign,
+ *   deleted or newly chosen while inactive
  */
 async function assertPrintableCustomFields(
   tx: TxClient,
   {
     organizationId,
     customFieldIds,
-  }: { organizationId: string; customFieldIds: string[] }
+    allowedInactiveIds,
+  }: {
+    organizationId: string;
+    customFieldIds: string[];
+    allowedInactiveIds: string[];
+  }
 ) {
   if (customFieldIds.length > MAX_TEMPLATE_CUSTOM_FIELDS) {
     throw new ShelfError({
@@ -440,6 +451,31 @@ async function assertPrintableCustomFields(
       additionalData: { organizationId },
     });
   }
+
+  const mustBeActive = customFieldIds.filter(
+    (id) => !allowedInactiveIds.includes(id)
+  );
+  if (mustBeActive.length === 0) return;
+  const active = await tx.customField.count({
+    where: {
+      id: { in: mustBeActive },
+      organizationId,
+      deletedAt: null,
+      active: true,
+    },
+  });
+  if (active !== mustBeActive.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Custom field inactive",
+      message:
+        "One of the chosen custom fields is inactive. Reload the page and pick again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
 }
 
 /**
@@ -466,11 +502,15 @@ export async function updatePdfTemplate({
 }) {
   try {
     return await db.$transaction(async (tx) => {
-      await findTemplateOrThrow(tx, { organizationId, templateId });
+      const stored = await findTemplateOrThrow(tx, {
+        organizationId,
+        templateId,
+      });
       await assertNameFree(tx, { organizationId, name, exceptId: templateId });
       await assertPrintableCustomFields(tx, {
         organizationId,
         customFieldIds: config.customFieldIds,
+        allowedInactiveIds: stored.config.customFieldIds,
       });
       return tx.pdfTemplate
         .update({

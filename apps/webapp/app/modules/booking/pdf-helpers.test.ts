@@ -651,6 +651,7 @@ describe("booking PDF: custom field values", () => {
       id: { in: ["cf-price", "cf-gone", "cf-notes"] },
       organizationId: "org-1",
       deletedAt: null,
+      active: true,
     });
     expect(result.customFields.map((field) => field.id)).toEqual([
       "cf-price",

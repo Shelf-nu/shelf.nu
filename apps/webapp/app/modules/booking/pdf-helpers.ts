@@ -331,6 +331,9 @@ export async function fetchAllPdfRelatedData(
                 id: { in: customFieldIds },
                 organizationId,
                 deletedAt: null,
+                // An inactive field is not printed, even when a saved
+                // template still names it.
+                active: true,
               },
               select: { id: true, name: true, type: true },
             })

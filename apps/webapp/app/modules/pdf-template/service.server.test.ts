@@ -49,6 +49,7 @@ const store = vi.hoisted(() => ({
     organizationId: string;
     type: string;
     deletedAt: Date | null;
+    active: boolean;
   }[],
   seq: 0,
 }));
@@ -197,13 +198,15 @@ const customField = vi.hoisted(() => ({
       where: {
         id: { in: string[] };
         organizationId: string;
+        active?: boolean;
       };
     }) =>
       store.customFields.filter(
         (f) =>
           where.id.in.includes(f.id) &&
           f.organizationId === where.organizationId &&
-          f.deletedAt === null
+          f.deletedAt === null &&
+          (where.active === undefined || f.active === where.active)
       ).length
   ),
 }));
@@ -505,32 +508,66 @@ describe("PDF templates: which template a print gets", () => {
 describe("PDF templates: custom fields on a template", () => {
   beforeEach(() => {
     store.customFields = [
-      { id: "cf-price", organizationId: ORG, type: "AMOUNT", deletedAt: null },
-      { id: "cf-serial", organizationId: ORG, type: "TEXT", deletedAt: null },
+      {
+        id: "cf-price",
+        organizationId: ORG,
+        type: "AMOUNT",
+        deletedAt: null,
+        active: true,
+      },
+      {
+        id: "cf-serial",
+        organizationId: ORG,
+        type: "TEXT",
+        deletedAt: null,
+        active: true,
+      },
       {
         id: "cf-notes",
         organizationId: ORG,
         type: "MULTILINE_TEXT",
         deletedAt: null,
+        active: true,
       },
-      { id: "cf-date", organizationId: ORG, type: "DATE", deletedAt: null },
+      {
+        id: "cf-date",
+        organizationId: ORG,
+        type: "DATE",
+        deletedAt: null,
+        active: true,
+      },
       {
         id: "cf-old",
         organizationId: ORG,
         type: "TEXT",
         deletedAt: new Date(),
+        active: true,
+      },
+      {
+        id: "cf-inactive",
+        organizationId: ORG,
+        type: "TEXT",
+        deletedAt: null,
+        active: false,
       },
       {
         id: "cf-foreign",
         organizationId: "org-2",
         type: "TEXT",
         deletedAt: null,
+        active: true,
       },
     ];
   });
 
-  async function save(customFieldIds: string[]) {
+  async function save(customFieldIds: string[], stored: string[] = []) {
     await getPdfTemplates({ organizationId: ORG });
+    // why: the stored config is what the update compares against; seed it
+    // directly because saving it through the service would run the checks.
+    templatesOf()[0].config = {
+      ...BOOKING_CHECKLIST_CONFIG,
+      customFieldIds: stored,
+    };
     return updatePdfTemplate({
       organizationId: ORG,
       templateId: templatesOf()[0].id,
@@ -559,6 +596,28 @@ describe("PDF templates: custom fields on a template", () => {
   it("refuses another workspace's field and a deleted one", async () => {
     await expect(save(["cf-foreign"])).rejects.toMatchObject({ status: 400 });
     await expect(save(["cf-old"])).rejects.toMatchObject({
+      status: 400,
+      title: "Custom field deleted",
+    });
+  });
+
+  it("keeps an inactive field the template already prints", async () => {
+    const saved = await save(["cf-inactive"], ["cf-inactive"]);
+
+    expect(saved?.config.customFieldIds).toEqual(["cf-inactive"]);
+  });
+
+  it("rejects choosing an inactive field", async () => {
+    await expect(save(["cf-inactive"])).rejects.toMatchObject({
+      status: 400,
+      title: "Custom field inactive",
+      message:
+        "One of the chosen custom fields is inactive. Reload the page and pick again.",
+    });
+  });
+
+  it("still rejects a deleted field the template already prints", async () => {
+    await expect(save(["cf-old"], ["cf-old"])).rejects.toMatchObject({
       status: 400,
       title: "Custom field deleted",
     });
