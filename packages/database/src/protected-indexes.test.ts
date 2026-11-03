@@ -76,6 +76,29 @@ test("strips a generated drop of a protected index", () => {
   assert.ok(result.sql.includes('CREATE INDEX "Asset_title_idx"'));
 });
 
+// Prisma writes schema-qualified names, as committed migrations since
+// 20250806090215 show.
+test("strips a schema-qualified drop of a protected foreign key", () => {
+  const sql =
+    '-- DropForeignKey\nALTER TABLE "public"."BookingAsset" DROP CONSTRAINT "BookingAsset_assetKitId_fkey";\n\n-- AlterTable\nALTER TABLE "public"."Asset" ADD COLUMN "nickname" TEXT;\n';
+
+  const result = stripProtectedDrops(sql);
+
+  assert.deepEqual(result.protectedNames, ["BookingAsset_assetKitId_fkey"]);
+  assert.ok(!result.sql.includes("DROP CONSTRAINT"));
+  assert.ok(!result.sql.includes("-- DropForeignKey"));
+  assert.ok(result.sql.includes('ADD COLUMN "nickname" TEXT;'));
+});
+
+test("strips a schema-qualified drop of a protected index", () => {
+  const sql = `-- DropIndex\nDROP INDEX "public"."${PROTECTED_INDEXES[0]}";\n`;
+
+  const result = stripProtectedDrops(sql);
+
+  assert.deepEqual(result.protectedNames, [PROTECTED_INDEXES[0]]);
+  assert.equal(result.sql.trim(), "");
+});
+
 test("leaves a migration without protected drops unchanged", () => {
   const sql =
     '-- AlterTable\nALTER TABLE "Asset" ADD COLUMN "nickname" TEXT;\n';
@@ -101,29 +124,71 @@ function foreignKeysCreatedByMigrations() {
   for (const migration of migrations) {
     const file = path.join(migrationsDir, migration, "migration.sql");
     if (!fs.existsSync(file)) continue;
-    const sql = fs.readFileSync(file, "utf8");
-    for (const [, name] of sql.matchAll(
-      /ADD CONSTRAINT\s+"([^"]+)"\s+FOREIGN KEY/gi
-    )) {
-      live.set(name, migration);
-    }
-    for (const [, name] of sql.matchAll(
-      /DROP CONSTRAINT\s+(?:IF EXISTS\s+)?"([^"]+)"/gi
-    )) {
-      live.delete(name);
-    }
-    for (const [, from, to] of sql.matchAll(
-      /RENAME CONSTRAINT\s+"([^"]+)"\s+TO\s+"([^"]+)"/gi
-    )) {
-      const createdIn = live.get(from);
-      if (createdIn) {
-        live.delete(from);
-        live.set(to, createdIn);
-      }
-    }
+    replayForeignKeyStatements(fs.readFileSync(file, "utf8"), migration, live);
   }
   return live;
 }
+
+/**
+ * Applies one migration's foreign key statements to `live`, a map of
+ * foreign key name to the migration that created it.
+ */
+function replayForeignKeyStatements(
+  sql: string,
+  migration: string,
+  live: Map<string, string>
+) {
+  // One pattern, applied in the order the statements appear: a migration that
+  // drops a key and adds it again must leave it in place.
+  const statements =
+    /ADD CONSTRAINT\s+"([^"]+)"\s+FOREIGN KEY|DROP CONSTRAINT\s+(?:IF EXISTS\s+)?"([^"]+)"|RENAME CONSTRAINT\s+"([^"]+)"\s+TO\s+"([^"]+)"/gi;
+  for (const [, added, dropped, renamedFrom, renamedTo] of sql.matchAll(
+    statements
+  )) {
+    if (added) {
+      live.set(added, migration);
+    } else if (dropped) {
+      live.delete(dropped);
+    } else if (renamedFrom && renamedTo) {
+      const createdIn = live.get(renamedFrom);
+      if (createdIn) {
+        live.delete(renamedFrom);
+        live.set(renamedTo, createdIn);
+      }
+    }
+  }
+}
+
+test("keeps a foreign key that a migration drops and adds again", () => {
+  // Prisma changes a foreign key's ON DELETE by dropping and re-adding it.
+  const live = new Map<string, string>([["Location_imageId_fkey", "first"]]);
+
+  replayForeignKeyStatements(
+    [
+      'ALTER TABLE "Location" DROP CONSTRAINT "Location_imageId_fkey";',
+      'ALTER TABLE "Location" ADD CONSTRAINT "Location_imageId_fkey" FOREIGN KEY ("imageId") REFERENCES "Image"("id") ON DELETE SET NULL;',
+    ].join("\n"),
+    "second",
+    live
+  );
+
+  assert.equal(live.get("Location_imageId_fkey"), "second");
+});
+
+test("removes a foreign key that a migration adds and drops again", () => {
+  const live = new Map<string, string>();
+
+  replayForeignKeyStatements(
+    [
+      'ALTER TABLE "Note" ADD CONSTRAINT "Note_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id");',
+      'ALTER TABLE "Note" DROP CONSTRAINT "Note_userId_fkey";',
+    ].join("\n"),
+    "only",
+    live
+  );
+
+  assert.equal(live.has("Note_userId_fkey"), false);
+});
 
 /**
  * The foreign key names Prisma expects from `schema.prisma`: an explicit

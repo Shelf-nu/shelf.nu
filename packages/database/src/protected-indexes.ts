@@ -71,8 +71,9 @@ export function stripProtectedDrops(sql: string): {
   const protectedNames: string[] = [];
 
   for (const index of PROTECTED_INDEXES) {
+    // Prisma writes the index schema-qualified (`"public"."<name>"`).
     const pattern = new RegExp(
-      `(?:-- DropIndex\\s*)?DROP INDEX (?:IF EXISTS )?["']?${escapeRegExp(
+      `(?:-- DropIndex\\s*)?DROP INDEX\\s+(?:IF EXISTS\\s+)?(?:"[^"]+"\\.)?["']?${escapeRegExp(
         index
       )}["']?;[^\\S\\n]*\\n?`,
       "gi"
@@ -84,8 +85,9 @@ export function stripProtectedDrops(sql: string): {
   }
 
   for (const foreignKey of PROTECTED_FOREIGN_KEYS) {
+    // Prisma writes the table schema-qualified (`"public"."<Table>"`).
     const pattern = new RegExp(
-      `(?:-- DropForeignKey\\s*)?ALTER TABLE\\s+"[^"]+"\\s+DROP CONSTRAINT\\s+(?:IF EXISTS\\s+)?"${escapeRegExp(
+      `(?:-- DropForeignKey\\s*)?ALTER TABLE\\s+(?:"[^"]+"\\.)?"[^"]+"\\s+DROP CONSTRAINT\\s+(?:IF EXISTS\\s+)?"${escapeRegExp(
         foreignKey
       )}";[^\\S\\n]*\\n?`,
       "gi"
