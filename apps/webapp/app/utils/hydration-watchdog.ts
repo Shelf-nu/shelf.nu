@@ -72,6 +72,23 @@ export const HYDRATION_TIMEOUT_MS = 20_000;
  */
 export const HYDRATION_RELOAD_WINDOW_MS = 60_000;
 
+/**
+ * How many resource timing entries the page keeps. The browser default of 250
+ * is smaller than the module graph of the biggest pages (about 290 files on
+ * `/assets`), and a dropped entry would read as a file that never finished.
+ */
+export const RESOURCE_TIMING_BUFFER_SIZE = 1_000;
+
+/** At most this many unfinished files are named in a report. */
+export const MAX_MISSING_BUNDLE_FILES = 10;
+
+/**
+ * Wall-clock time running ahead of the page's monotonic clock by more than
+ * this means the device slept, or its clock was changed, while the page loaded.
+ * The timings in such a report do not describe a user waiting.
+ */
+export const HYDRATION_CLOCK_GAP_MS = 5_000;
+
 /** Global the inline script exposes so the bundle can stand it down. */
 const WATCHDOG_GLOBAL = "__shelfHydrationWatchdog";
 
@@ -110,8 +127,24 @@ export type HydrationFailureReport = {
   failedAfterMs?: number | null;
   /** Script files from this origin that had finished downloading. */
   bundleFilesLoaded?: number;
+  /**
+   * Script files from this origin the page asked for (module scripts and
+   * `modulepreload` links). `null` when the document could not be read.
+   */
+  bundleFilesExpected?: number | null;
+  /**
+   * Paths of requested files with no finished download yet, up to
+   * {@link MAX_MISSING_BUNDLE_FILES}. A download that stalls raises no error,
+   * so this is the only trace it leaves.
+   */
+  missingBundleFiles?: string[];
   /** Milliseconds from navigation start until the last of them finished. */
   lastBundleFileMs?: number | null;
+  /**
+   * Wall-clock milliseconds from navigation start to the failure. Compared
+   * with `failedAfterMs` by {@link hasClockGap}.
+   */
+  wallClockMs?: number | null;
   /** `navigator.connection.effectiveType`, where the browser exposes it. */
   connection?: string | null;
   /** The browser is driven by automation (`navigator.webdriver`). */
@@ -157,6 +190,12 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   var RELOADED_AT_KEY = "${HYDRATION_RELOADED_AT_STORAGE_KEY}";
   var ORIGIN = window.location.origin;
 
+  try {
+    if (perf && perf.setResourceTimingBufferSize) {
+      perf.setResourceTimingBufferSize(${RESOURCE_TIMING_BUFFER_SIZE});
+    }
+  } catch (e) {}
+
   function readReport() {
     try {
       return JSON.parse(window.sessionStorage.getItem(KEY) || "null");
@@ -199,15 +238,21 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     return perf && perf.now ? perf.now() : Date.now();
   }
 
+  function withoutQuery(url) {
+    return String(url).split("?")[0];
+  }
+
   function diagnostics() {
     var files = 0;
     var last = null;
+    var finished = {};
     try {
       var entries = perf.getEntriesByType("resource");
       for (var i = 0; i < entries.length; i++) {
-        var name = String(entries[i].name).split("?")[0];
+        var name = withoutQuery(entries[i].name);
         if (isOwnUrl(name) && name.slice(-3) === ".js") {
           files++;
+          finished[name] = true;
           if (last === null || entries[i].responseEnd > last) {
             last = entries[i].responseEnd;
           }
@@ -216,12 +261,38 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     } catch (e) {
       files = 0;
     }
+    // A stalled download raises no error and leaves no timing entry, so the
+    // files the page asked for are compared with the ones that finished.
+    var expected = 0;
+    var missing = [];
+    try {
+      var requested = {};
+      var nodes = document.querySelectorAll('link[rel="modulepreload"], script[type="module"]');
+      for (var j = 0; j < nodes.length; j++) {
+        var url = withoutQuery(nodes[j].tagName === "LINK" ? nodes[j].href : nodes[j].src);
+        if (!isOwnUrl(url) || requested[url]) {
+          continue;
+        }
+        requested[url] = true;
+        expected++;
+        if (!finished[url] && missing.length < ${MAX_MISSING_BUNDLE_FILES}) {
+          missing.push(url.slice(ORIGIN.length));
+        }
+      }
+    } catch (e) {
+      expected = null;
+      missing = [];
+    }
     var connection = navigator.connection && navigator.connection.effectiveType;
     return {
       hidden: wasHidden,
       failedAfterMs: perf && perf.now ? Math.round(perf.now()) : null,
       bundleFilesLoaded: files,
+      bundleFilesExpected: expected,
+      missingBundleFiles: missing,
       lastBundleFileMs: last === null ? null : Math.round(last),
+      // Monotonic time stops while the device sleeps; wall-clock time does not.
+      wallClockMs: perf && perf.timeOrigin ? Math.round(Date.now() - perf.timeOrigin) : null,
       connection: connection || null,
       automated: navigator.webdriver === true
     };
@@ -389,6 +460,22 @@ export function isRecoveredReload(report: HydrationFailureReport): boolean {
 }
 
 /**
+ * Whether the wall clock ran ahead of the page's monotonic clock while it
+ * loaded: the device slept, or its clock was changed. A timeout in such a
+ * report did not keep anyone waiting for its full length.
+ *
+ * @param report - The report the failed load left behind
+ * @returns `true` when the gap exceeds {@link HYDRATION_CLOCK_GAP_MS}; `false`
+ *   when it does not, or when a report has no wall-clock reading
+ */
+export function hasClockGap(report: HydrationFailureReport): boolean {
+  if (report.wallClockMs == null || report.failedAfterMs == null) {
+    return false;
+  }
+  return report.wallClockMs - report.failedAfterMs > HYDRATION_CLOCK_GAP_MS;
+}
+
+/**
  * Stands the watchdog down and reports any earlier failed load to Sentry.
  * Call once, after hydration commits.
  *
@@ -431,6 +518,7 @@ export function markHydrated(): void {
       hydration_failure: report.reason,
       hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
       hydration_tab_hidden: report.hidden ? "yes" : "no",
+      hydration_clock_gap: hasClockGap(report) ? "yes" : "no",
     },
     extra: { ...report, hydratedAfterMs },
   });
