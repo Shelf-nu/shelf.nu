@@ -6,8 +6,7 @@
  * edit, duplicate, delete and pick the default template here; the Generate PDF
  * dialog on a booking then offers them by name.
  *
- * PDF templates are a paid feature. On a free workspace the card holds only
- * an upgrade note, the way the label branding switch does.
+ * The card is shown only for workspaces that can use bookings.
  *
  * Every change posts to the settings route's action, which re-checks the
  * caller's permission and scopes every write to the workspace.
@@ -78,17 +77,13 @@ type TemplateCustomField = {
 /**
  * The PDF templates card.
  *
- * @param props.canCustomize - Whether the workspace's tier includes PDF
- *   templates; without it the card shows an upgrade note instead of the list
  * @param props.templates - The workspace's booking templates, default first
  * @param props.customFields - The custom fields a template can print
  */
 export function PdfTemplatesSettings({
-  canCustomize,
   templates,
   customFields,
 }: {
-  canCustomize: boolean;
   templates: TemplateItem[];
   customFields: TemplateCustomField[];
 }) {
@@ -107,35 +102,18 @@ export function PdfTemplatesSettings({
         </p>
       </div>
 
-      {canCustomize ? (
-        <>
-          <ul className="flex flex-col divide-y rounded-md border">
-            {templates.map((item) => (
-              <TemplateRow
-                key={item.id}
-                template={item}
-                canDelete={templates.length > 1}
-                onEdit={() => setEditingId(item.id)}
-              />
-            ))}
-          </ul>
+      <ul className="flex flex-col divide-y rounded-md border">
+        {templates.map((item) => (
+          <TemplateRow
+            key={item.id}
+            template={item}
+            canDelete={templates.length > 1}
+            onEdit={() => setEditingId(item.id)}
+          />
+        ))}
+      </ul>
 
-          <AddTemplateForm onAdded={setEditingId} />
-        </>
-      ) : (
-        <p className="text-sm text-gray-600">
-          Every booking prints the Checklist. Choosing and editing PDF templates
-          is a premium feature.{" "}
-          <Button
-            variant="link"
-            className="inline text-sm"
-            to="/account-details/subscription"
-          >
-            Upgrade your plan
-          </Button>{" "}
-          to add a Check-out receipt, custom field columns and more.
-        </p>
-      )}
+      <AddTemplateForm onAdded={setEditingId} />
 
       {editing ? (
         <EditTemplateDialog

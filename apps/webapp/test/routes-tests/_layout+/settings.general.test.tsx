@@ -29,8 +29,9 @@ import {
   userHasActiveSubscription,
 } from "~/utils/stripe.server";
 import {
-  canCustomizePdfDocuments,
+  assertCanUseBookings,
   canHideShelfBranding,
+  canUseBookings,
 } from "~/utils/subscription.server";
 
 // why: mock parseFormData to avoid actual file upload in tests
@@ -86,10 +87,13 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: whether a workspace can use bookings also depends on the premium
+// switch of the environment; each test that needs a personal workspace
+// refusal sets the answer itself.
 vi.mock("~/utils/subscription.server", () => ({
   canHideShelfBranding: vi.fn(),
-  canCustomizePdfDocuments: vi.fn(() => true),
   canUseBookings: vi.fn(() => true),
+  assertCanUseBookings: vi.fn(),
 }));
 
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -914,27 +918,43 @@ describe("settings.general PDF templates", () => {
     expect(updatePdfTemplate).not.toHaveBeenCalled();
   });
 
-  it("refuses every template change on a plan without PDF templates", async () => {
-    vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
+  it("refuses a template write from a personal workspace", async () => {
+    const personalOrg = {
+      ...baseOrganization(),
+      type: OrganizationType.PERSONAL,
+    };
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      organizations: [personalOrg],
+      currentOrganization: personalOrg,
+      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+    vi.mocked(assertCanUseBookings).mockImplementationOnce(() => {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message: "You cannot use bookings in a personal workspace.",
+        label: "Tier",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    });
 
-    const added = await post([
+    const response = await post([
       ["intent", "add-template"],
       ["name", "Client quote"],
     ]);
-    const deleted = await post([
-      ["intent", "delete-template"],
-      ["templateId", "template-1"],
-    ]);
 
-    expect(added.init?.status).toBe(403);
-    expect(deleted.init?.status).toBe(403);
+    expect(response.init?.status).toBe(403);
+    expect(assertCanUseBookings).toHaveBeenCalledWith(personalOrg);
     expect(createPdfTemplate).not.toHaveBeenCalled();
-    expect(deletePdfTemplate).not.toHaveBeenCalled();
-    vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
   });
 
-  it("reads no templates for a plan without PDF templates", async () => {
-    vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
+  it("reads no templates for a workspace that cannot use bookings", async () => {
+    vi.mocked(canUseBookings).mockReturnValueOnce(false);
 
     const response = (await loader(
       createLoaderArgs({
@@ -946,8 +966,7 @@ describe("settings.general PDF templates", () => {
     const body = (response.data ?? response) as Record<string, unknown>;
 
     expect(getPdfTemplates).not.toHaveBeenCalled();
-    expect(body.canCustomizePdfDocuments).toBe(false);
+    expect(body.showPdfTemplates).toBe(false);
     expect(body.pdfTemplates).toEqual([]);
-    vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
   });
 });

@@ -62,7 +62,7 @@ import {
   premiumIsEnabled,
 } from "~/utils/stripe.server";
 import {
-  canCustomizePdfDocuments,
+  assertCanUseBookings,
   canHideShelfBranding,
   canUseBookings,
 } from "~/utils/subscription.server";
@@ -153,10 +153,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : Promise.resolve([]),
       ]);
 
-    // PDF templates are a paid feature: a free workspace sees the card with
-    // an upgrade note, and none of its templates are read.
-    const canCustomizeTemplates = canCustomizePdfDocuments(tierLimit);
-    const [pdfTemplates, templateCustomFields] = canCustomizeTemplates
+    // PDF templates belong to bookings: a workspace that cannot use bookings
+    // has no card and none of its templates are read.
+    const showPdfTemplates = canUseBookings(currentOrganization);
+    const [pdfTemplates, templateCustomFields] = showPdfTemplates
       ? await Promise.all([
           getPdfTemplates({ organizationId }),
           // The custom fields a template can print, for its edit form.
@@ -209,9 +209,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // ENABLE_SCIM is server-only and absent from `getBrowserEnv()`, so a
       // client-side `config.enableScim` would always be false.
       scimEnabled: config.enableScim,
-      canCustomizePdfDocuments: canCustomizeTemplates,
-      // A workspace that cannot have bookings has no booking PDF to lay out.
-      showPdfTemplates: canUseBookings(currentOrganization),
+      showPdfTemplates,
       pdfTemplates,
       templateCustomFields,
       scimTokens: scimTokens.map((t) => ({
@@ -297,19 +295,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    // PDF templates are a paid feature, gated here as well as in the UI: a
-    // hand-made POST from a free workspace must not create or change them.
-    if (intent.endsWith("-template") && !canCustomizePdfDocuments(tierLimit)) {
-      throw new ShelfError({
-        cause: null,
-        title: "Not on your plan",
-        message:
-          "PDF templates are part of paid plans. Upgrade your plan to choose and edit what a booking's PDF prints.",
-        label: "PDF templates",
-        status: 403,
-        shouldBeCaptured: false,
-        additionalData: { organizationId },
-      });
+    // PDF templates belong to bookings, gated here as well as in the UI: a
+    // hand-made POST from a personal workspace must not create or change them.
+    if (intent.endsWith("-template")) {
+      assertCanUseBookings(currentOrganization);
     }
 
     switch (intent) {
@@ -726,7 +715,6 @@ export default function GeneralPage() {
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
     isPersonalWorkspace,
-    canCustomizePdfDocuments: canCustomizeTemplates,
     showPdfTemplates,
     pdfTemplates,
     templateCustomFields,
@@ -742,7 +730,6 @@ export default function GeneralPage() {
         afterGeneral={
           showPdfTemplates ? (
             <PdfTemplatesSettings
-              canCustomize={canCustomizeTemplates}
               templates={pdfTemplates}
               customFields={templateCustomFields}
             />

@@ -143,35 +143,23 @@ export const CHECKLIST_TEMPLATE_NAME = "Checklist";
 export const CHECKOUT_RECEIPT_TEMPLATE_NAME = "Check-out receipt";
 
 /**
- * The templates a workspace starts with, in list order; the first is the
- * default. Every workspace gets the Checklist; a workspace whose tier includes
- * PDF templates also gets the Check-out receipt. The data migration
- * `20261028120000_add_pdf_documents` seeds the same for workspaces that
- * existed before templates.
- *
- * @param params.canCustomize - Whether the workspace's tier includes PDF
- *   templates
+ * The templates a workspace that can use bookings starts with, in list order;
+ * the first is the default: the Checklist, then the Check-out receipt. The
+ * data migration `20261028120000_add_pdf_documents` seeds the same for
+ * workspaces that existed before templates.
  */
-export function builtInBookingTemplates({
-  canCustomize,
-}: {
-  canCustomize: boolean;
-}) {
+export function builtInBookingTemplates() {
   return [
     {
       name: CHECKLIST_TEMPLATE_NAME,
       config: BOOKING_CHECKLIST_CONFIG,
       isDefault: true,
     },
-    ...(canCustomize
-      ? [
-          {
-            name: CHECKOUT_RECEIPT_TEMPLATE_NAME,
-            config: CHECKOUT_RECEIPT_CONFIG,
-            isDefault: false,
-          },
-        ]
-      : []),
+    {
+      name: CHECKOUT_RECEIPT_TEMPLATE_NAME,
+      config: CHECKOUT_RECEIPT_CONFIG,
+      isDefault: false,
+    },
   ];
 }
 

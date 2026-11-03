@@ -26,7 +26,7 @@ import { resolvePdfTemplateForPrint } from "~/modules/pdf-template/service.serve
 import { loader } from "~/routes/api+/bookings.$bookingId.generate-pdf";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
-import { canCustomizePdfDocuments } from "~/utils/subscription.server";
+import { canUseBookings } from "~/utils/subscription.server";
 
 // why: data() returns a fetch Response so the loader can be invoked directly,
 // with no router runtime to stand up.
@@ -88,15 +88,10 @@ vi.mock("~/modules/pdf-template/service.server", () => ({
   resolvePdfTemplateForPrint: vi.fn(),
 }));
 
-// why: the tier lookup reads the owner's plan from the database.
-vi.mock("~/modules/tier/service.server", () => ({
-  getOrganizationTierLimit: vi.fn().mockResolvedValue({}),
-}));
-
-// why: whether the plan includes PDF templates also depends on the
+// why: whether a workspace can use bookings depends on its type and on the
 // premium-features switch of the environment; each test sets the answer.
 vi.mock("~/utils/subscription.server", () => ({
-  canCustomizePdfDocuments: vi.fn(),
+  canUseBookings: vi.fn(),
 }));
 
 // why: PostHog is an external service; record what would be sent.
@@ -157,7 +152,7 @@ beforeEach(() => {
     booking: { from: null, to: null, originalFrom: null, originalTo: null },
     assets: ROWS,
   } as never);
-  vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
+  vi.mocked(canUseBookings).mockReturnValue(true);
   // Answers like the real lookup: the requested template, else the
   // remembered one, else the default.
   vi.mocked(resolvePdfTemplateForPrint).mockImplementation(
@@ -400,12 +395,12 @@ describe("booking template loader: which template prints", () => {
   });
 });
 
-describe("booking PDF loader: a workspace without PDF templates", () => {
+describe("booking PDF loader: a workspace that cannot use bookings", () => {
   beforeEach(() => {
-    vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
+    vi.mocked(canUseBookings).mockReturnValue(false);
   });
 
-  it("prints the built-in Checklist and ignores a requested template", async () => {
+  it("prints the Checklist for a workspace that cannot use bookings without reading templates", async () => {
     const response = (await loader(
       buildArgs({ query: "?template=template-check-out-receipt" })
     )) as unknown as Response;
@@ -427,5 +422,23 @@ describe("booking PDF loader: a workspace without PDF templates", () => {
       customFieldIds: [],
       formatPrefs: expect.objectContaining({ dateFormat: "DD_MM_YYYY" }),
     });
+  });
+});
+
+describe("booking PDF loader: premium features off", () => {
+  it("offers templates to a personal workspace when premium features are off", async () => {
+    // why: with premium off canUseBookings answers true for every workspace
+    // type, personal included; the stub returns that answer.
+    vi.mocked(canUseBookings).mockReturnValue(true);
+    vi.mocked(requirePermission).mockResolvedValue({
+      ...permissionContext(),
+      currentOrganization: { id: "org-1", type: "PERSONAL" },
+    } as never);
+
+    const response = (await loader(buildArgs())) as unknown as Response;
+    const body = await response.json();
+
+    expect(resolvePdfTemplateForPrint).toHaveBeenCalled();
+    expect(body.templates).toHaveLength(2);
   });
 });

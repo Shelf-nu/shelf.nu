@@ -5,10 +5,10 @@
  * booking PDF. Every function takes the caller's `organizationId` and scopes
  * every query by it, so a template id from another workspace reads as not found.
  *
- * A workspace always has at least one template and exactly one default. New
- * workspaces get the built-in templates when they are created; a workspace that
- * has none (one created by a path that skips them) gets them the first time
- * its templates are read. Template names are unique per workspace, ignoring case.
+ * A workspace that can use bookings always has at least one template and
+ * exactly one default. New team workspaces get the built-in templates when they
+ * are created; a workspace that has none gets them the first time its
+ * templates are read. Callers gate on `canUseBookings`; this module does not. Template names are unique per workspace, ignoring case.
  *
  * @see {@link file://./config.ts}
  * @see {@link file://../../routes/_layout+/settings.general.tsx}
@@ -17,7 +17,6 @@
 import type { Prisma, PdfTemplate } from "@prisma/client";
 import { PdfTemplateKind } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
-import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -69,45 +68,17 @@ function resolve(
 }
 
 /**
- * Whether the workspace's tier lets it keep PDF templates: saved layouts for
- * a booking's PDF, picked when the PDF is generated. Without it the booking
- * PDF prints the Checklist layout, and nothing about it can be chosen.
+ * The built-in templates of a new team workspace, as the `pdfTemplates` field
+ * of its `OrganizationCreateInput`: the Checklist (default) and the Check-out
+ * receipt.
  *
- * Lives here rather than in `~/utils/subscription.server` (which re-exports
- * it) so workspace creation can use it: the organization service cannot
- * import that module without an import cycle.
- *
- * @param tierLimit - The tier limits of the workspace's owner (from
- *   getOrganizationTierLimit or getUserTierLimit)
- * @returns `true` when the tier includes it or premium features are disabled
+ * @returns `pdfTemplates`, to spread into the create input
  */
-export function canCustomizePdfDocuments(
-  tierLimit: { canCustomizePdfDocuments: boolean } | null | undefined
-) {
-  if (!config.enablePremiumFeatures) return true;
-  if (!tierLimit) return false;
-  return tierLimit.canCustomizePdfDocuments;
-}
-
-/**
- * The built-in templates of a new workspace, as fields of its
- * `OrganizationCreateInput`: the templates, and when the paid ones were
- * given, so the first read does not seed them again.
- *
- * @param params.canCustomize - Whether the owner's tier includes PDF
- *   templates, which adds the Check-out receipt
- * @returns `pdfTemplates` and `paidPdfDocumentsSeededAt`, to spread into the
- *   create input
- */
-export function pdfTemplatesForNewWorkspace({
-  canCustomize,
-}: {
-  canCustomize: boolean;
-}) {
+export function pdfTemplatesForNewWorkspace() {
   return {
     pdfTemplates: {
       createMany: {
-        data: builtInBookingTemplates({ canCustomize }).map((template) => ({
+        data: builtInBookingTemplates().map((template) => ({
           name: template.name,
           kind: KIND,
           config: template.config,
@@ -115,42 +86,19 @@ export function pdfTemplatesForNewWorkspace({
         })),
       },
     },
-    paidPdfDocumentsSeededAt: canCustomize ? new Date() : null,
-  } satisfies Pick<
-    Prisma.OrganizationCreateInput,
-    "pdfTemplates" | "paidPdfDocumentsSeededAt"
-  >;
+  } satisfies Pick<Prisma.OrganizationCreateInput, "pdfTemplates">;
 }
 
 /**
- * Gives a workspace whose tier includes PDF templates the built-in ones it
- * lacks, then records that it has them. Idempotent: two concurrent calls
- * create each template once, because the name and the default are both
- * unique per workspace; a built-in the workspace already has is skipped.
- */
-async function seedPaidTemplates(organizationId: string) {
-  await db.pdfTemplate.createMany({
-    data: builtInBookingTemplates({ canCustomize: true }).map((template) => ({
-      organizationId,
-      name: template.name,
-      kind: KIND,
-      config: template.config,
-      isDefault: template.isDefault,
-    })),
-    skipDuplicates: true,
-  });
-  await db.organization.updateMany({
-    where: { id: organizationId, paidPdfDocumentsSeededAt: null },
-    data: { paidPdfDocumentsSeededAt: new Date() },
-  });
-}
-
-/**
- * Every booking template of a workspace, default first. Only for a workspace
- * whose tier includes PDF templates. The first time such a workspace reads
- * them (a workspace that upgraded, or one created by a path that seeds
- * nothing), it gets the paid built-ins it lacks. That happens once: a
- * template an admin deleted later is not seeded back.
+ * Every booking template of a workspace, default first. A workspace that has
+ * none (one created before templates, or by a path that seeds nothing) gets
+ * both built-ins the first time it reads them. Idempotent: two concurrent
+ * calls create each built-in once, because the name and the default are both
+ * unique per workspace.
+ *
+ * Callers must have checked `canUseBookings` first (`~/utils/subscription.server`):
+ * this module cannot import it without an import cycle through the user
+ * service, so it does not gate on the workspace type itself.
  *
  * @param params.organizationId - The caller's workspace
  * @returns The templates with their configs parsed
@@ -163,23 +111,26 @@ export async function getPdfTemplates({
 }): Promise<ResolvedPdfTemplate[]> {
   try {
     const read = () =>
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: {
-          paidPdfDocumentsSeededAt: true,
-          pdfTemplates: {
-            where: { kind: KIND },
-            select: TEMPLATE_SELECT,
-            orderBy: TEMPLATE_ORDER,
-          },
-        },
+      db.pdfTemplate.findMany({
+        where: { organizationId, kind: KIND },
+        select: TEMPLATE_SELECT,
+        orderBy: TEMPLATE_ORDER,
       });
-    let workspace = await read();
-    if (workspace && !workspace.paidPdfDocumentsSeededAt) {
-      await seedPaidTemplates(organizationId);
-      workspace = await read();
+    let rows = await read();
+    if (rows.length === 0) {
+      await db.pdfTemplate.createMany({
+        data: builtInBookingTemplates().map((template) => ({
+          organizationId,
+          name: template.name,
+          kind: KIND,
+          config: template.config,
+          isDefault: template.isDefault,
+        })),
+        skipDuplicates: true,
+      });
+      rows = await read();
     }
-    return (workspace?.pdfTemplates ?? []).map(resolve);
+    return rows.map(resolve);
   } catch (cause) {
     throw new ShelfError({
       cause,

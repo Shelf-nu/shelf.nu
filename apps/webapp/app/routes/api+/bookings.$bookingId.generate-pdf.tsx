@@ -33,7 +33,6 @@ import {
   rememberPdfTemplate,
 } from "~/modules/pdf-template/cookie.server";
 import { resolvePdfTemplateForPrint } from "~/modules/pdf-template/service.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { formatDate } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -50,7 +49,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canCustomizePdfDocuments } from "~/utils/subscription.server";
+import { canUseBookings } from "~/utils/subscription.server";
 
 export const loader = async ({
   context,
@@ -69,22 +68,21 @@ export const loader = async ({
   );
 
   try {
-    const { organizationId, organizations, access } = await requirePermission({
-      userId: userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, access } =
+      await requirePermission({
+        userId: userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     // Extract sorting params from URL using standard utilities
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
 
-    const canCustomize = canCustomizePdfDocuments(
-      await getOrganizationTierLimit({ organizationId, organizations })
-    );
-    // Read only when the tier includes PDF templates; a free workspace's
-    // `?template=` never reaches the database.
+    // A workspace that cannot use bookings prints the Checklist: its
+    // templates are never read and a `?template=` never reaches the database.
+    const canCustomize = canUseBookings(currentOrganization);
     const requestedTemplateId = canCustomize
       ? searchParams.get("template")
       : null;

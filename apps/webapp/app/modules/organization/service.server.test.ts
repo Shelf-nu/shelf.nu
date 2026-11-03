@@ -134,10 +134,6 @@ vi.mock("~/utils/stripe.server", () => ({
 // with premiumIsEnabled false to assert only the authorization branch
 vi.mock("../tier/service.server", () => ({
   updateUserTierId: vi.fn(),
-  // why: createOrganization reads the owner's tier to seed its PDF templates.
-  getUserTierLimit: vi
-    .fn()
-    .mockResolvedValue({ canCustomizePdfDocuments: false }),
 }));
 
 const currentOrganization = {
@@ -562,6 +558,20 @@ describe("createOrganization logo validation", () => {
         data: expect.objectContaining({ contentType: "image/png" }),
       })
     );
+  });
+
+  it("creates a team workspace with both built-in templates", async () => {
+    await createOrganization(args(null));
+
+    const { data } = dbMock.organization.create.mock.calls[0][0];
+    expect(
+      data.pdfTemplates.createMany.data.map(
+        (t: { name: string; isDefault: boolean }) => [t.name, t.isDefault]
+      )
+    ).toEqual([
+      ["Checklist", true],
+      ["Check-out receipt", false],
+    ]);
   });
 
   it("creates the workspace when no logo is supplied", async () => {

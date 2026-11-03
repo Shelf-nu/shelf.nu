@@ -15,7 +15,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BOOKING_CHECKLIST_CONFIG, CHECKOUT_RECEIPT_CONFIG } from "./config";
 import {
-  canCustomizePdfDocuments,
   createPdfTemplate,
   deletePdfTemplate,
   duplicatePdfTemplate,
@@ -52,8 +51,6 @@ const store = vi.hoisted(() => ({
     deletedAt: Date | null;
   }[],
   seq: 0,
-  /** Workspaces whose paid templates were already given. */
-  seeded: new Set<string>(),
 }));
 
 function matches(row: Row, where: Where = {}) {
@@ -211,18 +208,6 @@ const customField = vi.hoisted(() => ({
   ),
 }));
 
-const organization = vi.hoisted(() => ({
-  findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
-    paidPdfDocumentsSeededAt: store.seeded.has(where.id) ? new Date() : null,
-    pdfTemplates: sorted(
-      store.rows.filter((row) => row.organizationId === where.id)
-    ),
-  })),
-  updateMany: vi.fn(async ({ where }: { where: { id: string } }) => {
-    store.seeded.add(where.id);
-  }),
-}));
-
 /** Every raw query the service ran, as its SQL text and its values. */
 const rawQueries = vi.hoisted(() => [] as { sql: string; values: unknown[] }[]);
 const queryRaw = vi.hoisted(
@@ -239,7 +224,6 @@ vi.mock("~/database/db.server", () => {
   const db = {
     pdfTemplate,
     customField,
-    organization,
     // why: the row lock has no effect on a single-threaded in-memory table;
     // the SQL it was given is kept so a test can read it.
     $queryRaw: queryRaw,
@@ -248,30 +232,13 @@ vi.mock("~/database/db.server", () => {
   return { db };
 });
 
-// why: the tier gate opens for everyone when premium features are off; each
-// test picks the switch.
-const premium = vi.hoisted(() => ({ enabled: true }));
-vi.mock("~/config/shelf.config", async (importOriginal) => {
-  const actual = await importOriginal<{ config: Record<string, unknown> }>();
-  return {
-    config: {
-      ...actual.config,
-      get enablePremiumFeatures() {
-        return premium.enabled;
-      },
-    },
-  };
-});
-
 const ORG = "org-1";
 
 beforeEach(() => {
   store.rows = [];
   store.customFields = [];
   store.seq = 0;
-  store.seeded = new Set();
   rawQueries.length = 0;
-  premium.enabled = true;
 });
 
 function templatesOf(organizationId = ORG) {
@@ -292,30 +259,16 @@ describe("PDF templates: what a workspace starts with", () => {
     expect(templates[1].config).toEqual(CHECKOUT_RECEIPT_CONFIG);
   });
 
-  it("gives a workspace that upgrades its Check-out receipt once, and never seeds a deleted one back", async () => {
-    // A free workspace: the Checklist only, paid templates never given.
-    store.rows.push({
-      id: "free-checklist",
-      organizationId: ORG,
-      name: "Checklist",
-      kind: "BOOKING",
-      config: BOOKING_CHECKLIST_CONFIG,
-      isDefault: true,
-      createdAt: new Date(0),
-    });
-
-    const upgraded = await getPdfTemplates({ organizationId: ORG });
-    expect(upgraded.map(({ name, isDefault }) => [name, isDefault])).toEqual([
-      ["Checklist", true],
-      ["Check-out receipt", false],
+  it("gives a workspace with no templates both built-ins on first read", async () => {
+    const first = await getPdfTemplates({ organizationId: ORG });
+    expect(first.map((t) => t.name)).toEqual([
+      "Checklist",
+      "Check-out receipt",
     ]);
+    expect(first[0].isDefault).toBe(true);
 
-    await deletePdfTemplate({
-      organizationId: ORG,
-      templateId: upgraded[1].id,
-    });
-    const later = await getPdfTemplates({ organizationId: ORG });
-    expect(later.map((d) => d.name)).toEqual(["Checklist"]);
+    await getPdfTemplates({ organizationId: ORG });
+    expect(templatesOf()).toHaveLength(2);
   });
 
   it("does not add the built-in templates again to a workspace that has templates", async () => {
@@ -501,6 +454,44 @@ describe("PDF templates: which template a print gets", () => {
     ]);
   });
 
+  it("prints with the oldest template when none is marked default", async () => {
+    for (const [id, name, ms] of [
+      ["newer", "Newer", 2000],
+      ["older", "Older", 1000],
+    ] as const) {
+      store.rows.push({
+        id,
+        organizationId: ORG,
+        name,
+        kind: "BOOKING",
+        config: BOOKING_CHECKLIST_CONFIG,
+        isDefault: false,
+        createdAt: new Date(ms),
+      });
+    }
+
+    const { template } = await resolvePdfTemplateForPrint({
+      organizationId: ORG,
+    });
+
+    expect(template.id).toBe("older");
+  });
+
+  it("falls back to the default when the remembered template is gone or foreign", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    await getPdfTemplates({ organizationId: "org-2" });
+    const foreign = templatesOf("org-2")[1];
+
+    for (const rememberedId of ["deleted-template", foreign.id]) {
+      const { template } = await resolvePdfTemplateForPrint({
+        organizationId: ORG,
+        rememberedId,
+      });
+      expect(template.name).toBe("Checklist");
+      expect(template.isDefault).toBe(true);
+    }
+  });
+
   it("refuses a requested template that no longer exists", async () => {
     await expect(
       resolvePdfTemplateForPrint({
@@ -571,26 +562,5 @@ describe("PDF templates: custom fields on a template", () => {
       status: 400,
       title: "Custom field deleted",
     });
-  });
-});
-
-describe("PDF templates: which tiers include them", () => {
-  it("follows the owner's tier when premium features are on", () => {
-    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: true })).toBe(
-      true
-    );
-    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: false })).toBe(
-      false
-    );
-    expect(canCustomizePdfDocuments(null)).toBe(false);
-  });
-
-  it("includes them for every workspace when premium features are off", () => {
-    premium.enabled = false;
-
-    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: false })).toBe(
-      true
-    );
-    expect(canCustomizePdfDocuments(null)).toBe(true);
   });
 });

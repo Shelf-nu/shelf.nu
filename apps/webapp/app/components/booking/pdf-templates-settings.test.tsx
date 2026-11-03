@@ -1,6 +1,5 @@
 /**
- * The PDF templates card on Settings > General, on a plan with PDF templates
- * and on one without.
+ * The PDF templates card on Settings > General.
  *
  * @see {@link file://./pdf-templates-settings.tsx}
  */
@@ -41,8 +40,8 @@ function renderCard(props: Parameters<typeof PdfTemplatesSettings>[0]) {
 }
 
 describe("PDF templates card", () => {
-  it("lists the templates with their actions on a plan that has them", async () => {
-    renderCard({ canCustomize: true, templates: TEMPLATES, customFields: [] });
+  it("lists the templates with their actions", async () => {
+    renderCard({ templates: TEMPLATES, customFields: [] });
 
     const rows = await screen.findAllByRole("listitem");
     expect(rows.map((row) => row.textContent)).toEqual([
@@ -53,18 +52,5 @@ describe("PDF templates card", () => {
       within(rows[1]).getByRole("button", { name: "Make default" })
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Add template" })).toBeVisible();
-  });
-
-  it("shows an upgrade note and no templates on a plan without them", async () => {
-    renderCard({ canCustomize: false, templates: [], customFields: [] });
-
-    expect(await screen.findByText("PDF templates")).toBeVisible();
-    expect(
-      screen.getByRole("link", { name: "Upgrade your plan" })
-    ).toHaveAttribute("href", "/account-details/subscription");
-    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Add template" })
-    ).not.toBeInTheDocument();
   });
 });
