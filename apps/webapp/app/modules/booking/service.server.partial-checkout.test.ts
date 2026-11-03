@@ -345,6 +345,12 @@ vitest.mock("~/modules/user/service.server", () => ({
 }));
 
 // why: testing the service without writing real asset notes.
+// why: the first-scan gate asks whether the acting user may approve a pending
+// request (an approver's scan approves it). Default: may not.
+vitest.mock("~/utils/permissions/permission.validator.server", () => ({
+  hasPermission: vitest.fn().mockResolvedValue(false),
+}));
+
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn().mockResolvedValue(undefined),
 }));
@@ -645,6 +651,41 @@ describe("partialCheckoutBooking", () => {
         data: expect.objectContaining({ status: BookingStatus.ONGOING }),
       })
     );
+  });
+
+  it("lets an approver's first scan approve the pending request with the transition", async () => {
+    expect.assertions(1);
+
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ requireBookingApproval: true });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BookingStatus.ONGOING,
+          approvedAt: expect.any(Date),
+          approvedBy: { connect: { id: baseParams.userId } },
+        }),
+      })
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(false);
   });
 
   it("refuses the first scan when the locked row is no longer open (reverted to DRAFT meanwhile)", async () => {

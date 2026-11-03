@@ -68,6 +68,12 @@ vi.mock("./checkout-source-location.server", () => ({
 
 // why: asserted never called. The one-click services write the asset notes,
 // so a note from the batch itself would be a second copy on every asset.
+// why: a caller who may approve is not refused for pending requests; their
+// check-out approves each one. Default: may not.
+vi.mock("~/utils/permissions/permission.validator.server", () => ({
+  hasPermission: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock("~/modules/note/service.server", () => ({
   createNotes: vi.fn(),
 }));
@@ -263,6 +269,26 @@ describe("bulkCheckoutBookings", () => {
       ),
     });
     expect(checkoutMock).not.toHaveBeenCalled();
+  });
+
+  it("does not refuse a pending request to a caller who may approve", async () => {
+    // why: the approver's check-out approves the request (the service stamps
+    // it), so the batch rule only guards callers who cannot decide.
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vi.mocked(hasPermission).mockResolvedValueOnce(true);
+    settingsMock.mockResolvedValueOnce(
+      createBookingSettings({ requireBookingApproval: true })
+    );
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.RESERVED, { approvedAt: new Date() }),
+      selected("b2", BookingStatus.RESERVED, { approvedAt: null }),
+    ] as never);
+
+    await bulkCheckoutBookings(args(["b1", "b2"]));
+
+    expect(checkoutMock).toHaveBeenCalledTimes(2);
   });
 
   it("refuses the whole batch when a booking is an expired reservation", async () => {

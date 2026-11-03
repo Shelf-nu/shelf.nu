@@ -3208,6 +3208,85 @@ async function readFullCheckoutDepartures(
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * Whether the acting user approves a pending request by checking it out.
+ *
+ * An administrator or manager is both the approver and the person handing the
+ * gear over, so making them click Approve before Check out would be two steps
+ * for one decision. A custodian who may not approve (Self service, Base) is
+ * refused by the caller instead.
+ *
+ * @param actorUserId - The acting user; a scheduler-driven check-out has none
+ * @param organizationId - The booking's organization
+ * @returns The approver and the moment of approval, or `null` when the actor
+ * may not approve
+ */
+async function approvalOnCheckout({
+  actorUserId,
+  organizationId,
+}: {
+  actorUserId: User["id"] | null | undefined;
+  organizationId: Organization["id"];
+}) {
+  if (!actorUserId) return null;
+  const mayApprove = await hasPermission({
+    userId: actorUserId,
+    organizationId,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.approve,
+  });
+  if (!mayApprove) return null;
+  const approver = await getUserByID(actorUserId, {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
+    } satisfies Prisma.UserSelect,
+  });
+  return { approver, approvedAt: new Date() };
+}
+
+/**
+ * The audit trail of an approval made by checking the request out: the same
+ * system note and `BOOKING_APPROVED` event `approveBooking` writes, inside the
+ * check-out's transaction.
+ */
+async function recordApprovalOnCheckout(
+  tx: any,
+  {
+    bookingId,
+    organizationId,
+    approver,
+  }: {
+    bookingId: Booking["id"];
+    organizationId: Organization["id"];
+    approver: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
+  }
+) {
+  await createSystemBookingNote(
+    {
+      bookingId,
+      organizationId,
+      content: `${wrapUserLinkForNote(
+        approver
+      )} approved the booking request by checking it out`,
+    },
+    tx
+  );
+  await recordEvent(
+    {
+      organizationId,
+      actorUserId: approver.id,
+      action: "BOOKING_APPROVED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+    },
+    tx
+  );
+}
+
 async function checkoutBookingWritesWithinTx(
   tx: any,
   {
@@ -3310,13 +3389,36 @@ async function checkoutBookingWritesWithinTx(
       where: { id: bookingId, organizationId },
       select: { status: true, approvedAt: true },
     });
-    if (approvalRow) {
-      assertBookingIsApproved({
+    if (
+      approvalRow &&
+      isBookingPendingApproval({
         status: approvalRow.status,
         approvedAt: approvalRow.approvedAt,
         requireBookingApproval: true,
-        bookingId,
+      })
+    ) {
+      // Someone who may approve the request approves it by checking it out:
+      // the hand-over is the decision, in one step. Anyone else is refused.
+      const approval = await approvalOnCheckout({
+        actorUserId: checkedOutById,
+        organizationId,
       });
+      if (!approval) {
+        assertBookingIsApproved({
+          status: approvalRow.status,
+          approvedAt: approvalRow.approvedAt,
+          requireBookingApproval: true,
+          bookingId,
+        });
+      } else {
+        dataToUpdate.approvedAt = approval.approvedAt;
+        dataToUpdate.approvedBy = { connect: { id: approval.approver.id } };
+        await recordApprovalOnCheckout(tx, {
+          bookingId,
+          organizationId,
+          approver: approval.approver,
+        });
+      }
     }
   }
 
@@ -4257,17 +4359,28 @@ export async function checkoutBooking({
     // Approval gate: a pending reservation request (org requires approval,
     // no approvedAt) cannot be checked out from ANY entry point: web
     // dialog, mobile route, stale tab or direct POST all funnel through here.
+    // An approver's check-out approves the request instead (decided again,
+    // under the row lock, inside the transaction).
     const checkoutApprovalSettings = await db.bookingSettings.findUnique({
       where: { organizationId },
       select: { requireBookingApproval: true },
     });
-    assertBookingIsApproved({
-      status: bookingFound.status,
-      approvedAt: bookingFound.approvedAt,
-      requireBookingApproval:
-        checkoutApprovalSettings?.requireBookingApproval ?? false,
-      bookingId: id,
-    });
+    if (
+      isBookingPendingApproval({
+        status: bookingFound.status,
+        approvedAt: bookingFound.approvedAt,
+        requireBookingApproval:
+          checkoutApprovalSettings?.requireBookingApproval ?? false,
+      }) &&
+      !(await approvalOnCheckout({ actorUserId: userId, organizationId }))
+    ) {
+      assertBookingIsApproved({
+        status: bookingFound.status,
+        approvedAt: bookingFound.approvedAt,
+        requireBookingApproval: true,
+        bookingId: id,
+      });
+    }
 
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
     // not in this org BEFORE any asset-derived logic runs. A legacy
@@ -11584,18 +11697,44 @@ export async function partialCheckoutBooking({
                 status: 404,
               });
             }
-            assertBookingIsApproved({
-              status: approvalRow.status,
-              approvedAt: approvalRow.approvedAt ?? null,
-              requireBookingApproval:
-                partialApprovalGate?.requireBookingApproval ?? false,
-              bookingId: id,
-            });
-
             // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
             const transitionData: Prisma.BookingUpdateInput = {
               status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
             };
+
+            if (
+              isBookingPendingApproval({
+                status: approvalRow.status,
+                approvedAt: approvalRow.approvedAt ?? null,
+                requireBookingApproval:
+                  partialApprovalGate?.requireBookingApproval ?? false,
+              })
+            ) {
+              // An approver's first scan approves the request in the same
+              // step; anyone else is refused.
+              const approval = await approvalOnCheckout({
+                actorUserId: userId,
+                organizationId,
+              });
+              if (!approval) {
+                assertBookingIsApproved({
+                  status: approvalRow.status,
+                  approvedAt: approvalRow.approvedAt ?? null,
+                  requireBookingApproval: true,
+                  bookingId: id,
+                });
+              } else {
+                transitionData.approvedAt = approval.approvedAt;
+                transitionData.approvedBy = {
+                  connect: { id: approval.approver.id },
+                };
+                await recordApprovalOnCheckout(tx, {
+                  bookingId: id,
+                  organizationId,
+                  approver: approval.approver,
+                });
+              }
+            }
 
             // Early checkout: if the booking hasn't started yet and the user chose
             // to adjust the date (via the early-checkout dialog), move `from` to now

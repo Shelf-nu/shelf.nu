@@ -605,7 +605,7 @@ function EditBookingFormInner({
                   ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
                     hasItemsToCheckOut)) &&
                 canCheckOutBooking &&
-                !isPendingApproval
+                (!isPendingApproval || canApproveBooking)
               }
             >
               {(() => {

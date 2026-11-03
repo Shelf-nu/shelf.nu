@@ -142,15 +142,19 @@ export function resolveCheckInOutActions({
   canCheckOut,
   canCheckIn,
   isPendingApproval = false,
+  canApprove = false,
 }: {
   booking: Pick<BookingQuickActionsBooking, "status" | "hasItemsToCheckOut">;
   canCheckOut: boolean;
   canCheckIn: boolean;
   /**
    * A reservation request still waiting for a decision: the server refuses
-   * its check-out, so the row must not offer the button.
+   * its check-out to anyone who may not approve, so the row offers the
+   * button only to an approver, whose check-out approves the request.
    */
   isPendingApproval?: boolean;
+  /** The viewer holds `booking:approve`. */
+  canApprove?: boolean;
 }): { checkOut: boolean; checkOutRemaining: boolean; checkIn: boolean } {
   const isReserved = booking.status === BookingStatus.RESERVED;
   const isUnderway =
@@ -158,7 +162,7 @@ export function resolveCheckInOutActions({
     booking.status === BookingStatus.OVERDUE;
 
   return {
-    checkOut: isReserved && canCheckOut && !isPendingApproval,
+    checkOut: isReserved && canCheckOut && (!isPendingApproval || canApprove),
     checkOutRemaining:
       isUnderway && canCheckOut && booking.hasItemsToCheckOut === true,
     checkIn: isUnderway && canCheckIn,
@@ -226,6 +230,11 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
       status: booking.status,
       approvedAt: booking.approvedAt ?? null,
       requireBookingApproval: bookingSettings.requireBookingApproval,
+    }),
+    canApprove: userHasPermission({
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.approve,
     }),
   });
   if (!buttons.checkOut && !buttons.checkOutRemaining && !buttons.checkIn) {

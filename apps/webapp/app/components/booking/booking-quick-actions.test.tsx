@@ -219,6 +219,20 @@ describe("resolveCheckInOutActions: which buttons a status gets", () => {
     ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: false });
   });
 
+  it("offers Check out on a pending request to a viewer who may approve", () => {
+    // why: an approver's check-out approves the request in the same step, so
+    // the row keeps the button for them.
+    expect(
+      resolveCheckInOutActions({
+        booking: { status: BookingStatus.RESERVED },
+        canCheckOut: true,
+        canCheckIn: true,
+        isPendingApproval: true,
+        canApprove: true,
+      })
+    ).toEqual({ checkOut: true, checkOutRemaining: false, checkIn: false });
+  });
+
   it("drops the check-out buttons when the viewer may not check out", () => {
     expect(
       resolveCheckInOutActions({

@@ -489,6 +489,17 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: the check-out gate asks whether the acting user may approve a pending
+// request (an approver's check-out approves it). Default: may not approve;
+// every other permission the service asks about (extend) stays granted.
+vitest.mock("~/utils/permissions/permission.validator.server", () => ({
+  hasPermission: vitest
+    .fn()
+    .mockImplementation(({ action }: { action: string }) =>
+      Promise.resolve(action !== "approve")
+    ),
+}));
+
 // why: quantity-lock relies on $queryRaw (FOR UPDATE) which the db mock
 // can't express cleanly. The single-asset lock resolves a minimal asset stub
 // (tests override the return per-asset as needed); the batch lock returns
@@ -5239,6 +5250,77 @@ describe("checkoutBooking", () => {
     );
     expect(db.booking.update).not.toHaveBeenCalled();
     expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("lets an approver's check-out approve the pending request in the same write", async () => {
+    // why: an administrator or manager is both the approver and the person
+    // handing the gear over; Approve then Check out would be two clicks for
+    // one decision. The stamp rides the status flip, inside the transaction.
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireBookingApproval: true,
+    });
+    const pendingBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-pending-2",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(pendingBooking)
+      .mockResolvedValueOnce({
+        ...pendingBooking,
+        status: BookingStatus.ONGOING,
+      });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await checkoutBooking({ ...mockCheckoutParams, userId: "user-1" });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BookingStatus.ONGOING,
+          approvedAt: expect.any(Date),
+          approvedBy: { connect: { id: "user-1" } },
+        }),
+      })
+    );
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "BOOKING_APPROVED" }),
+      expect.anything()
+    );
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    vitest
+      .mocked(hasPermission)
+      .mockImplementation(({ action }: { action: string }) =>
+        Promise.resolve(action !== "approve")
+      );
   });
 
   it("should checkout booking successfully with no conflicts", async () => {

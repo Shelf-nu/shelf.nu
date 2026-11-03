@@ -71,11 +71,12 @@ export function ApprovalSettings({
               <div>
                 When enabled, bookings reserved by Base and Self service users
                 wait for approval by an administrator or manager before they can
-                be checked out. The requested items are still held for the
-                booking period. Reservations made while this is off stay
-                approved. Requests still waiting when you switch it off can be
-                checked out meanwhile, and need a decision again if you switch
-                it back on.
+                be checked out. An administrator or manager who checks a request
+                out approves it in the same step. The requested items are still
+                held for the booking period. Reservations made while this is off
+                stay approved. Requests still waiting when you switch it off can
+                be checked out meanwhile, and need a decision again if you
+                switch it back on.
               </div>
             }
             className="border-b-0 pb-[10px] pt-0"
