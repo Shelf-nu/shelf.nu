@@ -47,6 +47,7 @@ vi.mock("~/database/db.server", () => ({
     },
     assetLocation: { findMany: vi.fn(), deleteMany: vi.fn(), create: vi.fn() },
     location: { findFirst: vi.fn() },
+    locationNote: { createMany: vi.fn() },
     customField: { findMany: vi.fn() },
     qr: { findUnique: vi.fn() },
     tag: { findMany: vi.fn() },

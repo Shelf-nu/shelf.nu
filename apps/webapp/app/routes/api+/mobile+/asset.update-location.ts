@@ -19,6 +19,7 @@ import {
   readStockState,
   recordStockChanges,
 } from "~/modules/consumption-log/stock-ledger.server";
+import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -177,6 +178,7 @@ export async function action({ request }: ActionFunctionArgs) {
       placedQuantity,
       previousLocation,
       previousQuantity,
+      collapsedPlacements,
       rehome,
     } = await db.$transaction(async (tx) => {
       /**
@@ -370,6 +372,7 @@ export async function action({ request }: ActionFunctionArgs) {
         placedQuantity: pivotQuantity,
         previousLocation: primaryBefore,
         previousQuantity: primaryQuantityBefore,
+        collapsedPlacements,
         rehome: rehomeResult,
       };
     });
@@ -441,6 +444,29 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       assetId: asset.id,
       organizationId,
+    });
+
+    /**
+     * The location activity log gets the same lines the web writes for each
+     * event above: the arrival at the requested location and every placement
+     * the replace collapsed.
+     */
+    await createAssetLocationMoveNotes({
+      moves: [
+        ...collapsedPlacements.map((placement) => ({
+          asset,
+          from: placement.location,
+          to: null,
+          quantity: placement.quantity,
+        })),
+        {
+          asset,
+          from: previousLocation,
+          to: location,
+          quantity: placedQuantity,
+        },
+      ],
+      actor: user,
     });
 
     return data({

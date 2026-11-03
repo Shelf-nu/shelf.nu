@@ -398,6 +398,9 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 // why: location timeline notes are asserted through the mock, not stored.
 vi.mock("~/modules/location-note/service.server", () => ({
   createSystemLocationNote: vi.fn().mockResolvedValue({}),
+  // why: a move's "added / removed" lines have their own tests; these are
+  // about where custody goes.
+  createAssetLocationMoveNotes: vi.fn().mockResolvedValue(undefined),
 }));
 
 // why: asset notes are asserted through the mock, not stored.

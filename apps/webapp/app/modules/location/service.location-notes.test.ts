@@ -54,6 +54,11 @@ const dbMocks = vi.hoisted(() => ({
   custody: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  // why: the asset-move lines of the location activity log are written in
+  // one batch; the rows handed over are the output under test.
+  locationNote: {
+    createMany: vi.fn(),
+  },
   // why: user model stubs for resolving actor info in activity events
   user: {
     findUniqueOrThrow: vi.fn(),
@@ -110,7 +115,10 @@ vi.mock("~/utils/geolocate.server", () => ({
   geolocate: geolocateMock,
 }));
 
-vi.mock("~/modules/location-note/service.server", () => ({
+// why: the kit and comment note writers are stubbed; the asset-move lines run
+// for real so their rows are asserted from `db.locationNote.createMany`.
+vi.mock("~/modules/location-note/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createSystemLocationNote: locationNoteMocks.createSystemLocationNote,
   createLocationNote: locationNoteMocks.createLocationNote,
 }));
@@ -196,12 +204,19 @@ const { readStockStates, recordStockChanges } = await import(
   "~/modules/consumption-log/stock-ledger.server"
 );
 
+/** Markup the location activity log lines are built from in these tests. */
+const JANE = '{% link to="/settings/team/users/user-1" text="Jane Doe" /%}';
+const CAMERA = '{% link to="/assets/asset-1" text="Camera" /%}';
+const LOC_1 = '{% link to="/locations/loc-1" text="HQ" /%}';
+const WAREHOUSE = '{% link to="/locations/loc-3" text="Warehouse" /%}';
+
 describe("location service activity logging", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
     dbMocks.location.findUniqueOrThrow.mockResolvedValue({
       id: "loc-1",
+      name: "HQ",
       organizationId: "org-1",
       address: "Old St",
       latitude: null,
@@ -347,12 +362,66 @@ describe("location service activity logging", () => {
         removedAssetIds: [],
       });
 
-      expect(locationNoteMocks.createSystemLocationNote).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(
+        dbMocks.locationNote.createMany.mock.calls.flatMap(
+          ([args]: any) => args.data
+        )
+      ).toEqual([
+        {
           locationId: "loc-1",
-          content: expect.stringContaining("Camera"),
-        })
-      );
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} added ${CAMERA} to ${LOC_1}. Moved from ${WAREHOUSE}.`,
+        },
+        {
+          locationId: "loc-3",
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} removed ${CAMERA} from ${WAREHOUSE}. Moved to ${LOC_1}.`,
+        },
+      ]);
+    });
+
+    it("records a removal on the location's log when assets are taken off it", async () => {
+      dbMocks.asset.findMany.mockResolvedValueOnce([
+        {
+          id: "asset-1",
+          title: "Camera",
+          type: "INDIVIDUAL",
+          quantity: 1,
+          assetLocations: [
+            {
+              locationId: "loc-1",
+              quantity: 1,
+              assetKitId: null,
+              location: { id: "loc-1", name: "HQ" },
+            },
+          ],
+          user: { id: "user-1", firstName: "Ada", lastName: "Lovelace" },
+        },
+      ]);
+
+      await updateLocationAssets({
+        assetIds: [],
+        organizationId: "org-1",
+        locationId: "loc-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+        removedAssetIds: ["asset-1"],
+      });
+
+      expect(
+        dbMocks.locationNote.createMany.mock.calls.flatMap(
+          ([args]: any) => args.data
+        )
+      ).toEqual([
+        {
+          locationId: "loc-1",
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} removed ${CAMERA} from ${LOC_1}.`,
+        },
+      ]);
     });
   });
 

@@ -51,6 +51,9 @@ const dbMocks = vi.hoisted(() => ({
   location: {
     findFirst: vi.fn(),
   },
+  locationNote: {
+    createMany: vi.fn(),
+  },
   // why: the collapse reads the operator custody rows to re-home custody
   // taken from a dropped placement; none are out in these tests.
   custody: {
@@ -106,7 +109,8 @@ vi.mock("~/modules/note/service.server", () => ({
 }));
 
 // why: utility functions used for note formatting — we mock to avoid internal dependencies
-vi.mock("~/utils/markdoc-wrappers", () => ({
+vi.mock("~/utils/markdoc-wrappers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/markdoc-wrappers")>()),
   wrapUserLinkForNote: vi.fn(
     ({ firstName, lastName }: any) => `[${firstName} ${lastName}]`
   ),
@@ -259,6 +263,24 @@ describe("POST /api/mobile/asset/update-location", () => {
         assetId: "asset-1",
       })
     );
+    // Both locations' activity logs record the move.
+    expect(
+      dbMocks.locationNote.createMany.mock.calls[0][0].data.map(
+        (row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ]
+      )
+    ).toEqual([
+      [
+        "loc-new",
+        '[Test User] added {% link to="/assets/asset-1" text="Test Laptop" /%} to [New Office]. Moved from [Old Office].',
+      ],
+      [
+        "loc-old",
+        '[Test User] removed {% link to="/assets/asset-1" text="Test Laptop" /%} from [Old Office]. Moved to [New Office].',
+      ],
+    ]);
   });
 
   it("places the quantity from the locked row, not the pre-transaction read", async () => {

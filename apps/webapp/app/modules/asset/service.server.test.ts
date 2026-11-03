@@ -108,6 +108,11 @@ vitest.mock("~/database/db.server", () => ({
     // why: getAssets resolves its search term to matching asset ids via the
     // shared buildAssetSearchUnion, executed as a raw query.
     $queryRaw: vitest.fn().mockResolvedValue([]),
+    // why: a move's location activity log lines are written in one batch;
+    // the rows handed over are the output the move tests assert.
+    locationNote: {
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
     asset: {
       // why: createAsset's transaction writes the row through this stub, so a
       // test that needs the create to SUCCEED (rather than reject at a guard)
@@ -483,11 +488,16 @@ vitest.mock("~/modules/location/service.server", () => ({
   createLocationsIfNotExists: vitest.fn().mockResolvedValue([]),
 }));
 
-// why: same as above for the per-location-timeline note writes that
-// `moveAssetLocationUnits` + `placeUnplacedUnits` queue post-tx.
-vitest.mock("~/modules/location-note/service.server", () => ({
-  createSystemLocationNote: vitest.fn().mockResolvedValue({}),
-}));
+// why: same as above for the "placed N units" timeline note
+// `placeUnplacedUnits` queues post-tx. A move's "added / removed" lines run
+// for real and are asserted from `db.locationNote.createMany`.
+vitest.mock(
+  "~/modules/location-note/service.server",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    createSystemLocationNote: vitest.fn().mockResolvedValue({}),
+  })
+);
 
 // why: control custom-field lookup so we can assert org+category scoping
 vitest.mock("~/modules/custom-field/service.server", () => ({
@@ -3283,6 +3293,45 @@ describe("replaceAssetPlacements", () => {
         }),
       })
     );
+  });
+
+  it("logs each placement it adds or removes on that location's activity", async () => {
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        locationId: "loc-9",
+        quantity: 40,
+        location: { id: "loc-9", name: "Warehouse" },
+      },
+    ]);
+
+    await replaceAssetPlacements({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      placements: [{ locationId: "loc-1", quantity: 20 }],
+    });
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const pens = '{% link to="/assets/asset-1" text="Pens" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-1",
+        `${john} added 20 pcs of ${pens} to {% link to="/locations/loc-1" text="Baghdad Store" /%}.`,
+      ],
+      [
+        "loc-9",
+        `${john} removed 40 pcs of ${pens} from {% link to="/locations/loc-9" text="Warehouse" /%}.`,
+      ],
+    ]);
   });
 });
 
@@ -8152,10 +8201,6 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       (callback: (tx: unknown) => unknown) => callback(db)
     );
 
-    const { createSystemLocationNote } = await import(
-      "~/modules/location-note/service.server"
-    );
-
     await bulkUpdateAssetLocation({
       lastAuditDateAccess: "hidden",
       bookableScope: null,
@@ -8166,15 +8211,28 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       settings: ASSET_INDEX_SETTINGS,
     });
 
-    const contents = (
-      createSystemLocationNote as ReturnType<typeof vitest.fn>
-    ).mock.calls.map((c) => (c[0] as { content: string }).content);
-
-    expect(contents.length).toBeGreaterThan(0);
-    for (const content of contents) {
-      expect(content).toContain("asset-individual");
-      expect(content).not.toContain("asset-qty");
-    }
+    const rows = (
+      db.locationNote.createMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.flatMap(([args]) =>
+      args.data.map((row: { locationId: string; content: string }) => [
+        row.locationId,
+        row.content,
+      ])
+    );
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const tripod = '{% link to="/assets/asset-individual" text="Tripod" /%}';
+    const oldLoc = '{% link to="/locations/loc-old" text="Old Location" /%}';
+    const newLoc = '{% link to="/locations/loc-new" text="New Location" /%}';
+    expect(rows).toEqual([
+      [
+        "loc-new",
+        `${john} added ${tripod} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed ${tripod} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+    ]);
   });
 });
 

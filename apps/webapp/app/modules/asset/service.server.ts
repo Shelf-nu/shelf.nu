@@ -167,7 +167,6 @@ import { Logger } from "~/utils/logger";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
-  wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
   wrapLinkForNote,
   wrapNameForNote,
@@ -266,7 +265,10 @@ import {
   recordStockChanges,
 } from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
-import { createSystemLocationNote } from "../location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  createSystemLocationNote,
+} from "../location-note/service.server";
 import {
   buildAssetModelChangeNote,
   buildAvailableToBookChangeNote,
@@ -2775,61 +2777,22 @@ export async function updateAsset({
         meta: assetQtyMeta(asset, locationChangeQuantity),
       });
 
-      // Create location activity notes
-      const userLink = wrapUserLinkForNote({ ...user, id: userId });
-      // Single-asset location-timeline note. `wrapAssetWithCountForNote`
-      // prefixes the qty-tracked unit count ("50 units of {asset}");
-      // INDIVIDUAL renders the bare link, so phrasing is unchanged.
-      const assetForCount = {
-        id: asset.id,
-        title: asset.title,
-        type: asset.type,
-        unitOfMeasure: asset.unitOfMeasure,
-      };
-
-      if (newLocation) {
-        const newLocLink = wrapLinkForNote(
-          `/locations/${newLocation.id}`,
-          newLocation.name
-        );
-        const assetMarkup = wrapAssetWithCountForNote(
-          assetForCount,
-          locationChangeQuantity
-        );
-        const movedFrom = currentLocation
-          ? ` Moved from ${wrapLinkForNote(
-              `/locations/${currentLocation.id}`,
-              currentLocation.name
-            )}.`
-          : "";
-        await createSystemLocationNote({
-          locationId: newLocation.id,
-          content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
-          userId,
-        });
-      }
-
-      if (currentLocation && currentLocation.id !== newLocation?.id) {
-        const prevLocLink = wrapLinkForNote(
-          `/locations/${currentLocation.id}`,
-          currentLocation.name
-        );
-        const assetMarkup = wrapAssetWithCountForNote(
-          assetForCount,
-          locationChangeQuantity
-        );
-        const movedTo = newLocation
-          ? ` Moved to ${wrapLinkForNote(
-              `/locations/${newLocation.id}`,
-              newLocation.name
-            )}.`
-          : "";
-        await createSystemLocationNote({
-          locationId: currentLocation.id,
-          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
-          userId,
-        });
-      }
+      await createAssetLocationMoveNotes({
+        moves: [
+          {
+            asset: {
+              id: asset.id,
+              title: asset.title,
+              type: asset.type,
+              unitOfMeasure: asset.unitOfMeasure,
+            },
+            from: currentLocation,
+            to: newLocation,
+            quantity: locationChangeQuantity,
+          },
+        ],
+        actor: { ...user, id: userId },
+      });
     }
 
     if (assetBeforeUpdate && trackedFieldUpdates) {
@@ -4832,6 +4795,23 @@ export async function replaceAssetPlacements({
           })
         ),
         ...qtyChangeNoteCalls,
+        createAssetLocationMoveNotes({
+          moves: [
+            ...toCreate.map((p) => ({
+              asset,
+              from: null,
+              to: submittedLocations.get(p.locationId) ?? null,
+              quantity: p.quantity,
+            })),
+            ...toDelete.map((al) => ({
+              asset,
+              from: al.location,
+              to: null,
+              quantity: al.quantity,
+            })),
+          ],
+          actor: { ...user, id: userId },
+        }),
       ]);
     }
 
@@ -7998,78 +7978,19 @@ export async function bulkUpdateAssetLocation({
       }
     });
 
-    // Create location activity notes
-    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     /**
-     * The rows the transaction above actually wrote — quantity-tracked assets
-     * are filtered out of this path entirely, and an asset already at the
-     * target moves nowhere. A location's timeline must not claim either of
-     * them arrived, so these notes read the set the transaction wrote rather
-     * than re-deriving one from every selected asset.
+     * Location activity reads the rows the transaction above actually wrote:
+     * quantity-tracked assets are filtered out of this path, and an asset
+     * already at the target moves nowhere.
      */
-    const assetData = assetsToUpdate.map((a) => ({
-      id: a.id,
-      title: a.title,
-    }));
-
-    // Group assets by their previous (primary) location
-    const byPrevLocation = new Map<
-      string,
-      { name: string; assets: typeof assetData }
-    >();
-    for (const asset of assetsToUpdate) {
-      const prev = getPrimaryLocation(asset);
-      if (!prev) continue;
-      const existing = byPrevLocation.get(prev.id);
-      if (existing) {
-        existing.assets.push({ id: asset.id, title: asset.title });
-      } else {
-        byPrevLocation.set(prev.id, {
-          name: prev.name,
-          assets: [{ id: asset.id, title: asset.title }],
-        });
-      }
-    }
-
-    // Note on the new location
-    if (newLocation && assetData.length > 0) {
-      const newLocLink = wrapLinkForNote(
-        `/locations/${newLocation.id}`,
-        newLocation.name
-      );
-      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
-
-      const prevLocLinks = [...byPrevLocation.entries()].map(([id, { name }]) =>
-        wrapLinkForNote(`/locations/${id}`, name)
-      );
-      const movedFromSuffix =
-        prevLocLinks.length > 0
-          ? ` Moved from ${prevLocLinks.join(", ")}.`
-          : "";
-
-      await createSystemLocationNote({
-        locationId: newLocation.id,
-        content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
-        userId,
-      });
-    }
-
-    // Removal notes on previous locations
-    for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
-      const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
-      const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
-      const movedToSuffix = newLocation
-        ? ` Moved to ${wrapLinkForNote(
-            `/locations/${newLocation.id}`,
-            newLocation.name
-          )}.`
-        : "";
-      await createSystemLocationNote({
-        locationId: locId,
-        content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
-        userId,
-      });
-    }
+    await createAssetLocationMoveNotes({
+      moves: assetsToUpdate.map((asset) => ({
+        asset,
+        from: getPrimaryLocation(asset),
+        to: newLocation,
+      })),
+      actor: { ...user, id: userId },
+    });
 
     return true;
   } catch (cause) {
@@ -11287,42 +11208,17 @@ export async function moveAssetLocationUnits(
         quantity,
       });
 
-      // Per-location timeline notes (one each side) — same shape as
-      // the single-location update path at ~line 2596.
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        displayName,
-        firstName,
-        lastName,
+      await createAssetLocationMoveNotes({
+        moves: [
+          {
+            asset: { id: assetId, ...txResult.assetSnapshot },
+            from: fromLocation,
+            to: toLocation,
+            quantity,
+          },
+        ],
+        actor: { ...user, id: userId },
       });
-      const assetForCount = {
-        id: assetId,
-        title: txResult.assetSnapshot.title,
-        type: txResult.assetSnapshot.type,
-        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
-      };
-      const assetMarkup = wrapAssetWithCountForNote(assetForCount, quantity);
-      const fromLink = wrapLinkForNote(
-        `/locations/${fromLocation.id}`,
-        fromLocation.name
-      );
-      const toLink = wrapLinkForNote(
-        `/locations/${toLocation.id}`,
-        toLocation.name
-      );
-
-      await Promise.all([
-        createSystemLocationNote({
-          locationId: fromLocation.id,
-          content: `${userLink} removed ${assetMarkup} from ${fromLink}. Moved to ${toLink}.`,
-          userId,
-        }),
-        createSystemLocationNote({
-          locationId: toLocation.id,
-          content: `${userLink} added ${assetMarkup} to ${toLink}. Moved from ${fromLink}.`,
-          userId,
-        }),
-      ]);
     }
 
     await createCustodyRehomeNote({
