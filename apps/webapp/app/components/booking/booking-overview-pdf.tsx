@@ -1,12 +1,12 @@
 import type { ReactNode, RefObject } from "react";
 import { useRef, useState } from "react";
-import type { Asset, Booking } from "@prisma/client";
+import type { Booking } from "@prisma/client";
+import { FileTextIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
-import { useSearchParams } from "~/hooks/search-params";
 import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import type {
@@ -26,6 +26,9 @@ import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
+import { BookingActionTrigger } from "./booking-action-trigger";
+import type { BookingActionTriggerVariant } from "./booking-action-trigger";
+import type { BookingActionDisabled } from "./booking-actions";
 import { AssetCodePrintImage } from "../assets/asset-code-print-image";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { AssetPrintImage } from "../assets/asset-print-image";
@@ -82,38 +85,66 @@ export function bookingPdfTitle(
  */
 const PDF_DESCRIPTION_MAX_LENGTH = 300;
 
+/**
+ * The sort a booking PDF lists its assets in: the `orderBy` and
+ * `orderDirection` the generate routes read.
+ */
+export type PdfAssetOrder = { orderBy: string; orderDirection: string };
+
+/**
+ * Builds the {@link PdfAssetOrder} the booking page is showing, from its URL.
+ *
+ * The page's default `createdAt` order has no counterpart on the sheet, so it
+ * (and a missing `orderBy`) becomes `status`; the direction defaults to `desc`.
+ *
+ * @param searchParams - The booking page's query string
+ * @returns The order to hand to the PDF components
+ */
+export function pdfAssetOrderFromSearchParams(
+  searchParams: URLSearchParams
+): PdfAssetOrder {
+  const rawOrderBy = searchParams.get("orderBy");
+  return {
+    orderBy: !rawOrderBy || rawOrderBy === "createdAt" ? "status" : rawOrderBy,
+    orderDirection: searchParams.get("orderDirection") || "desc",
+  };
+}
+
+/**
+ * The entry that previews and prints a booking's document (its checklist or
+ * other saved PDF document), from the booking page or a bookings list row.
+ *
+ * Rendered as a trigger plus a portalled dialog rather than a
+ * `DropdownMenuItem`: selecting an item closes the menu, which would unmount
+ * this component and the open dialog with it.
+ *
+ * @param props.booking - The booking to print
+ * @param props.disabled - The trigger's disabled state, as the shared rules
+ *   (`resolveBookingActions`, its `bookingDocument` entry) decide it
+ * @param props.assetOrder - The sort to list assets in. Omitted, no sort is
+ *   sent and the server default (status, descending) applies; the booking page
+ *   passes the sort of its own URL.
+ * @param props.trigger - Menu row (default) or icon button
+ */
 export const BookingOverviewPDF = ({
   booking,
+  disabled,
+  assetOrder,
+  trigger = "menu-item",
 }: {
   booking: {
     id: Booking["id"];
     name: Booking["name"];
-    assets: Array<
-      Partial<Asset> & {
-        /** Cover image of the asset's model, rendered when the asset has no
-         * image of its own. See `~/modules/asset/image-resolution`. */
-        assetModel?: {
-          image: string | null;
-          thumbnailImage: string | null;
-        } | null;
-      }
-    >;
   };
+  disabled: BookingActionDisabled;
+  assetOrder?: PdfAssetOrder;
+  trigger?: BookingActionTriggerVariant;
 }) => {
-  const totalAssets = booking.assets.length;
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fetcher = useFetcher<PdfApiResponse>({
     key: `booking-document-${booking.id}`,
   });
-  const [searchParams] = useSearchParams();
-
-  // The booking page's own order. A document sorted by status prints in it;
-  // a document sorted by name ignores it.
-  const rawOrderBy = searchParams.get("orderBy");
-  const orderBy =
-    !rawOrderBy || rawOrderBy === "createdAt" ? "status" : rawOrderBy;
-  const orderDirection = searchParams.get("orderDirection") || "desc";
 
   const isIdle = fetcher.state === "idle";
   const response = fetcher.data?.pdfMeta ? fetcher.data : null;
@@ -146,7 +177,9 @@ export const BookingOverviewPDF = ({
    * last document, or the workspace default, and says which in the response.
    */
   const loadDocument = (documentId?: string) => {
-    const params = new URLSearchParams({ orderBy, orderDirection });
+    // A document sorted by status prints in the given order; a document
+    // sorted by name ignores it. Without one the server's default applies.
+    const params = new URLSearchParams(assetOrder ?? {});
     if (documentId) params.set("document", documentId);
     void fetcher.load(`/api/bookings/${booking.id}/generate-pdf?${params}`);
   };
@@ -165,23 +198,20 @@ export const BookingOverviewPDF = ({
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
   };
-  const disabled = !totalAssets && {
-    reason: "No assets in booking to generate a PDF.",
-  };
-
   return (
     <>
-      <Button
-        type="button"
-        variant="link"
-        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
-        width="full"
-        name="generate pdf"
+      {/* The menu row keeps its desktop-only look; the dialog is not built
+          for a phone-width menu. */}
+      <BookingActionTrigger
+        variant={trigger}
+        label="Generate PDF"
+        icon={<FileTextIcon className="size-4" />}
+        className={
+          trigger === "menu-item" ? "hidden text-left md:block" : undefined
+        }
         onClick={handleOpenDialog}
         disabled={disabled}
-      >
-        Generate PDF
-      </Button>
+      />
       <DialogPortal>
         <Dialog
           open={isDialogOpen}
@@ -290,17 +320,16 @@ export const BookingOverviewPDF = ({
       </DialogPortal>
 
       {/* Only for mobile */}
-      <Button
-        type="button"
-        variant="link"
-        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
-        width="full"
-        name="generate pdf"
-        disabled={disabled}
-        onClick={handleOpenDialog}
-      >
-        Generate PDF
-      </Button>
+      {trigger === "menu-item" && (
+        <BookingActionTrigger
+          variant="menu-item"
+          label="Generate PDF"
+          icon={<FileTextIcon className="size-4" />}
+          className="block text-left md:hidden"
+          disabled={disabled}
+          onClick={handleOpenDialog}
+        />
+      )}
     </>
   );
 };
