@@ -3185,6 +3185,91 @@ describe("updateAsset newLocationQuantity", () => {
   });
 });
 
+describe("updateAsset location activity", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the edit reads the asset several times with different selects
+    // (kit guard, before-state, type); route on the select, as the
+    // asset-model suite above does.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: any) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "INDIVIDUAL",
+            quantity: null,
+            assetKits: [],
+          });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve(null);
+      }
+    );
+    // why: both location ids resolve through org-scoped lookups.
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          id: where.id,
+          name: where.id === "loc-old" ? "Old Office" : "New Office",
+        })
+    );
+    const tripod = {
+      id: "asset-1",
+      title: "Tripod",
+      type: "INDIVIDUAL",
+      unitOfMeasure: null,
+    };
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue(tripod);
+    // why: a placement rewrite re-reads the row it just wrote.
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...tripod, assetLocations: [] });
+    // why: the placement rewrite locks the asset row with a raw query.
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: null,
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+  });
+
+  it("logs the move on the activity log of both locations", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+    } as any);
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
+    const oldLoc = '{% link to="/locations/loc-old" text="Old Office" /%}';
+    const newLoc = '{% link to="/locations/loc-new" text="New Office" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-new",
+        `${john} added ${tripod} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed ${tripod} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+    ]);
+  });
+});
+
 /**
  * `replaceAssetPlacements` — the manage-placements dialog's write path.
  *
@@ -5980,6 +6065,36 @@ describe("moveAssetLocationUnits", () => {
       ({ where }: { where: { id: string } }) =>
         Promise.resolve({ id: where.id, name: where.id })
     );
+  });
+
+  it("logs the move on the activity log of both locations", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce(null);
+
+    await moveAssetLocationUnits(baseArgs);
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const cables = '{% link to="/assets/asset-1" text="USB-C Cables" /%}';
+    const from = '{% link to="/locations/loc-from" text="loc-from" /%}';
+    const to = '{% link to="/locations/loc-to" text="loc-to" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-to",
+        `${john} added 25 boxes of ${cables} to ${to}. Moved from ${from}.`,
+      ],
+      [
+        "loc-from",
+        `${john} removed 25 boxes of ${cables} from ${from}. Moved to ${to}.`,
+      ],
+    ]);
   });
 
   it("creates a new destination row when 25/100 are moved to a fresh location", async () => {

@@ -382,6 +382,50 @@ describe("location service activity logging", () => {
       ]);
     });
 
+    it("logs a quantity-tracked add as an arrival only, since its other placements stay", async () => {
+      dbMocks.asset.findMany.mockResolvedValueOnce([
+        {
+          id: "asset-1",
+          title: "Camera",
+          type: "QUANTITY_TRACKED",
+          quantity: 80,
+          unitOfMeasure: "pcs",
+          assetLocations: [
+            {
+              locationId: "loc-3",
+              quantity: 30,
+              assetKitId: null,
+              location: { id: "loc-3", name: "Warehouse" },
+            },
+          ],
+          user: { id: "user-1", firstName: "Ada", lastName: "Lovelace" },
+        },
+      ]);
+
+      await updateLocationAssets({
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        locationId: "loc-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+        removedAssetIds: [],
+        assetQuantities: { "asset-1": 20 },
+      });
+
+      expect(
+        dbMocks.locationNote.createMany.mock.calls.flatMap(
+          ([args]: any) => args.data
+        )
+      ).toEqual([
+        {
+          locationId: "loc-1",
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} added 20 pcs of ${CAMERA} to ${LOC_1}.`,
+        },
+      ]);
+    });
+
     it("records a removal on the location's log when assets are taken off it", async () => {
       dbMocks.asset.findMany.mockResolvedValueOnce([
         {

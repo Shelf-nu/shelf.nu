@@ -11,6 +11,7 @@ import { db } from "~/database/db.server";
 import { formatLocationLink, safeDisplay } from "~/modules/location/utils";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
@@ -124,9 +125,11 @@ export type AssetLocationMove = {
  * A move whose `from` and `to` are the same location is not a move and writes
  * nothing.
  *
+ * Callers run this after their transaction commits, so it never throws: a
+ * failed write is logged, and the move it describes stays saved.
+ *
  * @param params.moves - The moves to describe, one per asset and location pair
  * @param params.actor - The user who made the moves, named on every line
- * @throws {ShelfError} If the notes cannot be written
  */
 export async function createAssetLocationMoveNotes({
   moves,
@@ -143,13 +146,19 @@ export async function createAssetLocationMoveNotes({
   /** Arrivals grouped by destination; departures by source AND destination. */
   const arrivals = new Map<string, AssetLocationMove[]>();
   const departures = new Map<string, AssetLocationMove[]>();
+  const addTo = (
+    groups: Map<string, AssetLocationMove[]>,
+    key: string,
+    move: AssetLocationMove
+  ) => {
+    const group = groups.get(key);
+    if (group) group.push(move);
+    else groups.set(key, [move]);
+  };
   for (const move of realMoves) {
-    if (move.to) {
-      arrivals.set(move.to.id, [...(arrivals.get(move.to.id) ?? []), move]);
-    }
+    if (move.to) addTo(arrivals, move.to.id, move);
     if (move.from) {
-      const key = `${move.from.id}:${move.to?.id ?? ""}`;
-      departures.set(key, [...(departures.get(key) ?? []), move]);
+      addTo(departures, `${move.from.id}:${move.to?.id ?? ""}`, move);
     }
   }
 
@@ -195,32 +204,40 @@ export async function createAssetLocationMoveNotes({
   try {
     await db.locationNote.createMany({ data });
   } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while recording the location activity.",
-      additionalData: {
-        assetIds: realMoves.map((move) => move.asset.id),
-        userId: actor.id,
-      },
-      label,
-    });
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Something went wrong while recording the location activity.",
+        additionalData: {
+          assetIds: realMoves.map((move) => move.asset.id),
+          userId: actor.id,
+        },
+        label,
+      })
+    );
   }
 }
 
 /**
  * One asset reads as its link, with the unit count for a QUANTITY_TRACKED
- * asset ("4 pcs of {asset}"); several read as one "N assets" popover.
+ * asset ("4 pcs of {asset}"); several read as one "N assets" popover. One
+ * asset can appear more than once in a group (slices of a pool held by two
+ * kits that move together), so a group of one asset adds its slices up.
  */
 function assetMarkup(group: AssetLocationMove[], action: "added" | "removed") {
-  if (group.length === 1) {
-    const { asset, quantity } = group[0];
+  const assets = new Map(group.map(({ asset }) => [asset.id, asset]));
+  if (assets.size === 1) {
+    const [asset] = assets.values();
+    const quantity = group.every((move) => move.quantity != null)
+      ? group.reduce((sum, move) => sum + (move.quantity ?? 0), 0)
+      : null;
     return wrapAssetWithCountForNote(
       { ...asset, title: safeDisplay(asset.title) },
       quantity
     );
   }
   return wrapAssetsWithDataForNote(
-    group.map(({ asset }) => ({
+    [...assets.values()].map((asset) => ({
       id: asset.id,
       title: safeDisplay(asset.title),
     })),

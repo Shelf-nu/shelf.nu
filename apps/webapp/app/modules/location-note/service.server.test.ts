@@ -1,6 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import Markdoc from "@markdoc/markdoc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
+import { Logger } from "~/utils/logger";
 
 import {
   createAssetLocationMoveNotes,
@@ -11,6 +14,9 @@ import {
 } from "./service.server";
 
 // why: testing location note service logic without touching the real database
+// why: a failed log write is reported, not thrown; the test reads the report.
+vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     locationNote: {
@@ -327,6 +333,71 @@ describe("createAssetLocationMoveNotes", () => {
     ]);
   });
 
+  it("adds up the slices of one asset that arrive together", async () => {
+    const sandbags = {
+      id: "sandbags",
+      title: "Sandbags",
+      type: "QUANTITY_TRACKED" as const,
+      unitOfMeasure: "bags",
+    };
+    await createAssetLocationMoveNotes({
+      actor,
+      moves: [
+        { asset: sandbags, from: unitA, to: dock, quantity: 5 },
+        { asset: sandbags, from: unitB, to: dock, quantity: 3 },
+      ],
+    });
+
+    expect(rows()[0]).toEqual([
+      "loc-dock",
+      `${ADA} added 8 bags of {% link to="/assets/sandbags" text="Sandbags" /%} to ${loc(
+        "loc-dock",
+        "Dock"
+      )}. Moved from ${loc("loc-a", "Unit A")}, ${loc("loc-b", "Unit B")}.`,
+    ]);
+  });
+
+  it("keeps typed names inside tag attributes, so they cannot inject a tag", async () => {
+    const payload = '{% link to="javascript:alert(1)" text="x" /%}';
+    await createAssetLocationMoveNotes({
+      actor: { ...actor, displayName: payload },
+      moves: [
+        {
+          asset: { id: "a-1", title: payload, type: "INDIVIDUAL" },
+          from: { id: "loc-1", name: payload },
+          to: { id: "loc-2", name: URL_SHAPED_VALUE },
+        },
+      ],
+    });
+
+    for (const [, content] of rows()) {
+      const tags = [...Markdoc.parse(content).walk()].filter(
+        (node) => node.type === "tag"
+      );
+      expect(tags.map((tag) => tag.tag)).toEqual(
+        expect.arrayContaining(["link"])
+      );
+      expect(
+        tags.every((tag) => !String(tag.attributes.to).startsWith("javascript"))
+      ).toBe(true);
+      expectValueOnlyInTag(content);
+    }
+  });
+
+  it("logs a failed write instead of failing the move it describes", async () => {
+    vi.mocked(mockDb.db.locationNote.createMany).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      createAssetLocationMoveNotes({
+        actor,
+        moves: [{ asset: pallet(1), from: unitA, to: dock }],
+      })
+    ).resolves.toBeUndefined();
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+  });
+
   it("writes nothing for a move that stays at the same location", async () => {
     await createAssetLocationMoveNotes({
       actor,
@@ -340,17 +411,22 @@ describe("createAssetLocationMoveNotes", () => {
 /**
  * Every flow that records `ASSET_LOCATION_CHANGED` has to write the location
  * activity log too, or a location's Activity tab and CSV silently miss the
- * move. This keeps a new writer from forgetting it.
+ * move. Checked per top-level function, so a new writer in a file that already
+ * has others cannot skip it.
  */
 describe("ASSET_LOCATION_CHANGED writers", () => {
   /**
-   * Writers whose location line comes from a different note on purpose.
-   * The stock adjustment logs "added N units at L (adjustment)" through
-   * `createCustodySourceLocationNote`.
+   * Functions that write their location line another way, keyed
+   * `<file>#<function>`, with the reason.
    */
-  const WRITES_ITS_OWN_LOCATION_LINE = [
-    "app/modules/consumption-log/service.server.ts",
-  ];
+  const WRITES_ITS_LOCATION_LINE_ELSEWHERE: Record<string, string> = {
+    "app/modules/consumption-log/service.server.ts#adjustQuantity":
+      "logs its own '(adjustment)' line via createCustodySourceLocationNote",
+    "app/modules/asset/service.server.ts#placeUnplacedUnits":
+      "logs its own 'placed N units at L' line",
+    "app/modules/location/service.server.ts#updateLocationAssets":
+      "writes its lines through createBulkLocationChangeNotes",
+  };
 
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -362,23 +438,37 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
     });
   }
 
+  /** Splits a source file into its top-level functions, by name. */
+  function topLevelFunctions(source: string) {
+    const starts = [
+      ...source.matchAll(/^(?:export )?(?:async )?function (\w+)/gm),
+    ];
+    return starts.map((match, i) => ({
+      name: match[1],
+      body: source.slice(match.index, starts[i + 1]?.index ?? source.length),
+    }));
+  }
+
   it("also write the location activity log", () => {
     const appRoot = join(__dirname, "../..");
     const webappRoot = join(appRoot, "..");
-    const writers = sourceFiles(appRoot)
-      .filter((path) =>
-        /action:\s*"ASSET_LOCATION_CHANGED"/.test(readFileSync(path, "utf8"))
-      )
-      .map((path) => relative(webappRoot, path));
+    const writers = sourceFiles(appRoot).flatMap((path) =>
+      topLevelFunctions(readFileSync(path, "utf8"))
+        .filter(({ body }) => /action:\s*"ASSET_LOCATION_CHANGED"/.test(body))
+        .map(({ name, body }) => ({
+          key: `${relative(webappRoot, path)}#${name}`,
+          body,
+        }))
+    );
 
     expect(writers.length).toBeGreaterThan(0);
-    const missing = writers.filter(
-      (path) =>
-        !WRITES_ITS_OWN_LOCATION_LINE.includes(path) &&
-        !readFileSync(join(webappRoot, path), "utf8").includes(
-          "createAssetLocationMoveNotes("
-        )
-    );
+    const missing = writers
+      .filter(
+        ({ key, body }) =>
+          !(key in WRITES_ITS_LOCATION_LINE_ELSEWHERE) &&
+          !body.includes("createAssetLocationMoveNotes(")
+      )
+      .map(({ key }) => key);
     expect(missing).toEqual([]);
   });
 });

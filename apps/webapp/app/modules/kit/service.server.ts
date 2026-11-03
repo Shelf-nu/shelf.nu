@@ -5444,7 +5444,7 @@ export async function updateKitLocation({
       const cascadedAssetsForNotes = assetsWithLocationChange.filter((asset) =>
         cascadedAssetIds.has(asset.id)
       );
-      if (userId && cascadedAssetsForNotes.length > 0) {
+      if (userId && cascadedAssetIds.size > 0) {
         const user = await getUserByID(userId, {
           select: {
             id: true,
@@ -5485,13 +5485,18 @@ export async function updateKitLocation({
             })
           )
         );
+        // Every member the cascade re-placed, judged by its kit slice: a
+        // quantity-tracked slice moves even when the asset's own placement is
+        // already at the target.
         await createAssetLocationMoveNotes({
-          moves: cascadedAssetsForNotes.map((asset) => ({
-            asset,
-            from: kitMemberMoveOrigin(asset, kit.location ?? null),
-            to: location,
-            quantity: asset.kitQuantity,
-          })),
+          moves: kit.assets
+            .filter((asset) => cascadedAssetIds.has(asset.id))
+            .map((asset) => ({
+              asset,
+              from: kitMemberMoveOrigin(asset, kit.location ?? null),
+              to: location,
+              quantity: asset.kitQuantity,
+            })),
           actor: { ...user, id: userId },
         });
       }
@@ -5723,7 +5728,6 @@ export async function bulkUpdateKitLocation({
     const allAssets = kitsWithAssets.flatMap((kit) => kit.assets);
     // Map asset.id → owning kit.id so we can attach `kitId` to each cascade event.
     const kitIdByAssetId = new Map<string, string>();
-    const kitById = new Map(kitsWithAssets.map((kit) => [kit.id, kit]));
     for (const kit of kitsWithAssets) {
       for (const asset of kit.assets) {
         kitIdByAssetId.set(asset.id, kit.id);
@@ -5812,7 +5816,7 @@ export async function bulkUpdateKitLocation({
       const cascadedAssetsForNotes = assetsWithLocationChange.filter((asset) =>
         cascadedAssetIds.has(asset.id)
       );
-      if (cascadedAssetsForNotes.length > 0) {
+      if (cascadedAssetIds.size > 0) {
         const user = await getUserByID(userId, {
           select: {
             id: true,
@@ -5852,16 +5856,19 @@ export async function bulkUpdateKitLocation({
             })
           )
         );
+        // One move per kit slice, read per kit: a quantity-tracked asset can
+        // sit in several of the selected kits, each at its own location.
         await createAssetLocationMoveNotes({
-          moves: cascadedAssetsForNotes.map((asset) => ({
-            asset,
-            from: kitMemberMoveOrigin(
-              asset,
-              kitById.get(kitIdByAssetId.get(asset.id) ?? "")?.location ?? null
-            ),
-            to: location,
-            quantity: asset.kitQuantity,
-          })),
+          moves: kitsWithAssets.flatMap((kit) =>
+            kit.assets
+              .filter((asset) => cascadedAssetIds.has(asset.id))
+              .map((asset) => ({
+                asset,
+                from: kitMemberMoveOrigin(asset, kit.location),
+                to: location,
+                quantity: asset.kitQuantity,
+              }))
+          ),
           actor: { ...user, id: userId },
         });
       }
@@ -5970,16 +5977,18 @@ export async function bulkUpdateKitLocation({
             })
           )
         );
-        // Each dropped row was its kit's slice at the kit's old location.
+        // Each dropped row was a kit's slice at that kit's old location.
         await createAssetLocationMoveNotes({
-          moves: unplacedAssetsForNotes.map((asset) => ({
-            asset,
-            from:
-              kitById.get(kitIdByAssetId.get(asset.id) ?? "")?.location ??
-              getPrimaryLocation(asset),
-            to: null,
-            quantity: asset.kitQuantity,
-          })),
+          moves: kitsWithAssets.flatMap((kit) =>
+            kit.assets
+              .filter((asset) => unplacedAssetIds.has(asset.id))
+              .map((asset) => ({
+                asset,
+                from: kit.location,
+                to: null,
+                quantity: asset.kitQuantity,
+              }))
+          ),
           actor: { ...user, id: userId },
         });
       }
@@ -6988,7 +6997,7 @@ export async function updateKitAssets({
         locationCascadedAssetIds.has(asset.id) &&
         (getPrimaryLocation(asset)?.id ?? null) !== kit.locationId
     );
-    if (locationMovedAssets.length > 0 && kit.location) {
+    if (locationCascadedAssetIds.size > 0 && kit.location) {
       await Promise.all(
         locationMovedAssets.map((asset) =>
           createNote({
@@ -7015,12 +7024,14 @@ export async function updateKitAssets({
       );
       await createAssetLocationMoveNotes({
         // A joining member's kit slice is new, so it comes from nowhere.
-        moves: locationMovedAssets.map((asset) => ({
-          asset,
-          from: kitMemberMoveOrigin(asset, null),
-          to: kit.location,
-          quantity: addedAssetKitQuantity(asset),
-        })),
+        moves: newlyAddedAssets
+          .filter((asset) => locationCascadedAssetIds.has(asset.id))
+          .map((asset) => ({
+            asset,
+            from: kitMemberMoveOrigin(asset, null),
+            to: kit.location,
+            quantity: addedAssetKitQuantity(asset),
+          })),
         actor: { ...user, id: userId },
       });
     }

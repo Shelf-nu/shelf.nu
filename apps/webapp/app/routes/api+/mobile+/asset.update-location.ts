@@ -449,16 +449,20 @@ export async function action({ request }: ActionFunctionArgs) {
     /**
      * The location activity log gets the same lines the web writes for each
      * event above: the arrival at the requested location and every placement
-     * the replace collapsed.
+     * the replace collapsed. A collapsed placement AT the requested location
+     * did not leave it (its units are part of the new placement), so it gets
+     * no removal line.
      */
     await createAssetLocationMoveNotes({
       moves: [
-        ...collapsedPlacements.map((placement) => ({
-          asset,
-          from: placement.location,
-          to: null,
-          quantity: placement.quantity,
-        })),
+        ...collapsedPlacements
+          .filter((placement) => placement.location?.id !== location.id)
+          .map((placement) => ({
+            asset,
+            from: placement.location,
+            to: null,
+            quantity: placement.quantity,
+          })),
         {
           asset,
           from: previousLocation,

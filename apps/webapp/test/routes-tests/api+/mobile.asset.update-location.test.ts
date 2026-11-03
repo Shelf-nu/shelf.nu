@@ -51,6 +51,8 @@ const dbMocks = vi.hoisted(() => ({
   location: {
     findFirst: vi.fn(),
   },
+  // why: the route writes the location activity log lines through this
+  // delegate; the rows handed over are asserted below.
   locationNote: {
     createMany: vi.fn(),
   },

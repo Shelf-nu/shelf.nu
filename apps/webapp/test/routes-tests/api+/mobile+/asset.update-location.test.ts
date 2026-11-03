@@ -28,8 +28,8 @@ vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findUnique: vi.fn() },
     location: { findFirst: vi.fn() },
-    // The location activity log lines are this route's output under test,
-    // asserted from the rows handed to `createMany`.
+    // why: the location activity log lines are this route's output under
+    // test, asserted from the rows handed to `createMany`.
     locationNote: { createMany: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -713,6 +713,35 @@ describe("location activity log", () => {
         type: "UPDATE",
         userId: "user-1",
         content: `${actor} removed 4 pcs of ${cords} from ${van}.`,
+      },
+    ]);
+  });
+
+  it("does not log a removal from the location the asset is moved to", async () => {
+    // Placed at Storage (primary) and the Van; the phone moves it to the Van.
+    const placements = [
+      { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+      { quantity: 4, location: { id: "loc-van", name: "Van" } },
+    ];
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({ assetLocations: placements }) as never
+    );
+    tx.assetLocation.findMany.mockResolvedValue(placements);
+
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(locationNoteRows()).toEqual([
+      {
+        locationId: "loc-van",
+        type: "UPDATE",
+        userId: "user-1",
+        content: `${actor} added 10 pcs of ${cords} to ${van}. Moved from ${storage}.`,
+      },
+      {
+        locationId: "loc-storage",
+        type: "UPDATE",
+        userId: "user-1",
+        content: `${actor} removed 10 pcs of ${cords} from ${storage}. Moved to ${van}.`,
       },
     ]);
   });
