@@ -18,6 +18,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { BOOKING_DISPOSITION_CATEGORIES } from "./checkout-attribution";
 import {
   getBookingIdsWithCheckinReceipt,
   getBookingIdsWithItemsToCheckOut,
@@ -736,7 +737,9 @@ describe("getBookingIdsWithCheckinReceipt", () => {
     expect(logFindManyMock.mock.calls[0][0].where).toMatchObject({
       bookingId: { in: bookingIds },
       booking: { organizationId: ORG_ID },
-      category: { in: expect.arrayContaining(["RETURN"]) },
+      // Every disposition the booking page counts as accounted units, so the
+      // list never greys out a receipt the page would print.
+      category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
     });
   });
 
