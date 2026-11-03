@@ -939,9 +939,10 @@ export default function AddBookingAssetsScreen() {
         onClose={() => setActiveQtyAsset(null)}
       />
 
-      {/* Add bar */}
+      {/* Add bar. Absolute, so the screen's padding does not move it: the bar
+          pads itself for a side rail or cutout, its background running under. */}
       {totalSelected > 0 && (
-        <View style={styles.bottomBar}>
+        <SafeAreaView edges={["left", "right"]} style={styles.bottomBar}>
           <TouchableOpacity
             style={styles.addButton}
             onPress={handleAdd}
@@ -967,7 +968,7 @@ export default function AddBookingAssetsScreen() {
               </>
             )}
           </TouchableOpacity>
-        </View>
+        </SafeAreaView>
       )}
     </SafeAreaView>
   );

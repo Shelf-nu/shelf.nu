@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   centredSheetSpan,
   overlayTopOffset,
+  scanSplit,
   tabScreenInsets,
 } from "./safe-edges";
 
@@ -54,8 +55,9 @@ describe("overlayTopOffset", () => {
     assert.equal(overlayTopOffset(24, 40), 40);
   });
 
-  it("clears a status bar or camera cutout taller than the offset", () => {
-    assert.equal(overlayTopOffset(62, 60), 70);
+  it("moves below a status bar or camera cutout taller than the offset", () => {
+    assert.equal(overlayTopOffset(62, 60), 62);
+    assert.equal(overlayTopOffset(48, 40), 48);
   });
 });
 
@@ -87,5 +89,37 @@ describe("centredSheetSpan", () => {
     assert.equal(span.width, 720);
     assert.equal(span.marginLeft, 73);
     assert.ok(span.marginLeft + span.width <= 951 - 84);
+  });
+});
+
+describe("scanSplit", () => {
+  const rails = { top: 24, right: 84, bottom: 0, left: 31 };
+
+  it("stacks camera over list on an upright screen, both clearing both sides", () => {
+    const split = scanSplit({ width: 390, height: 761 }, rails);
+    assert.equal(split.sideBySide, false);
+    assert.deepEqual(split.camera, { top: 24, right: 84, bottom: 0, left: 31 });
+    assert.deepEqual(split.panel, { top: 0, right: 84, bottom: 0, left: 31 });
+  });
+
+  it("puts the list beside the camera on a screen wider than tall", () => {
+    // Pixel Fold inner screen turned sideways, bottom tab bar below.
+    const split = scanSplit({ width: 883, height: 716 }, rails);
+    assert.equal(split.sideBySide, true);
+    // The camera keeps the left edge and the top; the panel the right edge.
+    assert.deepEqual(split.camera, { top: 24, right: 0, bottom: 0, left: 31 });
+    assert.deepEqual(split.panel, { top: 24, right: 84, bottom: 0, left: 0 });
+  });
+
+  it("keeps a square or upright screen stacked", () => {
+    assert.equal(
+      scanSplit({ width: 669, height: 669 }, rails).sideBySide,
+      false
+    );
+    // Duo open sideways, beside the 360-wide tab sidebar.
+    assert.equal(
+      scanSplit({ width: 591, height: 669 }, rails).sideBySide,
+      false
+    );
   });
 });

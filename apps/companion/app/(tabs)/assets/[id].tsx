@@ -17,7 +17,6 @@ import {
   Modal,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { releaseCategory, isLowStock } from "@shelf/quantity-control";
@@ -41,7 +40,6 @@ import {
 } from "@/lib/constants";
 import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
-import { useOverlayEdges } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { pushIntoTab } from "@/lib/navigation";
@@ -75,6 +73,7 @@ import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { AssetBookingsSection } from "@/components/asset-detail/asset-bookings-section";
 import { InfoRow } from "@/components/shared/info-row";
+import { ImageZoomModal } from "@/components/shared/image-zoom-modal";
 import { ArchivedNotice } from "@/components/shared/archived-notice";
 import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
@@ -134,8 +133,6 @@ export default function AssetDetailScreen() {
   const { user } = useAuth();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
-  // Clears a side rail or camera cutout in the full-window image viewer.
-  const overlayEdges = useOverlayEdges();
   // Render dates in the acting user's format preferences + timezone.
   const { formatDate, formatDateTime } = useDateFormatter();
 
@@ -1219,43 +1216,13 @@ export default function AssetDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Image Zoom Modal ──────────────────────────── */}
+      {/* ── Image zoom ─────────────────────────────── */}
       {asset.mainImage && (
-        <Modal
+        <ImageZoomModal
+          uri={asset.mainImage}
           visible={showImageZoom}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowImageZoom(false)}
-        >
-          <View
-            style={[
-              styles.zoomOverlay,
-              // The image fills the space between the side insets.
-              {
-                paddingLeft: overlayEdges.left,
-                paddingRight: overlayEdges.right,
-              },
-            ]}
-            accessibilityViewIsModal={true}
-          >
-            <TouchableOpacity
-              style={[
-                styles.zoomCloseBtn,
-                { top: overlayEdges.top, right: overlayEdges.right + 20 },
-              ]}
-              onPress={() => setShowImageZoom(false)}
-              accessibilityLabel="Close image viewer"
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: asset.mainImage }}
-              style={styles.zoomImage}
-              contentFit="contain"
-            />
-          </View>
-        </Modal>
+          onClose={() => setShowImageZoom(false)}
+        />
       )}
 
       {/* ── Modals ────────────────────────────────────── */}
@@ -1718,29 +1685,4 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   tagText: { fontSize: fontSize.sm, color: colors.gray700 },
-
-  // Image zoom modal
-  zoomOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  // `top` and `right` come from the window's insets at render time.
-  zoomCloseBtn: {
-    position: "absolute",
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  // Sized against the full-screen overlay rather than a window size read when
-  // the styles are built, so the image follows a rotation or a window resize.
-  zoomImage: {
-    width: "100%",
-    height: "70%",
-  },
 }));

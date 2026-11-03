@@ -84,6 +84,11 @@ describe("showsTabSidebar", () => {
     assert.equal(showsTabSidebar(951), true);
   });
 
+  it("switches to the sidebar at 900 points", () => {
+    assert.equal(showsTabSidebar(899), false);
+    assert.equal(showsTabSidebar(900), true);
+  });
+
   it("shows the sidebar on tablets held sideways", () => {
     assert.equal(showsTabSidebar(1133), true);
     assert.equal(showsTabSidebar(1180), true);

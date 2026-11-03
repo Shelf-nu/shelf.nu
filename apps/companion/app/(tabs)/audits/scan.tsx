@@ -17,6 +17,7 @@ import {
   Platform,
   Alert,
   AppState,
+  useWindowDimensions,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -28,6 +29,7 @@ import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { scanSplit } from "@/lib/safe-edges";
 import { useOverlayEdges, useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
@@ -85,17 +87,30 @@ function AuditScannerContent() {
 
   // ── Layout ───────────────────────────────────────────
 
-  /** Whether the screen is wider than tall, so the list sits beside the camera. */
-  const [sideBySide, setSideBySide] = useState(false);
   /**
-   * Insets the camera overlay and the panel keep clear of: an iPhone Duo's
-   * status-bar rail or a turned foldable's camera cutout, each side on its
-   * own. The tab sidebar already covers the left one when it is showing.
+   * The screen's own width, measured: beside the tab sidebar it is narrower
+   * than the window.
    */
-  const sideInsets = useTabScreenInsets();
-  const overlayEdges = useOverlayEdges(sideInsets);
-  /** Beside the list, the camera no longer reaches the right edge. */
-  const cameraRightInset = sideBySide ? 0 : overlayEdges.right;
+  const [screenWidth, setScreenWidth] = useState(0);
+  /**
+   * Height to weigh it against: the window's, which the keyboard never
+   * changes. The screen's own height shrinks while the Android keyboard is
+   * up, and judging by it would move the list beside the camera, and back,
+   * while a code is being typed.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  /**
+   * Whether the list sits beside the camera, and which insets each part keeps
+   * clear of: an iPhone Duo's status-bar rail or a turned foldable's camera
+   * cutout, each side on its own. The tab sidebar already covers the left one
+   * when it is showing.
+   */
+  const split = scanSplit(
+    { width: screenWidth, height: windowHeight },
+    useTabScreenInsets()
+  );
+  const { sideBySide } = split;
+  const cameraEdges = useOverlayEdges(split.camera);
 
   // ── Camera state ─────────────────────────────────────
 
@@ -1200,9 +1215,7 @@ function AuditScannerContent() {
   // tablet turned sideways) that would leave a letterbox of camera over a
   // short list, so the list moves beside the camera instead.
   const cameraSection = (
-    <View
-      style={[styles.cameraSection, sideBySide && styles.cameraSectionBeside]}
-    >
+    <View style={styles.cameraSection}>
       {isFocused && !isPaused && (
         <CameraView
           style={StyleSheet.absoluteFill}
@@ -1241,9 +1254,9 @@ function AuditScannerContent() {
           style={[
             styles.cameraHeader,
             {
-              paddingTop: overlayEdges.top,
-              paddingLeft: spacing.lg + overlayEdges.left,
-              paddingRight: spacing.lg + cameraRightInset,
+              paddingTop: cameraEdges.top,
+              paddingLeft: spacing.lg + cameraEdges.left,
+              paddingRight: spacing.lg + cameraEdges.right,
             },
           ]}
         >
@@ -1297,7 +1310,7 @@ function AuditScannerContent() {
           </View>
         </View>
 
-        {/* Scan frame — hidden while paused so it doesn't bleed through the paused overlay */}
+        {/* Scan frame: hidden while paused so it doesn't bleed through the paused overlay */}
         {!isPaused && (
           <View style={styles.scanFrameContainer}>
             <View style={styles.scanFrame}>
@@ -1358,8 +1371,8 @@ function AuditScannerContent() {
           style={[
             styles.toast,
             {
-              left: spacing.lg + overlayEdges.left,
-              right: spacing.lg + cameraRightInset,
+              left: spacing.lg + cameraEdges.left,
+              right: spacing.lg + cameraEdges.right,
             },
             toast.type === "found" && styles.toastFound,
             toast.type === "unexpected" && styles.toastUnexpected,
@@ -1414,8 +1427,11 @@ function AuditScannerContent() {
       style={[
         styles.devScanContainer,
         {
-          paddingLeft: spacing.md + overlayEdges.left,
-          paddingRight: spacing.md + cameraRightInset,
+          paddingLeft: spacing.md + cameraEdges.left,
+          paddingRight: spacing.md + cameraEdges.right,
+          // Beside the list it is the camera column's bottom row: clear of the
+          // home indicator when the tab sidebar leaves that edge uncovered.
+          paddingBottom: spacing.xs + split.camera.bottom,
         },
       ]}
     >
@@ -1480,11 +1496,13 @@ function AuditScannerContent() {
         styles.bottomPanel,
         sideBySide && styles.bottomPanelBeside,
         {
-          paddingLeft: sideBySide ? spacing.lg : spacing.lg + overlayEdges.left,
-          paddingRight: spacing.lg + overlayEdges.right,
+          // Beside the camera the panel reaches the top of the screen.
+          paddingTop: spacing.md + split.panel.top,
+          paddingLeft: spacing.lg + split.panel.left,
+          paddingRight: spacing.lg + split.panel.right,
+          // Below a tab sidebar nothing takes the home-indicator inset.
+          paddingBottom: split.panel.bottom,
         },
-        // Beside the camera the panel reaches the top of the screen.
-        sideBySide && { paddingTop: sideInsets.top + spacing.md },
       ]}
     >
       <ProgressHeader
@@ -1557,21 +1575,17 @@ function AuditScannerContent() {
     <View
       style={[styles.container, sideBySide && styles.containerBeside]}
       onLayout={(e) => {
-        const { width, height } = e.nativeEvent.layout;
-        setSideBySide(width > height);
+        setScreenWidth(e.nativeEvent.layout.width);
       }}
     >
-      {sideBySide ? (
-        <View style={styles.cameraColumn}>
-          {cameraSection}
-          {manualEntry}
-        </View>
-      ) : (
-        <>
-          {cameraSection}
-          {manualEntry}
-        </>
-      )}
+      {/* One element tree in both layouts, so switching between them
+          restyles the camera instead of remounting it. */}
+      <View
+        style={sideBySide ? styles.cameraColumnBeside : styles.cameraColumn}
+      >
+        {cameraSection}
+        {manualEntry}
+      </View>
       {panel}
 
       <CompleteAuditSheet
@@ -1608,8 +1622,16 @@ const useStyles = createStyles((colors, shadows) => ({
   containerBeside: {
     flexDirection: "row",
   },
-  // Holds the camera and the manual entry on the left of a wide screen.
+  // Holds the camera and the manual entry. Upright, it takes the manual
+  // entry's height plus 6 of the 11 shares of what is left (the panel takes
+  // 5), so the camera gets 6/11 of the space beside the manual-entry row.
   cameraColumn: {
+    flexGrow: 6,
+    flexShrink: 1,
+    flexBasis: "auto",
+  },
+  // Beside the list on a wide screen: 6 of 11 shares of the width.
+  cameraColumnBeside: {
     flex: 6,
   },
   centered: {
@@ -1647,14 +1669,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.md,
   },
 
-  // Camera: above the panel on an upright screen, beside it on a wide one.
+  // Camera: above the manual entry, in the camera column.
   cameraSection: {
-    flex: 6,
+    flex: 1,
     backgroundColor: "#000",
     position: "relative",
-  },
-  cameraSectionBeside: {
-    flex: 1,
   },
   cameraOverlay: {
     ...StyleSheet.absoluteFillObject,

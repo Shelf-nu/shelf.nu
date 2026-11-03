@@ -55,15 +55,15 @@ export function tabScreenInsets(
 
 /**
  * Distance from the top of a full-window overlay to its top controls (a close
- * button, a scanner header): clear of the status bar or camera cutout, and
- * never higher than `minimum`, the offset the phone layouts are drawn for.
+ * button, a scanner header): `minimum`, the offset the phone layouts are drawn
+ * for, or the top inset when that is taller, so the controls never sit under
+ * the status bar or a camera cutout.
  *
  * @param topInset - the window's top inset
  * @param minimum - the smallest offset, in points
  */
 export function overlayTopOffset(topInset: number, minimum: number): number {
-  // 8 pt of air under the status bar, the same gap the phone layouts leave.
-  return Math.max(topInset + 8, minimum);
+  return Math.max(topInset, minimum);
 }
 
 /**
@@ -86,5 +86,47 @@ export function centredSheetSpan(
   return {
     width,
     marginLeft: insets.left + Math.floor((room - width) / 2),
+  };
+}
+
+/** How a scanner screen splits between its camera and its list. */
+export type ScanSplit = {
+  /** Whether the list sits beside the camera instead of below it. */
+  sideBySide: boolean;
+  /** Insets on the camera area's edges. */
+  camera: EdgeInsets;
+  /** Insets on the list panel's edges. */
+  panel: EdgeInsets;
+};
+
+/**
+ * Splits a scanner screen into a camera area and a list panel, and says
+ * which of the screen's insets each one touches.
+ *
+ * Upright, the camera sits above the list, the way a phone is held, and both
+ * span the width, so both clear both side insets. On a screen wider than it
+ * is tall (a foldable or a tablet turned sideways) the list moves beside the
+ * camera, on the right: the camera keeps the left inset and the top, the
+ * panel takes the right inset and, now reaching the top, the top inset too.
+ *
+ * @param screen - the scanner screen's own size, in points
+ * @param insets - the insets on the screen's edges (`tabScreenInsets`)
+ */
+export function scanSplit(
+  screen: { width: number; height: number },
+  insets: EdgeInsets
+): ScanSplit {
+  const sideBySide = screen.width > screen.height;
+  if (!sideBySide) {
+    return {
+      sideBySide,
+      camera: { ...insets, bottom: 0 },
+      panel: { ...insets, top: 0 },
+    };
+  }
+  return {
+    sideBySide,
+    camera: { ...insets, right: 0 },
+    panel: { ...insets, left: 0 },
   };
 }

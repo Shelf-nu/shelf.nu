@@ -412,12 +412,13 @@ function ScannerContent() {
 
   const insets = useSafeAreaInsets();
   /**
-   * Side insets the overlay's controls keep clear of: an iPhone Duo's
-   * status-bar rail or a turned foldable's camera cutout. Each side is its
-   * own; the tab sidebar already covers the left one when it is showing.
+   * Insets the overlay's controls keep clear of: an iPhone Duo's status-bar
+   * rail or a turned foldable's camera cutout on the sides, each side its own,
+   * and the home indicator once the tab bar has moved to a sidebar. The
+   * sidebar already covers the left side when it is showing.
    */
-  const sideInsets = useTabScreenInsets();
-  const sideInsetStyle = { left: sideInsets.left, right: sideInsets.right };
+  const screenInsets = useTabScreenInsets();
+  const sideInsetStyle = { left: screenInsets.left, right: screenInsets.right };
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -3207,8 +3208,8 @@ function ScannerContent() {
             styles.overlaySection,
             styles.bottomSection,
             {
-              paddingLeft: sideInsets.left,
-              paddingRight: sideInsets.right,
+              paddingLeft: screenInsets.left,
+              paddingRight: screenInsets.right,
             },
           ]}
           pointerEvents="box-none"
@@ -3311,8 +3312,8 @@ function ScannerContent() {
               styles.devScanContainer,
               manualEntryPlacement,
               {
-                left: spacing.md + sideInsets.left,
-                right: spacing.md + sideInsets.right,
+                left: spacing.md + screenInsets.left,
+                right: spacing.md + screenInsets.right,
               },
             ]}
             // Full-width host: only the pill or the field inside it takes
@@ -3485,6 +3486,16 @@ function ScannerContent() {
               onResolveAllBlockers={resolveAllBookingBlockers}
             />
           )}
+          {/* Below a tab sidebar nothing covers the home indicator: extend
+              the drawer's white under it so its buttons stay clear. */}
+          {screenInsets.bottom > 0 ? (
+            <View
+              style={{
+                height: screenInsets.bottom,
+                backgroundColor: colors.white,
+              }}
+            />
+          ) : null}
         </View>
       )}
 
