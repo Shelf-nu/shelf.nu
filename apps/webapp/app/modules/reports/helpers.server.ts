@@ -4540,9 +4540,9 @@ export async function assetActivityReport(
       "BOOKING_CHECKED_IN",
     ];
 
-    // An export pages through the timeframe by offset, so its end must not
-    // move: a range ending later today would admit events recorded while the
-    // export runs, shifting every later batch. It ends when the export starts.
+    // An export ends when it starts: a range ending later today would
+    // otherwise count events the batches never reach, and the file would not
+    // match its own count.
     const readTimeframe = allRows
       ? {
           ...timeframe,
@@ -4550,11 +4550,15 @@ export async function assetActivityReport(
         }
       : timeframe;
 
-    /** Reads one page of events, with the KPI counts when `withSummary`. */
+    /**
+     * Reads one page of events, with the KPI counts when `withSummary`.
+     * Export batches pass `after`, the last event already read.
+     */
     const readEvents = (
       pageNumber: number,
       size: number,
-      withSummary: boolean
+      withSummary: boolean,
+      after?: ActivityEventCursor
     ) => {
       const query = {
         organizationId,
@@ -4564,6 +4568,7 @@ export async function assetActivityReport(
         page: pageNumber,
         pageSize: size,
         withSummary,
+        after,
       };
       return assetFilter && !assetFilter.isEmpty
         ? fetchFilteredActivityEvents({ ...query, assetFilter })
@@ -4643,19 +4648,23 @@ export async function assetActivityReport(
       first.summary ?? NO_ACTIVITY_SUMMARY;
     const rows = await toRows(first.events);
 
-    // The export reads on until a short batch ends the timeframe. The
-    // timeframe's end is fixed when the export starts, so events recorded
-    // meanwhile stay out of every batch.
+    // The export reads on until a short batch ends the timeframe. Each batch
+    // starts after the last event read rather than at an offset, so an asset
+    // that joins or leaves the filter mid-export cannot repeat or skip rows
+    // of other assets.
     let batch = first.events;
-    for (
-      let nextPage = 2;
+    while (
       allRows &&
       batch.length === ACTIVITY_EXPORT_BATCH_SIZE &&
-      rows.length < ACTIVITY_EXPORT_MAX_ROWS;
-      nextPage++
+      rows.length < ACTIVITY_EXPORT_MAX_ROWS
     ) {
-      batch = (await readEvents(nextPage, ACTIVITY_EXPORT_BATCH_SIZE, false))
-        .events;
+      const last = batch[batch.length - 1];
+      batch = (
+        await readEvents(1, ACTIVITY_EXPORT_BATCH_SIZE, false, {
+          occurredAt: last.occurredAt,
+          id: last.id,
+        })
+      ).events;
       rows.push(...(await toRows(batch)));
     }
 
@@ -4769,6 +4778,14 @@ interface ActivityEventQueryArgs {
   pageSize: number;
   /** Also count events across every page, for the KPIs. */
   withSummary: boolean;
+  /** Read the page that follows this event in report order; ignores `page`. */
+  after?: ActivityEventCursor;
+}
+
+/** An event's place in report order (`occurredAt` desc, then `id` asc). */
+interface ActivityEventCursor {
+  occurredAt: Date;
+  id: string;
 }
 
 type ActivityEventRecord = Prisma.ActivityEventGetPayload<object>;
@@ -4806,6 +4823,7 @@ async function fetchActivityEvents({
   page,
   pageSize,
   withSummary,
+  after,
 }: ActivityEventQueryArgs): Promise<ActivityEventPage> {
   const where: Prisma.ActivityEventWhereInput = {
     organizationId,
@@ -4842,11 +4860,23 @@ async function fetchActivityEvents({
 
   const [events, summary] = await Promise.all([
     db.activityEvent.findMany({
-      where,
-      // `id` tiebreaker keeps skip/take paging deterministic for events
-      // sharing an `occurredAt` (bulk mutations emit same-instant events).
+      where: after
+        ? {
+            AND: [
+              where,
+              {
+                OR: [
+                  { occurredAt: { lt: after.occurredAt } },
+                  { occurredAt: after.occurredAt, id: { gt: after.id } },
+                ],
+              },
+            ],
+          }
+        : where,
+      // `id` tiebreaker keeps paging deterministic for events sharing an
+      // `occurredAt` (bulk mutations emit same-instant events).
       orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
-      skip: (page - 1) * pageSize,
+      skip: after ? 0 : (page - 1) * pageSize,
       take: pageSize,
     }),
     withSummary ? readSummary() : null,
@@ -4872,6 +4902,7 @@ async function fetchFilteredActivityEvents({
   page,
   pageSize,
   withSummary,
+  after,
 }: ActivityEventQueryArgs & {
   assetFilter: ReportAssetFilter;
 }): Promise<ActivityEventPage> {
@@ -4922,8 +4953,13 @@ async function fetchFilteredActivityEvents({
       SELECT e.id
       FROM "ActivityEvent" e
       WHERE ${eventWhereSql}
+      ${
+        after
+          ? Prisma.sql`AND (e."occurredAt" < ${after.occurredAt} OR (e."occurredAt" = ${after.occurredAt} AND e.id > ${after.id}))`
+          : Prisma.empty
+      }
       ORDER BY e."occurredAt" DESC, e.id ASC
-      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+      LIMIT ${pageSize} OFFSET ${after ? 0 : (page - 1) * pageSize}
     `),
     withSummary ? readSummary() : null,
   ]);

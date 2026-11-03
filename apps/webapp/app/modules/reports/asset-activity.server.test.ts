@@ -403,17 +403,34 @@ describe("assetActivityReport export mode (allRows)", () => {
     expect(rows[5000].description).toBe(
       "Location changed: Hull depot → Leeds unit"
     );
-    const pages = vi
+    // The second batch starts after the last event of the first, not at an
+    // offset, and keeps the asset scope.
+    const [firstRead, secondRead] = vi
       .mocked(db.activityEvent.findMany)
-      .mock.calls.map(([args]) => ({
-        skip: args?.skip,
-        take: args?.take,
-        assetId: args?.where?.assetId,
-      }));
-    expect(pages).toEqual([
-      { skip: 0, take: 5000, assetId: "asset-1" },
-      { skip: 5000, take: 5000, assetId: "asset-1" },
-    ]);
+      .mock.calls.map(([args]) => args);
+    expect(firstRead).toMatchObject({
+      skip: 0,
+      take: 5000,
+      where: { assetId: "asset-1" },
+    });
+    expect(secondRead).toMatchObject({
+      skip: 0,
+      take: 5000,
+      where: {
+        AND: [
+          { assetId: "asset-1" },
+          {
+            OR: [
+              { occurredAt: { lt: new Date("2026-10-15T10:00:00Z") } },
+              {
+                occurredAt: new Date("2026-10-15T10:00:00Z"),
+                id: { gt: "evt-5000" },
+              },
+            ],
+          },
+        ],
+      },
+    });
     expect(db.activityEvent.count).toHaveBeenCalledTimes(1);
     expect(db.activityEvent.groupBy).toHaveBeenCalledTimes(2);
     expect(refreshExpiredAssetImages).not.toHaveBeenCalled();
@@ -449,10 +466,14 @@ describe("assetActivityReport export mode (allRows)", () => {
       expect(query.sql).toContain('FROM "Asset"');
       expect(query.values).toContain("cat-food");
     }
+    // Batch 2 starts after the last event read: no offset, and the cursor's
+    // time and id are bound into the query.
     expect(pageQueries.map((query) => query.values.slice(-2))).toEqual([
       [5000, 0],
-      [5000, 5000],
+      [5000, 0],
     ]);
+    expect(pageQueries[1].sql).toContain("e.id >");
+    expect(pageQueries[1].values).toContain("evt-5000");
   });
 
   it("ends the export's timeframe when the export starts", async () => {

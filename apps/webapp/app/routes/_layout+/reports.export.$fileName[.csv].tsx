@@ -806,12 +806,18 @@ function generateAssetActivityCsv(
     row.performedBy || "System",
   ]);
 
-  // An export that reached its ceiling says so rather than ending silently.
+  // A file that does not hold every counted event says why, rather than
+  // ending silently: either it reached its ceiling, or assets joined or left
+  // the filter while it was being written.
+  const written = rows.length.toLocaleString("en-US");
+  const total = totalRows.toLocaleString("en-US");
   if (rows.length >= ACTIVITY_EXPORT_MAX_ROWS && totalRows > rows.length) {
-    const written = rows.length.toLocaleString("en-US");
-    const total = totalRows.toLocaleString("en-US");
     csvRows.push([
       `Export stopped at ${written} of ${total} rows. Narrow the date range to export the rest.`,
+    ]);
+  } else if (rows.length !== totalRows) {
+    csvRows.push([
+      `Rows in this file: ${written}. Rows counted when the export started: ${total}. Assets changed while it ran; export again for a matching file.`,
     ]);
   }
 

@@ -770,10 +770,12 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       );
     });
 
-    it("adds no notice when fewer rows than counted arrive below the ceiling", async () => {
+    it("says so when a file below the ceiling holds a different number of rows than counted", async () => {
       const lines = await exportLines([moveRow], 3);
 
-      expect(lines).toHaveLength(2);
+      expect(lines.at(-1)).toBe(
+        "Rows in this file: 1. Rows counted when the export started: 3. Assets changed while it ran; export again for a matching file."
+      );
     });
   });
 });
