@@ -44,6 +44,7 @@ import type {
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { useTabScreenInsets } from "@/lib/use-safe-edges";
+import { closedManualEntryBottom } from "@/lib/scanner-manual-entry";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -519,21 +520,36 @@ function ScannerContent() {
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
 
+  /** Height of the overlay's bottom strip, measured. */
+  const [bottomStripHeight, setBottomStripHeight] = useState<number | null>(
+    null
+  );
+  /** Bottom edge of the camera controls within that strip, measured. */
+  const [controlsBottom, setControlsBottom] = useState<number | null>(null);
+  const closedManualEntry = closedManualEntryBottom(
+    bottomStripHeight !== null && controlsBottom !== null
+      ? bottomStripHeight - controlsBottom
+      : null,
+    screenInsets.bottom
+  );
+
   /**
    * Absolute position of the manual-entry control.
    *
    * The open text field always lives in the top strip, just under the status
    * bar: the keyboard rises from the bottom and would cover a field anchored
    * there, and the top strip is free above the header and pills. The closed
-   * pill sits low in the bottom strip while nothing else is there, and moves
-   * to the top strip as soon as a drawer opens: the drawer shares the bottom
-   * strip with the hint text and the camera controls, and no offset keeps the
-   * pill clear of all three on a short screen.
+   * pill sits low in the bottom strip, under the camera controls, while
+   * nothing else is there. It moves to the top strip as soon as a drawer
+   * opens (the drawer shares the bottom strip with the hint text and the
+   * camera controls, and no offset keeps the pill clear of all three on a
+   * short screen), and when the strip is too short to fit it under the
+   * controls at all.
    */
   const manualEntryPlacement =
-    devScanVisible || drawerHeight > 0
+    devScanVisible || drawerHeight > 0 || closedManualEntry === null
       ? { top: insets.top + spacing.md }
-      : { bottom: MANUAL_ENTRY_BOTTOM };
+      : { bottom: closedManualEntry };
 
   // Cooldown (shared hook)
   const {
@@ -3213,6 +3229,9 @@ function ScannerContent() {
             },
           ]}
           pointerEvents="box-none"
+          onLayout={(e) =>
+            setBottomStripHeight(Math.round(e.nativeEvent.layout.height))
+          }
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -3256,7 +3275,14 @@ function ScannerContent() {
           </Animated.View>
 
           {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
-          <View style={styles.controlButtons} pointerEvents="box-none">
+          <View
+            style={styles.controlButtons}
+            pointerEvents="box-none"
+            onLayout={(e) => {
+              const { y, height } = e.nativeEvent.layout;
+              setControlsBottom(Math.round(y + height));
+            }}
+          >
             {/* Pause/Resume toggle */}
             <TouchableOpacity
               style={[
@@ -3633,8 +3659,6 @@ export default function ScannerScreen() {
 // ── Styles ────────────────────────────────────────────────
 
 const FRAME_SIZE = 240;
-/** Distance of the closed "Enter code" pill from the bottom edge when no drawer is open. */
-const MANUAL_ENTRY_BOTTOM = 90;
 
 const useStyles = createStyles((colors) => ({
   container: {
