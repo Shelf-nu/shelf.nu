@@ -510,7 +510,9 @@ export async function updatePdfTemplate({
       await assertPrintableCustomFields(tx, {
         organizationId,
         customFieldIds: config.customFieldIds,
-        allowedInactiveIds: stored.config.customFieldIds,
+        // `parse` fills defaults, so a row stored without the key still works.
+        allowedInactiveIds: parseBookingTemplateConfig(stored.config)
+          .customFieldIds,
       });
       return tx.pdfTemplate
         .update({

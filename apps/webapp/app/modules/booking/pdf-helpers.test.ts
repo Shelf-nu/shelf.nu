@@ -663,4 +663,55 @@ describe("booking PDF: custom field values", () => {
     });
     expect(result.assets[0]).not.toHaveProperty("customFields");
   });
+
+  it("leaves out a template's inactive custom field", async () => {
+    vi.clearAllMocks();
+    // why: the booking read, the asset read and the org read, as in `run`.
+    mockOf(getBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      description: null,
+      custodianUser: null,
+      custodianTeamMember: { name: "Ada" },
+      tags: [],
+      modelRequests: [],
+      bookingAssets: [{ ...BOOKING_ASSETS[0], asset: ASSET }],
+    });
+    mockOf(db.asset.findMany).mockResolvedValue([ASSET]);
+    mockOf(db.kit.findMany).mockResolvedValue([]);
+    mockOf(db.organization.findUnique).mockResolvedValue({
+      id: "org-1",
+      name: "Org",
+      imageId: null,
+      currency: "EUR",
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+      showQrCodesOnPdfs: false,
+    });
+    // why: the database filters on `active: true`, so the inactive field
+    // "cf-off" is never returned.
+    mockOf(db.customField.findMany).mockResolvedValue([]);
+
+    const result = await fetchAllPdfRelatedData(
+      "booking-1",
+      "org-1",
+      "user-1",
+      undefined,
+      new Request("http://localhost/x", {
+        headers: { "Accept-Language": "en-US" },
+      }),
+      undefined,
+      { customFieldIds: ["cf-off"] }
+    );
+
+    expect(mockOf(db.customField.findMany).mock.calls[0][0].where).toEqual({
+      id: { in: ["cf-off"] },
+      organizationId: "org-1",
+      deletedAt: null,
+      active: true,
+    });
+    expect(result.customFields).toEqual([]);
+    expect(result.assets[0].customFieldValues).toEqual({});
+  });
 });

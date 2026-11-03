@@ -622,4 +622,19 @@ describe("PDF templates: custom fields on a template", () => {
       title: "Custom field deleted",
     });
   });
+
+  it("saves a template stored with an empty config", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    // why: a row written before custom fields existed has no `customFieldIds`.
+    templatesOf()[0].config = {};
+
+    const saved = await updatePdfTemplate({
+      organizationId: ORG,
+      templateId: templatesOf()[0].id,
+      name: "Client quote",
+      config: { ...BOOKING_CHECKLIST_CONFIG, customFieldIds: ["cf-price"] },
+    });
+
+    expect(saved?.config.customFieldIds).toEqual(["cf-price"]);
+  });
 });
