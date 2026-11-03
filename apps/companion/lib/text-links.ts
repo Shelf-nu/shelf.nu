@@ -122,8 +122,10 @@ function segmentBareDomains(text: string): TextSegment[] {
     // A capitalised "domain" is a missed space: "damaged.No charger".
     const tld = match[1];
     if (!BARE_DOMAIN_TLDS.has(tld)) continue;
-    const after = text[start + match[0].length] ?? "";
-    if (after && BLOCKED_AFTER.test(after)) continue;
+    const rest = text.slice(start + match[0].length);
+    if (BLOCKED_AFTER.test(rest.charAt(0))) continue;
+    // A hostname that runs on past the TLD ("acme.com.x") is not "acme.com".
+    if (/^\.[a-z0-9]/i.test(rest)) continue;
 
     const link = readBareDomain(match[0]);
     // The TLD must survive trimming: "acme.com." ends at "acme.com".

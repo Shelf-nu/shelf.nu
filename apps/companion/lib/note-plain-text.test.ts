@@ -250,3 +250,16 @@ test("a link tag without a usable target reads as its text", () => {
     [{ type: "text", text: "Kit A moved" }]
   );
 });
+
+test("placeholder characters typed into a note stay text", () => {
+  const content = "odd \uE0000\uE001 chars, see https://x.com/a";
+  const segments = markdocToSegments(content, format, BASE, COMMENT);
+  assert.equal(
+    segments.map((segment) => segment.text).join(""),
+    "odd \uE0000\uE001 chars, see https://x.com/a"
+  );
+  assert.deepEqual(
+    segments.filter((segment) => segment.type === "link"),
+    [{ type: "link", text: "https://x.com/a", url: "https://x.com/a" }]
+  );
+});

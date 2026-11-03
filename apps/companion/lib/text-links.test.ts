@@ -95,6 +95,7 @@ test("a missed space after a full stop does not make a link", () => {
 
 test("a domain followed by more word characters is not linked", () => {
   assert.deepEqual(links("lens.de-fogged and rig.com_backup"), []);
+  assert.deepEqual(links("example.com2 and example.com.x"), []);
 });
 
 test("a domain glued to another word or path is not linked", () => {

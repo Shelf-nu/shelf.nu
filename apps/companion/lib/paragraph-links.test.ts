@@ -66,3 +66,21 @@ test("a text that is one outside link shows only its chip", () => {
 test("two different links keep the text", () => {
   assert.equal(read("https://a.com https://b.com").onlyChip, false);
 });
+
+test("a lone link with its own label keeps the text", () => {
+  const { onlyChip } = paragraphLinks(
+    [
+      {
+        type: "link",
+        text: "Calibration instructions",
+        url: "https://example.com/file.pdf",
+      },
+    ],
+    SERVER
+  );
+  assert.equal(onlyChip, false);
+});
+
+test("a lone bare domain shows only its chip", () => {
+  assert.equal(read("canon.com/r5.pdf").onlyChip, true);
+});

@@ -111,8 +111,9 @@ const MARKDOWN_LINK =
 
 /**
  * Stand-in for a held run while the rest of the note is flattened: a
- * private-use character pair around the run's index, which no note contains
- * and no step of `markdocToPlainText` rewrites.
+ * private-use character pair around the run's index, which no step of
+ * `markdocToPlainText` rewrites. A note can contain the same characters, so
+ * a match with no held run behind it stays text.
  */
 const HELD_RUN = /\uE000(\d+)\uE001/g;
 
@@ -209,10 +210,12 @@ export function markdocToSegments(
   const segments: TextSegment[] = [];
   let cursor = 0;
   for (const match of plain.matchAll(HELD_RUN)) {
+    const run = held[Number(match[1])];
+    if (run === undefined) continue;
     if (match.index > cursor) {
       segments.push(...findTextLinks(plain.slice(cursor, match.index)));
     }
-    segments.push(held[Number(match[1])]);
+    segments.push(run);
     cursor = match.index + match[0].length;
   }
   if (cursor < plain.length) {

@@ -24,8 +24,10 @@ export const RELEASE_CAP_MS = 1000;
 /**
  * Opens the browser; when the answer is the locked type, releases the held
  * session (waiting at most `RELEASE_CAP_MS`, ignoring its failure) and opens
- * once more. A second locked answer is returned as is: a browser that really
- * is showing stays on top, and nothing loops.
+ * once more. A browser that really is showing (a page opened from code while
+ * another is up) is closed and replaced by the new page, the same outcome
+ * as tapping a link inside it. A second locked answer is returned as is, so
+ * nothing loops.
  *
  * @param open - Opens the browser and resolves with its result.
  * @param release - Releases the held session (`dismissBrowser`).

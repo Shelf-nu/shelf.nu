@@ -5,8 +5,8 @@
  * Each link to another website gets one chip, in the order the links
  * appear, at most `MAX_PARAGRAPH_CHIPS`. Links to Shelf itself (the claimed
  * host or the connected server) get none: they open an app screen or a
- * Shelf page, not a document. A text that is nothing but one such link
- * shows only its chip.
+ * Shelf page, not a document. A text that is nothing but one such link,
+ * shown as its URL, shows only its chip.
  *
  * Pure, and free of React Native, Expo and `@/` imports so the node test
  * runner can load it.
@@ -28,6 +28,11 @@ export type ParagraphLinks = {
   /** True when the text is one outside link and nothing else. */
   readonly onlyChip: boolean;
 };
+
+/** Whether a link run reads as its own URL (typed, or bare without `https://`). */
+function showsItsUrl(run: { text: string; url: string }): boolean {
+  return run.text === run.url || `https://${run.text}` === run.url;
+}
 
 /**
  * Reads the chips for a paragraph's text and link runs.
@@ -53,8 +58,15 @@ export function paragraphLinks(
   const visible = runs.filter(
     (run) => run.type === "link" || run.text.trim() !== ""
   );
+  const [only] = visible;
   return {
     chips: chips.slice(0, MAX_PARAGRAPH_CHIPS),
-    onlyChip: visible.length === 1 && chips.length === 1,
+    // A link written with its own label ("Calibration instructions") keeps
+    // the text: the chip's words come from the URL and would drop it.
+    onlyChip:
+      visible.length === 1 &&
+      chips.length === 1 &&
+      only.type === "link" &&
+      showsItsUrl(only),
   };
 }
