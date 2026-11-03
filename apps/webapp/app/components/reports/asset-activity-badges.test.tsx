@@ -54,8 +54,15 @@ describe("AssetActivityContent activity badges", () => {
 
     // The legend names the pair once; each row's badge names its own type.
     expect(screen.getByText("Archived / Reinstated")).toBeInTheDocument();
-    expect(screen.getByText("Archived")).toBeInTheDocument();
-    expect(screen.getByText("Reinstated")).toBeInTheDocument();
+    // Neutral gray, the tone archived assets carry everywhere else.
+    expect(screen.getByText("Archived")).toHaveClass(
+      "bg-gray-100",
+      "text-gray-700"
+    );
+    expect(screen.getByText("Reinstated")).toHaveClass(
+      "bg-gray-100",
+      "text-gray-700"
+    );
     expect(screen.queryByText("ARCHIVED")).toBeNull();
   });
 });
