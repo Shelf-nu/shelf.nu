@@ -4,13 +4,15 @@
  * Wraps a `React.lazy` component so that a chunk which fails to download (a
  * flaky network, a file from another deploy) degrades to a message in place of
  * that one feature, instead of throwing to the route's error boundary and
- * replacing the whole page.
+ * replacing the whole page. What it catches is still reported to Sentry,
+ * since the page's error boundary that would have reported it never sees it.
  *
  * @see {@link file://./../code-preview/code-preview-dialog.tsx}
  * @see {@link file://./../availability-calendar/availability-calendar.lazy.tsx}
  */
 import { Component, Suspense } from "react";
 import type { ReactNode } from "react";
+import * as Sentry from "@sentry/react-router";
 
 /** Props for {@link LazyLoadBoundary}. */
 type LazyLoadBoundaryProps = {
@@ -21,7 +23,10 @@ type LazyLoadBoundaryProps = {
   children: ReactNode;
 };
 
-/** Catches the rejection of a lazy import and renders the `failed` fallback. */
+/**
+ * Catches the rejection of a lazy import (or a render crash of the component)
+ * and renders the `failed` fallback.
+ */
 class LazyErrorBoundary extends Component<
   { failed: ReactNode; children: ReactNode },
   { hasFailed: boolean }
@@ -30,6 +35,12 @@ class LazyErrorBoundary extends Component<
 
   static getDerivedStateFromError() {
     return { hasFailed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    // Not tagged as the error boundary, which bypasses the client filters:
+    // they apply here as anywhere else.
+    Sentry.captureException(error, { tags: { source: "lazy-load-boundary" } });
   }
 
   render() {

@@ -1,6 +1,8 @@
 import { lazy, useState } from "react";
+import type { ReactNode } from "react";
 import { KIT_MEMBERS_CUSTODY_BLOCKED_REASON } from "@shelf/labels";
 import { useAtomValue } from "jotai";
+import { DownloadIcon } from "lucide-react";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
@@ -21,7 +23,9 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { Dialog, DialogPortal } from "../layout/dialog";
 import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
+import { Spinner } from "../shared/spinner";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
@@ -58,6 +62,36 @@ import When from "../when/when";
  * It loads the first time someone opens it. */
 const BulkDownloadQrDialog = lazy(() => import("./bulk-download-qr-dialog"));
 
+/**
+ * The download dialog's frame, shown while its chunk loads or if it failed
+ * to, so picking the action always opens something.
+ */
+function BulkDownloadQrPlaceholder({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <DialogPortal>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title={
+          <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
+            <DownloadIcon />
+          </div>
+        }
+      >
+        <div className="flex flex-col items-center px-6 py-8">{children}</div>
+      </Dialog>
+    </DialogPortal>
+  );
+}
+
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
 
@@ -87,6 +121,7 @@ function ConditionalDropdown() {
   /* Mounted from the first opening on: the dialog stays mounted between
    * openings so it can drop a download that resolves after it closed. */
   const [hasOpenedBulkDownloadQr, setHasOpenedBulkDownloadQr] = useState(false);
+  const closeBulkDownloadQr = () => setIsBulkDownloadQrOpen(false);
 
   const {
     ref: dropdownRef,
@@ -251,12 +286,30 @@ function ConditionalDropdown() {
       </When>
 
       {hasOpenedBulkDownloadQr ? (
-        <LazyLoadBoundary loading={null} failed={null}>
+        <LazyLoadBoundary
+          loading={
+            <BulkDownloadQrPlaceholder
+              open={isBulkDownloadQrOpen}
+              onClose={closeBulkDownloadQr}
+            >
+              <Spinner />
+            </BulkDownloadQrPlaceholder>
+          }
+          failed={
+            <BulkDownloadQrPlaceholder
+              open={isBulkDownloadQrOpen}
+              onClose={closeBulkDownloadQr}
+            >
+              <p className="text-center text-error-500">
+                The QR code download could not be loaded. Reload the page and
+                try again.
+              </p>
+            </BulkDownloadQrPlaceholder>
+          }
+        >
           <BulkDownloadQrDialog
             isDialogOpen={isBulkDownloadQrOpen}
-            onClose={() => {
-              setIsBulkDownloadQrOpen(false);
-            }}
+            onClose={closeBulkDownloadQr}
           />
         </LazyLoadBoundary>
       ) : null}
