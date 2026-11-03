@@ -54,6 +54,8 @@ Existing mirrors:
 | `lib/model-reservation-shortfall.ts` → the shortfall notice + row chip                         | `apps/webapp/app/components/booking/booking-model-reservations-section.tsx` → the header notice and `ShortfallChip`              | `@shelf/labels`                                    |
 | `lib/booking-extend.ts` → `newEndError`                                                        | `modules/booking/service.server.ts` → `extendBooking`, and `ExtendBookingSchema`'s future-date check                             | a pure `packages/*` booking module (none yet)      |
 | `components/asset-edit/custom-field-input.tsx` → `OPTION_SEARCH_THRESHOLD` + the option filter | `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx` → `ENUM_SEARCH_THRESHOLD` + its filter         | a pure `packages/*` custom-field module (none yet) |
+| `lib/push/routing.ts` → `PUSH_CATEGORIES` + `PushPayload`                                      | `apps/webapp/app/modules/push/types.ts` + `toExpoMessage` in `modules/push/service.server.ts` (lands with PUSH-2)                | a pure `packages/*` push module (none yet)         |
+| `lib/push/preferences.ts` → `NotificationPreferences`                                          | `apps/webapp/app/modules/push/types.ts` (lands with PUSH-2)                                                                      | a pure `packages/*` push module (none yet)         |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

@@ -14,10 +14,12 @@ import Markdoc from "@markdoc/markdoc";
 import { AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { db } from "~/database/db.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   assertModelUnitsNotReservedElsewhere,
   assertOutstandingModelRequestsFit,
@@ -33,6 +35,7 @@ import {
   materializeModelRequestForAsset,
   MAX_MODELS_PER_RESERVATION_BATCH,
   removeBookingModelRequest,
+  reserveModelsUpToAvailability,
   RESERVATION_BATCH_TX_TIMEOUT_MS,
   upsertBookingModelRequest,
   upsertBookingModelRequests,
@@ -2007,6 +2010,30 @@ describe("upsertBookingModelRequest", () => {
     });
   });
 
+  it("keeps a URL-shaped asset-model name inside a name tag", async () => {
+    stageTotal(5);
+    // @ts-expect-error mocked
+    db.assetModel.findUnique.mockResolvedValue({
+      id: MODEL_ID,
+      name: URL_SHAPED_VALUE,
+    });
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    const content = (
+      createSystemBookingNote as unknown as {
+        mock: { calls: Array<[{ content: string }]> };
+      }
+    ).mock.calls[0][0].content;
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
+  });
+
   it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
     expect.assertions(3);
     stageTotal(5);
@@ -2034,12 +2061,12 @@ describe("upsertBookingModelRequest", () => {
 
     // Parse it exactly as the feed does. Pin the count first: `every`
     // is vacuously true on an empty array, so without this a change that
-    // stopped emitting our own links would leave both guards below
-    // asserting nothing. One actor link, and only that.
+    // stopped emitting our own tags would leave both guards below asserting
+    // nothing. One actor link and the `name` tag carrying the model name.
     const tags = markdocTagsIn(content);
-    expect(tags).toHaveLength(1);
-    // The only tag may be the actor link we emit ourselves...
-    expect(tags.every((node) => node.tag === "link")).toBe(true);
+    expect(tags.map((node) => node.tag)).toEqual(["link", "name"]);
+    // The model name stays inert text inside its `name` tag...
+    expect(tags[1].attributes.text).not.toContain("{%");
     // ...and none of them may point anywhere the attacker chose.
     expect(
       tags.every(
@@ -2438,6 +2465,251 @@ describe("upsertBookingModelRequests", () => {
   });
 });
 
+describe("reserveModelsUpToAvailability", () => {
+  /** One call to the reservation upsert, as the write core issues it. */
+  type UpsertArgs = {
+    where: { bookingId_assetModelId: { assetModelId: string } };
+    create: { quantity: number };
+  };
+
+  /** Quantities actually written, in write order. */
+  function writtenQuantities() {
+    return (
+      db.bookingModelRequest.upsert as unknown as {
+        mock: { calls: Array<[UpsertArgs]> };
+      }
+    ).mock.calls.map(([args]) => ({
+      assetModelId: args.where.bookingId_assetModelId.assetModelId,
+      quantity: args.create.quantity,
+    }));
+  }
+
+  /** `count` model ids that sort in the order they are numbered. */
+  const modelIds = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, i) => `model-${String(i + 1).padStart(2, "0")}`
+    );
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    installClaimSimulator();
+    // why: the batch locks every model it names in one statement, which the
+    // shared stub answers with a single row. Answer it with enough rows for a
+    // full batch so the lock reads as "every model is in this workspace".
+    const claim = vitest.mocked(db.$queryRaw).getMockImplementation()!;
+    vitest
+      .mocked(db.$queryRaw)
+      .mockImplementation(((strings: TemplateStringsArray, ...rest: never[]) =>
+        Array.isArray(strings) && strings.join("").includes('"AssetModel"')
+          ? Promise.resolve(
+              Array.from(
+                { length: MAX_MODELS_PER_RESERVATION_BATCH },
+                (_, i) => ({ id: `locked-${i}` })
+              )
+            )
+          : claim(strings, ...rest)) as never);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      name: "Copy",
+      status: BookingStatus.DRAFT,
+      from,
+      to,
+    });
+    stageTotal(12);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue(null);
+    // @ts-expect-error mocked
+    db.asset.findMany.mockResolvedValue([]);
+    // why: the report names each model, and every model asked about is in
+    // the workspace unless a test says otherwise.
+    vitest
+      .mocked(db.assetModel.findMany)
+      .mockImplementation(((args: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(
+          args.where.id.in.map((id) => ({ id, name: `Model ${id}` }))
+        )) as never);
+    vitest.mocked(db.assetModel.findUnique).mockImplementation(((args: {
+      where: { id: string };
+    }) =>
+      Promise.resolve({
+        id: args.where.id,
+        name: `Model ${args.where.id}`,
+      })) as never);
+    // why: the write core tells a create from an update by the timestamps of
+    // the row it wrote; equal ones mean the create branch ran.
+    vitest.mocked(db.bookingModelRequest.upsert).mockImplementation(((
+      args: UpsertArgs
+    ) =>
+      Promise.resolve({
+        id: `req-${args.where.bookingId_assetModelId.assetModelId}`,
+        bookingId: BOOKING_ID,
+        assetModelId: args.where.bookingId_assetModelId.assetModelId,
+        quantity: args.create.quantity,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+      })) as never);
+  });
+
+  it("reserves in full what fits and reports nothing", async () => {
+    const reduced = await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      requested: [{ assetModelId: MODEL_ID, quantity: 3 }],
+    });
+
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 3 },
+    ]);
+    expect(reduced).toEqual([]);
+  });
+
+  it("caps a model at what the window has free and reports it", async () => {
+    // Four free, eight on another booking: asking for ten reserves the four.
+    stageTotal(12);
+    stageReservedConcrete(8);
+
+    const reduced = await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      requested: [{ assetModelId: MODEL_ID, quantity: 10 }],
+    });
+
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 4 },
+    ]);
+    expect(reduced).toEqual([
+      {
+        assetModelId: MODEL_ID,
+        assetModelName: `Model ${MODEL_ID}`,
+        requested: 10,
+        reserved: 4,
+      },
+    ]);
+  });
+
+  it("writes nothing for a model with no free unit, and reports it as 0", async () => {
+    stageTotal(0);
+
+    const reduced = await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      requested: [{ assetModelId: MODEL_ID, quantity: 2 }],
+    });
+
+    expect(db.bookingModelRequest.upsert).not.toHaveBeenCalled();
+    expect(reduced).toEqual([
+      expect.objectContaining({ requested: 2, reserved: 0 }),
+    ]);
+  });
+
+  it("sums a repeated model and ignores entries with nothing to reserve", async () => {
+    await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      requested: [
+        { assetModelId: MODEL_ID, quantity: 2 },
+        { assetModelId: MODEL_ID, quantity: 3 },
+        { assetModelId: "model-empty", quantity: 0 },
+      ],
+    });
+
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 5 },
+    ]);
+  });
+
+  it("splits a plan larger than one batch into separate transactions", async () => {
+    const ids = modelIds(MAX_MODELS_PER_RESERVATION_BATCH + 5);
+
+    const reduced = await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      // Listed in reverse, so the write order shows the sort.
+      requested: [...ids]
+        .reverse()
+        .map((assetModelId) => ({ assetModelId, quantity: 1 })),
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: RESERVATION_BATCH_TX_TIMEOUT_MS,
+    });
+    expect(writtenQuantities().map((w) => w.assetModelId)).toEqual(ids);
+    expect(reduced).toEqual([]);
+  });
+
+  it("keeps the batches that wrote when a later one fails, reporting its models as failed", async () => {
+    // why: the failure is logged for Sentry; the test only needs it silent.
+    vitest.spyOn(Logger, "error").mockImplementation(() => {});
+    const ids = modelIds(MAX_MODELS_PER_RESERVATION_BATCH + 2);
+    // why: fail only the second transaction, as a lost connection would.
+    const passThrough = vitest.mocked(db.$transaction).getMockImplementation()!;
+    vitest
+      .mocked(db.$transaction)
+      .mockImplementationOnce(passThrough)
+      .mockImplementationOnce(() =>
+        Promise.reject(new Error("connection lost"))
+      );
+
+    const reduced = await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      requested: ids.map((assetModelId) => ({ assetModelId, quantity: 1 })),
+    });
+
+    expect(writtenQuantities()).toHaveLength(MAX_MODELS_PER_RESERVATION_BATCH);
+    expect(reduced).toEqual(
+      ids.slice(MAX_MODELS_PER_RESERVATION_BATCH).map((assetModelId) => ({
+        assetModelId,
+        assetModelName: `Model ${assetModelId}`,
+        requested: 1,
+        reserved: 0,
+        // A failure, not a shortfall, so the message can say so.
+        failed: true,
+      }))
+    );
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips a model outside the workspace", async () => {
+    // why: the workspace-scoped name read is what leaves a foreign model out.
+    vitest
+      .mocked(db.assetModel.findMany)
+      .mockResolvedValue([{ id: MODEL_ID, name: "Camera" }] as never);
+
+    const reduced = await reserveModelsUpToAvailability({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      requested: [
+        { assetModelId: MODEL_ID, quantity: 1 },
+        { assetModelId: "model-other-org", quantity: 1 },
+      ],
+    });
+
+    expect(db.assetModel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: ORG_ID }),
+      })
+    );
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 1 },
+    ]);
+    expect(reduced).toEqual([]);
+  });
+});
+
 describe("removeBookingModelRequest", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -2740,8 +3012,43 @@ describe("removeBookingModelRequest", () => {
       // Every sibling note in this file names the count; cancellation used to
       // be the outlier, reading "cancelled the model-level reservation for
       // Model" with the operator's 3 units nowhere in the trail.
-      expect(content).toContain("**3 × Dell Latitude 5550**");
+      expect(content).toContain(
+        '**3 ×** {% name text="Dell Latitude 5550" /%} reservation'
+      );
       expect(content).toContain("cancelled");
+    });
+
+    it("keeps a URL-shaped asset-model name inside a name tag", async () => {
+      // @ts-expect-error mocked
+      db.booking.findUnique.mockResolvedValue({
+        id: BOOKING_ID,
+        status: BookingStatus.DRAFT,
+      });
+      // @ts-expect-error mocked
+      db.bookingModelRequest.findUnique.mockResolvedValue({
+        id: "req-1",
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        fulfilledQuantity: 0,
+        assetModel: {
+          name: URL_SHAPED_VALUE,
+        },
+      });
+
+      await removeBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      });
+
+      const content = (
+        createSystemBookingNote as unknown as {
+          mock: { calls: Array<[{ content: string }]> };
+        }
+      ).mock.calls[0][0].content;
+      expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
     });
 
     it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
@@ -2777,12 +3084,12 @@ describe("removeBookingModelRequest", () => {
       ).mock.calls[0][0].content;
 
       // Count first — `every` passes vacuously on an empty array, so this
-      // is what stops both guards below silently covering nothing if the
-      // note ever stopped emitting our own links. One actor link, and only
-      // that.
+      // is what stops the guard below silently covering nothing if the note
+      // ever stopped emitting our own tags. One actor link and the `name` tag
+      // carrying the model name.
       const tags = markdocTagsIn(content);
-      expect(tags).toHaveLength(1);
-      expect(tags.every((node) => node.tag === "link")).toBe(true);
+      expect(tags.map((node) => node.tag)).toEqual(["link", "name"]);
+      expect(tags[1].attributes.text).not.toContain("{%");
       expect(
         tags.every(
           (node) => !/^javascript:/i.test(String(node.attributes?.to ?? ""))
@@ -3133,6 +3440,44 @@ describe("materializeModelRequestForAsset", () => {
     });
   });
 
+  it("keeps a URL-shaped asset-model name and asset title inside tags", async () => {
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: {
+        name: URL_SHAPED_VALUE,
+      },
+    });
+
+    await materializeModelRequestForAsset({
+      bookingId: BOOKING_ID,
+      asset: {
+        id: "asset-1",
+        title: URL_SHAPED_VALUE,
+        assetModelId: MODEL_ID,
+        type: AssetType.INDIVIDUAL,
+      },
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    const content = (
+      db.bookingNote.create as unknown as {
+        mock: { calls: Array<[{ data: { content: string } }]> };
+      }
+    ).mock.calls[0][0].data.content;
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name", "link"]);
+    expect(content).toContain(
+      `{% link to="/assets/asset-1" text="${URL_SHAPED_VALUE}" /%}`
+    );
+  });
+
   it("cannot be used to inject a live Markdoc tag via the asset-model name or asset title", async () => {
     expect.assertions(3);
     // Both values are free-form user input spliced into the scan note.
@@ -3170,12 +3515,14 @@ describe("materializeModelRequestForAsset", () => {
 
     // Count first — `every` passes vacuously on an empty array, so this is
     // what stops both guards below silently covering nothing if the note
-    // ever stopped emitting our own links. This note carries two: the
-    // actor link and the scanned asset's link.
+    // ever stopped emitting our own tags. This note carries four: the actor
+    // link, the scanned asset's link and the model name's two `name` tags.
     const tags = markdocTagsIn(content);
-    expect(tags).toHaveLength(2);
-    // Only the actor and asset links we emit ourselves...
-    expect(tags.every((node) => node.tag === "link")).toBe(true);
+    expect(tags).toHaveLength(4);
+    // Only the links and `name` tags we emit ourselves...
+    expect(
+      tags.every((node) => node.tag === "link" || node.tag === "name")
+    ).toBe(true);
     // ...and none of them points anywhere the attacker chose.
     expect(
       tags.every(

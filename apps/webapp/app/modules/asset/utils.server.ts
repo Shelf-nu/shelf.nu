@@ -17,8 +17,11 @@ import { formatUnitCount } from "~/utils/asset-quantity";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  wrapUserLinkForNote,
+  wrapLinkForNote,
+  wrapNameForNote,
+} from "~/utils/markdoc-wrappers";
 import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
 import type { ArchivedFilter, ICustomFieldValueJson } from "./types";
@@ -202,7 +205,8 @@ export function getInitialPlacementNoteContent(asset: {
  *   lastName: "Doe",
  *   isFirstTimeSet: true
  * })
- * // Returns: "**John Doe** set **Serial Number** of **Laptop** to **SN123456**"
+ * // Returns: '{% link to="/settings/team/users/..." text="John Doe" /%} set
+ * //   {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
  *
  * // Updating existing value
  * getCustomFieldUpdateNoteContent({
@@ -213,7 +217,9 @@ export function getInitialPlacementNoteContent(asset: {
  *   lastName: "Smith",
  *   isFirstTimeSet: false
  * })
- * // Returns: "**Jane Smith** updated **Status** of **Camera** from **Active** to **Inactive**"
+ * // Returns: '{% link to="/settings/team/users/..." text="Jane Smith" /%} updated
+ * //   {% name text="Status" /%} from {% name text="Active" chips=true /%} to
+ * //   {% name text="Inactive" chips=true /%}.'
  */
 export function getCustomFieldUpdateNoteContent({
   customFieldName,
@@ -241,22 +247,23 @@ export function getCustomFieldUpdateNoteContent({
     firstName,
     lastName,
   });
-  // Custom field NAMES and VALUES are both free-form user input and render
-  // as literal text in this Markdoc note.
-  const fieldName = stripMarkdocDelimiters(customFieldName);
-  const safeNew = stripMarkdocDelimiters(newValue);
-  const safePrevious = stripMarkdocDelimiters(previousValue);
+  // Custom field NAMES and VALUES are both free-form user input, so each goes
+  // inside a `name` tag. Values show their web links as chips, like the asset
+  // page does; field names never do.
+  const fieldName = wrapNameForNote(customFieldName);
+  const safeNew = wrapNameForNote(newValue, { chips: true });
+  const safePrevious = wrapNameForNote(previousValue, { chips: true });
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${fieldName}** to **${safeNew}**.`;
+    message = `${userLink} set ${fieldName} to ${safeNew}.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${fieldName}** from **${safePrevious}** to **${safeNew}**.`;
+    message = `${userLink} updated ${fieldName} from ${safePrevious} to ${safeNew}.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${fieldName}** value **${safePrevious}**.`;
+    message = `${userLink} removed ${fieldName} value ${safePrevious}.`;
   }
 
   return message;
@@ -341,6 +348,76 @@ export function compareCustomFieldValues(
       // For text and other types, do deep comparison
       return JSON.stringify(oldValue) !== JSON.stringify(newValue);
   }
+}
+
+/** The custom-field writes an asset save has to make, split by kind. */
+export type CustomFieldValueWritePlan = {
+  /** Fields with a value and no stored row yet. */
+  toCreate: Array<{ customFieldId: string; value: ICustomFieldValueJson }>;
+  /** Stored rows whose value differs from the submitted one. */
+  toUpdate: Array<{ valueId: string; value: ICustomFieldValueJson }>;
+  /** Fields submitted empty that still have a stored row. */
+  toRemoveFieldIds: string[];
+};
+
+/**
+ * Decides which custom-field value rows an asset save must create, update or
+ * delete, given the rows already stored for the asset.
+ *
+ * The edit form submits every custom field, changed or not, and each nested
+ * update or delete costs Prisma a lookup query plus the write. So a field is
+ * only written when its stored value actually differs (compared in full, not
+ * just `raw`), and only deleted when a stored row exists.
+ *
+ * The schema does not enforce one row per (asset, custom field); the app keeps
+ * it to one by creating a row only when none is stored. If duplicates exist,
+ * every stored row that differs is updated, so they converge on the submitted
+ * value, and clearing the field deletes them all.
+ *
+ * @param existingValues - The asset's stored value rows
+ * @param formValues - The submitted values, keyed by custom field id (`id`);
+ *   a falsy `value` means the field was cleared
+ * @returns The writes to make, each list possibly empty
+ */
+export function planCustomFieldValueWrites(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: unknown;
+  }>,
+  formValues: Array<{ id: string; value: ICustomFieldValueJson | null }>
+): CustomFieldValueWritePlan {
+  const existingByFieldId = new Map<
+    string,
+    Array<(typeof existingValues)[number]>
+  >();
+  for (const row of existingValues) {
+    const rows = existingByFieldId.get(row.customFieldId) ?? [];
+    rows.push(row);
+    existingByFieldId.set(row.customFieldId, rows);
+  }
+  const plan: CustomFieldValueWritePlan = {
+    toCreate: [],
+    toUpdate: [],
+    toRemoveFieldIds: [],
+  };
+
+  for (const { id: customFieldId, value } of formValues) {
+    const existing = existingByFieldId.get(customFieldId) ?? [];
+    if (!value) {
+      if (existing.length > 0) plan.toRemoveFieldIds.push(customFieldId);
+    } else if (existing.length === 0) {
+      plan.toCreate.push({ customFieldId, value });
+    } else {
+      for (const row of existing) {
+        if (!_.isEqual(row.value, value)) {
+          plan.toUpdate.push({ valueId: row.id, value });
+        }
+      }
+    }
+  }
+
+  return plan;
 }
 
 /**

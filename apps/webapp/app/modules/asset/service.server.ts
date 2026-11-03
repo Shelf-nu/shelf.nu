@@ -132,7 +132,6 @@ import {
 } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
-  extractCustomFieldValuesFromPayload,
   formatInvalidNumericCustomFieldMessage,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
@@ -158,13 +157,13 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
   wrapLinkForNote,
+  wrapNameForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
@@ -232,11 +231,13 @@ import {
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
   detectCustomFieldChanges,
+  planCustomFieldValueWrites,
   type CustomFieldChangeInfo,
   getArchivedFilterFromParams,
   type ArchivedFilter,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type { FieldChangeEventInput } from "../activity-event/types";
 import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
@@ -261,6 +262,7 @@ import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   buildAssetModelChangeNote,
+  buildAvailableToBookChangeNote,
   resolveUserLink,
 } from "../note/helpers.server";
 import {
@@ -2132,10 +2134,6 @@ export async function updateAsset({
         (cf) => !!cf.value
       );
 
-      const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
-        (cf) => !cf.value
-      );
-
       // SECURITY (cross-org IDOR): the create/updateMany writes below connect
       // values to a CustomField by an id sourced from form input. Prove every
       // referenced custom field belongs to this org before writing. (Removals
@@ -2149,65 +2147,42 @@ export async function updateAsset({
       });
 
       /**
-       * Split the writes into create vs update ourselves instead of using a
-       * nested `upsert`. Prisma emulates each nested upsert with a
-       * SELECT-then-write round-trip per field, which is the N+1 reported in
-       * Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF. We already loaded the
-       * existing values above (`currentCustomFieldsValuesWithFields`), so we
-       * know which fields exist without asking the database again. Each
-       * custom field has at most one value row per asset, so keying by
-       * `customFieldId` is unambiguous.
+       * Write only what changed. Every nested `updateMany` entry and the
+       * nested `deleteMany` each cost Prisma a lookup query before the write,
+       * and the form submits every field, so unchanged fields and fields that
+       * were already empty are left out. Creates and updates are split here
+       * rather than using a nested `upsert`, which Prisma emulates with a
+       * lookup per field.
        */
-      const existingValueIdByFieldId = new Map(
-        currentCustomFieldsValuesWithFields.map((ccfv) => [
-          ccfv.customFieldId,
-          ccfv.id,
-        ])
-      );
-
-      const customFieldsToCreate = customFieldValuesToAdd
-        .filter(({ id }) => !existingValueIdByFieldId.has(id))
-        .map(({ id, value }) => ({ value, customFieldId: id }));
-
-      /**
-       * Existing values are written with `updateMany` (one entry per row),
-       * NOT a nested `update`. `update` would throw P2025 and abort the whole
-       * asset save if a concurrent edit deleted the value row in the window
-       * between the `findMany` above and this write; `updateMany` matches zero
-       * rows instead of throwing. The concurrent delete then wins (the row
-       * stays gone) rather than 500-ing the user — an acceptable
-       * last-write-wins outcome for this rare interleaving, and it keeps the
-       * per-field existence SELECT eliminated.
-       */
-      const customFieldsToUpdate = customFieldValuesToAdd
-        .filter(({ id }) => existingValueIdByFieldId.has(id))
-        .map(({ id, value }) => ({
-          where: { id: existingValueIdByFieldId.get(id) as string },
-          data: { value },
-        }));
+      const { toCreate, toUpdate, toRemoveFieldIds } =
+        planCustomFieldValueWrites(
+          currentCustomFieldsValuesWithFields,
+          customFieldsValuesFromForm
+        );
 
       Object.assign(data, {
         customFields: {
-          ...(customFieldsToCreate.length > 0
-            ? { create: customFieldsToCreate }
-            : {}),
-          ...(customFieldsToUpdate.length > 0
-            ? { updateMany: customFieldsToUpdate }
-            : {}),
-          ...(customFieldValuesToRemove.length > 0
+          ...(toCreate.length > 0 ? { create: toCreate } : {}),
+          /**
+           * `updateMany`, not a nested `update`: if a concurrent edit deleted
+           * the row after the `findMany` above, `update` throws P2025 and
+           * fails the whole save, while `updateMany` matches zero rows and
+           * the delete wins.
+           */
+          ...(toUpdate.length > 0
             ? {
-                // Collapse N per-field deleteMany filters into ONE `IN`
-                // clause so Prisma issues a single SELECT pre-flight +
-                // single DELETE, not 2N round trips (Sentry N+1
-                // SHELF-WEBAPP-1NZ, 1P0). Prisma's nested `deleteMany`
-                // accepts EITHER a single where OR an array of wheres —
-                // the array form fans out into per-entry queries.
-                deleteMany: {
-                  customFieldId: {
-                    in: customFieldValuesToRemove.map((cf) => cf.id),
-                  },
-                },
+                updateMany: toUpdate.map(({ valueId, value }) => ({
+                  where: { id: valueId },
+                  data: { value },
+                })),
               }
+            : {}),
+          /**
+           * One `deleteMany` with an `IN` filter: the array form of
+           * `deleteMany` runs a lookup and a delete per entry.
+           */
+          ...(toRemoveFieldIds.length > 0
+            ? { deleteMany: { customFieldId: { in: toRemoveFieldIds } } }
             : {}),
         },
       });
@@ -3600,16 +3575,16 @@ async function noteModelShortfallsOnBookings(
 
   const what =
     archivedTitles.length === 1
-      ? `**${stripMarkdocDelimiters(archivedTitles[0])}**`
+      ? wrapNameForNote(archivedTitles[0])
       : `${archivedTitles.length} assets`;
 
   await createSystemBookingNotes(
     {
       notes: shortfalls.map((shortfall) => ({
         bookingId: shortfall.bookingId,
-        content: `${actorLink} archived ${what}. This booking's reservation of **${stripMarkdocDelimiters(
+        content: `${actorLink} archived ${what}. This booking's reservation of ${wrapNameForNote(
           shortfall.modelName
-        )}** is now ${shortfall.short} ${
+        )} is now ${shortfall.short} ${
           shortfall.short === 1 ? "unit" : "units"
         } short for its dates. Reduce it to what can be assigned.`,
       })),
@@ -5159,30 +5134,6 @@ export async function uploadDuplicateAssetMainImage(
   }
 }
 
-export function createCustomFieldsPayloadFromAsset(
-  asset: Prisma.AssetGetPayload<{
-    include: {
-      custody: { include: { custodian: true } };
-      tags: true;
-      customFields: true;
-    };
-  }>
-) {
-  if (!asset?.customFields || asset?.customFields?.length === 0) {
-    return {};
-  }
-
-  return (
-    asset.customFields?.reduce(
-      (obj, { customFieldId, value }) => {
-        const rawValue = (value as { raw: string })?.raw ?? value ?? "";
-        return { ...obj, [`cf-${customFieldId}`]: rawValue };
-      },
-      {} as Record<string, any>
-    ) || {}
-  );
-}
-
 /**
  * Deletes the copies `duplicateAsset` created before a later copy failed, so a
  * duplicate request never leaves part of its copies behind.
@@ -5356,13 +5307,20 @@ export async function duplicateAsset({
       }),
     };
 
-    const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
-
-    const extractedCustomFieldValues = extractCustomFieldValuesFromPayload({
-      payload: { ...payload, ...customFieldValues },
-      customFieldDef: customFields,
-      isDuplicate: true,
-    });
+    // A copy carries each active field's stored value exactly as it is.
+    // Rebuilding it from `raw` would hold old values to today's rules, so a
+    // value saved before its field became a Link field would block the copy.
+    const activeFieldIds = new Set(customFields.map((field) => field.id));
+    const copiedCustomFieldValues = asset.customFields
+      .filter(({ customFieldId }) => activeFieldIds.has(customFieldId))
+      .map(
+        ({ customFieldId, value }) =>
+          ({
+            id: customFieldId,
+            // Stored values were built by `buildCustomFieldValue`.
+            value: value as unknown as ShelfAssetCustomFieldValueType["value"],
+          }) as ShelfAssetCustomFieldValueType
+      );
 
     // All copies are created or none are. Each `createAsset` commits its own
     // transaction and retries on a sequential-id collision, which an
@@ -5376,7 +5334,7 @@ export async function duplicateAsset({
             title: `${asset.title} (copy${
               amountOfDuplicates > 1 ? ` ${i + 1}` : ""
             })`,
-            customFieldsValues: extractedCustomFieldValues,
+            customFieldsValues: copiedCustomFieldValues,
           })
         );
       }
@@ -5884,7 +5842,7 @@ export async function createAssetsFromContentImport({
     // conflict it goes on to reject.
     const existingCustomFields = await db.customField.findMany({
       where: { organizationId, deletedAt: null },
-      select: { name: true, type: true },
+      select: { name: true, type: true, format: true },
     });
 
     const { errors: rowErrors, totalErrors } = validateContentImportRows({
@@ -6334,20 +6292,119 @@ export async function createAssetsFromContentImport({
   }
 }
 
+/**
+ * The `ASSET_AVAILABLE_TO_BOOK_CHANGED` event for one asset, shared by the
+ * single and bulk writers so both leave the same trail.
+ *
+ * The switch is a boolean and callers emit only for assets whose value really
+ * changes, so the previous value is always the opposite of the new one.
+ *
+ * @param args.organizationId - The workspace the asset belongs to
+ * @param args.userId - The acting user
+ * @param args.assetId - The asset whose switch changed
+ * @param args.availableToBook - The value the switch was set to
+ * @returns The event input for `recordEvent` / `recordEvents`
+ */
+function buildAvailableToBookChangeEvent({
+  organizationId,
+  userId,
+  assetId,
+  availableToBook,
+}: {
+  organizationId: Asset["organizationId"];
+  userId: User["id"];
+  assetId: Asset["id"];
+  availableToBook: boolean;
+}): FieldChangeEventInput {
+  return {
+    organizationId,
+    actorUserId: userId,
+    action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+    entityType: "ASSET",
+    entityId: assetId,
+    assetId,
+    field: "availableToBook",
+    fromValue: !availableToBook,
+    toValue: availableToBook,
+  };
+}
+
+/**
+ * Turns an asset's "Available for bookings" switch on or off.
+ *
+ * When the value actually changes, the write, an UPDATE note on the asset and
+ * one `ASSET_AVAILABLE_TO_BOOK_CHANGED` event commit together. Setting the
+ * value the asset already has writes no note and no event, so re-submitting
+ * the switch does not fill the activity log.
+ *
+ * @param params.id - The asset to change
+ * @param params.availableToBook - The value to set
+ * @param params.organizationId - The caller's validated workspace
+ * @param params.userId - The acting user, named in the note and the event
+ * @returns The updated asset
+ * @throws {ShelfError} 400 when the asset is archived, including one archived
+ *   while this write was in flight
+ */
 export async function updateAssetBookingAvailability({
   id,
   availableToBook,
   organizationId,
-}: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
+  userId,
+}: Pick<Asset, "id" | "availableToBook" | "organizationId"> & {
+  userId: User["id"];
+}) {
   try {
     // Archived assets are frozen (issue #382): availability can't be toggled.
     // The pre-check gives the clear error; `archivedAt: null` in the WHERE
     // closes the window where an archive commits between it and the write.
     await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
 
-    return await db.asset.update({
-      where: { id, organizationId, archivedAt: null },
-      data: { availableToBook },
+    // Resolved before the transaction: it reads the user table, not the asset.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
+    });
+
+    return await db.$transaction(async (tx) => {
+      // The row lock makes the before-read and the write one step, so two
+      // toggles racing each other cannot both record the same change.
+      await lockAssetsForArchiveGuard(tx, [id], organizationId);
+      const before = await tx.asset.findUnique({
+        where: { id, organizationId, archivedAt: null },
+        select: { availableToBook: true },
+      });
+
+      const asset = await tx.asset.update({
+        where: { id, organizationId, archivedAt: null },
+        data: { availableToBook },
+      });
+
+      if (before && before.availableToBook !== availableToBook) {
+        await createNote(
+          {
+            content: buildAvailableToBookChangeNote({
+              userLink,
+              availableToBook,
+            }),
+            type: "UPDATE",
+            userId,
+            assetId: id,
+            organizationId,
+          },
+          tx
+        );
+        await recordEvent(
+          buildAvailableToBookChangeEvent({
+            organizationId,
+            userId,
+            assetId: id,
+            availableToBook,
+          }),
+          tx
+        );
+      }
+
+      return asset;
     });
   } catch (cause) {
     if (isLikeShelfError(cause)) {
@@ -7313,8 +7370,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianName)}**`;
+        : // Free-form fallback name, inside a `name` tag like every typed value.
+          wrapNameForNote(custodianName);
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -7576,20 +7633,21 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
-          // Actor name, custodian name and asset title are all user-supplied
-          // and render as literal text in this Markdoc note.
-          const actorName = stripMarkdocDelimiters(
+          // Actor name, custodian name and asset title are all user-supplied,
+          // so each goes inside a `name` tag. The note is on the asset's own
+          // page, so its title is not a link.
+          const actorName = wrapNameForNote(
             `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
           );
-          const custodianName = stripMarkdocDelimiters(
+          const custodianName = wrapNameForNote(
             primaryCustody
               ? resolveTeamMemberName(primaryCustody.custodian)
               : "Unknown Custodian"
           );
           return {
-            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
-              asset.title ?? ""
-            )}**`,
+            content: `${actorName} has released ${custodianName}'s custody over ${wrapNameForNote(
+              asset.title
+            )}`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -8893,7 +8951,24 @@ export async function bulkAssignAssetTags({
   }
 }
 
+/**
+ * Turns the "Available for bookings" switch on or off for many assets,
+ * including a cross-page "select all".
+ *
+ * Leaves the same trail as {@link updateAssetBookingAvailability}: one UPDATE
+ * note and one `ASSET_AVAILABLE_TO_BOOK_CHANGED` event per asset whose value
+ * actually changes, written in the transaction that makes the change. Assets
+ * already at the target value are skipped, as are assets archived after the
+ * archived check.
+ *
+ * @param params.userId - The acting user, named in every note and event
+ * @param params.type - The value to set
+ * @returns `true` once the change is committed
+ * @throws {ShelfError} 400 when the selection holds an archived asset, or a
+ *   select-all filter the caller may not use
+ */
 export async function bulkMarkAvailability({
+  userId,
   organizationId,
   assetIds,
   type,
@@ -8903,6 +8978,7 @@ export async function bulkMarkAvailability({
   bookableScope,
   timeZone = "UTC",
 }: {
+  userId: User["id"];
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
@@ -8945,17 +9021,79 @@ export async function bulkMarkAvailability({
     // Archived assets are frozen (issue #382): can't change availability.
     await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
-    // Simple, consistent where clause. `archivedAt: null` skips an asset that
-    // was archived after the check above, so its availability stays frozen.
-    await db.asset.updateMany({
-      where: {
-        id: { in: resolvedIds },
-        organizationId,
-        availableToBook: type === "unavailable",
-        archivedAt: null,
-      },
-      data: { availableToBook: type === "available" },
+    if (resolvedIds.length === 0) {
+      return true;
+    }
+
+    const availableToBook = type === "available";
+
+    // Resolved once, outside the transaction: it reads the user table, and
+    // every note in this batch is written by the same person.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
     });
+
+    // The write, its events and its notes run in here over a selection that
+    // "select all" can make large, so the ceiling matches the other bulk
+    // writers rather than Prisma's 5s default.
+    await db.$transaction(
+      async (tx) => {
+        // The row lock makes the before-read and the write one step, so a
+        // concurrent toggle cannot slip between them and be recorded twice.
+        await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+
+        // Org-scoped, so every id below is proven to belong here. An asset
+        // archived after the check above drops out and stays frozen.
+        const assetsBeforeUpdate = await tx.asset.findMany({
+          where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
+          select: { id: true, availableToBook: true },
+        });
+
+        // Only rows that actually change, so the activity log does not fill
+        // with no-op entries when the selection already holds the value.
+        const changingIds = assetsBeforeUpdate
+          .filter((asset) => asset.availableToBook !== availableToBook)
+          .map((asset) => asset.id);
+
+        if (changingIds.length === 0) {
+          return;
+        }
+
+        await tx.asset.updateMany({
+          where: { id: { in: changingIds }, organizationId, archivedAt: null },
+          data: { availableToBook },
+        });
+
+        await recordEvents(
+          changingIds.map((assetId) =>
+            buildAvailableToBookChangeEvent({
+              organizationId,
+              userId,
+              assetId,
+              availableToBook,
+            })
+          ),
+          tx
+        );
+
+        // Every changed asset gets the same sentence, so one `createMany`.
+        await createNotes(
+          {
+            content: buildAvailableToBookChangeNote({
+              userLink,
+              availableToBook,
+            }),
+            type: "UPDATE",
+            userId,
+            assetIds: changingIds,
+            organizationId,
+          },
+          tx
+        );
+      },
+      { timeout: 15000 }
+    );
 
     return true;
   } catch (cause) {
@@ -8963,7 +9101,7 @@ export async function bulkMarkAvailability({
     throw new ShelfError({
       cause,
       message: "Something went wrong while marking assets as available.",
-      additionalData: { assetIds, organizationId },
+      additionalData: { userId, assetIds, organizationId },
       label,
     });
   }

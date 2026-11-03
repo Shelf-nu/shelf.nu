@@ -165,6 +165,7 @@ export default function AssetDetailsPage() {
                 <BookingStatusBadge
                   status={booking.status}
                   custodianUserId={booking.custodianUserId || undefined}
+                  to={booking.to}
                 />
                 <TimeRemaining
                   from={booking.from}

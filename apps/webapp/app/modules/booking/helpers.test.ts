@@ -12,6 +12,7 @@ import {
   hasKitBookingConflicts,
   isAssetCheckoutEligible,
   isBookingArchivable,
+  isReservationExpired,
   makeCheckoutEligibility,
   shouldPromptEarlyCheckout,
   type PdfBookingAssetSlice,
@@ -1531,5 +1532,47 @@ describe("buildAddToActiveBookingBlockerWhere", () => {
     });
     expect(where.type).toBe(AssetType.INDIVIDUAL);
     expect(where.type).not.toBe(AssetType.QUANTITY_TRACKED);
+  });
+});
+
+describe("isReservationExpired", () => {
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const inADay = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  it("is true for a RESERVED booking whose end date has passed", () => {
+    expect(isReservationExpired(BookingStatus.RESERVED, dayAgo)).toBe(true);
+  });
+
+  it("reads an ISO string off serialized loader data", () => {
+    expect(isReservationExpired("RESERVED", dayAgo.toISOString())).toBe(true);
+  });
+
+  it("is false while the end date is still ahead, even past the start", () => {
+    // why: a late pickup is still a live claim on the units; only the end
+    // date decides, as the server-side `isBookingExpired` does.
+    expect(isReservationExpired(BookingStatus.RESERVED, inADay)).toBe(false);
+  });
+
+  it("is false for any status other than RESERVED", () => {
+    // why: an ONGOING or OVERDUE booking past its end is late, its own state;
+    // a COMPLETE one is history. None of them is a dead reservation.
+    for (const status of [
+      BookingStatus.DRAFT,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.COMPLETE,
+      BookingStatus.ARCHIVED,
+      BookingStatus.CANCELLED,
+    ]) {
+      expect(isReservationExpired(status, dayAgo)).toBe(false);
+    }
+  });
+
+  it("is false without an end date or with one that is not a date", () => {
+    expect(isReservationExpired(BookingStatus.RESERVED, null)).toBe(false);
+    expect(isReservationExpired(BookingStatus.RESERVED, undefined)).toBe(false);
+    expect(isReservationExpired(BookingStatus.RESERVED, "not a date")).toBe(
+      false
+    );
   });
 });

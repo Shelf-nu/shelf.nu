@@ -12,15 +12,24 @@ paths:
 
 `Booking` carries two date pairs and they are not interchangeable:
 
-| Pair                        | Meaning                | Who writes it                                  |
-| --------------------------- | ---------------------- | ---------------------------------------------- |
-| `originalFrom`/`originalTo` | the **planned** period | create, DRAFT edit, reserve — and nothing else |
-| `from`/`to`                 | the **live** period    | extension, check-out/check-in date rewrites    |
+| Pair                        | Meaning                | Who writes it                                   |
+| --------------------------- | ---------------------- | ----------------------------------------------- |
+| `originalFrom`/`originalTo` | the **planned** period | create, DRAFT edit, reserve, expired reschedule |
+| `from`/`to`                 | the **live** period    | extension, check-out/check-in date rewrites     |
 
 Once a booking starts, only `from`/`to` move. Booking Compliance measures
 returns against the planned end, so writing `originalTo` on a started booking
 erases the deadline the custodian agreed to — and makes the metric resettable
 by the person it measures (extend a late booking, it scores on-time).
+
+**One exception, and it is not a started booking.** Checking out an expired
+reservation (RESERVED, end passed, never checked out) "with a new end date"
+moves both pairs to the new window (`applyRescheduledWindow`). Nothing went
+out against the old plan, so it was never a deadline anyone missed: the
+operator and custodian are agreeing to a new reservation at the counter. The
+replaced period goes on the activity trail as a note and
+`BOOKING_DATES_CHANGED` events. It is reachable only from the header's full
+check-out, never from a scan or a batch.
 
 Flows that rewrite `from`/`to` must **seed, never overwrite**. Use
 `plannedStartToPreserve` / `plannedEndToPreserve` (`~/modules/booking/service.server`),

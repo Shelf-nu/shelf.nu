@@ -515,7 +515,7 @@ export async function createKitChangeNote({
         { id: newKit.id, name: newKit.name.trim() },
         "updated"
       );
-      message = `${userLink} changed kit  from ${currentKitLink} to ${newKitLink}.`;
+      message = `${userLink} changed kit from ${currentKitLink} to ${newKitLink}.`;
     }
 
     /** User is adding asset to a kit for first time */

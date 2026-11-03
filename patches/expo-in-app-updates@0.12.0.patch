@@ -1,0 +1,305 @@
+diff --git a/android/src/main/java/expo/modules/inappupdates/ExpoInAppUpdatesModule.kt b/android/src/main/java/expo/modules/inappupdates/ExpoInAppUpdatesModule.kt
+index b49767e7129bcf4c97a4ed2fc609aa7ff3c5d1a5..121457fd67befa2f9312f145be526033c70ed757 100644
+--- a/android/src/main/java/expo/modules/inappupdates/ExpoInAppUpdatesModule.kt
++++ b/android/src/main/java/expo/modules/inappupdates/ExpoInAppUpdatesModule.kt
+@@ -1,8 +1,6 @@
+ package expo.modules.inappupdates
+ 
+-import android.net.Uri
+ import android.app.Activity
+-import android.content.Intent
+ import android.content.IntentSender
+ import expo.modules.kotlin.Promise
+ import expo.modules.kotlin.modules.Module
+@@ -30,14 +28,6 @@ class ExpoInAppUpdatesModule : Module() {
+         private const val EVENT_UPDATE_COMPLETED = "updateCompleted"
+     }
+ 
+-    private fun redirectToStore() {
+-        val intent = Intent(Intent.ACTION_VIEW).apply {
+-            data = Uri.parse("https://play.google.com/store/apps/details?id=${appContext.reactContext?.packageName}")
+-            setPackage("com.android.vending")
+-        }
+-        appContext.currentActivity?.startActivity(intent)
+-    }
+-
+     private fun chooseFinalUpdateType(info: AppUpdateInfo, requested: Int?): Int? {
+         if (requested != null) {
+             return if (info.isUpdateTypeAllowed(requested)) requested else null
+@@ -56,19 +46,17 @@ class ExpoInAppUpdatesModule : Module() {
+     private val listener = InstallStateUpdatedListener { state ->
+         when (state.installStatus()) {
+             InstallStatus.DOWNLOADED -> {
+-                // Notify that download is completed and ready to install
++                // Notify that download is completed and ready to install. The app
++                // decides when to restart by calling completeUpdate().
+                 sendEvent(EVENT_UPDATE_DOWNLOADED, mapOf("readyToInstall" to true))
+-
+-                // Trigger user action to complete the update
+-                appUpdateManager.completeUpdate()
+             }
+             InstallStatus.INSTALLED -> {
+                 // Update has been installed successfully
+                 sendEvent(EVENT_UPDATE_COMPLETED, mapOf())
+             }
+             InstallStatus.FAILED -> {
+-                // Update failed, redirect to store
+-                redirectToStore()
++                // Update failed; the app checks again on its next attempt.
++                sendEvent(EVENT_UPDATE_CANCELLED, mapOf("reason" to "Update download failed"))
+             }
+             InstallStatus.CANCELED -> {
+                 // Update was canceled by the user
+@@ -107,6 +95,13 @@ class ExpoInAppUpdatesModule : Module() {
+         AsyncFunction("checkForUpdate") { promise: Promise ->
+             appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
+                 when {
++                    appUpdateInfo.installStatus() == InstallStatus.DOWNLOADED -> {
++                        // A flexible update finished downloading and waits for completeUpdate().
++                        promise.resolve(mapOf(
++                            "updateAvailable" to true,
++                            "downloaded" to true
++                        ))
++                    }
+                     appUpdateInfo.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE -> {
+                         val updatePriority = appUpdateInfo.updatePriority()
+                         val updateTypeStr = when {
+@@ -179,6 +174,14 @@ class ExpoInAppUpdatesModule : Module() {
+             }
+         }
+ 
++        AsyncFunction("completeUpdate") { promise: Promise ->
++            appUpdateManager.completeUpdate()
++                .addOnSuccessListener { promise.resolve(true) }
++                .addOnFailureListener { error ->
++                    promise.reject(CodedException("Failed to complete update: ${error.message}", error))
++                }
++        }
++
+         OnActivityResult { _, activityResult ->
+             if (activityResult.requestCode == REQUEST_CODE) {
+                 if (activityResult.resultCode != Activity.RESULT_OK) {
+@@ -186,8 +189,8 @@ class ExpoInAppUpdatesModule : Module() {
+                         // User canceled the update
+                         sendEvent(EVENT_UPDATE_CANCELLED, mapOf("reason" to "User cancelled from system dialog"))
+                     } else {
+-                        // Update flow failed, try redirecting to Play Store
+-                        redirectToStore()
++                        // Update flow failed; the app checks again on its next attempt.
++                        sendEvent(EVENT_UPDATE_CANCELLED, mapOf("reason" to "Update flow failed"))
+                     }
+                 }
+             }
+diff --git a/build/ExpoInAppUpdates.types.d.ts b/build/ExpoInAppUpdates.types.d.ts
+index 8617ac7032099c9f1e6b5184844acdcbcd07953c..006067b622116f7711b10c83df26c63ee8c8ab40 100644
+--- a/build/ExpoInAppUpdates.types.d.ts
++++ b/build/ExpoInAppUpdates.types.d.ts
+@@ -13,6 +13,8 @@ export type ExpoInAppUpdatesModuleType = {
+         updateAvailable: boolean;
+         /** If an update is in progress */
+         updateInProgress?: boolean;
++    /** Android: a flexible update finished downloading and waits for `completeUpdate()`. */
++    downloaded?: boolean;
+         /** The latest app version published in the App Store / Play Store. On Android, this is the `versionCode` that you defined in `app.json`. */
+         storeVersion: string;
+         /** The release date of the current version of the app
+@@ -53,6 +55,7 @@ export type ExpoInAppUpdatesModuleType = {
+      *
+      * @return Whether the update was started successfully.
+      */
++    completeUpdate: () => Promise<boolean>;
+     startUpdate: (
+     /**
+      * Must be one of the [AppUpdateType](../index.ts)
+diff --git a/build/index.d.ts b/build/index.d.ts
+index db8c76b20aa181359aa671133f40c2d5a044bb93..aaa7d5a1ffe32424a498f1bf8ca488c66326b9a2 100644
+--- a/build/index.d.ts
++++ b/build/index.d.ts
+@@ -16,6 +16,8 @@ export declare const AppUpdateType: {
+ export declare function checkForUpdate(): Promise<{
+     updateAvailable: boolean;
+     updateInProgress?: boolean;
++    /** Android: a flexible update finished downloading and waits for `completeUpdate()`. */
++    downloaded?: boolean;
+     storeVersion: string;
+     releaseDate?: string | null;
+     daysSinceRelease?: number | null;
+@@ -46,6 +48,12 @@ export declare function checkAndStartUpdate(isImmediate?: boolean): Promise<bool
+  * @param listener - Callback function to execute when event is triggered
+  * @returns A function to remove the event listener
+  */
++/**
++ * Installs a downloaded flexible update and restarts the app.
++ *
++ * @platform android
++ */
++export declare function completeUpdate(): Promise<boolean>;
+ export declare function addUpdateListener<K extends keyof ExpoInAppUpdatesEvents>(eventName: K, listener: ExpoInAppUpdatesEvents[K]): () => void;
+ export type { UpdateCancelledEvent, UpdateCompletedEvent, UpdateDownloadedEvent, UpdateStartEvent, };
+ //# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
+diff --git a/build/index.js b/build/index.js
+index 0ebf82cf7d200a84226122967ead2f74278924e1..04702e8d41e6c7623c55bf75537abeb4dd08e500 100644
+--- a/build/index.js
++++ b/build/index.js
+@@ -48,6 +48,19 @@ export async function checkAndStartUpdate(isImmediate = false) {
+     }
+     return false;
+ }
++/**
++ * Installs a downloaded flexible update and restarts the app.
++ *
++ * @platform android
++ *
++ * @return Resolves `true` once Play accepts the request; `false` on iOS.
++ */
++export async function completeUpdate() {
++    if (Platform.OS !== "android") {
++        return false;
++    }
++    return ExpoInAppUpdatesModule.completeUpdate();
++}
+ /**
+  * Add a listener for update events
+  * @param eventName - Name of the event to listen for
+diff --git a/ios/ExpoInAppUpdates.podspec b/ios/ExpoInAppUpdates.podspec
+index e9f877d5ff3e4a007acff50c7c2d9ae5618bc5bc..318553aa64bfe8a379ec83409aa8ce086f2f8fca 100644
+--- a/ios/ExpoInAppUpdates.podspec
++++ b/ios/ExpoInAppUpdates.podspec
+@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
+   s.license        = package['license']
+   s.author         = package['author']
+   s.homepage       = package['homepage']
+-  s.platforms      = { :ios => '16.4' }
++  s.platforms      = { :ios => '15.1' }
+   s.swift_version  = '5.4'
+   s.source         = { git: 'https://github.com/SohelIslamImran/expo-in-app-updates' }
+   s.static_framework = true
+diff --git a/ios/ExpoInAppUpdatesModule.swift b/ios/ExpoInAppUpdatesModule.swift
+index 6135d9302da41e9f4c85c310b763b93a2ffd3ebc..1ede979c66d792141e5bf131066610a2cbf7e59c 100644
+--- a/ios/ExpoInAppUpdatesModule.swift
++++ b/ios/ExpoInAppUpdatesModule.swift
+@@ -68,12 +68,6 @@ public class ExpoInAppUpdatesModule: Module {
+                 // Send update start event
+                 self.sendEvent(EVENT_UPDATE_START, ["updateType": nil])
+ 
+-                guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+-                      let rootViewController = scene.windows.first?.rootViewController else {
+-                    promise.reject("ERROR", "Unable to get root view controller")
+-                    return
+-                }
+-
+                 let storeViewController = SKStoreProductViewController()
+                 let parameters = [SKStoreProductParameterITunesItemIdentifier: appId]
+ 
+@@ -81,32 +75,47 @@ public class ExpoInAppUpdatesModule: Module {
+                 self.storeDelegate = StoreProductViewControllerDelegate(module: self)
+                 storeViewController.delegate = self.storeDelegate
+ 
+-                storeViewController.loadProduct(withParameters: parameters) { (loaded, error) in
+-                    if loaded {
+-                        DispatchQueue.main.async {
+-                            rootViewController.present(storeViewController, animated: true, completion: nil)
++                storeViewController.loadProduct(withParameters: parameters) { (loaded, _) in
++                    DispatchQueue.main.async {
++                        // Resolves true only once the sheet is on screen, and false when
++                        // it cannot be shown, so the caller never records a sheet the user
++                        // did not see. A failed load never leaves the app.
++                        guard loaded,
++                              let presenter = ExpoInAppUpdatesModule.topViewController(),
++                              !presenter.isBeingPresented,
++                              !presenter.isBeingDismissed else {
++                            promise.resolve(false)
++                            return
+                         }
+-                        promise.resolve(true)
+-                    } else {
+-                        let urlString = "https://apps.apple.com/app/id\(appId)"
+-                        if let url = URL(string: urlString) {
+-                            DispatchQueue.main.async {
+-                                UIApplication.shared.open(url, options: [:]) { success in
+-                                    if success {
+-                                        promise.resolve(true)
+-                                    } else {
+-                                        promise.reject("ERROR", "Failed to open App Store URL")
+-                                    }
+-                                }
++                        var settled = false
++                        presenter.present(storeViewController, animated: true) {
++                            if !settled {
++                                settled = true
++                                promise.resolve(true)
+                             }
+-                        } else {
+-                            promise.reject("ERROR", "Invalid App Store URL")
++                        }
++                        // UIKit refuses a presentation without calling the completion.
++                        if storeViewController.presentingViewController == nil && !settled {
++                            settled = true
++                            promise.resolve(false)
+                         }
+                     }
+                 }
+             }
+         }
+     }
++
++    /// The view controller at the top of the key window's presentation chain, so the
++    /// sheet opens above any modal already on screen.
++    static func topViewController() -> UIViewController? {
++        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
++        let windows = scenes.flatMap { $0.windows }
++        var top = (windows.first { $0.isKeyWindow } ?? windows.first)?.rootViewController
++        while let presented = top?.presentedViewController {
++            top = presented
++        }
++        return top
++    }
+ }
+ 
+ // SKStoreProductViewController delegate
+diff --git a/src/ExpoInAppUpdates.types.ts b/src/ExpoInAppUpdates.types.ts
+index 59845d6780dbe745a965348338c97ee1f52adfbe..95fa3e2a86d6f3ce53ef6c2478982788050dd4a0 100644
+--- a/src/ExpoInAppUpdates.types.ts
++++ b/src/ExpoInAppUpdates.types.ts
+@@ -16,6 +16,8 @@ export type ExpoInAppUpdatesModuleType = {
+ 
+     /** If an update is in progress */
+     updateInProgress?: boolean;
++    /** Android: a flexible update finished downloading and waits for `completeUpdate()`. */
++    downloaded?: boolean;
+ 
+     /** The latest app version published in the App Store / Play Store. On Android, this is the `versionCode` that you defined in `app.json`. */
+     storeVersion: string;
+@@ -64,6 +66,7 @@ export type ExpoInAppUpdatesModuleType = {
+    *
+    * @return Whether the update was started successfully.
+    */
++  completeUpdate: () => Promise<boolean>;
+   startUpdate: (
+     /**
+      * Must be one of the [AppUpdateType](../index.ts)
+diff --git a/src/index.ts b/src/index.ts
+index 7eee5f94dc2f6178c15f1b147ecd9ca89df8f25a..234a6992183ca1bcb5e628a45dd30931c45c951a 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -63,6 +63,19 @@ export async function checkAndStartUpdate(isImmediate = false) {
+   return false;
+ }
+ 
++/**
++ * Installs a downloaded flexible update and restarts the app.
++ *
++ * @platform android
++ *
++ * @return Resolves `true` once Play accepts the request; `false` on iOS.
++ */
++export async function completeUpdate(): Promise<boolean> {
++    if (Platform.OS !== "android") {
++        return false;
++    }
++    return ExpoInAppUpdatesModule.completeUpdate();
++}
+ /**
+  * Add a listener for update events
+  * @param eventName - Name of the event to listen for

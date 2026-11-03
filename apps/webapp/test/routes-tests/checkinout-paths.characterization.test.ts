@@ -88,8 +88,8 @@ vi.mock("~/database/db.server", () => {
       },
       bookingSettings: { findUnique: read(() => h.state.settings) },
       workingHours: { findUnique: read(() => h.state.workingHours) },
-      // The overview check-in intent lists the assets still out after its
-      // guards and before `checkinBooking`; it cannot refuse.
+      // The mobile fulfil route looks for archived assets among the scanned
+      // ids after its guards; none is archived here, so it cannot refuse.
       asset: { findMany: read(() => []) },
     },
   };

@@ -55,8 +55,13 @@ import { formatDate } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  wrapLinkForNote,
+  wrapNameForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type {
   ActivityEventInput,
@@ -2797,24 +2802,25 @@ export async function upsertBookingModelRequest({
     // Activity note — best-effort, outside the tx so a markdoc hiccup
     // can't roll back the upsert. Phrasing depends on whether this was
     // a create, an increase, a decrease, or a no-op:
-    //   - create   : "reserved **N × Model** for this booking."
-    //   - increase : "increased the **Model** reservation from **M** to **N**."
-    //   - decrease : "decreased the **Model** reservation from **M** to **N**."
+    //   - create   : "reserved **N ×** {Model} for this booking."
+    //   - increase : "increased the {Model} reservation from **M** to **N**."
+    //   - decrease : "decreased the {Model} reservation from **M** to **N**."
+    // where {Model} is the model name inside a `name` tag.
     //   - no-op    : skip the note entirely (nothing actually changed)
     const { assetModel, previousQuantity, wasCreated } = result;
-    // Model names are user-supplied and render as literal text in the note.
-    const modelName = stripMarkdocDelimiters(assetModel.name);
+    // Model names are user-supplied, so the name goes inside a `name` tag.
+    const modelName = wrapNameForNote(assetModel.name);
     let content: string | null = null;
     // Same race-safe discriminator the write core's events use: the upsert
     // result, not the stale pre-read. In the lost-race case (wasCreated false but
     // previousQuantity null) the quantity comparisons are unknowable, so
     // the note is skipped — the event trail still records the change.
     if (wasCreated) {
-      content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
+      content = `{actor} reserved **${quantity} ×** ${modelName} for this booking.`;
     } else if (previousQuantity != null && quantity > previousQuantity) {
-      content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} increased the ${modelName} reservation from **${previousQuantity}** to **${quantity}**.`;
     } else if (previousQuantity != null && quantity < previousQuantity) {
-      content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} decreased the ${modelName} reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
     // `actor.link` is null only when the actor lookup failed, in which case
@@ -3045,6 +3051,188 @@ export async function upsertBookingModelRequests({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                      reserveModelsUpToAvailability                         */
+/* -------------------------------------------------------------------------- */
+
+/** A model that {@link reserveModelsUpToAvailability} reserved less of than asked. */
+export type ReducedModelReservation = {
+  assetModelId: string;
+  assetModelName: string;
+  /** Units asked for. */
+  requested: number;
+  /** Units actually reserved, `0` when none could be. */
+  reserved: number;
+  /**
+   * The reservation could not be written (the write errored), as opposed to
+   * the pool being short. Absent for a real shortfall.
+   */
+  failed?: true;
+};
+
+/**
+ * Reserves units of several models on a booking, each capped at what its pool
+ * can still give the booking's dates, and reports the models that came out
+ * short instead of refusing.
+ *
+ * For writers that copy a plan rather than take a user's explicit ask, such as
+ * duplicating a booking: the copy is still worth having when a few models have
+ * fewer units free in the new window, so the shortfall is reported back to the
+ * user rather than failing the whole copy.
+ *
+ * Models are written in batches of {@link MAX_MODELS_PER_RESERVATION_BATCH},
+ * one transaction each, sorted by id like every other writer of these rows. A
+ * plan can name more models than one transaction may carry. Each batch measures
+ * its pools under the model locks and writes through
+ * {@link writeBookingModelRequestInTx}, so the cap and the write's own pool
+ * check agree. A batch that fails is logged and its models are reported as
+ * reserved `0` and `failed`; the batches already written stay.
+ *
+ * Expects a booking that holds no reservation for these models yet: each
+ * quantity is written as the absolute target.
+ *
+ * @param args.bookingId - The booking to reserve on, in `organizationId`
+ * @param args.organizationId - The caller's workspace. Models outside it are
+ *   skipped.
+ * @param args.userId - The acting user, recorded on the activity events
+ * @param args.requested - Units wanted per model; repeated models are summed and
+ *   entries below 1 are ignored
+ * @returns One entry per model reserved below what was asked, in model-id order
+ */
+export async function reserveModelsUpToAvailability({
+  bookingId,
+  organizationId,
+  userId,
+  requested,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  requested: BookingModelRequestAddition[];
+}): Promise<ReducedModelReservation[]> {
+  const wantedByModel = new Map<string, number>();
+  for (const { assetModelId, quantity } of requested) {
+    if (!Number.isInteger(quantity) || quantity < 1) continue;
+    wantedByModel.set(
+      assetModelId,
+      (wantedByModel.get(assetModelId) ?? 0) + quantity
+    );
+  }
+  if (wantedByModel.size === 0) return [];
+
+  // Names for the report, and the workspace scope: a model that is not in this
+  // workspace is left out here rather than failing the batch it lands in.
+  const models = await db.assetModel.findMany({
+    where: { id: { in: [...wantedByModel.keys()] }, organizationId },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(models.map((m) => [m.id, m.name]));
+  const orderedModelIds = [...nameById.keys()].sort();
+
+  const actor = await loadActorBestEffort(userId);
+  const reduced: ReducedModelReservation[] = [];
+
+  for (
+    let start = 0;
+    start < orderedModelIds.length;
+    start += MAX_MODELS_PER_RESERVATION_BATCH
+  ) {
+    const batchIds = orderedModelIds.slice(
+      start,
+      start + MAX_MODELS_PER_RESERVATION_BATCH
+    );
+    const reportFor = (assetModelId: string, reserved: number) => ({
+      assetModelId,
+      assetModelName: nameById.get(assetModelId)!,
+      requested: wantedByModel.get(assetModelId)!,
+      reserved,
+    });
+
+    try {
+      const batchReduced = await db.$transaction(
+        async (tx) => {
+          const booking = await tx.booking.findUnique({
+            where: { id: bookingId, organizationId },
+            select: { from: true, to: true },
+          });
+          if (!booking) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              status: 404,
+              message: "Booking not found in current workspace.",
+              shouldBeCaptured: false,
+            });
+          }
+
+          // Pool first, then the row, the order every writer takes them in.
+          await lockAssetModelsForReservation(tx, batchIds, organizationId);
+          for (const assetModelId of batchIds) {
+            await lockModelRequestRow(tx, bookingId, assetModelId);
+          }
+
+          const fits = await measureModelPoolFits({
+            bookingId,
+            organizationId,
+            from: booking.from,
+            to: booking.to,
+            outstandingByModel: new Map(
+              batchIds.map((id) => [id, wantedByModel.get(id)!])
+            ),
+            tx,
+          });
+
+          const short: ReducedModelReservation[] = [];
+          for (const assetModelId of batchIds) {
+            const { availability, namedNotInCustody, outstanding } =
+              fits.get(assetModelId)!;
+            // What the pool can still give this booking once the units it
+            // holds by name are counted, the headroom the write core checks.
+            const headroom = Math.max(
+              0,
+              availability.available - namedNotInCustody
+            );
+            const reserved = Math.min(outstanding, headroom);
+            if (reserved > 0) {
+              await writeBookingModelRequestInTx(tx, {
+                bookingId,
+                assetModelId,
+                quantity: reserved,
+                organizationId,
+                userId,
+                actor,
+              });
+            }
+            if (reserved < outstanding) {
+              short.push(reportFor(assetModelId, reserved));
+            }
+          }
+          return short;
+        },
+        { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+      );
+      reduced.push(...batchReduced);
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          label,
+          message: "Failed to reserve a batch of models on a booking.",
+          additionalData: { bookingId, organizationId, batchIds },
+        })
+      );
+      reduced.push(
+        ...batchIds.map((id) => ({
+          ...reportFor(id, 0),
+          failed: true as const,
+        }))
+      );
+    }
+  }
+
+  return reduced;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         removeBookingModelRequest                          */
 /* -------------------------------------------------------------------------- */
 
@@ -3200,17 +3388,17 @@ export async function removeBookingModelRequest({
 
     if (cancelled && actor.link) {
       try {
-        // Mirrors the create path's shape ("reserved **3 × Model** for this
+        // Mirrors the create path's shape ("reserved **3 ×** {Model} for this
         // booking") so the pair reads symmetrically in the activity feed.
-        // Model names are user-supplied and render as literal text here.
+        // Model names are user-supplied, so the name goes inside a `name` tag.
         await createSystemBookingNote({
           bookingId,
           organizationId,
           content: `${actor.link} cancelled the **${
             cancelled.quantity
-          } × ${stripMarkdocDelimiters(
+          } ×** ${wrapNameForNote(
             cancelled.assetModelName
-          )}** reservation for this booking.`,
+          )} reservation for this booking.`,
         });
       } catch {
         // non-fatal
@@ -3454,8 +3642,11 @@ export async function materializeModelRequestForAsset({
       : userId
       ? await loadActor(userId)
       : null;
-    const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
-    const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
+    const assetLink = wrapLinkForNote(
+      `/assets/${asset.id}`,
+      stripMarkdocDelimiters(asset.title)
+    );
+    const modelNameForNote = wrapNameForNote(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
     // consistently whether or not the caller threaded an actor through.
     const content = actor?.link

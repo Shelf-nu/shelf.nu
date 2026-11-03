@@ -8,6 +8,7 @@ import {
   ALLOWED_FILTER_PATHNAMES,
   cleanParamsForFilterCookie,
 } from "~/hooks/search-params";
+import { hasUnknownEnumFilterValue } from "~/modules/asset/enum-filter-values";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { COOKIE_DOMAIN } from "./env";
@@ -401,6 +402,24 @@ function normalizeAdvancedFilterParams(
 }
 
 /**
+ * The Advanced filters worth remembering: the cookie-clean params without any
+ * enum filter the query rejects (e.g. `status=is:ARCHIVED`). The URL that
+ * carries such a filter still reaches the query and gets its explaining 400;
+ * only the cookie forgets it, so it is never restored onto a plain `/assets`.
+ *
+ * @param params - Normalized Advanced filter params
+ * @returns The params string to store or restore
+ */
+function cleanAdvancedParamsForFilterCookie(params: string): string {
+  const searchParams = new URLSearchParams(cleanParamsForFilterCookie(params));
+  const remembered = new URLSearchParams();
+  searchParams.forEach((value, key) => {
+    if (!hasUnknownEnumFilterValue(key, value)) remembered.append(key, value);
+  });
+  return remembered.toString();
+}
+
+/**
  * Gets and validates advanced filters from request parameters
  * Ensures URL parameters match the expected advanced filter format
  * @param request - The incoming request
@@ -438,7 +457,7 @@ export async function getAdvancedFiltersFromRequest(
     const validatedParamsString = validatedParams.toString();
     const serializedCookie = await serializeFilterCookieForUrl(
       advancedAssetFilterCookie,
-      cleanParamsForFilterCookie(validatedParamsString),
+      cleanAdvancedParamsForFilterCookie(validatedParamsString),
       cookieHeader
     );
 
@@ -463,12 +482,24 @@ export async function getAdvancedFiltersFromRequest(
         dropParam
       );
       const validatedParamsString = validatedParams.toString();
-      const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);
+      const cleanedFilters = cleanAdvancedParamsForFilterCookie(
+        validatedParamsString
+      );
 
       return {
         filters: cleanedFilters || undefined,
-        // Don't save back to cookie (already there)
-        serializedCookie: undefined,
+        // Rewrite the cookie only when cleaning changed it: store what is
+        // left, or expire it when nothing is (a cookie holding only a
+        // rejected enum filter would otherwise be parsed and discarded on
+        // every visit).
+        serializedCookie:
+          cleanedFilters === new URLSearchParams(filters).toString()
+            ? undefined
+            : (await serializeFilterCookieForUrl(
+                advancedAssetFilterCookie,
+                cleanedFilters,
+                cookieHeader
+              )) ?? undefined,
         // Redirect to apply filters to URL
         redirectNeeded: !!cleanedFilters,
       };

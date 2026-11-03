@@ -68,6 +68,17 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    one-line reason; say "restore D2" to bring one back. Pre-existing nits are
    not listed.
 
+   When the PR touches `schema.prisma` or a migration, the report also has a
+   **Database changes** section and a 🗄️ line under the header. The setup
+   script parses the migration SQL itself, so the section lists every new
+   table (with its columns), column, enum, index, foreign key, rename, drop and
+   data write, each on its own row, plus the Prisma models and enums added or
+   removed. The reviewer also checks each new name against what its rows
+   actually hold and raises a misleading or vague name as a should-fix, since
+   a table name is expensive to change once it ships. A PR that edits a
+   migration that already existed gets a warning: databases that already ran
+   it never see the edit.
+
 After the report the skill asks what to do next in a picker. You tick which
 findings to fix: each finding when there are 4 or fewer, otherwise whole
 sections (must fix, should fix, nits, spotted along the way), or type a custom

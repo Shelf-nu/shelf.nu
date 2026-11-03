@@ -14,6 +14,9 @@ import { reconcileRecurringReminders } from "./modules/asset-reminder/chain.serv
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
+import { registerLinkPreviewWorkers } from "./modules/link-preview/worker.server";
+import { registerPushWorkers } from "./modules/push/worker.server";
+import { startNotificationBus } from "./utils/emitter/notification-bus.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
@@ -93,6 +96,29 @@ schedulerService
             })
           );
         }),
+      registerPushWorkers()
+        .then(() => console.log("Push workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while registering push workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      registerLinkPreviewWorkers()
+        .then(() => console.log("Link preview workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Something went wrong while registering link preview workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
     ])
   )
   .then(() =>
@@ -134,6 +160,17 @@ schedulerService
     );
   });
 // === end: register scheduler and workers ===
+
+// Cross-machine toast delivery; boot never waits on the database connection
+startNotificationBus().catch((cause) => {
+  Logger.error(
+    new ShelfError({
+      cause,
+      message: "Notification bus crash",
+      label: "Notification",
+    })
+  );
+});
 
 /**
  * Handle errors that are not handled by a loader or action try/catch block.

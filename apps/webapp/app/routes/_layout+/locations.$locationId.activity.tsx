@@ -6,6 +6,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { LocationNotes } from "~/components/location/notes";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { getLocation } from "~/modules/location/service.server";
 import { getLocationNotes } from "~/modules/location-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -53,6 +54,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
+    /** Titles for the web links in the notes, for their chips. */
+    const linkTitles = await getLinkTitles({
+      organizationId,
+      notes,
+    });
+
     const header: HeaderData = {
       title: `${location.name}'s activity`,
     };
@@ -61,6 +68,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       location: { id: location.id, name: location.name },
       notes,
       header,
+      linkTitles,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { locationId, userId });

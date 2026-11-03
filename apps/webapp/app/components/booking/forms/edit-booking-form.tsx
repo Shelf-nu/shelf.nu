@@ -8,6 +8,7 @@ import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
+import type { ZodObject, ZodString } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
@@ -49,10 +50,12 @@ import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-po
 import { Button } from "../../shared/button";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
+import { canActOnBooking } from "../booking-actions";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
+import { EXPIRED_CHECKOUT_NEW_TO_FIELD } from "../checkout-dialog";
 import {
   BookingFormSchema,
   getReserveStartBlockedReason,
@@ -344,6 +347,15 @@ function EditBookingFormInner({
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
     actionData?.error
   );
+  /**
+   * The end date picked in the expired-reservation check-out prompt, refused
+   * by the server. The prompt closes on submit, so its error is shown beside
+   * the booking dates and named after the prompt's field, never under the
+   * form's own End Date.
+   */
+  const expiredCheckoutNewToError = getValidationErrors<
+    ZodObject<{ [EXPIRED_CHECKOUT_NEW_TO_FIELD]: ZodString }>
+  >(actionData?.error)?.[EXPIRED_CHECKOUT_NEW_TO_FIELD]?.message;
 
   const canCheckInBooking = userHasPermission({
     roles,
@@ -400,13 +412,19 @@ function EditBookingFormInner({
   /**
    * Whether the user can see the booking actions:
    * - Members who write every booking always see them.
-   * - Everyone else only on a booking they hold.
+   * - Everyone else only on a booking they hold, through either of the
+   *   loader booking's custody links (the same ones the Actions menu reads).
    * This also decides whether the name and description fields are disabled.
    */
-  const canSeeActions =
-    roleAccess.bookings.writeAll ||
-    defaultTeamMember?.userId === userId ||
-    defaultTeamMember?.id === userId;
+  const canSeeActions = canActOnBooking({
+    booking: {
+      custodianUserId: loaderBooking.custodianUserId,
+      custodianTeamMemberUserId:
+        loaderBooking.custodianTeamMember?.userId ?? null,
+    },
+    userId,
+    access: roleAccess,
+  });
 
   /**
    * Saving a draft keeps it a draft, so both Save buttons say so: a plain
@@ -608,8 +626,23 @@ function EditBookingFormInner({
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
                     sourceQuestions={checkoutSourceQuestions}
-                    booking={{ id, name: name!, from: startDateAsDate }}
+                    booking={{
+                      id,
+                      name: name!,
+                      from: startDateAsDate,
+                      // For the expired-reservation prompt: a RESERVED
+                      // booking whose end has passed is asked for a new end
+                      // date or an explicit "as overdue". The stored end, not
+                      // the editable field: the server judges expiry on the
+                      // saved row, and an unsaved edit must not flip the
+                      // prompt.
+                      status,
+                      to: loaderBooking.to,
+                    }}
                     disabled={disabled}
+                    // The full check-out from the header is the one path
+                    // that can give an expired reservation a new window.
+                    allowNewEndDate
                     canFullCheckOut={!!bookingStatus?.isReserved}
                     canCheckOutRemaining={
                       !!(
@@ -716,6 +749,11 @@ function EditBookingFormInner({
                   disabled={inputFieldIsDisabled}
                   workingHoursData={workingHoursData}
                 />
+                {expiredCheckoutNewToError ? (
+                  <p role="alert" className="mt-2 text-sm text-error-500">
+                    New end date for the check-out: {expiredCheckoutNewToError}
+                  </p>
+                ) : null}
               </div>
               <div className="mt-[10px]">
                 <CustodianField

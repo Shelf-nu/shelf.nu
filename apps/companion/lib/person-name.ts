@@ -17,7 +17,7 @@
  *
  * Migrated call sites so far: the booking detail screen (creator + custodian).
  * The same join is still hand-rolled, untrimmed and displayName-blind in
- * `app/(tabs)/audits/[id].tsx`, `app/(tabs)/settings.tsx`,
+ * `app/(tabs)/audits/[id].tsx`, `app/(tabs)/settings/index.tsx`,
  * `app/(tabs)/scanner.tsx`, `app/(tabs)/assets/[id].tsx`,
  * `app/(tabs)/assets/kits/[id].tsx`, `components/team-member-picker.tsx` and
  * `components/asset-detail/notes-section.tsx`. Converting those needs the

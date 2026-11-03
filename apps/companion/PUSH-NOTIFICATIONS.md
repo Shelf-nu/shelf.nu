@@ -185,8 +185,9 @@ Xcode and EAS switch the value to `production` when archiving. The rules:
    `Unicode Normalization not appropriate for ASCII-8BIT` in a shell without
    a UTF-8 locale.
 
-2. In a development build, Settings, About, "Push token (dev)" shares the
-   `ExponentPushToken[...]` string.
+2. Sign in, open Settings, Notifications, and turn push on. The app registers
+   the device; copy the token from the server's `PushToken` table, or log it
+   from `lib/push/registration.ts` while testing.
 3. Send a test message to it. The Expo web tool at
    `https://expo.dev/notifications` works for a quick look, but it does not show
    the ticket id, so for the receipt check send with the API and read the id

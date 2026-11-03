@@ -23,16 +23,24 @@ import {
   HYDRATION_TIMEOUT_MS,
   HYDRATION_WATCHDOG_SCRIPT,
   markHydrated,
+  MAX_MISSING_BUNDLE_FILES,
+  RESOURCE_TIMING_BUFFER_SIZE,
 } from "./hydration-watchdog";
 
 // why: Sentry is a network side effect; the test asserts what would be sent.
-vi.mock("@sentry/react-router", () => ({ captureMessage: vi.fn() }));
+vi.mock("@sentry/react-router", () => ({
+  captureMessage: vi.fn(),
+  logger: { info: vi.fn() },
+}));
 
 /** The origin the page is served from, as the script sees it. */
 const ORIGIN = "https://app.shelf.nu";
 
 /** A file of the app's own bundle. */
 const OWN_CHUNK = `${ORIGIN}/file-assets/abc/chunk-X1.js`;
+
+/** Another file of the bundle. */
+const OTHER_CHUNK = `${ORIGIN}/file-assets/abc/chunk-Y2.js`;
 
 /** The Cloudflare analytics beacon, which content blockers commonly stop. */
 const THIRD_PARTY_SCRIPT =
@@ -45,14 +53,58 @@ type FakeWindow = {
     reload: ReturnType<typeof vi.fn>;
   };
   __shelfHydrationWatchdog?: { done: () => void };
+  performance?: FakePerformance;
 };
+
+/** The parts of `window.performance` the script reads. */
+type FakePerformance = {
+  now: () => number;
+  timeOrigin: number;
+  getEntriesByType: () => Array<{ name: string; responseEnd: number }>;
+  setResourceTimingBufferSize: ReturnType<typeof vi.fn>;
+  addEventListener: (type: string, listener: () => void) => void;
+  /** Fires the event the browser sends once it drops timing entries. */
+  fillBuffer: () => void;
+};
+
+/**
+ * A `performance` whose clock and finished downloads the test controls.
+ *
+ * @param finished - URLs of the files that finished downloading
+ * @param now - What the monotonic clock reads; defaults to wall time since start
+ */
+function fakePerformance({
+  finished = [],
+  now,
+}: { finished?: string[]; now?: () => number } = {}): FakePerformance {
+  const timeOrigin = Date.now();
+  const bufferFullListeners: Array<() => void> = [];
+  return {
+    timeOrigin,
+    now: now ?? (() => Date.now() - timeOrigin),
+    getEntriesByType: () =>
+      finished.map((name) => ({ name, responseEnd: 100 })),
+    setResourceTimingBufferSize: vi.fn(),
+    addEventListener: (type, listener) => {
+      if (type === "resourcetimingbufferfull") {
+        bufferFullListeners.push(listener);
+      }
+    },
+    fillBuffer: () => bufferFullListeners.forEach((listener) => listener()),
+  };
+}
 
 let fakeWindow: FakeWindow;
 
-/** Runs the inline script the way the document `<head>` would. */
-function runWatchdog() {
+/**
+ * Runs the inline script the way the document `<head>` would.
+ *
+ * @param performance - Stands in for `window.performance` when given
+ */
+function runWatchdog(performance?: FakePerformance) {
   fakeWindow = {
     location: { origin: ORIGIN, pathname: "/assets", reload: vi.fn() },
+    ...(performance ? { performance } : {}),
   };
   // why: `location.reload` cannot be observed on the real window, so the
   // script gets a window whose location records it. Everything else is the
@@ -115,6 +167,27 @@ function storedReport(): HydrationFailureReport | null {
 const isShowingScreen = () =>
   document.documentElement.hasAttribute(HYDRATION_FAILED_ATTRIBUTE);
 
+/** What the tab's visibility and automation flag read as, per test. */
+let visibility: DocumentVisibilityState = "visible";
+let automated = false;
+
+/** Shows or hides the tab, firing the event the browser would. */
+function setTabVisibility(state: DocumentVisibilityState) {
+  visibility = state;
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+// why: happy-dom reports every page as visible and as automated
+// (`navigator.webdriver` is true), so each test states both itself.
+Object.defineProperty(document, "visibilityState", {
+  configurable: true,
+  get: () => visibility,
+});
+Object.defineProperty(navigator, "webdriver", {
+  configurable: true,
+  get: () => automated,
+});
+
 beforeEach(() => {
   vi.useFakeTimers();
   sessionStorage.clear();
@@ -123,6 +196,9 @@ beforeEach(() => {
   document.documentElement.removeAttribute(HYDRATION_FAILED_ATTRIBUTE);
   document.documentElement.removeAttribute(UNSUPPORTED_BROWSER_ATTRIBUTE);
   vi.mocked(Sentry.captureMessage).mockClear();
+  vi.mocked(Sentry.logger.info).mockClear();
+  visibility = "visible";
+  automated = false;
 });
 
 afterEach(() => {
@@ -334,6 +410,164 @@ describe("HYDRATION_WATCHDOG_SCRIPT: the page is slow to hydrate", () => {
     });
   });
 
+  it("does not count time while the tab is hidden", () => {
+    // A background tab or a restored session: nobody is looking yet.
+    visibility = "hidden";
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS * 5);
+    expect(isShowingScreen()).toBe(false);
+
+    // The clock starts once the tab is shown.
+    setTabVisibility("visible");
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+    expect(storedReport()).toMatchObject({ reason: "timeout", hidden: true });
+  });
+
+  it("pauses the clock while hidden and keeps the visible time already spent", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(15_000);
+    setTabVisibility("hidden");
+    vi.advanceTimersByTime(60_000);
+    setTabVisibility("visible");
+
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 15_000 - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+  });
+
+  it("is not shortened by a wall-clock change while visible", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(15_000);
+    // The system clock jumps an hour ahead (a manual change, an NTP fix).
+    vi.setSystemTime(Date.now() + 3_600_000);
+    setTabVisibility("hidden");
+    setTabVisibility("visible");
+
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 15_000 - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+  });
+
+  it("records what the page looked like when it timed out", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      reason: "timeout",
+      hidden: false,
+      automated: false,
+      failedAfterMs: expect.any(Number),
+      bundleFilesLoaded: expect.any(Number),
+    });
+    expect(storedReport()).toHaveProperty("lastBundleFileMs");
+    expect(storedReport()).toHaveProperty("connection");
+  });
+
+  it("names the requested files that never finished downloading", () => {
+    // A stalled download raises no error; only the missing timing entry shows it.
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    document.head.appendChild(modulePreload(OTHER_CHUNK));
+    document.head.appendChild(modulePreload(THIRD_PARTY_SCRIPT));
+    runWatchdog(fakePerformance({ finished: [OTHER_CHUNK] }));
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesLoaded: 1,
+      bundleFilesExpected: 2,
+      missingBundleFiles: ["/file-assets/abc/chunk-X1.js"],
+    });
+  });
+
+  it("names no missing files once the browser dropped timing entries", () => {
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    const performance = fakePerformance();
+    runWatchdog(performance);
+    performance.fillBuffer();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesExpected: 1,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names no missing files when the finished downloads cannot be read", () => {
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    const performance = fakePerformance();
+    performance.getEntriesByType = () => {
+      throw new Error("not supported");
+    };
+    runWatchdog(performance);
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesLoaded: 0,
+      bundleFilesExpected: 1,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names no missing files when the requested files cannot be read", () => {
+    runWatchdog(fakePerformance());
+    // why: a document the script cannot query is hard to produce in happy-dom.
+    const query = vi
+      .spyOn(document, "querySelectorAll")
+      .mockImplementation(() => {
+        throw new Error("not supported");
+      });
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+    query.mockRestore();
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesExpected: null,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names at most a handful of unfinished files", () => {
+    for (let i = 0; i < MAX_MISSING_BUNDLE_FILES + 5; i++) {
+      document.head.appendChild(
+        modulePreload(`${ORIGIN}/file-assets/abc/chunk-${i}.js`)
+      );
+    }
+    runWatchdog(fakePerformance());
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()?.bundleFilesExpected).toBe(
+      MAX_MISSING_BUNDLE_FILES + 5
+    );
+    expect(storedReport()?.missingBundleFiles).toHaveLength(
+      MAX_MISSING_BUNDLE_FILES
+    );
+  });
+
+  it("keeps timing entries for the whole module graph", () => {
+    const performance = fakePerformance();
+    runWatchdog(performance);
+
+    expect(performance.setResourceTimingBufferSize).toHaveBeenCalledWith(
+      RESOURCE_TIMING_BUFFER_SIZE
+    );
+  });
+
+  it("records wall-clock time next to the monotonic clock", () => {
+    // The monotonic clock stood still for 16 s, as it does while a device sleeps.
+    let monotonic = 0;
+    runWatchdog(fakePerformance({ now: () => monotonic }));
+    monotonic = 4_000;
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      failedAfterMs: 4_000,
+      wallClockMs: HYDRATION_TIMEOUT_MS,
+    });
+  });
+
   it("removes the screen again if hydration completes late", () => {
     runWatchdog();
     vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
@@ -386,13 +620,41 @@ describe("HYDRATION_GATE_STYLES", () => {
 });
 
 describe("markHydrated", () => {
-  it("reports a failed earlier load to Sentry once, then forgets it", () => {
+  it("logs a load the automatic reload fixed, once, without raising an issue", () => {
+    runWatchdog();
+    failToLoad(modulePreload(OWN_CHUNK));
+
+    // The reloaded page hydrates.
+    markHydrated();
+    markHydrated();
+
+    // The user only saw a reload, so this is counted, not alerted on.
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    expect(Sentry.logger.info).toHaveBeenCalledWith(
+      "App bundle reloaded after a failed load",
+      expect.objectContaining({
+        label: "Hydration",
+        reason: "load-error",
+        path: "/assets",
+        failures: 1,
+        source: expect.stringContaining("/file-assets/abc/chunk-X1.js"),
+      })
+    );
+    expect(storedReport()).toBeNull();
+  });
+
+  it("raises a warning when the reload failed too and the recovery screen showed", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    fakeWindow.__shelfHydrationWatchdog?.done();
     runWatchdog();
     failToLoad(moduleScript());
 
-    markHydrated();
+    // A manual reload from the recovery screen hydrates.
     markHydrated();
 
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
     expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
     expect(Sentry.captureMessage).toHaveBeenCalledWith(
       "App bundle failed to load before hydration",
@@ -402,10 +664,78 @@ describe("markHydrated", () => {
         tags: {
           hydration_failure: "load-error",
           hydration_auto_reloaded: "yes",
+          hydration_tab_hidden: "no",
+          hydration_clock_gap: "no",
+        },
+        extra: expect.objectContaining({ failures: 2 }),
+      })
+    );
+  });
+
+  it("raises a warning when the page timed out", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        fingerprint: ["hydration-failure", "timeout"],
+        tags: {
+          hydration_failure: "timeout",
+          hydration_auto_reloaded: "no",
+          hydration_tab_hidden: "no",
+          hydration_clock_gap: "no",
         },
       })
     );
-    expect(storedReport()).toBeNull();
+  });
+
+  it("tags a failure from a tab that had been hidden", () => {
+    runWatchdog();
+    setTabVisibility("hidden");
+    setTabVisibility("visible");
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        tags: expect.objectContaining({ hydration_tab_hidden: "yes" }),
+      })
+    );
+  });
+
+  it("tags a failure whose wall clock ran ahead of the page clock", () => {
+    let monotonic = 0;
+    runWatchdog(fakePerformance({ now: () => monotonic }));
+    monotonic = 4_000;
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        tags: expect.objectContaining({ hydration_clock_gap: "yes" }),
+      })
+    );
+  });
+
+  it("sends nothing for a browser under automation", () => {
+    // Crawlers and link previewers fast-forward timers; their timeouts say
+    // nothing about users.
+    automated = true;
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
   });
 
   it("sends nothing after a clean load", () => {
@@ -413,5 +743,6 @@ describe("markHydrated", () => {
     markHydrated();
 
     expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
   });
 });

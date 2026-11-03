@@ -1,4 +1,9 @@
-import { AssetType, ConsumptionType, CustomFieldType } from "@prisma/client";
+import {
+  AssetType,
+  ConsumptionType,
+  CustomFieldFormat,
+  CustomFieldType,
+} from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type { AdvancedIndexAsset } from "~/modules/asset/types";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
@@ -36,11 +41,41 @@ const VISIBLE_ONLY_COLUMNS: Column[] = [
 ];
 
 describe("buildImportReadyColumns", () => {
+  it("writes a Link field's header with its format, so a re-import keeps it", () => {
+    const columns = buildImportReadyColumns({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [
+        {
+          name: "Manual",
+          type: CustomFieldType.TEXT,
+          format: CustomFieldFormat.LINK,
+        },
+        {
+          name: "Serial",
+          type: CustomFieldType.TEXT,
+          format: CustomFieldFormat.PLAIN,
+        },
+      ],
+      barcodesEnabled: false,
+    });
+
+    expect(columns.filter((c) => c.kind === "cf").map((c) => c.header)).toEqual(
+      ["cf:Manual,type:TEXT,format:LINK", "cf:Serial,type:TEXT"]
+    );
+  });
+
   it("emits the full importable schema in 'all' scope", () => {
     const columns = buildImportReadyColumns({
       columnScope: "all",
       settingsColumns: [],
-      activeCustomFields: [{ name: "Brand", type: CustomFieldType.OPTION }],
+      activeCustomFields: [
+        {
+          name: "Brand",
+          type: CustomFieldType.OPTION,
+          format: CustomFieldFormat.PLAIN,
+        },
+      ],
       barcodesEnabled: true,
     });
     const headers = columns.map((c) => c.header);
@@ -85,7 +120,13 @@ describe("buildImportReadyColumns", () => {
     const columns = buildImportReadyColumns({
       columnScope: "visible",
       settingsColumns: VISIBLE_ONLY_COLUMNS,
-      activeCustomFields: [{ name: "Brand", type: CustomFieldType.OPTION }],
+      activeCustomFields: [
+        {
+          name: "Brand",
+          type: CustomFieldType.OPTION,
+          format: CustomFieldFormat.PLAIN,
+        },
+      ],
       barcodesEnabled: true,
     });
     const headers = columns.map((c) => c.header);
@@ -113,7 +154,13 @@ describe("buildImportReadyColumns", () => {
     const columns = buildImportReadyColumns({
       columnScope: "all",
       settingsColumns: [],
-      activeCustomFields: [{ name: "Brand", type: CustomFieldType.OPTION }],
+      activeCustomFields: [
+        {
+          name: "Brand",
+          type: CustomFieldType.OPTION,
+          format: CustomFieldFormat.PLAIN,
+        },
+      ],
       barcodesEnabled: true,
     });
     for (const { header } of columns) {
@@ -303,7 +350,9 @@ describe("custom-field value encoding", () => {
     const args = {
       columnScope: "all" as const,
       settingsColumns: [],
-      activeCustomFields: [{ name, type: cfType }],
+      activeCustomFields: [
+        { name, type: cfType, format: CustomFieldFormat.PLAIN },
+      ],
       barcodesEnabled: false,
       assets: [assetWithCf(name, value)],
     };
@@ -446,7 +495,13 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     const args = {
       columnScope: "all" as const,
       settingsColumns: [],
-      activeCustomFields: [{ name: "Brand", type: CustomFieldType.OPTION }],
+      activeCustomFields: [
+        {
+          name: "Brand",
+          type: CustomFieldType.OPTION,
+          format: CustomFieldFormat.PLAIN,
+        },
+      ],
       barcodesEnabled: true,
       assets: [
         makeAsset({
@@ -602,13 +657,24 @@ describe("export -> update-importer round trip (final review fix)", () => {
   // `alwaysInclude` fails a test immediately.
   it("the real Import-ready 'all columns' header row is fully recognized by the update importer", () => {
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: CustomFieldType.TEXT },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: CustomFieldType.TEXT,
+        format: CustomFieldFormat.PLAIN,
+      },
     ];
 
     const [headerRow] = buildImportReadyRows({
       columnScope: "all",
       settingsColumns: [],
-      activeCustomFields: [{ name: "Serial", type: CustomFieldType.TEXT }],
+      activeCustomFields: [
+        {
+          name: "Serial",
+          type: CustomFieldType.TEXT,
+          format: CustomFieldFormat.PLAIN,
+        },
+      ],
       barcodesEnabled: true,
       assets: [],
     });

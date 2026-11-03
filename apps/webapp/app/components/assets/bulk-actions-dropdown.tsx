@@ -30,6 +30,7 @@ import BulkAssetModelUpdateDialog from "./bulk-asset-model-update-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
+import BulkCustomFieldUpdateDialog from "./bulk-custom-field-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
@@ -204,6 +205,7 @@ function ConditionalDropdown() {
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
         <BulkCategoryUpdateDialog />
+        <BulkCustomFieldUpdateDialog />
         <BulkSetReorderPointDialog />
         <BulkAssetModelUpdateDialog />
         <BulkAssetModelRemoveDialog />
@@ -443,6 +445,14 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
+                  onClick={closeMenu}
+                  disabled={archivedBulkDisabled || isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="custom-field"
+                  label="Set custom field"
                   onClick={closeMenu}
                   disabled={archivedBulkDisabled || isLoading}
                 />

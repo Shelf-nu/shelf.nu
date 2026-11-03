@@ -1170,6 +1170,7 @@ export default function AssetDetailScreen() {
           <CustomFieldsSection
             customFields={activeCustomFields}
             currency={asset.organization?.currency || "USD"}
+            fieldLinkTitles={asset.fieldLinkTitles}
           />
 
           {/* ── Activity / Notes ───────────────────────── */}

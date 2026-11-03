@@ -38,7 +38,7 @@ This guide will walk you through setting up Supabase for your Shelf.nu applicati
 # Connection pooling (for app runtime)
 DATABASE_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.pooler.supabase.com:6543/postgres?pgbouncer=true"
 
-# Direct connection (for migrations)
+# Direct connection (for migrations and toast notifications, see notifications.md)
 DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/postgres"
 ```
 

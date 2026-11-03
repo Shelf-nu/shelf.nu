@@ -79,6 +79,35 @@ export function bookingCustodianIsSelf(
   return access.policy.bookings.custodianPicker === "self";
 }
 
+/**
+ * Whether the caller may write to this booking: every booking for roles with
+ * `bookings.writeAll`, otherwise only ones they created or hold through the
+ * user custody link. The non-throwing form of `validateBookingOwnership`
+ * (`~/utils/booking-authorization.server`), for surfaces that decide which
+ * actions to offer. Pure and client-safe, so the server guard and the UI that
+ * hides what it refuses share one rule.
+ *
+ * @param params.booking - The booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @returns `true` when writes to this booking are allowed
+ */
+export function canWriteBooking({
+  booking,
+  userId,
+  access,
+}: {
+  booking: { creatorId: string | null; custodianUserId: string | null };
+  userId: string;
+  access: Pick<RoleAccess, "bookings">;
+}): boolean {
+  return (
+    access.bookings.writeAll ||
+    booking.creatorId === userId ||
+    booking.custodianUserId === userId
+  );
+}
+
 export const bookingStatusColorMap: {
   [key in BookingStatus]: BadgeColorScheme;
 } = {

@@ -18,6 +18,7 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getSupabase, rebuildSupabase } from "../supabase";
+import { runBeforeSessionEnd } from "./session-end";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
   classifyServerChange,
@@ -207,6 +208,9 @@ async function clearServerScopedState(): Promise<void> {
 /**
  * Ends the current session on the outgoing client.
  *
+ * The before-session-end tasks (`./session-end.ts`) run first, while the
+ * session is still live.
+ *
  * A network failure does NOT throw — supabase-js returns the error and, for a
  * non-4xx failure, skips removing the local session. Left at that, the previous
  * server's refresh token stays in SecureStore under its own project key and is
@@ -217,6 +221,8 @@ async function clearServerScopedState(): Promise<void> {
  * @returns Resolves once the session is gone locally, whatever the server said.
  */
 async function endSessionOnOutgoingClient(): Promise<void> {
+  await runBeforeSessionEnd();
+
   try {
     const { error } = await getSupabase().auth.signOut();
     if (!error) return;

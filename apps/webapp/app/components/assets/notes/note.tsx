@@ -101,7 +101,7 @@ const Comment = ({
           a deliberate feature here. System notes (the `Update` variant above)
           get the default `false` — their text is assembled by us from entity
           names, so an external link in one was injected. */}
-      <MarkdownViewer content={note.content} allowExternalLinks />
+      <MarkdownViewer content={note.content} allowExternalLinks linkChips />
     </div>
   </>
 );

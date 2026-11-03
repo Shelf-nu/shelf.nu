@@ -1,6 +1,8 @@
 import type { AuditForEmail } from "~/emails/audit-updates-template";
 import { auditUpdatesTemplateString } from "~/emails/audit-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import { auditEmailSubject, PUSH_MESSAGES } from "~/modules/push/messages";
+import { sendPush } from "~/modules/push/service.server";
 import type { ClientHint } from "~/utils/client-hints";
 import {
   formatDate,
@@ -14,6 +16,8 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import { AUDIT_REMINDER_TIMEFRAMES } from "./constants";
+import type { AuditReminder } from "./constants";
 
 type BasicAuditEmailContentArgs = {
   auditName: string;
@@ -158,7 +162,8 @@ export const auditOverdueEmailContent = (args: BasicAuditEmailContentArgs) =>
   });
 
 /**
- * Sends an email notification when a user is assigned to an audit
+ * Notifies a user assigned to an audit: an email, and a push with the due
+ * date in their own format.
  */
 export async function sendAuditAssignedEmail({
   audit,
@@ -194,7 +199,7 @@ export async function sendAuditAssignedEmail({
 
     sendEmail({
       to: assigneeEmail,
-      subject: `🔍 You've been assigned to audit: "${audit.name}" - shelf.nu`,
+      subject: auditEmailSubject("ASSIGNED", audit.name),
       text: auditAssignedEmailContent({
         auditName: audit.name,
         assetsCount: assetCount,
@@ -206,6 +211,18 @@ export async function sendAuditAssignedEmail({
         customEmailFooter: audit.organization.customEmailFooter,
       }),
       html,
+    });
+
+    void sendPush({
+      userIds: [assigneeUserId],
+      ...PUSH_MESSAGES.AUDIT_ASSIGNED({
+        auditId: audit.id,
+        organizationId: audit.organizationId,
+        auditName: audit.name,
+        dueDate: audit.dueDate
+          ? formatDate(audit.dueDate, prefs, { includeTime: true })
+          : undefined,
+      }),
     });
 
     Logger.info(
@@ -416,16 +433,17 @@ export function sendAuditCompletedEmail({
 }
 
 /**
- * Send audit reminder email to assignees
- * @param timeframe - Human-readable timeframe (e.g., "24 hours", "4 hours", "1 hour")
- * @param heading - Email heading/subject prefix (e.g., "🔔 Audit due in 24 hours")
+ * Sends an audit reminder to its assignees: an email to each, and one push to
+ * them all.
+ *
+ * @param reminder - Which reminder this is; sets the time left that the email
+ *   and the push name
  */
 export function sendAuditReminderEmail({
   audit,
   assignees,
   hints,
-  timeframe,
-  heading,
+  reminder,
 }: {
   audit: AuditForEmail;
   assignees: Array<{
@@ -433,9 +451,10 @@ export function sendAuditReminderEmail({
     user: UserNameFields & { email: string } & RawFormatPrefs;
   }>;
   hints: ClientHint;
-  timeframe: string;
-  heading: string;
+  reminder: AuditReminder;
 }): void {
+  const timeframe = AUDIT_REMINDER_TIMEFRAMES[reminder];
+  const heading = `🔔 Audit due in ${timeframe}`;
   const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
   const assetCount = audit._count.assets;
 
@@ -443,10 +462,10 @@ export function sendAuditReminderEmail({
     try {
       // Resolve THIS recipient's stored formatting prefs (their own
       // dateFormat/timeFormat/timeZone), not the scheduler-captured creator
-      // hints — otherwise every reminder recipient sees the creator's
-      // format/timezone. AUDIT_INCLUDE_FOR_EMAIL now carries the raw preference
-      // columns on each assignee, so we resolve from the loaded row (no
-      // per-recipient DB fetch); `hints` is the null-field fallback only.
+      // hints, so each recipient sees their own format and time zone.
+      // AUDIT_INCLUDE_FOR_EMAIL carries the raw preference columns on each
+      // assignee, so prefs resolve from the loaded row (no per-recipient
+      // DB fetch); `hints` is the null-field fallback only.
       const prefs = resolveFormatPrefs(assignment.user, hints);
 
       const html = await auditUpdatesTemplateString({
@@ -458,7 +477,7 @@ export function sendAuditReminderEmail({
 
       sendEmail({
         to: assignment.user.email,
-        subject: `${heading}: "${audit.name}" - shelf.nu`,
+        subject: auditEmailSubject(reminder, audit.name),
         text: auditReminderEmailContent({
           auditName: audit.name,
           assetsCount: assetCount,
@@ -493,15 +512,24 @@ export function sendAuditReminderEmail({
       );
     }
   });
+
+  void sendPush({
+    userIds: assignees.map(({ userId }) => userId),
+    ...PUSH_MESSAGES[`AUDIT_${reminder}`]({
+      auditId: audit.id,
+      organizationId: audit.organizationId,
+      auditName: audit.name,
+    }),
+  });
 }
 
 /**
- * Send overdue notice email to both creator and assignees.
+ * Sends the overdue notice to the audit's creator and assignees: an email to
+ * each, and one push to them all.
  *
  * Each recipient's dates are rendered in THEIR OWN stored formatting prefs
- * (dateFormat/timeFormat/timeZone). Pass the recipient's `userId` so their
- * prefs can be resolved per recipient; when it is absent the render falls back
- * to the scheduler-captured request `hints`.
+ * (dateFormat/timeFormat/timeZone), read from the columns on their row; the
+ * scheduler-captured request `hints` fill any preference they have not set.
  */
 export function sendAuditOverdueEmail({
   audit,
@@ -511,8 +539,8 @@ export function sendAuditOverdueEmail({
   audit: AuditForEmail;
   recipients: Array<
     {
-      /** Recipient user id (informational; prefs resolve from the columns). */
-      userId?: string;
+      /** The recipient's user id, which their push goes to. */
+      userId: string;
       email: string;
     } & UserNameFields &
       RawFormatPrefs
@@ -539,7 +567,7 @@ export function sendAuditOverdueEmail({
 
       sendEmail({
         to: recipient.email,
-        subject: `⚠️ Audit overdue: "${audit.name}" - shelf.nu`,
+        subject: auditEmailSubject("OVERDUE", audit.name),
         text: auditOverdueEmailContent({
           auditName: audit.name,
           assetsCount: assetCount,
@@ -570,5 +598,14 @@ export function sendAuditOverdueEmail({
         })
       );
     }
+  });
+
+  void sendPush({
+    userIds: recipients.map(({ userId }) => userId),
+    ...PUSH_MESSAGES.AUDIT_OVERDUE({
+      auditId: audit.id,
+      organizationId: audit.organizationId,
+      auditName: audit.name,
+    }),
   });
 }

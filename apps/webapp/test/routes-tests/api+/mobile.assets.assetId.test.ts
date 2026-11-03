@@ -14,6 +14,10 @@
  *   asset is checked out on, picked with the web asset overview's filter and
  *   shown to viewers who may see all custody or who hold that booking.
  * - The projection. Rows destructured off the query result stay off the wire.
+ * - Links. Each value names its field's `format`, and `fieldLinkTitles`
+ *   carries the titles for the links in the active values, keyed by custom
+ *   field id on the server (the companion's `custom-field-links.test.ts`
+ *   renders the same shape).
  *
  * The visibility helpers from `mobile-custody-visibility.server`, the booking
  * read gate and the name resolvers are NOT mocked, so the real logic runs end
@@ -115,6 +119,17 @@ vitest.mock("~/utils/subscription.server", () => ({
   canUseBarcodes: vitest.fn(() => true),
 }));
 
+// why: link titles are read from LinkPreview rows in Postgres (and links due a
+// fetch are queued); each case states what the workspace knows. Keying them
+// by field (`linkTitlesByField`) stays real.
+vitest.mock(
+  "~/modules/link-preview/service.server",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    getLinkTitles: vitest.fn().mockResolvedValue({}),
+  })
+);
+
 // why: we need to control error formatting without running real error logic
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn((cause: any) => ({
@@ -138,7 +153,9 @@ import {
 import { db } from "~/database/db.server";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { LINK_TITLES, MANUAL_URL, SHOP_URL } from "@helpers/link-titles";
 import { accessFor } from "@helpers/role-access";
 
 /**
@@ -1275,5 +1292,119 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
         }),
       })
     );
+  });
+});
+
+describe("Link fields on GET /api/mobile/assets/:assetId", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    requireMobileAuthMock.mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    // A member without asset:update or custody view gets the titles too.
+    getMobileUserContextMock.mockResolvedValue({
+      canUseBarcodes: false,
+      canUseAudits: false,
+      access: accessFor(["BASE"]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+  });
+
+  it("selects each value's field format, which the companion's asset detail contract carries", async () => {
+    // why: a mocked database returns whatever the fixture holds, so the query
+    // is what this pins. Titles are read for every TEXT value whatever its
+    // format, so `format` is not about fetching. It is selected because each
+    // value in the payload names its field's format: the companion types it on
+    // `AssetDetail.customFields[].customField.format`
+    // (apps/companion/lib/api/types.ts) to tell a Link field from plain text.
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
+
+    await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          customFields: {
+            select: expect.objectContaining({
+              customField: {
+                select: expect.objectContaining({ type: true, format: true }),
+              },
+            }),
+          },
+        }),
+      })
+    );
+  });
+
+  it("sends the titles of the links in the asset's active values by field id", async () => {
+    const field = {
+      name: "Manual",
+      type: "TEXT",
+      format: "LINK",
+      helpText: null,
+    };
+    const manual = {
+      id: "cfv-manual",
+      value: { raw: MANUAL_URL, valueText: MANUAL_URL },
+      customField: { ...field, id: "cf-manual", active: true },
+    };
+    const retired = {
+      id: "cfv-retired",
+      value: { raw: SHOP_URL, valueText: SHOP_URL },
+      customField: { ...field, id: "cf-retired", active: false },
+    };
+    // A non-ASCII host: the server keys it in punycode, which the phone's URL
+    // implementation cannot reproduce.
+    const handbook = {
+      id: "cfv-handbook",
+      value: {
+        raw: "https://bücher.example/Handbuch.pdf",
+        valueText: "https://bücher.example/Handbuch.pdf",
+      },
+      customField: { ...field, id: "cf-handbook", active: true },
+    };
+    const serial = {
+      id: "cfv-serial",
+      value: { raw: "SN-0042", valueText: "SN-0042" },
+      customField: { ...field, id: "cf-serial", format: "PLAIN", active: true },
+    };
+    assetFindUniqueMock.mockResolvedValue({
+      ...buildAsset(),
+      customFields: [manual, retired, handbook, serial],
+    } as unknown as AssetFixture);
+    vitest.mocked(getLinkTitles).mockResolvedValue({
+      ...LINK_TITLES,
+      "https://xn--bcher-kva.example/Handbuch.pdf": {
+        pageTitle: "Handbuch EOS R5",
+        customTitle: null,
+      },
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (response as unknown as Response).json();
+
+    // A deactivated field's value is not shown, so its link is not read.
+    expect(getLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      values: [manual, handbook, serial],
+    });
+    expect(body.asset.fieldLinkTitles).toEqual({
+      "cf-manual": { pageTitle: "EOS R5 user manual", customTitle: null },
+      "cf-handbook": { pageTitle: "Handbuch EOS R5", customTitle: null },
+    });
+    expect(body.asset).not.toHaveProperty("linkTitles");
+    // The per-value Link list is gone: the companion finds links itself.
+    expect(body.asset.linkFields).toBeUndefined();
   });
 });

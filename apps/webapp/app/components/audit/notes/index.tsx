@@ -1,5 +1,6 @@
 import { useFetcher, useLoaderData } from "react-router";
 import { Note, type NoteWithUser } from "~/components/assets/notes/note";
+import { LinkTitlesProvider } from "~/components/links/link-titles-context";
 import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import {
@@ -12,7 +13,7 @@ import { ActionsDropdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 
 export const AuditNotes = () => {
-  const { session } = useLoaderData<typeof loader>();
+  const { session, linkTitles } = useLoaderData<typeof loader>();
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
@@ -70,26 +71,28 @@ export const AuditNotes = () => {
         </p>
       )}
       {hasNotes ? (
-        <ul className="notes-list mt-8 w-full">
-          {/* Render optimistic note using the same Note component */}
-          {optimisticNote && (
-            <Note
-              key={optimisticNote.id}
-              note={optimisticNote}
-              actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
-              assetLinkBase={assetLinkBase}
-            />
-          )}
-          {/* Render all existing notes */}
-          {(session.notes as NoteWithUser[]).map((note) => (
-            <Note
-              key={note.id}
-              note={note}
-              actionsDropdown={<ActionsDropdown noteId={note.id} />}
-              assetLinkBase={assetLinkBase}
-            />
-          ))}
-        </ul>
+        <LinkTitlesProvider value={linkTitles}>
+          <ul className="notes-list mt-8 w-full">
+            {/* Render optimistic note using the same Note component */}
+            {optimisticNote && (
+              <Note
+                key={optimisticNote.id}
+                note={optimisticNote}
+                actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
+                assetLinkBase={assetLinkBase}
+              />
+            )}
+            {/* Render all existing notes */}
+            {(session.notes as NoteWithUser[]).map((note) => (
+              <Note
+                key={note.id}
+                note={note}
+                actionsDropdown={<ActionsDropdown noteId={note.id} />}
+                assetLinkBase={assetLinkBase}
+              />
+            ))}
+          </ul>
+        </LinkTitlesProvider>
       ) : (
         <div className="flex h-[500px] items-center  justify-center">
           <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">

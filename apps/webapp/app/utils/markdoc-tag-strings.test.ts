@@ -9,6 +9,7 @@ import {
   wrapDescriptionForNote,
   wrapKitsWithDataForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapTagForNote,
   wrapUserLinkForNote,
 } from "./markdoc-wrappers";
@@ -114,7 +115,7 @@ describe("encodeRawTagAttributeValues", () => {
         {
           tag: "description",
           attributes: {
-            oldText: "Path C:\\new\\temp\\ and a &quot;quote&quot;",
+            oldText: 'Path C:\\new\\temp\\ and a "quote"',
             newText: "ends with a backslash\\",
           },
         },
@@ -255,6 +256,28 @@ describe("encodeRawTagAttributeValues", () => {
     });
   });
 
+  describe("quotes", () => {
+    it("hands a name with quotes to its tag as typed", () => {
+      expect(renderedTags(wrapNameForNote('Camera "A"'))).toEqual([
+        { tag: "name", attributes: { text: 'Camera "A"' } },
+      ]);
+    });
+
+    it("keeps a quoted name that tries to add an attribute in its value", () => {
+      const tag = wrapLinkForNote("/bookings/b1", 'x" to="javascript:alert(1)');
+
+      expect(renderedTags(tag)).toEqual([
+        {
+          tag: "link",
+          attributes: {
+            to: "/bookings/b1",
+            text: 'x" to="javascript:alert(1)',
+          },
+        },
+      ]);
+    });
+  });
+
   describe("text that is not a writer tag", () => {
     it("copies a stray {% in plain text and encodes the tag after it", () => {
       const description = wrapDescriptionForNote("aa", "b\nc");
@@ -318,8 +341,7 @@ describe("encodeRawTagAttributeValues", () => {
       {
         tag: "description",
         attributes: {
-          newText:
-            "x %}\n{% link to=&quot;javascript:alert(1)&quot; text=&quot;hi&quot; /%}\n{%",
+          newText: 'x %}\n{% link to="javascript:alert(1)" text="hi" /%}\n{%',
         },
       },
     ]);

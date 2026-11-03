@@ -21,9 +21,11 @@
  * @see {@link file://./../../../routes/_layout+/me.notes.tsx} for the /me route
  * @see {@link file://./../../../modules/team-member-note/service.server.ts} for the data layer
  */
+import type { LinkTitles } from "@shelf/links";
 import { useFetcher } from "react-router";
 import type { NoteWithUser } from "~/components/assets/notes/note";
 import { Note } from "~/components/assets/notes/note";
+import { LinkTitlesProvider } from "~/components/links/link-titles-context";
 import { useUserData } from "~/hooks/use-user-data";
 import type { TeamMemberNoteWithUser } from "~/modules/team-member-note/service.server";
 import { isFormProcessing } from "~/utils/form";
@@ -40,11 +42,14 @@ import { NewUserNote } from "./new";
  */
 export const UserNotes = ({
   notes,
+  linkTitles,
   canCreate = true,
   canDelete = true,
   actionUrl,
 }: {
   notes: TeamMemberNoteWithUser[];
+  /** Page titles for the web links in the notes, from the route loader */
+  linkTitles?: LinkTitles;
   canCreate?: boolean;
   canDelete?: boolean;
   actionUrl?: string;
@@ -89,34 +94,36 @@ export const UserNotes = ({
         <NewUserNote fetcher={fetcher} actionUrl={actionUrl} />
       ) : null}
       {hasNotes || optimisticNote ? (
-        <ul className="notes-list mt-8 w-full">
-          {/* Optimistic note has a placeholder ID — don't render actions until the real note exists */}
-          {optimisticNote && (
-            <Note
-              key={optimisticNote.id}
-              note={optimisticNote}
-              actionsDropdown={undefined}
-            />
-          )}
-          {/* Render all existing notes. Only show delete for notes authored by the current user. */}
-          {notes.map((note) => {
-            const isAuthor = canDelete && user?.id === note.userId;
-            return (
+        <LinkTitlesProvider value={linkTitles}>
+          <ul className="notes-list mt-8 w-full">
+            {/* Optimistic note has a placeholder ID: no actions until the real note exists */}
+            {optimisticNote && (
               <Note
-                key={note.id}
-                note={note as unknown as NoteWithUser}
-                actionsDropdown={
-                  isAuthor ? (
-                    <UserNoteActionsDropdown
-                      noteId={note.id}
-                      actionUrl={actionUrl}
-                    />
-                  ) : undefined
-                }
+                key={optimisticNote.id}
+                note={optimisticNote}
+                actionsDropdown={undefined}
               />
-            );
-          })}
-        </ul>
+            )}
+            {/* Render all existing notes. Only show delete for notes authored by the current user. */}
+            {notes.map((note) => {
+              const isAuthor = canDelete && user?.id === note.userId;
+              return (
+                <Note
+                  key={note.id}
+                  note={note as unknown as NoteWithUser}
+                  actionsDropdown={
+                    isAuthor ? (
+                      <UserNoteActionsDropdown
+                        noteId={note.id}
+                        actionUrl={actionUrl}
+                      />
+                    ) : undefined
+                  }
+                />
+              );
+            })}
+          </ul>
+        </LinkTitlesProvider>
       ) : (
         <div className="flex h-[500px] items-center justify-center">
           <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">

@@ -289,6 +289,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       formData,
       fulfilAndCheckoutSchema
     );
+    const hints = getClientHint(request);
 
     /**
      * Pull the booking's from/to for the full check-out's pre-tx conflict
@@ -335,7 +336,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       checkoutIntentChoice,
-      hints: getClientHint(request),
+      hints,
       seesAllBookings: access.bookings.seeAll,
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
@@ -424,6 +425,7 @@ export default function FulfilAndCheckoutForBooking() {
       bookingFrom: booking.from
         ? new Date(booking.from).toISOString()
         : new Date().toISOString(),
+      bookingTo: booking.to ? new Date(booking.to).toISOString() : null,
       bookingStatus: booking.status,
       checksOutScannedOnly,
       expectedModelRequests,
