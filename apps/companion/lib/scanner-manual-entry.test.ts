@@ -25,6 +25,11 @@ describe("closedManualEntryBottom", () => {
     assert.equal(closedManualEntryBottom(107, 20), 75);
   });
 
+  it("leaves room for a taller pill at a larger text size", () => {
+    // The same short screen with the pill at 40 pt instead of 24.
+    assert.equal(closedManualEntryBottom(107, 20, 40), 59);
+  });
+
   it("moves to the top strip when no offset clears both the controls and the edge", () => {
     assert.equal(closedManualEntryBottom(50, 20), null);
   });

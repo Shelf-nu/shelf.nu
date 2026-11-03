@@ -16,8 +16,11 @@
 /** The pill's distance from the bottom edge when the strip has room for it. */
 export const MANUAL_ENTRY_BOTTOM = 90;
 
-/** Height of the closed pill, in points (one line of small text plus padding). */
-const PILL_HEIGHT = 24;
+/**
+ * Height of the closed pill at the default text size, in points (one line of
+ * small text plus padding), for use until the pill has been measured.
+ */
+const DEFAULT_PILL_HEIGHT = 24;
 
 /** Air kept between the camera controls and the pill. */
 const GAP_BELOW_CONTROLS = 8;
@@ -33,13 +36,16 @@ const GAP_ABOVE_EDGE = 8;
  *   and the screen's bottom edge, or `null` before they have been measured
  * @param bottomInset - the screen's bottom inset (home indicator), when
  *   nothing below the screen covers it
+ * @param pillHeight - the pill's measured height, which grows with the
+ *   system text size
  */
 export function closedManualEntryBottom(
   spaceBelowControls: number | null,
-  bottomInset: number
+  bottomInset: number,
+  pillHeight: number = DEFAULT_PILL_HEIGHT
 ): number | null {
   if (spaceBelowControls === null) return MANUAL_ENTRY_BOTTOM;
-  const highest = spaceBelowControls - GAP_BELOW_CONTROLS - PILL_HEIGHT;
+  const highest = spaceBelowControls - GAP_BELOW_CONTROLS - pillHeight;
   const bottom = Math.min(MANUAL_ENTRY_BOTTOM, highest);
   return bottom >= bottomInset + GAP_ABOVE_EDGE ? bottom : null;
 }

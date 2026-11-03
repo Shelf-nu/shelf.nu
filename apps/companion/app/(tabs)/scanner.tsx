@@ -526,11 +526,14 @@ function ScannerContent() {
   );
   /** Bottom edge of the camera controls within that strip, measured. */
   const [controlsBottom, setControlsBottom] = useState<number | null>(null);
+  /** Height of the closed pill, measured: it grows with the text size. */
+  const [closedPillHeight, setClosedPillHeight] = useState<number | null>(null);
   const closedManualEntry = closedManualEntryBottom(
     bottomStripHeight !== null && controlsBottom !== null
       ? bottomStripHeight - controlsBottom
       : null,
-    screenInsets.bottom
+    screenInsets.bottom,
+    closedPillHeight ?? undefined
   );
 
   /**
@@ -3346,6 +3349,12 @@ function ScannerContent() {
             // touches, so a tap beside them reaches the paused layer.
             pointerEvents="box-none"
             testID="manual-entry-container"
+            onLayout={(e) => {
+              // The container holds only the pill while it is closed.
+              if (!devScanVisible) {
+                setClosedPillHeight(Math.round(e.nativeEvent.layout.height));
+              }
+            }}
           >
             {devScanVisible ? (
               <View style={styles.devScanRow}>
