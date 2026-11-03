@@ -62,6 +62,9 @@ type FakePerformance = {
   timeOrigin: number;
   getEntriesByType: () => Array<{ name: string; responseEnd: number }>;
   setResourceTimingBufferSize: ReturnType<typeof vi.fn>;
+  addEventListener: (type: string, listener: () => void) => void;
+  /** Fires the event the browser sends once it drops timing entries. */
+  fillBuffer: () => void;
 };
 
 /**
@@ -75,12 +78,19 @@ function fakePerformance({
   now,
 }: { finished?: string[]; now?: () => number } = {}): FakePerformance {
   const timeOrigin = Date.now();
+  const bufferFullListeners: Array<() => void> = [];
   return {
     timeOrigin,
     now: now ?? (() => Date.now() - timeOrigin),
     getEntriesByType: () =>
       finished.map((name) => ({ name, responseEnd: 100 })),
     setResourceTimingBufferSize: vi.fn(),
+    addEventListener: (type, listener) => {
+      if (type === "resourcetimingbufferfull") {
+        bufferFullListeners.push(listener);
+      }
+    },
+    fillBuffer: () => bufferFullListeners.forEach((listener) => listener()),
   };
 }
 
@@ -470,6 +480,35 @@ describe("HYDRATION_WATCHDOG_SCRIPT: the page is slow to hydrate", () => {
       bundleFilesLoaded: 1,
       bundleFilesExpected: 2,
       missingBundleFiles: ["/file-assets/abc/chunk-X1.js"],
+    });
+  });
+
+  it("names no missing files once the browser dropped timing entries", () => {
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    const performance = fakePerformance();
+    runWatchdog(performance);
+    performance.fillBuffer();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesExpected: 1,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names no missing files when the finished downloads cannot be read", () => {
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    const performance = fakePerformance();
+    performance.getEntriesByType = () => {
+      throw new Error("not supported");
+    };
+    runWatchdog(performance);
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesLoaded: 0,
+      bundleFilesExpected: 1,
+      missingBundleFiles: null,
     });
   });
 

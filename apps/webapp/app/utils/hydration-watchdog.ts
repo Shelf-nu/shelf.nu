@@ -135,9 +135,10 @@ export type HydrationFailureReport = {
   /**
    * Paths of requested files with no finished download yet, up to
    * {@link MAX_MISSING_BUNDLE_FILES}. A download that stalls raises no error,
-   * so this is the only trace it leaves.
+   * so this is the only trace it leaves. `null` when the finished downloads
+   * could not be read in full, which would list loaded files as missing.
    */
-  missingBundleFiles?: string[];
+  missingBundleFiles?: string[] | null;
   /** Milliseconds from navigation start until the last of them finished. */
   lastBundleFileMs?: number | null;
   /**
@@ -190,9 +191,17 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   var RELOADED_AT_KEY = "${HYDRATION_RELOADED_AT_STORAGE_KEY}";
   var ORIGIN = window.location.origin;
 
+  // Set once the browser starts dropping timing entries.
+  var timingBufferFull = false;
+
   try {
     if (perf && perf.setResourceTimingBufferSize) {
       perf.setResourceTimingBufferSize(${RESOURCE_TIMING_BUFFER_SIZE});
+    }
+    if (perf && perf.addEventListener) {
+      perf.addEventListener("resourcetimingbufferfull", function () {
+        timingBufferFull = true;
+      });
     }
   } catch (e) {}
 
@@ -246,6 +255,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     var files = 0;
     var last = null;
     var finished = {};
+    var timingReadable = true;
     try {
       var entries = perf.getEntriesByType("resource");
       for (var i = 0; i < entries.length; i++) {
@@ -260,6 +270,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       }
     } catch (e) {
       files = 0;
+      timingReadable = false;
     }
     // A stalled download raises no error and leaves no timing entry, so the
     // files the page asked for are compared with the ones that finished.
@@ -281,7 +292,11 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       }
     } catch (e) {
       expected = null;
-      missing = [];
+    }
+    // Without every finished download to compare with, loaded files would be
+    // listed as missing.
+    if (!timingReadable || timingBufferFull) {
+      missing = null;
     }
     var connection = navigator.connection && navigator.connection.effectiveType;
     return {
