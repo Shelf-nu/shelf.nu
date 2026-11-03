@@ -631,6 +631,42 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     });
   });
 
+  describe("asset-activity archive rows", () => {
+    it("names archive and reinstate events in the Activity Type column", async () => {
+      vi.mocked(assetActivityReport).mockResolvedValue({
+        rows: ["ARCHIVED", "REINSTATED"].map((activityType) => ({
+          // Dates are covered elsewhere; this test is about the type cell.
+          occurredAt: null,
+          assetId: "classet1",
+          assetName: "Pallet 17",
+          activityType,
+          description: activityType === "ARCHIVED" ? "Archived" : "Reinstated",
+          performedBy: "Sam Operative",
+        })),
+      } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
+          ),
+          params: { fileName: "asset-activity" },
+          context,
+        })
+      )) as unknown as Response;
+      const lines = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      // Read the cell by its header, so added columns leave this check alone.
+      const typeColumn = lines[0].split(",").indexOf("Activity Type");
+      expect(lines.slice(1).map((line) => line.split(",")[typeColumn])).toEqual(
+        ["Archived", "Reinstated"]
+      );
+    });
+  });
+
   describe("asset-inventory", () => {
     it("writes the URL each QR code encodes next to its id", async () => {
       vi.mocked(assetInventoryReport).mockResolvedValue({

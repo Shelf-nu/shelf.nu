@@ -30,7 +30,10 @@ import {
   type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { getReportById } from "~/modules/reports/registry";
-import type { AuditCompletionRow } from "~/modules/reports/types";
+import type {
+  AssetActivityType,
+  AuditCompletionRow,
+} from "~/modules/reports/types";
 import type {
   TimeframePreset,
   BookingComplianceRow,
@@ -811,8 +814,8 @@ function formatAssetStatus(status: string): string {
 /**
  * Format activity type for CSV.
  */
-function formatActivityType(type: string): string {
-  const labels: Record<string, string> = {
+function formatActivityType(type: AssetActivityType): string {
+  const labels: Record<AssetActivityType, string> = {
     CREATED: "Asset created",
     UPDATED: "Asset updated",
     CUSTODY_ASSIGNED: "Custody assigned",

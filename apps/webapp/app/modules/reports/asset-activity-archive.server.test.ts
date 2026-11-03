@@ -7,7 +7,7 @@
  * @see {@link file://./helpers.server.ts} `assetActivityReport`
  */
 
-import type { ActivityAction } from "@prisma/client";
+import type { ActivityAction, Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: the report reads Prisma; these cases hand it events in memory and
@@ -22,6 +22,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
+import { buildReportAssetFilter } from "./asset-filter";
 import { assetActivityReport } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
@@ -53,6 +54,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(db.activityEvent.count).mockResolvedValue(2);
   vi.mocked(db.activityEvent.groupBy).mockResolvedValue([] as never);
+  vi.mocked(db.$queryRaw).mockResolvedValue([] as never);
+  // `sequentialId` and `qrCodes` go beyond this report's select; a mock
+  // ignores the select, so extra fields cost nothing and keep the fixture
+  // valid for a select that reads them.
   vi.mocked(db.asset.findMany).mockResolvedValue([
     {
       id: "asset-1",
@@ -103,5 +108,25 @@ describe("assetActivityReport archive rows", () => {
     expect(query?.where?.action).toEqual({
       in: expect.arrayContaining(["ASSET_ARCHIVED", "ASSET_UNARCHIVED"]),
     });
+  });
+
+  it("asks for archive events when the filter bar narrows the assets", async () => {
+    await assetActivityReport({
+      organizationId: ORG,
+      timeframe: TIMEFRAME,
+      assetFilter: buildReportAssetFilter({ categoryIds: ["cat-1"] }),
+    });
+
+    // The filtered path passes the action list as one bound array.
+    const values = vi
+      .mocked(db.$queryRaw)
+      .mock.calls.flatMap(([query]) => (query as unknown as Prisma.Sql).values);
+    const actionLists = values.filter(Array.isArray) as string[][];
+    expect(actionLists.length).toBeGreaterThan(0);
+    for (const actions of actionLists) {
+      expect(actions).toEqual(
+        expect.arrayContaining(["ASSET_ARCHIVED", "ASSET_UNARCHIVED"])
+      );
+    }
   });
 });

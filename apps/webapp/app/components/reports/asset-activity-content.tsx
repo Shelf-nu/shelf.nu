@@ -24,7 +24,11 @@ import {
   DateCell,
   ReportTable,
 } from "~/components/reports/report-table";
-import type { AssetActivityRow, ReportKpi } from "~/modules/reports/types";
+import type {
+  AssetActivityRow,
+  AssetActivityType,
+  ReportKpi,
+} from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
 
 /**
@@ -51,7 +55,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
     cell: ({ row }) => {
       const type = row.original.activityType;
       // Plain English labels — no jargon or internal codes
-      const labels: Record<string, string> = {
+      // Keyed by every activity type, so a new type cannot ship without its
+      // label and color.
+      const labels: Record<AssetActivityType, string> = {
         CREATED: "Asset created",
         UPDATED: "Asset updated",
         CUSTODY_ASSIGNED: "Assigned to team member",
@@ -64,7 +70,7 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         REINSTATED: "Reinstated",
       };
       // Semantic colors for activity types
-      const colors: Record<string, string> = {
+      const colors: Record<AssetActivityType, string> = {
         CREATED: "bg-green-100 text-green-700",
         UPDATED: "bg-blue-100 text-blue-700",
         CUSTODY_ASSIGNED: "bg-violet-100 text-violet-700",
