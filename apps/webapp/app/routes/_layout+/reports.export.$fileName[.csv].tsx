@@ -24,7 +24,7 @@ import {
   topBookedKitsReport,
   assetInventoryReport,
   assetUtilizationReport,
-  assetActivityReport,
+  assetActivityExportRows,
   assetDistributionReport,
   monthlyBookingTrendsReport,
   type BookingComplianceSortColumn,
@@ -67,6 +67,7 @@ import { assertUserCanUseReports } from "~/utils/subscription.server";
 /**
  * Builds the report named by `?reportId` as a CSV download, applying the same
  * filters as the report page but reading up to 10,000 rows instead of one page.
+ * The Asset Activity Summary reads every event in the timeframe instead.
  *
  * @returns The CSV as an attachment, or the failure with its status: 400 without
  *   a report id, 404 for an unknown report, 403 for one that does not export or
@@ -152,8 +153,8 @@ export const loader = async ({
     // The client forwards the page's full query string, and the filters are
     // resolved by the same function the page loader uses, so each case hands
     // its query function exactly the filters the filtered page showed. Paging
-    // is the one deliberate difference: exports always read page 1 with a 10k
-    // page size.
+    // is the one deliberate difference: exports read page 1 with a 10k page
+    // size, except the Asset Activity Summary, which reads every event.
     const reportFilters = await resolveReportFilters({
       organizationId,
       searchParams,
@@ -306,18 +307,13 @@ export const loader = async ({
       }
 
       case "asset-activity": {
-        const reportData = await assetActivityReport({
+        const rows = await assetActivityExportRows({
           organizationId,
           timeframe,
           assetId: reportFilters.assetId ?? undefined,
           assetFilter: reportFilters.assetFilter,
-          page: 1,
-          pageSize: 10000,
         });
-        csvString = generateAssetActivityCsv(
-          reportData.rows as AssetActivityRow[],
-          formatPrefs
-        );
+        csvString = generateAssetActivityCsv(rows, formatPrefs);
         break;
       }
 
@@ -776,9 +772,13 @@ function generateAssetActivityCsv(
   const headers = [
     "Date",
     "Asset ID",
+    "SAM ID",
+    "QR Code ID",
     "Asset Name",
     "Activity Type",
     "Description",
+    "From",
+    "To",
     "Performed By",
   ];
 
@@ -786,9 +786,15 @@ function generateAssetActivityCsv(
     // Datetime column ("Date & Time"): include the time part.
     formatDateForCsv(row.occurredAt, prefs, { includeTime: true }),
     row.assetId,
+    row.samId || "",
+    row.qrId || "",
     row.assetName,
     formatActivityType(row.activityType),
     row.description || "",
+    // Both sides of a change, names rather than ids, so a sheet can filter
+    // "every move into Warehouse B" without parsing the description.
+    row.changedFrom || "",
+    row.changedTo || "",
     row.performedBy || "System",
   ]);
 

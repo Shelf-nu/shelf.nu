@@ -31,6 +31,12 @@ import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
+import {
+  describeChange,
+  loadReferenceNames,
+  type ActivityDescription,
+  type ReferenceNames,
+} from "./asset-activity-description.server";
 import { mergeAssetWhere, type ReportAssetFilter } from "./asset-filter";
 import { resolveCheckInTimes } from "./check-in-time.server";
 import { WITHOUT_LOCATION_ID } from "./filter-params";
@@ -4550,20 +4556,25 @@ export async function assetActivityReport(
     const assetIds = [
       ...new Set(events.map((e) => e.assetId).filter(Boolean)),
     ] as string[];
-    const assets = await db.asset.findMany({
-      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
-      where: { id: { in: assetIds }, organizationId },
-      select: {
-        id: true,
-        organizationId: true,
-        title: true,
-        mainImage: true,
-        mainImageExpiration: true,
-        thumbnailImage: true,
-        // Model cover image for assets with no image of their own
-        ...ASSET_MODEL_IMAGE_SELECT,
-      },
-    });
+    const [assets, referenceNames] = await Promise.all([
+      db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
+        where: { id: { in: assetIds }, organizationId },
+        select: {
+          id: true,
+          organizationId: true,
+          title: true,
+          sequentialId: true,
+          qrCodes: { take: 1, select: { id: true } },
+          mainImage: true,
+          mainImageExpiration: true,
+          thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
+        },
+      }),
+      loadReferenceNames(organizationId, events),
+    ]);
     const refreshedAssets = await refreshExpiredAssetImages(assets);
     const assetMap = new Map(refreshedAssets.map((a) => [a.id, a]));
 
@@ -4571,16 +4582,24 @@ export async function assetActivityReport(
     const rows: AssetActivityRow[] = events.map((event) => {
       const asset = event.assetId ? assetMap.get(event.assetId) : null;
       const actorSnapshot = event.actorSnapshot as UserNameFields | null;
+      const { description, changedFrom, changedTo } = buildActivityDescription(
+        event,
+        referenceNames
+      );
 
       return {
         id: event.id,
         assetId: event.assetId || "",
+        samId: asset?.sequentialId ?? null,
+        qrId: asset?.qrCodes[0]?.id ?? null,
         assetName: asset?.title || "Unknown Asset",
         thumbnailImage: asset?.thumbnailImage || null,
         mainImage: asset?.mainImage || null,
         assetModel: asset?.assetModel ?? null,
         activityType: mapActionToActivityType(event.action),
-        description: buildActivityDescription(event),
+        description,
+        changedFrom,
+        changedTo,
         occurredAt: event.occurredAt,
         performedBy: actorSnapshot
           ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
@@ -4674,6 +4693,39 @@ export async function assetActivityReport(
       message: "Failed to generate Asset Activity Summary report",
       additionalData: { organizationId },
     });
+  }
+}
+
+/**
+ * Events read per query while building an export. Each batch's asset and
+ * name lookups pass at most this many ids, well under Postgres' bind limit.
+ */
+const ACTIVITY_EXPORT_BATCH_SIZE = 5000;
+
+/**
+ * Reads every Asset Activity Summary event in the timeframe, in the report's
+ * order (newest first) and with the page's filters. The report itself returns
+ * one page; this reads page after page of {@link ACTIVITY_EXPORT_BATCH_SIZE}
+ * until a short page ends the timeframe, so an export is never cut short.
+ *
+ * @param args - Workspace, timeframe and the same asset filters as the page
+ * @returns One row per event
+ * @throws {ShelfError} If a query fails
+ */
+export async function assetActivityExportRows(
+  args: Omit<AssetActivityArgs, "page" | "pageSize">
+): Promise<AssetActivityRow[]> {
+  const rows: AssetActivityRow[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await assetActivityReport({
+      ...args,
+      page,
+      pageSize: ACTIVITY_EXPORT_BATCH_SIZE,
+    });
+    rows.push(...batch.rows);
+    // The timeframe's end is fixed when the export starts, so events recorded
+    // meanwhile cannot shift later pages.
+    if (batch.rows.length < ACTIVITY_EXPORT_BATCH_SIZE) return rows;
   }
 }
 
@@ -4852,13 +4904,19 @@ function mapActionToActivityType(action: ActivityAction): AssetActivityType {
   }
 }
 
-/** Build human-readable description from activity event */
-function buildActivityDescription(event: {
-  action: ActivityAction;
-  field?: string | null;
-  fromValue?: unknown;
-  toValue?: unknown;
-}): string {
+/**
+ * Describes an activity event in plain words, with record ids replaced by the
+ * names in `names`.
+ */
+function buildActivityDescription(
+  event: {
+    action: ActivityAction;
+    field?: string | null;
+    fromValue?: unknown;
+    toValue?: unknown;
+  },
+  names: ReferenceNames
+): ActivityDescription {
   const actionLabels: Record<string, string> = {
     ASSET_CREATED: "Asset created",
     ASSET_NAME_CHANGED: "Name changed",
@@ -4882,27 +4940,5 @@ function buildActivityDescription(event: {
   const label =
     actionLabels[event.action] || event.action.replace(/_/g, " ").toLowerCase();
 
-  // Add from/to values for change events
-  if (
-    event.field &&
-    event.fromValue !== undefined &&
-    event.toValue !== undefined
-  ) {
-    const from = formatFieldValue(event.fromValue);
-    const to = formatFieldValue(event.toValue);
-    if (from && to) {
-      return `${label}: ${from} → ${to}`;
-    }
-  }
-
-  return label;
-}
-
-/** Format a field value for display */
-function formatFieldValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  return JSON.stringify(value);
+  return describeChange(label, event, names);
 }

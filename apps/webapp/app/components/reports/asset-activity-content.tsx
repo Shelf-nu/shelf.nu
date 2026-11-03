@@ -4,7 +4,7 @@
  * Renders the body of the "Asset Activity" report: a hero section summarising
  * total activity counts (assignments, check-ins/outs, most active asset) plus
  * a chronological table of recent asset events with semantic activity-type
- * badges.
+ * badges and a plain-words description of each change.
  *
  * Extracted from the monolithic reports route during the
  * `reports.$reportId.tsx` decomposition. The route owns data fetching,
@@ -83,6 +83,17 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         </span>
       );
     },
+  },
+  {
+    accessorKey: "description",
+    header: "Details",
+    // Table cells never wrap; this one does, so a long change such as
+    // "Location changed: Main warehouse → Unit 4, Leeds" stays readable.
+    cell: ({ row }) => (
+      <span className="block min-w-48 max-w-xs whitespace-normal text-gray-700">
+        {row.original.description}
+      </span>
+    ),
   },
   {
     accessorKey: "performedBy",
