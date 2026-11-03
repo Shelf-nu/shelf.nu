@@ -383,7 +383,7 @@ describe("the Pending approval filter", () => {
     const response = await BOOKINGS_INDEX.loader({
       context: { getSession: () => ({ userId: ME }) },
       request: new Request(
-        "http://localhost/bookings?status=PENDING_APPROVAL&teamMember=tm-1"
+        "http://localhost/bookings?status=PENDING_APPROVAL&teamMember=tm-1&page=3"
       ),
       params: {},
     } as unknown as LoaderFunctionArgs);

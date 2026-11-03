@@ -146,6 +146,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       if (!approvalSettings?.requireBookingApproval) {
         const cleaned = new URLSearchParams(searchParams);
         cleaned.delete("status");
+        // The page number belonged to the filtered list; the unfiltered one
+        // may have fewer pages, so start it from page 1 like the status
+        // picker does.
+        cleaned.delete("page");
         const query = cleaned.toString();
         /**
          * The saved filter cookie may still hold the stale status. Rewrite it
