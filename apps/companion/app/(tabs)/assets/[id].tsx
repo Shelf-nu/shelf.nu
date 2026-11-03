@@ -41,6 +41,7 @@ import {
 } from "@/lib/constants";
 import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
+import { useOverlayEdges } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { pushIntoTab } from "@/lib/navigation";
@@ -133,6 +134,8 @@ export default function AssetDetailScreen() {
   const { user } = useAuth();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
+  // Clears a side rail or camera cutout in the full-window image viewer.
+  const overlayEdges = useOverlayEdges();
   // Render dates in the acting user's format preferences + timezone.
   const { formatDate, formatDateTime } = useDateFormatter();
 
@@ -1224,9 +1227,22 @@ export default function AssetDetailScreen() {
           animationType="fade"
           onRequestClose={() => setShowImageZoom(false)}
         >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
+          <View
+            style={[
+              styles.zoomOverlay,
+              // The image fills the space between the side insets.
+              {
+                paddingLeft: overlayEdges.left,
+                paddingRight: overlayEdges.right,
+              },
+            ]}
+            accessibilityViewIsModal={true}
+          >
             <TouchableOpacity
-              style={styles.zoomCloseBtn}
+              style={[
+                styles.zoomCloseBtn,
+                { top: overlayEdges.top, right: overlayEdges.right + 20 },
+              ]}
               onPress={() => setShowImageZoom(false)}
               accessibilityLabel="Close image viewer"
               accessibilityRole="button"
@@ -1710,10 +1726,9 @@ const useStyles = createStyles((colors, shadows) => ({
     justifyContent: "center",
     alignItems: "center",
   },
+  // `top` and `right` come from the window's insets at render time.
   zoomCloseBtn: {
     position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
     zIndex: 10,
     width: 44,
     height: 44,

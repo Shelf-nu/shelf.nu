@@ -20,7 +20,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
-  Platform,
 } from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -39,6 +38,7 @@ import {
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
+import { useOverlayEdges } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
 import { CodeSection } from "@/components/shared/code-section";
@@ -67,6 +67,8 @@ export default function KitDetailScreen() {
   const assetNavigation = useAssetScreenNavigation();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
+  // Clears a side rail or camera cutout in the full-window image viewer.
+  const overlayEdges = useOverlayEdges();
   const { formatDate } = useDateFormatter();
 
   // Role-aware UI — the server re-enforces these on every API call.
@@ -376,9 +378,22 @@ export default function KitDetailScreen() {
           animationType="fade"
           onRequestClose={() => setShowImageZoom(false)}
         >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
+          <View
+            style={[
+              styles.zoomOverlay,
+              // The image fills the space between the side insets.
+              {
+                paddingLeft: overlayEdges.left,
+                paddingRight: overlayEdges.right,
+              },
+            ]}
+            accessibilityViewIsModal={true}
+          >
             <TouchableOpacity
-              style={styles.zoomCloseBtn}
+              style={[
+                styles.zoomCloseBtn,
+                { top: overlayEdges.top, right: overlayEdges.right + 20 },
+              ]}
               onPress={() => setShowImageZoom(false)}
               accessibilityLabel="Close image viewer"
               accessibilityRole="button"
@@ -592,10 +607,9 @@ const useStyles = createStyles((colors, shadows) => ({
     justifyContent: "center",
     alignItems: "center",
   },
+  // `top` and `right` come from the window's insets at render time.
   zoomCloseBtn: {
     position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
     zIndex: 10,
     width: 44,
     height: 44,

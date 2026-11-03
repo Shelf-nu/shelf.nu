@@ -43,6 +43,7 @@ import type {
 } from "@/lib/api/types";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -410,6 +411,13 @@ function ScannerContent() {
   }, [anyDrawerVisible]);
 
   const insets = useSafeAreaInsets();
+  /**
+   * Side insets the overlay's controls keep clear of: an iPhone Duo's
+   * status-bar rail or a turned foldable's camera cutout. Each side is its
+   * own; the tab sidebar already covers the left one when it is showing.
+   */
+  const sideInsets = useTabScreenInsets();
+  const sideInsetStyle = { left: sideInsets.left, right: sideInsets.right };
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -3087,7 +3095,10 @@ function ScannerContent() {
         {/* Top - Action picker or Booking header */}
         <View style={styles.overlaySection} pointerEvents="box-none">
           {isBookingMode ? (
-            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+            <View
+              style={[styles.actionPickerContainer, sideInsetStyle]}
+              pointerEvents="box-none"
+            >
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
                   // Anchored navigation, like the submit handlers: the scanner
@@ -3142,7 +3153,10 @@ function ScannerContent() {
               </View>
             </View>
           ) : (
-            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+            <View
+              style={[styles.actionPickerContainer, sideInsetStyle]}
+              pointerEvents="box-none"
+            >
               <ActionPills
                 actions={availableActions}
                 currentAction={action}
@@ -3189,7 +3203,14 @@ function ScannerContent() {
            * The drawer is an absolutely-positioned sibling at `bottom: 0`, so
            * it never needed the overlay to make room in the first place.
            */
-          style={[styles.overlaySection, styles.bottomSection]}
+          style={[
+            styles.overlaySection,
+            styles.bottomSection,
+            {
+              paddingLeft: sideInsets.left,
+              paddingRight: sideInsets.right,
+            },
+          ]}
           pointerEvents="box-none"
         >
           {/* Mode indicator dots */}
@@ -3286,7 +3307,14 @@ function ScannerContent() {
             be occluded (the unclaimed card is tall enough to reach this pill). */}
         {!scanResult && (
           <View
-            style={[styles.devScanContainer, manualEntryPlacement]}
+            style={[
+              styles.devScanContainer,
+              manualEntryPlacement,
+              {
+                left: spacing.md + sideInsets.left,
+                right: spacing.md + sideInsets.right,
+              },
+            ]}
             // Full-width host: only the pill or the field inside it takes
             // touches, so a tap beside them reaches the paused layer.
             pointerEvents="box-none"
@@ -3357,7 +3385,7 @@ function ScannerContent() {
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
         <View
-          style={styles.drawerHost}
+          style={[styles.drawerHost, sideInsetStyle]}
           pointerEvents="box-none"
           onLayout={(e) => {
             const h = Math.round(e.nativeEvent.layout.height);
@@ -3638,10 +3666,9 @@ const useStyles = createStyles((colors) => ({
 
   // Hosts the drawers as a sibling ABOVE the paused overlay (zIndex 5) so
   // their buttons stay tappable while the camera is auto-paused.
+  // `left` and `right` come from the side insets at render time.
   drawerHost: {
     position: "absolute",
-    left: 0,
-    right: 0,
     bottom: 0,
     zIndex: 10,
   },
@@ -3697,11 +3724,10 @@ const useStyles = createStyles((colors) => ({
   },
 
   // Action picker
+  // `left` and `right` come from the side insets at render time.
   actionPickerContainer: {
     position: "absolute",
     bottom: spacing.lg,
-    left: 0,
-    right: 0,
   },
   bookingModeHeader: {
     flexDirection: "row",
@@ -3760,10 +3786,9 @@ const useStyles = createStyles((colors) => ({
   },
 
   // ── Dev Scan Injection (DEV only) ───────────────
+  // `left` and `right` come from the side insets at render time.
   devScanContainer: {
     position: "absolute" as const,
-    left: spacing.md,
-    right: spacing.md,
     zIndex: 999,
   },
   devScanRow: {

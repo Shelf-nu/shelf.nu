@@ -49,6 +49,16 @@ describe("isTabletScreen", () => {
     // iPad mini, the smallest iPad.
     assert.equal(isTabletScreen(744, 1133), true);
   });
+
+  it("counts a foldable's inner display as a tablet and its outer as a phone", () => {
+    // iPhone Duo: inner display open sideways and upright, then the outer.
+    assert.equal(isTabletScreen(951, 669), true);
+    assert.equal(isTabletScreen(669, 951), true);
+    assert.equal(isTabletScreen(466, 678), false);
+    // Pixel 9 Pro Fold: inner screen, then the outer.
+    assert.equal(isTabletScreen(852, 883), true);
+    assert.equal(isTabletScreen(443, 994), false);
+  });
 });
 
 describe("showsTabSidebar", () => {
@@ -56,10 +66,26 @@ describe("showsTabSidebar", () => {
     assert.equal(showsTabSidebar(430), false);
     // iPad Air 11" and Pixel Tablet, upright.
     assert.equal(showsTabSidebar(820), false);
+    assert.equal(showsTabSidebar(834), false);
     assert.equal(showsTabSidebar(800), false);
   });
 
+  it("keeps the bottom tab bar on an upright Duo, a Fold and split windows", () => {
+    assert.equal(showsTabSidebar(669), false);
+    // Pixel 9 Pro Fold inner screen, either way round.
+    assert.equal(showsTabSidebar(852), false);
+    assert.equal(showsTabSidebar(883), false);
+    // Duo Split View (left window) and Fold split screen.
+    assert.equal(showsTabSidebar(469), false);
+    assert.equal(showsTabSidebar(426), false);
+  });
+
+  it("shows the sidebar on an iPhone Duo opened sideways", () => {
+    assert.equal(showsTabSidebar(951), true);
+  });
+
   it("shows the sidebar on tablets held sideways", () => {
+    assert.equal(showsTabSidebar(1133), true);
     assert.equal(showsTabSidebar(1180), true);
     assert.equal(showsTabSidebar(1280), true);
   });

@@ -36,6 +36,7 @@ import {
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -734,7 +735,10 @@ export default function AddBookingAssetsScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    // On iOS this modal sits outside the content column, so it keeps clear
+    // of a side rail or cutout itself. The edges are measured natively, so
+    // inside the column on Android (already clear) they add nothing.
+    <SafeAreaView edges={["left", "right"]} style={styles.container}>
       {/* Segmented Assets / Kits / Models */}
       <View style={styles.segment}>
         {(["assets", "kits", "models"] as Mode[]).map((m) => {
@@ -965,7 +969,7 @@ export default function AddBookingAssetsScreen() {
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

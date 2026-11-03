@@ -12,11 +12,19 @@
  * column width (an iPad window being resized) changes a style instead of
  * remounting the screen and losing its state.
  *
+ * The wrapper also keeps the screen clear of the window's side insets: an
+ * iPhone Duo's status-bar rail (about 84 pt down the left or right edge when
+ * open sideways or in Split View) and an Android foldable's camera cutout
+ * when the device is turned. It measures its own overlap with them natively,
+ * so a rail already covered by the tab sidebar adds nothing, and the left and
+ * right sides are padded separately. Phones held upright have no side insets.
+ *
  * @see lib/content-column.ts for the column widths
  */
 
 import type { ReactElement, ReactNode } from "react";
 import { View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import type { ParamListBase, RouteProp } from "@react-navigation/native";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
@@ -44,7 +52,9 @@ function ContentColumn({
   const { colors } = useTheme();
 
   return (
-    <View
+    // Side edges only: the header and the tab bar own the top and bottom.
+    <SafeAreaView
+      edges={["left", "right"]}
       style={{
         flex: 1,
         alignItems: "center",
@@ -54,7 +64,7 @@ function ContentColumn({
       }}
     >
       <View style={{ flex: 1, width: "100%", maxWidth }}>{children}</View>
-    </View>
+    </SafeAreaView>
   );
 }
 
