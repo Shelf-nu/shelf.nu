@@ -1,11 +1,11 @@
 /**
- * What a PDF document prints for each custom field type.
+ * What a PDF template prints for each custom field type.
  *
  * @see {@link file://./format.ts}
  */
 import { describe, expect, it } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
-import { formatDocumentCustomFieldValue } from "./format";
+import { formatTemplateCustomFieldValue } from "./format";
 
 const prefs: ResolvedFormatPrefs = {
   dateFormat: "DD_MM_YYYY",
@@ -15,10 +15,10 @@ const prefs: ResolvedFormatPrefs = {
 };
 
 function print(
-  type: Parameters<typeof formatDocumentCustomFieldValue>[0]["type"],
+  type: Parameters<typeof formatTemplateCustomFieldValue>[0]["type"],
   value: unknown
 ) {
-  return formatDocumentCustomFieldValue({
+  return formatTemplateCustomFieldValue({
     value,
     type,
     currency: "EUR",
@@ -27,7 +27,7 @@ function print(
   });
 }
 
-describe("PDF document custom field values", () => {
+describe("PDF template custom field values", () => {
   it("prints an amount in the workspace currency", () => {
     expect(print("AMOUNT", { raw: 85, valueText: "85" })).toBe("€85.00");
   });

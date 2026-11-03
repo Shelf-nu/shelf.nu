@@ -1,75 +1,75 @@
 /**
- * Printed Document Service
+ * Printed Template Service
  *
- * Reads and writes a workspace's PDF documents: the named layouts of the
+ * Reads and writes a workspace's PDF templates: the named layouts of the
  * booking PDF. Every function takes the caller's `organizationId` and scopes
- * every query by it, so a document id from another workspace reads as not found.
+ * every query by it, so a template id from another workspace reads as not found.
  *
- * A workspace always has at least one document and exactly one default. New
- * workspaces get the built-in documents when they are created; a workspace that
+ * A workspace always has at least one template and exactly one default. New
+ * workspaces get the built-in templates when they are created; a workspace that
  * has none (one created by a path that skips them) gets them the first time
- * its documents are read. Document names are unique per workspace, ignoring case.
+ * its templates are read. Template names are unique per workspace, ignoring case.
  *
  * @see {@link file://./config.ts}
  * @see {@link file://../../routes/_layout+/settings.general.tsx}
  * @see {@link file://../../routes/api+/bookings.$bookingId.generate-pdf.tsx}
  */
-import type { Prisma, PdfDocument } from "@prisma/client";
-import { PdfDocumentKind } from "@prisma/client";
+import type { Prisma, PdfTemplate } from "@prisma/client";
+import { PdfTemplateKind } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { assertCustomFieldsBelongToOrg } from "~/utils/org-validation.server";
-import type { BookingDocumentConfig } from "./config";
+import type { BookingTemplateConfig } from "./config";
 import {
   BOOKING_CHECKLIST_CONFIG,
-  builtInBookingDocuments,
-  MAX_DOCUMENT_CUSTOM_FIELDS,
-  MAX_DOCUMENT_NAME_LENGTH,
-  parseBookingDocumentConfig,
+  builtInBookingTemplates,
+  MAX_TEMPLATE_CUSTOM_FIELDS,
+  MAX_TEMPLATE_NAME_LENGTH,
+  parseBookingTemplateConfig,
 } from "./config";
 
-const label = "PDF documents";
+const label = "PDF templates";
 
 type TxClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
 
-const KIND = PdfDocumentKind.BOOKING;
+const KIND = PdfTemplateKind.BOOKING;
 
-/** A PDF document with its config parsed. */
-export type ResolvedPdfDocument = Pick<
-  PdfDocument,
+/** A PDF template with its config parsed. */
+export type ResolvedPdfTemplate = Pick<
+  PdfTemplate,
   "id" | "name" | "isDefault"
-> & { config: BookingDocumentConfig };
+> & { config: BookingTemplateConfig };
 
-const DOCUMENT_SELECT = {
+const TEMPLATE_SELECT = {
   id: true,
   name: true,
   isDefault: true,
   config: true,
-} satisfies Prisma.PdfDocumentSelect;
+} satisfies Prisma.PdfTemplateSelect;
 
-/** List order: the default first, then the order the documents were made in. */
-const DOCUMENT_ORDER = [
+/** List order: the default first, then the order the templates were made in. */
+const TEMPLATE_ORDER = [
   { isDefault: "desc" },
   { createdAt: "asc" },
   { name: "asc" },
-] satisfies Prisma.PdfDocumentOrderByWithRelationInput[];
+] satisfies Prisma.PdfTemplateOrderByWithRelationInput[];
 
 function resolve(
-  row: Prisma.PdfDocumentGetPayload<{ select: typeof DOCUMENT_SELECT }>
-): ResolvedPdfDocument {
+  row: Prisma.PdfTemplateGetPayload<{ select: typeof TEMPLATE_SELECT }>
+): ResolvedPdfTemplate {
   return {
     id: row.id,
     name: row.name,
     isDefault: row.isDefault,
-    config: parseBookingDocumentConfig(row.config),
+    config: parseBookingTemplateConfig(row.config),
   };
 }
 
 /**
- * Whether the workspace's tier lets it keep PDF documents: saved layouts for
+ * Whether the workspace's tier lets it keep PDF templates: saved layouts for
  * a booking's PDF, picked when the PDF is generated. Without it the booking
  * PDF prints the Checklist layout, and nothing about it can be chosen.
  *
@@ -90,52 +90,52 @@ export function canCustomizePdfDocuments(
 }
 
 /**
- * The built-in documents of a new workspace, as fields of its
- * `OrganizationCreateInput`: the documents, and when the paid ones were
+ * The built-in templates of a new workspace, as fields of its
+ * `OrganizationCreateInput`: the templates, and when the paid ones were
  * given, so the first read does not seed them again.
  *
  * @param params.canCustomize - Whether the owner's tier includes PDF
- *   documents, which adds the Check-out receipt
- * @returns `pdfDocuments` and `paidPdfDocumentsSeededAt`, to spread into the
+ *   templates, which adds the Check-out receipt
+ * @returns `pdfTemplates` and `paidPdfDocumentsSeededAt`, to spread into the
  *   create input
  */
-export function pdfDocumentsForNewWorkspace({
+export function pdfTemplatesForNewWorkspace({
   canCustomize,
 }: {
   canCustomize: boolean;
 }) {
   return {
-    pdfDocuments: {
+    pdfTemplates: {
       createMany: {
-        data: builtInBookingDocuments({ canCustomize }).map((document) => ({
-          name: document.name,
+        data: builtInBookingTemplates({ canCustomize }).map((template) => ({
+          name: template.name,
           kind: KIND,
-          config: document.config,
-          isDefault: document.isDefault,
+          config: template.config,
+          isDefault: template.isDefault,
         })),
       },
     },
     paidPdfDocumentsSeededAt: canCustomize ? new Date() : null,
   } satisfies Pick<
     Prisma.OrganizationCreateInput,
-    "pdfDocuments" | "paidPdfDocumentsSeededAt"
+    "pdfTemplates" | "paidPdfDocumentsSeededAt"
   >;
 }
 
 /**
- * Gives a workspace whose tier includes PDF documents the built-in ones it
+ * Gives a workspace whose tier includes PDF templates the built-in ones it
  * lacks, then records that it has them. Idempotent: two concurrent calls
- * create each document once, because the name and the default are both
+ * create each template once, because the name and the default are both
  * unique per workspace; a built-in the workspace already has is skipped.
  */
-async function seedPaidDocuments(organizationId: string) {
-  await db.pdfDocument.createMany({
-    data: builtInBookingDocuments({ canCustomize: true }).map((document) => ({
+async function seedPaidTemplates(organizationId: string) {
+  await db.pdfTemplate.createMany({
+    data: builtInBookingTemplates({ canCustomize: true }).map((template) => ({
       organizationId,
-      name: document.name,
+      name: template.name,
       kind: KIND,
-      config: document.config,
-      isDefault: document.isDefault,
+      config: template.config,
+      isDefault: template.isDefault,
     })),
     skipDuplicates: true,
   });
@@ -146,44 +146,44 @@ async function seedPaidDocuments(organizationId: string) {
 }
 
 /**
- * Every booking document of a workspace, default first. Only for a workspace
- * whose tier includes PDF documents. The first time such a workspace reads
+ * Every booking template of a workspace, default first. Only for a workspace
+ * whose tier includes PDF templates. The first time such a workspace reads
  * them (a workspace that upgraded, or one created by a path that seeds
  * nothing), it gets the paid built-ins it lacks. That happens once: a
- * document an admin deleted later is not seeded back.
+ * template an admin deleted later is not seeded back.
  *
  * @param params.organizationId - The caller's workspace
- * @returns The documents with their configs parsed
+ * @returns The templates with their configs parsed
  * @throws {ShelfError} 500 when the read fails
  */
-export async function getPdfDocuments({
+export async function getPdfTemplates({
   organizationId,
 }: {
   organizationId: string;
-}): Promise<ResolvedPdfDocument[]> {
+}): Promise<ResolvedPdfTemplate[]> {
   try {
     const read = () =>
       db.organization.findUnique({
         where: { id: organizationId },
         select: {
           paidPdfDocumentsSeededAt: true,
-          pdfDocuments: {
+          pdfTemplates: {
             where: { kind: KIND },
-            select: DOCUMENT_SELECT,
-            orderBy: DOCUMENT_ORDER,
+            select: TEMPLATE_SELECT,
+            orderBy: TEMPLATE_ORDER,
           },
         },
       });
     let workspace = await read();
     if (workspace && !workspace.paidPdfDocumentsSeededAt) {
-      await seedPaidDocuments(organizationId);
+      await seedPaidTemplates(organizationId);
       workspace = await read();
     }
-    return (workspace?.pdfDocuments ?? []).map(resolve);
+    return (workspace?.pdfTemplates ?? []).map(resolve);
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while loading the PDF documents.",
+      message: "Something went wrong while loading the PDF templates.",
       additionalData: { organizationId },
       label,
     });
@@ -191,20 +191,20 @@ export async function getPdfDocuments({
 }
 
 /**
- * Picks the document a booking PDF prints with.
+ * Picks the template a booking PDF prints with.
  *
- * - An explicitly `requestedId` must be one of this workspace's documents;
- *   anything else, another workspace's document included, is a 404.
+ * - An explicitly `requestedId` must be one of this workspace's templates;
+ *   anything else, another workspace's template included, is a 404.
  * - Otherwise the `rememberedId` (the caller's last pick) when it still
- *   exists in this workspace, then the default document.
+ *   exists in this workspace, then the default template.
  *
  * @param params.organizationId - The caller's workspace
- * @param params.requestedId - The `?document=` id, when the URL names one
- * @param params.rememberedId - The last document this person printed with here
- * @returns The document and every document of the workspace, for the picker
- * @throws {ShelfError} 404 when `requestedId` is not a document of the workspace
+ * @param params.requestedId - The `?template=` id, when the URL names one
+ * @param params.rememberedId - The last template this person printed with here
+ * @returns The template and every template of the workspace, for the picker
+ * @throws {ShelfError} 404 when `requestedId` is not a template of the workspace
  */
-export async function resolvePdfDocumentForPrint({
+export async function resolvePdfTemplateForPrint({
   organizationId,
   requestedId,
   rememberedId,
@@ -213,34 +213,34 @@ export async function resolvePdfDocumentForPrint({
   requestedId?: string | null;
   rememberedId?: string | null;
 }): Promise<{
-  document: ResolvedPdfDocument;
-  documents: ResolvedPdfDocument[];
+  template: ResolvedPdfTemplate;
+  templates: ResolvedPdfTemplate[];
 }> {
-  const documents = await getPdfDocuments({ organizationId });
+  const templates = await getPdfTemplates({ organizationId });
 
   if (requestedId) {
-    const requested = documents.find((document) => document.id === requestedId);
+    const requested = templates.find((template) => template.id === requestedId);
     if (!requested) {
       throw new ShelfError({
         cause: null,
-        title: "Document not found",
+        title: "Template not found",
         message:
-          "This document does not exist in your workspace. It may have been deleted. Pick another document.",
+          "This template does not exist in your workspace. It may have been deleted. Pick another template.",
         additionalData: { organizationId, requestedId },
         label,
         status: 404,
         shouldBeCaptured: false,
       });
     }
-    return { document: requested, documents };
+    return { template: requested, templates };
   }
 
-  const document =
-    documents.find((s) => s.id === rememberedId) ??
-    documents.find((s) => s.isDefault) ??
-    documents[0];
+  const template =
+    templates.find((s) => s.id === rememberedId) ??
+    templates.find((s) => s.isDefault) ??
+    templates[0];
 
-  return { document, documents };
+  return { template, templates };
 }
 
 /** Turns a duplicate-name write into a message for the form. */
@@ -254,7 +254,7 @@ function rethrowNameTaken(cause: unknown, name: string): never {
     throw new ShelfError({
       cause,
       title: "Name already used",
-      message: `A document called "${name}" already exists. Pick another name.`,
+      message: `A template called "${name}" already exists. Pick another name.`,
       label,
       status: 400,
       shouldBeCaptured: false,
@@ -276,45 +276,45 @@ function wrap(cause: unknown, message: string, organizationId: string): never {
 }
 
 /**
- * Locks every document of the workspace until the transaction ends, so two
+ * Locks every template of the workspace until the transaction ends, so two
  * concurrent deletes or default changes run one after the other and the
  * keep-one and one-default rules see each other's result.
  */
-async function lockWorkspaceDocuments(tx: TxClient, organizationId: string) {
-  await tx.$queryRaw`SELECT "id" FROM "PdfDocument" WHERE "organizationId" = ${organizationId} FOR UPDATE`;
+async function lockWorkspaceTemplates(tx: TxClient, organizationId: string) {
+  await tx.$queryRaw`SELECT "id" FROM "PdfTemplate" WHERE "organizationId" = ${organizationId} FOR UPDATE`;
 }
 
-async function findDocumentOrThrow(
+async function findTemplateOrThrow(
   tx: TxClient,
-  { organizationId, documentId }: { organizationId: string; documentId: string }
+  { organizationId, templateId }: { organizationId: string; templateId: string }
 ) {
-  const document = await tx.pdfDocument.findFirst({
-    where: { id: documentId, organizationId, kind: KIND },
-    select: DOCUMENT_SELECT,
+  const template = await tx.pdfTemplate.findFirst({
+    where: { id: templateId, organizationId, kind: KIND },
+    select: TEMPLATE_SELECT,
   });
-  if (!document) {
+  if (!template) {
     throw new ShelfError({
       cause: null,
-      title: "Document not found",
-      message: "This document does not exist in your workspace.",
-      additionalData: { organizationId, documentId },
+      title: "Template not found",
+      message: "This template does not exist in your workspace.",
+      additionalData: { organizationId, templateId },
       label,
       status: 404,
       shouldBeCaptured: false,
     });
   }
-  return document;
+  return template;
 }
 
 /**
- * Adds a document laid out like the Checklist document.
+ * Adds a template laid out like the Checklist template.
  *
  * @param params.organizationId - The caller's workspace
- * @param params.name - The new document's name, unique in the workspace
- * @returns The new document
+ * @param params.name - The new template's name, unique in the workspace
+ * @returns The new template
  * @throws {ShelfError} 400 when the name is taken
  */
-export async function createPdfDocument({
+export async function createPdfTemplate({
   organizationId,
   name,
 }: {
@@ -322,11 +322,11 @@ export async function createPdfDocument({
   name: string;
 }) {
   try {
-    // A workspace without documents gets the built-in ones first, so the new
-    // document is never the only one and never the default.
-    await getPdfDocuments({ organizationId });
+    // A workspace without templates gets the built-in ones first, so the new
+    // template is never the only one and never the default.
+    await getPdfTemplates({ organizationId });
     await assertNameFree(db, { organizationId, name });
-    return await db.pdfDocument
+    return await db.pdfTemplate
       .create({
         data: {
           organizationId,
@@ -334,35 +334,35 @@ export async function createPdfDocument({
           kind: KIND,
           config: BOOKING_CHECKLIST_CONFIG,
         },
-        select: DOCUMENT_SELECT,
+        select: TEMPLATE_SELECT,
       })
       .then(resolve)
       .catch((cause) => rethrowNameTaken(cause, name));
   } catch (cause) {
     wrap(
       cause,
-      "Something went wrong while adding the document.",
+      "Something went wrong while adding the template.",
       organizationId
     );
   }
 }
 
 /**
- * Refuses a name another document of the workspace already has, ignoring case,
- * so the picker never lists two documents that read the same.
+ * Refuses a name another template of the workspace already has, ignoring case,
+ * so the picker never lists two templates that read the same.
  *
- * @param params.exceptId - The document being renamed, which may keep its name
+ * @param params.exceptId - The template being renamed, which may keep its name
  * @throws {ShelfError} 400 when the name is taken
  */
 async function assertNameFree(
-  client: Pick<TxClient, "pdfDocument">,
+  client: Pick<TxClient, "pdfTemplate">,
   {
     organizationId,
     name,
     exceptId,
   }: { organizationId: string; name: string; exceptId?: string }
 ) {
-  const clash = await client.pdfDocument.findFirst({
+  const clash = await client.pdfTemplate.findFirst({
     where: {
       organizationId,
       kind: KIND,
@@ -377,43 +377,43 @@ async function assertNameFree(
 /**
  * Picks "Copy of <name>", then "Copy of <name> (2)", and so on, until the
  * name is free in the workspace (ignoring case). The source name is cut so
- * the copy still fits {@link MAX_DOCUMENT_NAME_LENGTH}.
+ * the copy still fits {@link MAX_TEMPLATE_NAME_LENGTH}.
  */
 function copyName(name: string, taken: string[]) {
   const lower = new Set(taken.map((t) => t.toLowerCase()));
   for (let n = 1; ; n++) {
     const suffix = n === 1 ? "" : ` (${n})`;
-    const room = MAX_DOCUMENT_NAME_LENGTH - "Copy of ".length - suffix.length;
+    const room = MAX_TEMPLATE_NAME_LENGTH - "Copy of ".length - suffix.length;
     const candidate = `Copy of ${name.slice(0, room).trimEnd()}${suffix}`;
     if (!lower.has(candidate.toLowerCase())) return candidate;
   }
 }
 
 /**
- * Adds a copy of a document, named "Copy of <name>". The copy is never the
+ * Adds a copy of a template, named "Copy of <name>". The copy is never the
  * default.
  *
  * @param params.organizationId - The caller's workspace
- * @param params.documentId - The document to copy
+ * @param params.templateId - The template to copy
  * @returns The copy
- * @throws {ShelfError} 404 when the document is not in the workspace
+ * @throws {ShelfError} 404 when the template is not in the workspace
  */
-export async function duplicatePdfDocument({
+export async function duplicatePdfTemplate({
   organizationId,
-  documentId,
+  templateId,
 }: {
   organizationId: string;
-  documentId: string;
+  templateId: string;
 }) {
   try {
     return await db.$transaction(async (tx) => {
       // Two copies made at once would both pick the same free name.
-      await lockWorkspaceDocuments(tx, organizationId);
-      const source = await findDocumentOrThrow(tx, {
+      await lockWorkspaceTemplates(tx, organizationId);
+      const source = await findTemplateOrThrow(tx, {
         organizationId,
-        documentId,
+        templateId,
       });
-      const names = await tx.pdfDocument.findMany({
+      const names = await tx.pdfTemplate.findMany({
         where: { organizationId, kind: KIND },
         select: { name: true },
       });
@@ -421,15 +421,15 @@ export async function duplicatePdfDocument({
         source.name,
         names.map((n) => n.name)
       );
-      return tx.pdfDocument
+      return tx.pdfTemplate
         .create({
           data: {
             organizationId,
             name,
             kind: KIND,
-            config: parseBookingDocumentConfig(source.config),
+            config: parseBookingTemplateConfig(source.config),
           },
-          select: DOCUMENT_SELECT,
+          select: TEMPLATE_SELECT,
         })
         .then(resolve)
         .catch((cause) => rethrowNameTaken(cause, name));
@@ -437,14 +437,14 @@ export async function duplicatePdfDocument({
   } catch (cause) {
     wrap(
       cause,
-      "Something went wrong while duplicating the document.",
+      "Something went wrong while duplicating the template.",
       organizationId
     );
   }
 }
 
 /**
- * Proves every custom field a document names is a live field of the workspace
+ * Proves every custom field a template names is a live field of the workspace
  * that is not deleted. Every custom field type prints: most as a column, a
  * multi-line text in the description row.
  *
@@ -458,11 +458,11 @@ async function assertPrintableCustomFields(
     customFieldIds,
   }: { organizationId: string; customFieldIds: string[] }
 ) {
-  if (customFieldIds.length > MAX_DOCUMENT_CUSTOM_FIELDS) {
+  if (customFieldIds.length > MAX_TEMPLATE_CUSTOM_FIELDS) {
     throw new ShelfError({
       cause: null,
       title: "Too many custom fields",
-      message: `A document prints at most ${MAX_DOCUMENT_CUSTOM_FIELDS} custom fields.`,
+      message: `A template prints at most ${MAX_TEMPLATE_CUSTOM_FIELDS} custom fields.`,
       label,
       status: 400,
       shouldBeCaptured: false,
@@ -492,40 +492,40 @@ async function assertPrintableCustomFields(
 }
 
 /**
- * Saves a document's name and switches.
+ * Saves a template's name and switches.
  *
  * @param params.organizationId - The caller's workspace
- * @param params.documentId - The document to save
+ * @param params.templateId - The template to save
  * @param params.name - Its name, unique in the workspace
  * @param params.config - Its switches
- * @returns The saved document
+ * @returns The saved template
  * @throws {ShelfError} 400 for a taken name or an unprintable custom field,
- *   404 when the document is not in the workspace
+ *   404 when the template is not in the workspace
  */
-export async function updatePdfDocument({
+export async function updatePdfTemplate({
   organizationId,
-  documentId,
+  templateId,
   name,
   config,
 }: {
   organizationId: string;
-  documentId: string;
+  templateId: string;
   name: string;
-  config: BookingDocumentConfig;
+  config: BookingTemplateConfig;
 }) {
   try {
     return await db.$transaction(async (tx) => {
-      await findDocumentOrThrow(tx, { organizationId, documentId });
-      await assertNameFree(tx, { organizationId, name, exceptId: documentId });
+      await findTemplateOrThrow(tx, { organizationId, templateId });
+      await assertNameFree(tx, { organizationId, name, exceptId: templateId });
       await assertPrintableCustomFields(tx, {
         organizationId,
         customFieldIds: config.customFieldIds,
       });
-      return tx.pdfDocument
+      return tx.pdfTemplate
         .update({
-          where: { id: documentId, organizationId },
+          where: { id: templateId, organizationId },
           data: { name, config },
-          select: DOCUMENT_SELECT,
+          select: TEMPLATE_SELECT,
         })
         .then(resolve)
         .catch((cause) => rethrowNameTaken(cause, name));
@@ -533,74 +533,74 @@ export async function updatePdfDocument({
   } catch (cause) {
     wrap(
       cause,
-      "Something went wrong while saving the document.",
+      "Something went wrong while saving the template.",
       organizationId
     );
   }
 }
 
 /**
- * Makes a document the one the print dialog offers first.
+ * Makes a template the one the print dialog offers first.
  *
  * @param params.organizationId - The caller's workspace
- * @param params.documentId - The new default
- * @throws {ShelfError} 404 when the document is not in the workspace
+ * @param params.templateId - The new default
+ * @throws {ShelfError} 404 when the template is not in the workspace
  */
-export async function setDefaultPdfDocument({
+export async function setDefaultPdfTemplate({
   organizationId,
-  documentId,
+  templateId,
 }: {
   organizationId: string;
-  documentId: string;
+  templateId: string;
 }) {
   try {
     await db.$transaction(async (tx) => {
-      await lockWorkspaceDocuments(tx, organizationId);
-      await findDocumentOrThrow(tx, { organizationId, documentId });
+      await lockWorkspaceTemplates(tx, organizationId);
+      await findTemplateOrThrow(tx, { organizationId, templateId });
       // Clear first: one default per workspace is a unique index.
-      await tx.pdfDocument.updateMany({
+      await tx.pdfTemplate.updateMany({
         where: { organizationId, kind: KIND, isDefault: true },
         data: { isDefault: false },
       });
-      await tx.pdfDocument.update({
-        where: { id: documentId, organizationId },
+      await tx.pdfTemplate.update({
+        where: { id: templateId, organizationId },
         data: { isDefault: true },
       });
     });
   } catch (cause) {
     wrap(
       cause,
-      "Something went wrong while changing the default document.",
+      "Something went wrong while changing the default template.",
       organizationId
     );
   }
 }
 
 /**
- * Deletes a document. The last document of a workspace cannot be deleted. Deleting
- * the default makes the oldest remaining document the default.
+ * Deletes a template. The last template of a workspace cannot be deleted. Deleting
+ * the default makes the oldest remaining template the default.
  *
  * @param params.organizationId - The caller's workspace
- * @param params.documentId - The document to delete
- * @throws {ShelfError} 400 for the last document, 404 when the document is not in
+ * @param params.templateId - The template to delete
+ * @throws {ShelfError} 400 for the last template, 404 when the template is not in
  *   the workspace
  */
-export async function deletePdfDocument({
+export async function deletePdfTemplate({
   organizationId,
-  documentId,
+  templateId,
 }: {
   organizationId: string;
-  documentId: string;
+  templateId: string;
 }) {
   try {
     await db.$transaction(async (tx) => {
-      await lockWorkspaceDocuments(tx, organizationId);
-      const document = await findDocumentOrThrow(tx, {
+      await lockWorkspaceTemplates(tx, organizationId);
+      const template = await findTemplateOrThrow(tx, {
         organizationId,
-        documentId,
+        templateId,
       });
-      const remaining = await tx.pdfDocument.findMany({
-        where: { organizationId, kind: KIND, id: { not: documentId } },
+      const remaining = await tx.pdfTemplate.findMany({
+        where: { organizationId, kind: KIND, id: { not: templateId } },
         select: { id: true },
         orderBy: [{ createdAt: "asc" }, { name: "asc" }],
         take: 1,
@@ -609,22 +609,22 @@ export async function deletePdfDocument({
       if (remaining.length === 0) {
         throw new ShelfError({
           cause: null,
-          title: "Keep one document",
+          title: "Keep one template",
           message:
-            "A workspace always keeps at least one document. Add another document before you delete this one.",
+            "A workspace always keeps at least one template. Add another template before you delete this one.",
           label,
           status: 400,
           shouldBeCaptured: false,
-          additionalData: { organizationId, documentId },
+          additionalData: { organizationId, templateId },
         });
       }
 
-      await tx.pdfDocument.delete({
-        where: { id: documentId, organizationId },
+      await tx.pdfTemplate.delete({
+        where: { id: templateId, organizationId },
       });
 
-      if (document.isDefault) {
-        await tx.pdfDocument.update({
+      if (template.isDefault) {
+        await tx.pdfTemplate.update({
           where: { id: remaining[0].id, organizationId },
           data: { isDefault: true },
         });
@@ -633,7 +633,7 @@ export async function deletePdfDocument({
   } catch (cause) {
     wrap(
       cause,
-      "Something went wrong while deleting the document.",
+      "Something went wrong while deleting the template.",
       organizationId
     );
   }

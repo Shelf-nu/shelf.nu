@@ -16,8 +16,8 @@ import {
 } from "~/modules/barcode/display";
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
-import { formatDocumentCustomFieldValue } from "~/modules/pdf-document/format";
-import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
+import { formatTemplateCustomFieldValue } from "~/modules/pdf-template/format";
+import { assertCanDownloadBookingTemplates } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
@@ -100,9 +100,9 @@ export interface PdfDbResult {
     customFieldValues: Record<string, string>;
   })[];
   /**
-   * The custom fields the document prints, in the document's order. Only live
-   * fields of the workspace of a type a document can print: a field deleted since
-   * the document was saved drops out here.
+   * The custom fields the template prints, in the template's order. Only live
+   * fields of the workspace of a type a template can print: a field deleted since
+   * the template was saved drops out here.
    */
   customFields: Pick<CustomField, "id" | "name" | "type">[];
   totalValue: string;
@@ -116,7 +116,7 @@ export interface PdfDbResult {
     // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
     | "qrIdDisplayPreference"
     | "barcodesEnabled"
-    // Whether the document prints the code pictures at all.
+    // Whether the template prints the code pictures at all.
     | "showQrCodesOnPdfs"
   >;
   /**
@@ -153,16 +153,16 @@ export interface PdfDbResult {
 /** Optional switches for {@link fetchAllPdfRelatedData}. */
 export interface PdfDataOptions {
   /**
-   * Whether to draw a code picture per asset. `true` by default, so a document
+   * Whether to draw a code picture per asset. `true` by default, so a template
    * that prints code pictures needs no opt-in.
    *
-   * A document that prints only the text code passes `false`: the encode is a
+   * A template that prints only the text code passes `false`: the encode is a
    * per-asset cost and puts a data URL per asset into a response that nothing
    * reads. The workspace's own `showQrCodesOnPdfs` still wins over a `true`
    * here: this switch can only turn generation off, never on.
    */
   includeCodeImages?: boolean;
-  /** Custom fields whose values the document prints. None by default. */
+  /** Custom fields whose values the template prints. None by default. */
   customFieldIds?: string[];
   /** The acting user's format preferences, for printed custom field dates. */
   formatPrefs?: ResolvedFormatPrefs;
@@ -190,7 +190,7 @@ export async function fetchAllPdfRelatedData(
     });
 
     if (access) {
-      assertCanDownloadBookingDocuments({
+      assertCanDownloadBookingTemplates({
         access,
         booking,
         userId,
@@ -231,7 +231,7 @@ export async function fetchAllPdfRelatedData(
       ),
     ];
 
-    const [rawAssets, organization, snapshotKits, documentCustomFields] =
+    const [rawAssets, organization, snapshotKits, templateCustomFields] =
       await Promise.all([
         db.asset.findMany({
           // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: booking PDF lists every asset the booking already holds, archived ones included
@@ -287,8 +287,8 @@ export async function fetchAllPdfRelatedData(
                 },
               },
             },
-            // Only the values of the custom fields the document prints, and
-            // no query at all for a document that prints none.
+            // Only the values of the custom fields the template prints, and
+            // no query at all for a template that prints none.
             customFields: customFieldIds.length > 0 && {
               where: { customFieldId: { in: customFieldIds } },
               select: { customFieldId: true, value: true },
@@ -389,8 +389,8 @@ export async function fetchAllPdfRelatedData(
         ])
       );
 
-    // Drawn only when the document will print them: a workspace that turned code
-    // pictures off, or a caller whose document has no picture at all, renders
+    // Drawn only when the template will print them: a workspace that turned code
+    // pictures off, or a caller whose template has no picture at all, renders
     // nothing from this map, so drawing it would cost an encode per asset and
     // put a data URL per asset in the response that nothing reads. The renderer
     // treats a missing entry as "text only", so an empty map needs no handling
@@ -425,9 +425,9 @@ export async function fetchAllPdfRelatedData(
       },
     }));
 
-    // The document's custom fields in the document's own order, not the database's.
+    // The template's custom fields in the template's own order, not the database's.
     const customFields = customFieldIds.flatMap((id) => {
-      const field = documentCustomFields.find((f) => f.id === id);
+      const field = templateCustomFields.find((f) => f.id === id);
       return field ? [field] : [];
     });
     const locale = getClientHint(request).locale;
@@ -438,7 +438,7 @@ export async function fetchAllPdfRelatedData(
     // any of them again, here or in the browser, and the render list is one row
     // per SLICE, so a QUANTITY_TRACKED asset booked standalone and through
     // three kits would otherwise serialise four copies of each. Each row keeps
-    // only the printed text of the document's custom fields.
+    // only the printed text of the template's custom fields.
 
     const printableAssets = sortedAssets.map(
       ({
@@ -452,7 +452,7 @@ export async function fetchAllPdfRelatedData(
         const customFieldValues: Record<string, string> = {};
         for (const field of customFields) {
           const stored = storedValues.find((v) => v.customFieldId === field.id);
-          const text = formatDocumentCustomFieldValue({
+          const text = formatTemplateCustomFieldValue({
             value: stored?.value,
             type: field.type,
             currency: organization.currency,
@@ -466,10 +466,10 @@ export async function fetchAllPdfRelatedData(
     );
 
     // `getBooking` returns the whole booking, and `BOOKING_WITH_ASSETS_INCLUDE`
-    // hangs two things off it that the document never reads: `bookingAssets`,
+    // hangs two things off it that the template never reads: `bookingAssets`,
     // carrying a second, select-shaped copy of every asset — code relations
     // included — once per slice, and `modelRequests` with full `AssetModel`
-    // rows, which the document reads from the projection above instead. The
+    // rows, which the template reads from the projection above instead. The
     // booking itself is here for its name, description, custodian and tags.
     const {
       bookingAssets: _bookingAssets,
@@ -505,7 +505,7 @@ export async function fetchAllPdfRelatedData(
       modelRequests,
     };
   } catch (cause) {
-    // A refusal (the caller may not see this booking or its documents) keeps
+    // A refusal (the caller may not see this booking or its templates) keeps
     // its own 4xx status; only unexpected failures become a 500.
     rethrowIfClientError(cause);
     throw new ShelfError({

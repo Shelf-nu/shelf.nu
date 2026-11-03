@@ -134,7 +134,7 @@ vi.mock("~/utils/stripe.server", () => ({
 // with premiumIsEnabled false to assert only the authorization branch
 vi.mock("../tier/service.server", () => ({
   updateUserTierId: vi.fn(),
-  // why: createOrganization reads the owner's tier to seed its PDF documents.
+  // why: createOrganization reads the owner's tier to seed its PDF templates.
   getUserTierLimit: vi
     .fn()
     .mockResolvedValue({ canCustomizePdfDocuments: false }),

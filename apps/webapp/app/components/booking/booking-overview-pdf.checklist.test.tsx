@@ -1,11 +1,11 @@
 /**
- * The Checklist prints the booking PDF as it was before PDF documents existed.
+ * The Checklist prints the booking PDF as it was before PDF templates existed.
  *
  * `__snapshots__/checklist-document.html` is the markup the booking PDF rendered
- * for one busy booking before it read a document, recorded by the commit that
+ * for one busy booking before it read a template, recorded by the commit that
  * added this test. A free workspace must keep printing exactly that page; a
- * paid workspace's seeded "Checklist" document prints it too, titled by the
- * document ("Checklist - ...") where the page said "Booking checklist for ...".
+ * paid workspace's seeded "Checklist" template prints it too, titled by the
+ * template ("Checklist - ...") where the page said "Booking checklist for ...".
  *
  * @see {@link file://./booking-overview-pdf.tsx}
  */
@@ -15,7 +15,7 @@ import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { busyBookingPdfMeta } from "@factories";
 
-import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-document/config";
+import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-template/config";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -53,7 +53,7 @@ vi.mock("~/hooks/use-date-formatter", async () => {
   };
 });
 
-describe("booking PDF: the Checklist document", () => {
+describe("booking PDF: the Checklist template", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-28T12:00:00.000Z"));
@@ -64,7 +64,7 @@ describe("booking PDF: the Checklist document", () => {
   });
 
   function printedMarkup(
-    pdfDocument: {
+    pdfTemplate: {
       name: string;
       config: typeof BOOKING_CHECKLIST_CONFIG;
     } | null
@@ -73,7 +73,7 @@ describe("booking PDF: the Checklist document", () => {
       <BookingPDFPreview
         componentRef={{ current: null }}
         pdfMeta={busyBookingPdfMeta()}
-        pdfDocument={pdfDocument}
+        pdfTemplate={pdfTemplate}
       />
     ).container.innerHTML;
   }
@@ -84,11 +84,11 @@ describe("booking PDF: the Checklist document", () => {
       "utf8"
     );
 
-  it("prints exactly the page it always has for a workspace without PDF documents", () => {
+  it("prints exactly the page it always has for a workspace without PDF templates", () => {
     expect(printedMarkup(null)).toBe(before());
   });
 
-  it("prints the same page for a workspace's Checklist document, titled by the document", () => {
+  it("prints the same page for a workspace's Checklist template, titled by the template", () => {
     expect(before()).toContain("Booking checklist for Campaign Shoot");
     expect(
       printedMarkup({ name: "Checklist", config: BOOKING_CHECKLIST_CONFIG })

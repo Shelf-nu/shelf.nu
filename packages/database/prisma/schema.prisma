@@ -474,7 +474,7 @@ model PdfTemplate {
   name String
   kind PdfTemplateKind @default(BOOKING)
 
-  /// The layout's switches. Read through the booking template config parser,
+  /// The layout's switches. Read through `parseBookingTemplateConfig`,
   /// which fills any key a stored row lacks from the Checklist template's
   /// values.
   config Json @default("{}")

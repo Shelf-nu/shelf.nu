@@ -8,6 +8,7 @@ import type {
 import { data, redirect, useLoaderData } from "react-router";
 
 import { z } from "zod";
+import { PdfTemplatesSettings } from "~/components/booking/pdf-templates-settings";
 import { ErrorContent } from "~/components/errors";
 
 import type { HeaderData } from "~/components/layout/header/types";
@@ -21,7 +22,6 @@ import {
   EditWorkspaceSSOSettingsFormSchema,
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
-import { PdfDocumentsSettings } from "~/components/workspace/pdf-documents-settings";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import {
@@ -31,18 +31,18 @@ import {
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
 import {
-  AddDocumentFormSchema,
-  PdfDocumentFormSchema,
-  documentFromForm,
-} from "~/modules/pdf-document/form";
+  AddTemplateFormSchema,
+  PdfTemplateFormSchema,
+  templateFromForm,
+} from "~/modules/pdf-template/form";
 import {
-  createPdfDocument,
-  deletePdfDocument,
-  duplicatePdfDocument,
-  getPdfDocuments,
-  setDefaultPdfDocument,
-  updatePdfDocument,
-} from "~/modules/pdf-document/service.server";
+  createPdfTemplate,
+  deletePdfTemplate,
+  duplicatePdfTemplate,
+  getPdfTemplates,
+  setDefaultPdfTemplate,
+  updatePdfTemplate,
+} from "~/modules/pdf-template/service.server";
 import { generateScimToken } from "~/modules/scim/auth.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -153,13 +153,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : Promise.resolve([]),
       ]);
 
-    // PDF documents are a paid feature: a free workspace sees the card with
-    // an upgrade note, and none of its documents are read.
-    const canCustomizeDocuments = canCustomizePdfDocuments(tierLimit);
-    const [pdfDocuments, documentCustomFields] = canCustomizeDocuments
+    // PDF templates are a paid feature: a free workspace sees the card with
+    // an upgrade note, and none of its templates are read.
+    const canCustomizeTemplates = canCustomizePdfDocuments(tierLimit);
+    const [pdfTemplates, templateCustomFields] = canCustomizeTemplates
       ? await Promise.all([
-          getPdfDocuments({ organizationId }),
-          // The custom fields a document can print, for its edit form.
+          getPdfTemplates({ organizationId }),
+          // The custom fields a template can print, for its edit form.
           db.customField.findMany({
             where: {
               organizationId,
@@ -209,11 +209,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // ENABLE_SCIM is server-only and absent from `getBrowserEnv()`, so a
       // client-side `config.enableScim` would always be false.
       scimEnabled: config.enableScim,
-      canCustomizePdfDocuments: canCustomizeDocuments,
+      canCustomizePdfDocuments: canCustomizeTemplates,
       // A workspace that cannot have bookings has no booking PDF to lay out.
-      showPdfDocuments: canUseBookings(currentOrganization),
-      pdfDocuments,
-      documentCustomFields,
+      showPdfTemplates: canUseBookings(currentOrganization),
+      pdfTemplates,
+      templateCustomFields,
       scimTokens: scimTokens.map((t) => ({
         id: t.id,
         label: t.label,
@@ -283,11 +283,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
           "transfer-ownership",
           "generateScimToken",
           "deleteScimToken",
-          "add-document",
-          "save-document",
-          "duplicate-document",
-          "default-document",
-          "delete-document",
+          "add-template",
+          "save-template",
+          "duplicate-template",
+          "default-template",
+          "delete-template",
         ]),
       }),
       {
@@ -297,15 +297,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    // PDF documents are a paid feature, gated here as well as in the UI: a
+    // PDF templates are a paid feature, gated here as well as in the UI: a
     // hand-made POST from a free workspace must not create or change them.
-    if (intent.endsWith("-document") && !canCustomizePdfDocuments(tierLimit)) {
+    if (intent.endsWith("-template") && !canCustomizePdfDocuments(tierLimit)) {
       throw new ShelfError({
         cause: null,
         title: "Not on your plan",
         message:
-          "PDF documents are part of paid plans. Upgrade your plan to choose and edit what a booking's PDF prints.",
-        label: "PDF documents",
+          "PDF templates are part of paid plans. Upgrade your plan to choose and edit what a booking's PDF prints.",
+        label: "PDF templates",
         status: 403,
         shouldBeCaptured: false,
         additionalData: { organizationId },
@@ -651,54 +651,54 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect("/settings/general");
       }
-      case "add-document": {
-        const { name } = parseData(formData, AddDocumentFormSchema, {
+      case "add-template": {
+        const { name } = parseData(formData, AddTemplateFormSchema, {
           additionalData: { userId, organizationId },
         });
-        const document = await createPdfDocument({ organizationId, name });
+        const template = await createPdfTemplate({ organizationId, name });
         sendNotification({
-          title: "Document added",
-          message: `"${document.name}" is ready to set up.`,
+          title: "Template added",
+          message: `"${template.name}" is ready to set up.`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
-        return payload({ documentId: document.id });
+        return payload({ templateId: template.id });
       }
-      case "save-document": {
-        const form = parseData(formData, PdfDocumentFormSchema, {
+      case "save-template": {
+        const form = parseData(formData, PdfTemplateFormSchema, {
           additionalData: { userId, organizationId },
         });
-        const { name, config } = documentFromForm(form);
-        await updatePdfDocument({
+        const { name, config } = templateFromForm(form);
+        await updatePdfTemplate({
           organizationId,
-          documentId: form.documentId,
+          templateId: form.templateId,
           name,
           config,
         });
         sendNotification({
-          title: "Document saved",
+          title: "Template saved",
           message: `"${name}" prints with the new settings.`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
-        return payload({ documentId: form.documentId });
+        return payload({ templateId: form.templateId });
       }
-      case "duplicate-document":
-      case "default-document":
-      case "delete-document": {
-        const { documentId } = parseData(
+      case "duplicate-template":
+      case "default-template":
+      case "delete-template": {
+        const { templateId } = parseData(
           formData,
-          z.object({ documentId: z.string().min(1) }),
+          z.object({ templateId: z.string().min(1) }),
           { additionalData: { userId, organizationId } }
         );
-        if (intent === "duplicate-document") {
-          await duplicatePdfDocument({ organizationId, documentId });
-        } else if (intent === "default-document") {
-          await setDefaultPdfDocument({ organizationId, documentId });
+        if (intent === "duplicate-template") {
+          await duplicatePdfTemplate({ organizationId, templateId });
+        } else if (intent === "default-template") {
+          await setDefaultPdfTemplate({ organizationId, templateId });
         } else {
-          await deletePdfDocument({ organizationId, documentId });
+          await deletePdfTemplate({ organizationId, templateId });
         }
-        return payload({ documentId });
+        return payload({ templateId });
       }
       default: {
         throw new ShelfError({
@@ -726,10 +726,10 @@ export default function GeneralPage() {
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
     isPersonalWorkspace,
-    canCustomizePdfDocuments: canCustomizeDocuments,
-    showPdfDocuments,
-    pdfDocuments,
-    documentCustomFields,
+    canCustomizePdfDocuments: canCustomizeTemplates,
+    showPdfTemplates,
+    pdfTemplates,
+    templateCustomFields,
   } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
@@ -740,11 +740,11 @@ export default function GeneralPage() {
         scimEnabled={scimEnabled}
         scimTokens={scimTokens}
         afterGeneral={
-          showPdfDocuments ? (
-            <PdfDocumentsSettings
-              canCustomize={canCustomizeDocuments}
-              documents={pdfDocuments}
-              customFields={documentCustomFields}
+          showPdfTemplates ? (
+            <PdfTemplatesSettings
+              canCustomize={canCustomizeTemplates}
+              templates={pdfTemplates}
+              customFields={templateCustomFields}
             />
           ) : null
         }

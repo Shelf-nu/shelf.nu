@@ -10,18 +10,18 @@ import { Image } from "~/components/shared/image";
 import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import type {
-  BookingDocumentConfig,
-  PdfDocumentSummary,
-} from "~/modules/pdf-document/config";
+  BookingTemplateConfig,
+  PdfTemplateSummary,
+} from "~/modules/pdf-template/config";
 import {
   BOOKING_CHECKLIST_CONFIG,
   printsAsColumn,
-} from "~/modules/pdf-document/config";
-import type { DocumentColumn } from "~/modules/pdf-document/rows";
+} from "~/modules/pdf-template/config";
+import type { TemplateColumn } from "~/modules/pdf-template/rows";
 import {
-  groupDocumentRows,
-  documentColumns,
-} from "~/modules/pdf-document/rows";
+  groupTemplateRows,
+  templateColumns,
+} from "~/modules/pdf-template/rows";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
@@ -46,42 +46,42 @@ import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
-/** The saved PDF document a booking's PDF is laid out by. */
-export type PdfDocumentForPdf = {
+/** The saved PDF template a booking's PDF is laid out by. */
+export type PdfTemplateForPdf = {
   id: string;
   name: string;
-  config: BookingDocumentConfig;
+  config: BookingTemplateConfig;
 };
 
 type PdfApiResponse =
   | {
       pdfMeta: PdfDbResult;
-      /** `null` when the workspace's tier has no PDF documents. */
-      document: PdfDocumentForPdf | null;
-      documents: PdfDocumentSummary[];
+      /** `null` when the workspace's tier has no PDF templates. */
+      template: PdfTemplateForPdf | null;
+      templates: PdfTemplateSummary[];
       error: null;
     }
   | { pdfMeta?: undefined; error: { message: string } };
 
 /**
  * The title printed on a booking's PDF, and its file name. A workspace without
- * PDF documents keeps the title the booking PDF has always had.
+ * PDF templates keeps the title the booking PDF has always had.
  *
- * @param documentName - The saved document's name, or `null` without one
+ * @param templateName - The saved template's name, or `null` without one
  * @param bookingName - The booking's name
  */
 export function bookingPdfTitle(
-  documentName: string | null,
+  templateName: string | null,
   bookingName: string
 ) {
-  return documentName === null
+  return templateName === null
     ? `Booking checklist for ${bookingName}`
-    : `${documentName} - ${bookingName}`;
+    : `${templateName} - ${bookingName}`;
 }
 
 /**
  * The most description characters printed under each asset row. The booking
- * document is a hand-out, so a long description is cut instead of filling pages.
+ * template is a hand-out, so a long description is cut instead of filling pages.
  */
 const PDF_DESCRIPTION_MAX_LENGTH = 300;
 
@@ -111,8 +111,8 @@ export function pdfAssetOrderFromSearchParams(
 }
 
 /**
- * The entry that previews and prints a booking's document (its checklist or
- * other saved PDF document), from the booking page or a bookings list row.
+ * The entry that previews and prints a booking's template (its checklist or
+ * other saved PDF template), from the booking page or a bookings list row.
  *
  * Rendered as a trigger plus a portalled dialog rather than a
  * `DropdownMenuItem`: selecting an item closes the menu, which would unmount
@@ -120,7 +120,7 @@ export function pdfAssetOrderFromSearchParams(
  *
  * @param props.booking - The booking to print
  * @param props.disabled - The trigger's disabled state, as the shared rules
- *   (`resolveBookingActions`, its `bookingDocument` entry) decide it
+ *   (`resolveBookingActions`, its `bookingTemplate` entry) decide it
  * @param props.assetOrder - The sort to list assets in. Omitted, no sort is
  *   sent and the server default (status, descending) applies; the booking page
  *   passes the sort of its own URL.
@@ -143,56 +143,56 @@ export const BookingOverviewPDF = ({
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fetcher = useFetcher<PdfApiResponse>({
-    key: `booking-document-${booking.id}`,
+    key: `booking-template-${booking.id}`,
   });
 
   const isIdle = fetcher.state === "idle";
   const response = fetcher.data?.pdfMeta ? fetcher.data : null;
-  // A refused load (the picked document was deleted meanwhile, or the booking
-  // cannot be read) is shown, with a way to load the documents again.
+  // A refused load (the picked template was deleted meanwhile, or the booking
+  // cannot be read) is shown, with a way to load the templates again.
   const failure = isIdle && fetcher.data?.error ? fetcher.data.error : null;
   const isLoading = !isIdle || (response === null && failure === null);
 
-  // The document list of the last load that answered, so a refused load leaves
+  // The template list of the last load that answered, so a refused load leaves
   // the picker usable. Adjusted while rendering, React's pattern for state
   // derived from a changing value.
-  const [documentList, setDocumentList] = useState<PdfDocumentSummary[]>([]);
-  if (response && response.documents !== documentList)
-    setDocumentList(response.documents);
-  // The document just picked, shown in the picker before its load answers.
+  const [templateList, setTemplateList] = useState<PdfTemplateSummary[]>([]);
+  if (response && response.templates !== templateList)
+    setTemplateList(response.templates);
+  // The template just picked, shown in the picker before its load answers.
   const [pickedId, setPickedId] = useState<string | null>(null);
-  const shownDocumentId = pickedId ?? response?.document?.id ?? "";
-  // Only a workspace whose tier includes PDF documents gets a choice.
-  const canChoose = documentList.length > 0;
+  const shownTemplateId = pickedId ?? response?.template?.id ?? "";
+  // Only a workspace whose tier includes PDF templates gets a choice.
+  const canChoose = templateList.length > 0;
 
   const handlePrint = useReactToPrint({
     contentRef: componentRef,
-    documentTitle: response?.document
-      ? bookingPdfTitle(response.document.name, booking.name)
+    templateTitle: response?.template
+      ? bookingPdfTitle(response.template.name, booking.name)
       : `booking-${booking.name}-${Date.now()}`,
   });
 
   /**
-   * Loads the document's data. With no `documentId` the server picks the person's
-   * last document, or the workspace default, and says which in the response.
+   * Loads the template's data. With no `templateId` the server picks the person's
+   * last template, or the workspace default, and says which in the response.
    */
-  const loadDocument = (documentId?: string) => {
-    // A document sorted by status prints in the given order; a document
+  const loadTemplate = (templateId?: string) => {
+    // A template sorted by status prints in the given order; a template
     // sorted by name ignores it. Without one the server's default applies.
     const params = new URLSearchParams(assetOrder ?? {});
-    if (documentId) params.set("document", documentId);
+    if (templateId) params.set("template", templateId);
     void fetcher.load(`/api/bookings/${booking.id}/generate-pdf?${params}`);
   };
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
     setPickedId(null);
-    loadDocument();
+    loadTemplate();
   };
 
-  const handlePickDocument = (documentId: string) => {
-    setPickedId(documentId);
-    loadDocument(documentId);
+  const handlePickTemplate = (templateId: string) => {
+    setPickedId(templateId);
+    loadTemplate(templateId);
   };
 
   const handleCloseDialog = () => {
@@ -223,27 +223,27 @@ export const BookingOverviewPDF = ({
               <When truthy={canChoose}>
                 <div className="mx-auto mt-3 flex max-w-sm flex-col items-stretch gap-1 text-left">
                   <span
-                    id={`document-picker-label-${booking.id}`}
+                    id={`template-picker-label-${booking.id}`}
                     className="text-sm font-medium text-gray-700"
                   >
-                    Document
+                    Template
                   </span>
                   <Select
-                    value={shownDocumentId}
-                    onValueChange={handlePickDocument}
+                    value={shownTemplateId}
+                    onValueChange={handlePickTemplate}
                     disabled={!canChoose}
                   >
                     <SelectTrigger
-                      aria-labelledby={`document-picker-label-${booking.id}`}
+                      aria-labelledby={`template-picker-label-${booking.id}`}
                     >
-                      <SelectValue placeholder="Loading documents..." />
+                      <SelectValue placeholder="Loading templates..." />
                     </SelectTrigger>
                     <SelectContent
                       position="popper"
                       className="w-[var(--radix-select-trigger-width)]"
                       align="start"
                     >
-                      {documentList.map((item) => (
+                      {templateList.map((item) => (
                         <SelectItem
                           key={item.id}
                           value={item.id}
@@ -256,7 +256,7 @@ export const BookingOverviewPDF = ({
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-gray-500">
-                    Owners and admins set up documents in Settings, General.
+                    Owners and admins set up templates in Settings, General.
                   </p>
                 </div>
               </When>
@@ -290,7 +290,7 @@ export const BookingOverviewPDF = ({
                     variant="secondary"
                     onClick={() => {
                       setPickedId(null);
-                      loadDocument();
+                      loadTemplate();
                     }}
                   >
                     Try again
@@ -300,7 +300,7 @@ export const BookingOverviewPDF = ({
                 <div className="overflow-x-auto">
                   <BookingPDFPreview
                     pdfMeta={response.pdfMeta}
-                    pdfDocument={response.document}
+                    pdfTemplate={response.template}
                     componentRef={componentRef}
                   />
                 </div>
@@ -349,7 +349,7 @@ const wrappingTd = (padding: string) =>
  * body cell's classes. The cell's content comes from `renderCell`.
  */
 const COLUMN_CELLS: Record<
-  Exclude<DocumentColumn["kind"], "customField">,
+  Exclude<TemplateColumn["kind"], "customField">,
   { header: string; th: string; td: string }
 > = {
   number: {
@@ -390,43 +390,43 @@ const CUSTOM_FIELD_CELL = {
   td: "break-words border-r border-gray-300 px-1.5 py-2.5 text-xs text-gray-600",
 };
 
-function cellsOf(column: DocumentColumn) {
+function cellsOf(column: TemplateColumn) {
   return column.kind === "customField"
     ? CUSTOM_FIELD_CELL
     : COLUMN_CELLS[column.kind];
 }
 
-function columnKey(column: DocumentColumn) {
+function columnKey(column: TemplateColumn) {
   return column.kind === "customField"
     ? `customField-${column.customFieldId}`
     : column.kind;
 }
 
 /**
- * The printable body of a booking document: the page `react-to-print` copies to
- * paper, and what the dialog shows as its preview. The document's config decides
+ * The printable body of a booking template: the page `react-to-print` copies to
+ * paper, and what the dialog shows as its preview. The template's config decides
  * which columns, rows and header lines print.
  *
  * Exported so it can be rendered on its own. {@link BookingOverviewPDF}, the
  * dialog around it, needs a router for the fetcher that loads `pdfMeta`.
  *
  * @param props.componentRef - Ref `react-to-print` prints from. Pass
- *   `{ current: null }` to render the document without printing it.
- * @param props.pdfMeta - Everything the document renders, as returned by
+ *   `{ current: null }` to render the template without printing it.
+ * @param props.pdfMeta - Everything the template renders, as returned by
  *   `fetchAllPdfRelatedData`. Renders nothing until it arrives.
- * @param props.pdfDocument - The saved document the page is laid out by, its
+ * @param props.pdfTemplate - The saved template the page is laid out by, its
  *   name titling the page. `null` prints the built-in Checklist under the
  *   title the booking PDF has always had.
- * @returns The document, or `null` while `pdfMeta` is still loading.
+ * @returns The template, or `null` while `pdfMeta` is still loading.
  */
 export const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
-  pdfDocument,
+  pdfTemplate,
 }: {
   componentRef: RefObject<HTMLDivElement | null>;
   pdfMeta: PdfDbResult | null;
-  pdfDocument: Pick<PdfDocumentForPdf, "name" | "config"> | null;
+  pdfTemplate: Pick<PdfTemplateForPdf, "name" | "config"> | null;
 }) => {
   if (!pdfMeta) return null;
 
@@ -440,9 +440,9 @@ export const BookingPDFPreview = ({
     modelRequests,
     customFields,
   } = pdfMeta;
-  const config = pdfDocument?.config ?? BOOKING_CHECKLIST_CONFIG;
+  const config = pdfTemplate?.config ?? BOOKING_CHECKLIST_CONFIG;
 
-  // Workspaces that want people scanning the label on the item, not the document,
+  // Workspaces that want people scanning the label on the item, not the template,
   // turn the code pictures off. The text code prints either way, so the row is
   // still matchable by eye.
   const showCodeImages = organization.showQrCodesOnPdfs ?? true;
@@ -483,7 +483,7 @@ export const BookingPDFPreview = ({
   const descriptionRowFields = config.assetDescription
     ? customFields.filter((field) => !printsAsColumn(field.type))
     : [];
-  const columns = documentColumns({
+  const columns = templateColumns({
     config,
     customFieldIds: columnFields.map((field) => field.id),
     codePercent: PDF_CODE_COLUMN_PERCENT,
@@ -492,13 +492,13 @@ export const BookingPDFPreview = ({
     name: columnKey(column),
     percent: column.percent,
   }));
-  const groups = groupDocumentRows(assets, config.groupBy);
+  const groups = groupTemplateRows(assets, config.groupBy);
   const firstRowIndexOfGroup = groups.map((_, i) =>
     groups.slice(0, i).reduce((sum, g) => sum + g.rows.length, 0)
   );
 
   const renderCell = (
-    column: DocumentColumn,
+    column: TemplateColumn,
     asset: PdfAssetRow,
     index: number,
     codeImage: PdfDbResult["assetIdToCodeImageMap"][string] | undefined,
@@ -523,7 +523,7 @@ export const BookingPDFPreview = ({
       case "kit":
         return (
           <>
-            {/* The document prints the kit's name only. Kits carry no
+            {/* The template prints the kit's name only. Kits carry no
                 `sequentialId`, so a SAM_ID workspace has no kit code to
                 print here. */}
             {asset?.kit?.name}
@@ -581,7 +581,7 @@ export const BookingPDFPreview = ({
     <div className="border bg-gray-200 py-4">
       <PrintTableStyles tableClassName="booking-assets-table" />
       <div
-        // On screen the document is an A4 page with its 10mm margins as padding,
+        // On screen the template is an A4 page with its 10mm margins as padding,
         // so the preview's table is the same 190mm wide as the printed one.
         className="pdf-wrapper mx-auto w-[210mm] bg-white p-[10mm] font-inter"
         ref={componentRef}
@@ -598,7 +598,7 @@ export const BookingPDFPreview = ({
               <h3 className="m-0 p-0 text-gray-600">{organization?.name}</h3>
             </div>
             <h1 className="mt-0.5 text-xl font-medium">
-              {bookingPdfTitle(pdfDocument?.name ?? null, booking.name)}
+              {bookingPdfTitle(pdfTemplate?.name ?? null, booking.name)}
             </h1>
           </div>
           <div className="text-gray-500">

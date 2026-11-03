@@ -37,8 +37,8 @@ import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import {
   canCustomizePdfDocuments,
-  pdfDocumentsForNewWorkspace,
-} from "../pdf-document/service.server";
+  pdfTemplatesForNewWorkspace,
+} from "../pdf-template/service.server";
 import { getUserTierLimit, updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
 import { lockMembership } from "../user/membership-lock.server";
@@ -271,7 +271,7 @@ export async function createOrganization({
         },
       },
 
-      ...pdfDocumentsForNewWorkspace({
+      ...pdfTemplatesForNewWorkspace({
         canCustomize: canCustomizePdfDocuments(await getUserTierLimit(userId)),
       }),
     } satisfies Prisma.OrganizationCreateInput;

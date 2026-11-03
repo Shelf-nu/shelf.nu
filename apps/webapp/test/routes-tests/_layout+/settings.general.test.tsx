@@ -11,11 +11,11 @@ import {
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import {
-  createPdfDocument,
-  deletePdfDocument,
-  getPdfDocuments,
-  updatePdfDocument,
-} from "~/modules/pdf-document/service.server";
+  createPdfTemplate,
+  deletePdfTemplate,
+  getPdfTemplates,
+  updatePdfTemplate,
+} from "~/modules/pdf-template/service.server";
 import { action, loader } from "~/routes/_layout+/settings.general";
 import { ShelfError } from "~/utils/error";
 import {
@@ -52,16 +52,16 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: the document rules run against the database and have their own tests
-// (`modules/pdf-document/service.server.test.ts`); this suite is about the
+// why: the template rules run against the database and have their own tests
+// (`modules/pdf-template/service.server.test.ts`); this suite is about the
 // route's gate and how it reads the form.
-vi.mock("~/modules/pdf-document/service.server", () => ({
-  getPdfDocuments: vi.fn().mockResolvedValue([]),
-  createPdfDocument: vi.fn(),
-  updatePdfDocument: vi.fn(),
-  duplicatePdfDocument: vi.fn(),
-  setDefaultPdfDocument: vi.fn(),
-  deletePdfDocument: vi.fn(),
+vi.mock("~/modules/pdf-template/service.server", () => ({
+  getPdfTemplates: vi.fn().mockResolvedValue([]),
+  createPdfTemplate: vi.fn(),
+  updatePdfTemplate: vi.fn(),
+  duplicatePdfTemplate: vi.fn(),
+  setDefaultPdfTemplate: vi.fn(),
+  deletePdfTemplate: vi.fn(),
 }));
 
 // why: mock Stripe functions to avoid real Stripe API calls in tests
@@ -778,7 +778,7 @@ describe("settings.general SSO settings write", () => {
   });
 });
 
-describe("settings.general PDF documents", () => {
+describe("settings.general PDF templates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getOrganizationTierLimitMock.mockResolvedValue({ id: "tier_2" } as any);
@@ -810,9 +810,9 @@ describe("settings.general PDF documents", () => {
     ) as Promise<{ init?: { status?: number } }>;
   }
 
-  const documentForm = (customFieldIds: string[]): [string, string][] => [
-    ["intent", "save-document"],
-    ["documentId", "document-1"],
+  const templateForm = (customFieldIds: string[]): [string, string][] => [
+    ["intent", "save-template"],
+    ["templateId", "template-1"],
     ["name", "  Client quote  "],
     ["columns.image", "off"],
     ["columns.quantity", "off"],
@@ -832,7 +832,7 @@ describe("settings.general PDF documents", () => {
     ["signatureLines", "on"],
   ];
 
-  it("lets only owners and admins change documents: the gate is general settings update", async () => {
+  it("lets only owners and admins change templates: the gate is general settings update", async () => {
     const refusal = new ShelfError({
       cause: null,
       message: "You are not allowed to do this.",
@@ -843,12 +843,12 @@ describe("settings.general PDF documents", () => {
     requirePermissionMock.mockRejectedValue(refusal);
 
     const response = await post([
-      ["intent", "delete-document"],
-      ["documentId", "document-1"],
+      ["intent", "delete-template"],
+      ["templateId", "template-1"],
     ]);
 
     expect(response.init?.status).toBe(403);
-    expect(deletePdfDocument).not.toHaveBeenCalled();
+    expect(deletePdfTemplate).not.toHaveBeenCalled();
     expect(requirePermissionMock).toHaveBeenCalledWith(
       expect.objectContaining({
         entity: PermissionEntity.generalSettings,
@@ -869,24 +869,24 @@ describe("settings.general PDF documents", () => {
     }
   });
 
-  it("deletes a document in the caller's workspace only", async () => {
+  it("deletes a template in the caller's workspace only", async () => {
     await post([
-      ["intent", "delete-document"],
-      ["documentId", "document-1"],
+      ["intent", "delete-template"],
+      ["templateId", "template-1"],
     ]);
 
-    expect(deletePdfDocument).toHaveBeenCalledWith({
+    expect(deletePdfTemplate).toHaveBeenCalledWith({
       organizationId: "org-1",
-      documentId: "document-1",
+      templateId: "template-1",
     });
   });
 
-  it("saves the form as the document's name and config, empty custom field slots dropped", async () => {
-    await post(documentForm(["cf-price", "none", "cf-serial"]));
+  it("saves the form as the template's name and config, empty custom field slots dropped", async () => {
+    await post(templateForm(["cf-price", "none", "cf-serial"]));
 
-    expect(updatePdfDocument).toHaveBeenCalledWith({
+    expect(updatePdfTemplate).toHaveBeenCalledWith({
       organizationId: "org-1",
-      documentId: "document-1",
+      templateId: "template-1",
       name: "Client quote",
       config: {
         columns: {
@@ -908,32 +908,32 @@ describe("settings.general PDF documents", () => {
   });
 
   it("refuses a fourth custom field before anything is saved", async () => {
-    const response = await post(documentForm(["cf-1", "cf-2", "cf-3", "cf-4"]));
+    const response = await post(templateForm(["cf-1", "cf-2", "cf-3", "cf-4"]));
 
     expect(response.init?.status).toBe(400);
-    expect(updatePdfDocument).not.toHaveBeenCalled();
+    expect(updatePdfTemplate).not.toHaveBeenCalled();
   });
 
-  it("refuses every document change on a plan without PDF documents", async () => {
+  it("refuses every template change on a plan without PDF templates", async () => {
     vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
 
     const added = await post([
-      ["intent", "add-document"],
+      ["intent", "add-template"],
       ["name", "Client quote"],
     ]);
     const deleted = await post([
-      ["intent", "delete-document"],
-      ["documentId", "document-1"],
+      ["intent", "delete-template"],
+      ["templateId", "template-1"],
     ]);
 
     expect(added.init?.status).toBe(403);
     expect(deleted.init?.status).toBe(403);
-    expect(createPdfDocument).not.toHaveBeenCalled();
-    expect(deletePdfDocument).not.toHaveBeenCalled();
+    expect(createPdfTemplate).not.toHaveBeenCalled();
+    expect(deletePdfTemplate).not.toHaveBeenCalled();
     vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
   });
 
-  it("reads no documents for a plan without PDF documents", async () => {
+  it("reads no templates for a plan without PDF templates", async () => {
     vi.mocked(canCustomizePdfDocuments).mockReturnValue(false);
 
     const response = (await loader(
@@ -945,9 +945,9 @@ describe("settings.general PDF documents", () => {
     )) as unknown as { data?: Record<string, unknown> };
     const body = (response.data ?? response) as Record<string, unknown>;
 
-    expect(getPdfDocuments).not.toHaveBeenCalled();
+    expect(getPdfTemplates).not.toHaveBeenCalled();
     expect(body.canCustomizePdfDocuments).toBe(false);
-    expect(body.pdfDocuments).toEqual([]);
+    expect(body.pdfTemplates).toEqual([]);
     vi.mocked(canCustomizePdfDocuments).mockReturnValue(true);
   });
 });

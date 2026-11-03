@@ -34,7 +34,7 @@ import {
 } from "./service.server";
 import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
-import { pdfDocumentsForNewWorkspace } from "../pdf-document/service.server";
+import { pdfTemplatesForNewWorkspace } from "../pdf-template/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -288,10 +288,10 @@ describe(createUserAccountForTesting.name, () => {
                   user: { connect: { id: USER_ID } },
                 },
               },
-              ...pdfDocumentsForNewWorkspace({
+              ...pdfTemplatesForNewWorkspace({
                 canCustomize: !config.enablePremiumFeatures,
               }),
-              // Stamped at creation when the plan includes PDF documents.
+              // Stamped at creation when the plan includes PDF templates.
               paidPdfDocumentsSeededAt: config.enablePremiumFeatures
                 ? null
                 : expect.any(Date),
