@@ -9,9 +9,10 @@
  * same tags (read by the image picker on the device) is used instead.
  *
  * EXIF has no zone unless `OffsetTimeOriginal` is present. Without it the date
- * is a wall-clock time, read in the uploader's time zone preference.
+ * is a wall-clock time, read in the device zone the phone app declares, else in
+ * the uploader's time zone preference.
  *
- * No usable date gives `null`, shown as "Time taken unknown". Nothing here ever
+ * No usable date gives `null`, shown as a "No date" chip. Nothing here ever
  * fails an upload. EXIF can be edited, so this is the best signal available,
  * not proof of when a photo was taken.
  *
@@ -49,8 +50,7 @@ export type ExifCaptureTags = {
  *
  * @param tags - `DateTimeOriginal` and, when the device wrote it,
  *   `OffsetTimeOriginal`, both as EXIF text
- * @param timeZone - IANA zone to read an offset-less date in (the uploader's
- *   preference)
+ * @param timeZone - IANA zone to read an offset-less date in
  * @param now - The upload time, to reject dates from a camera clock set in the
  *   future
  * @returns The capture instant, or null when the date is missing or not a real
@@ -68,9 +68,9 @@ export function captureTimeFromTags(
 
   // why: cameras with an unset clock write zeros ("0000:00:00 00:00:00"), and
   // Date.UTC rolls an out-of-range day or month into the next one silently.
-  // This catches both in the phone's form fields; a date read from the file
-  // has already been rolled over by exif-reader, which this cannot undo.
-  // Rebuilding the parts and comparing catches both.
+  // Rebuilding the parts and comparing catches both in the phone's form
+  // fields; a date read from the file has already been rolled over by
+  // exif-reader, which this cannot undo.
   const wallClock = new Date(
     Date.UTC(year, month - 1, day, hour, minute, second)
   );

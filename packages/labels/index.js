@@ -1005,13 +1005,14 @@ export function describeAuditPhoto(
   // the whole audit, the audit's start. A photo can be added before its asset
   // is scanned (or the scan can be undone and redone later), so the check is
   // never later than the upload itself: a photo is old only against the
-  // earlier of the two.
+  // earlier of the two. With neither a scan nor an audit start known, the
+  // upload alone is the check.
   const scannedMs = toMs(assetScannedAt);
   const baseMs = scannedMs ?? toMs(auditStartedAt);
   const checkMs =
     baseMs !== null && uploadedMs !== null
       ? Math.min(baseMs, uploadedMs)
-      : baseMs ?? null;
+      : baseMs ?? uploadedMs;
   const checkLabel =
     checkMs !== null && checkMs === uploadedMs && checkMs !== baseMs
       ? "upload"

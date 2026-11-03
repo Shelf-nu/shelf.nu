@@ -32,10 +32,8 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
-import {
-  AuditPhotoCaption,
-  describeAuditPhotoForUser,
-} from "@/components/audit/audit-photo-caption";
+import { AuditPhotoCaption } from "@/components/audit/audit-photo-caption";
+import { describeAuditPhotoForUser } from "@/lib/audit-photo-description";
 
 type EvidenceViewerProps = {
   visible: boolean;

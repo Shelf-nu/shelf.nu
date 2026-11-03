@@ -49,7 +49,7 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * `exifDateTimeOriginal` / `exifOffsetTimeOriginal` fields the phone app sends,
  * else null. How it arrived is saved as `captureSource`: `WEB_UPLOAD` for the
  * web app, and for the phone app the `captureSource` field it sends (`CAMERA`
- * or `LIBRARY`), else null. See `photo-captured-at.server.ts`.
+ * or `LIBRARY`), else `PHONE`. See `photo-captured-at.server.ts`.
  *
  * @param request - The request containing the image file
  * @param auditSessionId - ID of the audit session
@@ -126,6 +126,7 @@ export async function uploadAuditImage({
 
     // Read from the original bytes: the stored copy is re-encoded without EXIF.
     let fileTags: ExifCaptureTags | null = null;
+    let inspected = false;
 
     // Parse and upload the file to Supabase storage
     const fileData = await parseFileFormData({
@@ -143,7 +144,11 @@ export async function uploadAuditImage({
       generateThumbnail: true,
       thumbnailSize: 108,
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      // why: the record is made for the first `image` part, so only the first
+      // file inspected may decide its capture time.
       inspectOriginal: async (original) => {
+        if (inspected) return;
+        inspected = true;
         fileTags = await readExifCaptureTags(original);
       },
     });
@@ -191,7 +196,10 @@ export async function uploadAuditImage({
 
     const capturedAt = await resolveCapturedAt({
       fileTags,
-      formTags: captureTagsFromFormData(fileData),
+      // The date fields are the phone app's copy of EXIF its picker read; a
+      // browser sends the file itself, so a web upload never reads them.
+      formTags:
+        uploadedVia === "phone" ? captureTagsFromFormData(fileData) : null,
       // An EXIF date with no offset is a wall-clock time. A phone upload is
       // read in the zone the device declares (it was taken on that device);
       // a web upload in the uploader's preference zone.

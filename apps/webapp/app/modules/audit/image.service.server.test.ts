@@ -612,9 +612,22 @@ describe("uploadAuditImage returnParsedFormData", () => {
         exifOffsetTimeOriginal: "-07:00",
       });
 
-      await upload();
+      await upload("phone");
 
       expect(storedCapturedAt()).toEqual(new Date("2026-10-21T01:30:00Z"));
+    });
+
+    it("ignores the phone app's date fields on a web upload", async () => {
+      // A browser sends the file itself; date fields on a web request are a
+      // hand-made claim, not a copy of the file's EXIF.
+      uploadReceives(await jpeg(), {
+        exifDateTimeOriginal: "2026:10:01 08:30:00",
+        exifOffsetTimeOriginal: "+00:00",
+      });
+
+      await upload("web");
+
+      expect(storedCapturedAt()).toBeNull();
     });
 
     it("stores null, and still uploads, when neither has a date", async () => {

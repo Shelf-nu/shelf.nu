@@ -11,27 +11,14 @@
  * @see ../../../webapp/app/components/audit/audit-photo.tsx the web tile
  * @see ./evidence-viewer.tsx
  * @see ./evidence-modal.tsx
+ * @see ../../lib/audit-photo-description.ts the words, from the payload
  */
 import { Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type {
-  AuditPhotoCaptureSource,
-  AuditPhotoDescription,
-} from "@shelf/labels";
-import { describeAuditPhoto } from "@shelf/labels";
+import type { AuditPhotoDescription } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize } from "@/lib/constants";
-import { useDateFormatter } from "@/lib/use-date-formatter";
-
-/** The capture fields of an audit photo. */
-export type AuditPhotoCaptureFields = {
-  capturedAt: string | null;
-  captureSource: AuditPhotoCaptureSource | null;
-  createdAt: string;
-  /** When the photo's asset was scanned; null for a photo of the whole audit */
-  assetScannedAt: string | null;
-};
 
 /** The icon for each way a photo reaches Shelf. */
 const SOURCE_ICONS = {
@@ -42,35 +29,9 @@ const SOURCE_ICONS = {
 } as const;
 
 /**
- * Describes a photo in the user's own date and time format. A plain function
- * so a list can describe every row with one formatter from
- * {@link useDateFormatter}.
- *
- * @param image - The photo's capture fields, with its asset's scan time
- * @param auditStartedAt - When its audit started: what a photo of the whole
- *   audit is checked against
- * @param formatter - `useDateFormatter()`
- * @returns What to show for the photo
- */
-export function describeAuditPhotoForUser(
-  image: AuditPhotoCaptureFields,
-  auditStartedAt: string | null | undefined,
-  { formatDate, formatDateTime }: ReturnType<typeof useDateFormatter>
-): AuditPhotoDescription {
-  return describeAuditPhoto(image, {
-    assetScannedAt: image.assetScannedAt,
-    auditStartedAt,
-    format: {
-      dateTime: (value) => formatDateTime(value),
-      custom: (value, options) => formatDate(value, options),
-    },
-  });
-}
-
-/**
  * Icon and short date and time, then a chip when the photo needs a second look.
  *
- * @param props.description - From {@link describeAuditPhotoForUser}
+ * @param props.description - From `describeAuditPhotoForUser`
  * @param props.width - The thumbnail's width, so the caption wraps under it
  */
 export function AuditPhotoCaption({
@@ -88,7 +49,13 @@ export function AuditPhotoCaption({
       : { bg: colors.backgroundSecondary, text: colors.muted };
 
   return (
-    <View style={[styles.caption, { width }]} importantForAccessibility="no">
+    // why: the photo's own accessibilityLabel already reads `detail` and the
+    // flag, so the caption is hidden from VoiceOver and TalkBack, children too.
+    <View
+      style={[styles.caption, { width }]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
       {description.short ? (
         <View style={styles.row}>
           {description.source ? (

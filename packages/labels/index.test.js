@@ -693,6 +693,37 @@ test("a photo taken days before its asset was scanned is an old photo", () => {
   );
 });
 
+test("with no scan and no audit start, a photo is measured against its upload", () => {
+  // why: the phone reads the audit's start once, so it has none for an audit
+  // that was still pending when the scanner opened.
+  const photo = describeAuditPhoto(
+    {
+      captureSource: "LIBRARY",
+      capturedAt: "2026-10-01T09:00:00Z",
+      createdAt: "2026-10-26T09:00:00Z",
+    },
+    { assetScannedAt: null, auditStartedAt: null, format, now: NOW }
+  );
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+  assert.equal(
+    photo.detail,
+    "Photo library · file says dt(2026-10-01T09:00) · 25 days before upload"
+  );
+});
+
+test("the gap reads in seconds, hours or days as it grows", () => {
+  const gap = (capturedAt) =>
+    describe({
+      captureSource: "CAMERA",
+      capturedAt,
+      createdAt: "2026-10-28T10:00:00Z",
+    }).detail.split(" · ")[2];
+
+  assert.equal(gap("2026-10-28T09:59:30Z"), "under a minute before upload");
+  assert.equal(gap("2026-10-28T05:00:00Z"), "5 h before upload");
+});
+
 test("a photo uploaded before its asset is scanned is measured against its upload", () => {
   // why: a photo can be added to an asset before the asset is scanned, or the
   // scan can be undone and redone days later. A camera photo taken and

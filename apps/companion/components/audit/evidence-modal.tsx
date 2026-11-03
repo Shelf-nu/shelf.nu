@@ -26,10 +26,8 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
-import {
-  AuditPhotoCaption,
-  describeAuditPhotoForUser,
-} from "@/components/audit/audit-photo-caption";
+import { AuditPhotoCaption } from "@/components/audit/audit-photo-caption";
+import { describeAuditPhotoForUser } from "@/lib/audit-photo-description";
 import type { PhotoCapture } from "@/lib/audit-photo-exif";
 import { photoCaptureFromPicker } from "@/lib/audit-photo-exif";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";

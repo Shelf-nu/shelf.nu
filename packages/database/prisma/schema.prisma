@@ -2905,8 +2905,8 @@ model AuditImage {
   /// this is the best signal available, not proof.
   capturedAt DateTime?
 
-  /// How the photo reached Shelf. Null for photos from before this field and
-  /// from app versions that do not send it.
+  /// How the photo reached Shelf. Null only for photos uploaded before this
+  /// field existed; a phone upload with no or an unknown source is PHONE.
   captureSource AuditImageCaptureSource?
 
   // Datetime

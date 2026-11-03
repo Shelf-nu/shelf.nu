@@ -94,6 +94,10 @@ describe("completeAuditWithImages", () => {
         uploadedById: "user-1",
         auditAssetId: undefined,
         description: "Completion image",
+        // A browser upload is always WEB_UPLOAD, and the rebuilt request keeps
+        // the original hints so an offset-less date is read in the right zone.
+        uploadedVia: "web",
+        hints: expect.objectContaining({ timeZone: "UTC" }),
       })
     );
 
