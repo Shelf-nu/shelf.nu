@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
-import { Alert } from "react-native";
-import { usePreventRemove } from "expo-router";
+import { useMemo } from "react";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import { valuationFromInput } from "@/lib/asset-valuation";
 import { editLeaveGuard } from "@/lib/edit-leave-guard";
 import type { AssetDetail, Category, Location, Tag } from "@/lib/api";
@@ -79,26 +78,11 @@ export function useFormValidation({
 
   // Rules (held while saving, released after a save) in lib/edit-leave-guard.ts
   const guard = editLeaveGuard({ isDirty, didSave, isSubmitting });
-  // Set when the user discards, so the guard drops in the same render that
-  // `repeat` lifts it and replays the blocked navigation.
-  const [leaving, setLeaving] = useState(false);
 
-  usePreventRemove(guard.hold && !leaving, ({ repeat }) => {
-    if (!guard.prompt) return;
-    Alert.alert(
-      "Discard Changes?",
-      "You have unsaved changes. Are you sure you want to go back?",
-      [
-        { text: "Keep Editing", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => {
-            setLeaving(true);
-            repeat();
-          },
-        },
-      ]
-    );
+  useDiscardGuard({
+    active: guard.hold,
+    decide: () => (guard.prompt ? "prompt" : "hold"),
+    title: "Discard Changes?",
+    message: "You have unsaved changes. Are you sure you want to go back?",
   });
 }

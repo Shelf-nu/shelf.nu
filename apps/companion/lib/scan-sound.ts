@@ -89,7 +89,9 @@ async function playAudio(): Promise<void> {
   try {
     await ensureLoaded();
     if (soundObject) {
-      await soundObject.seekTo(0);
+      // A seek on a player that is still loading can reject; play anyway, the
+      // player starts once the sound is ready.
+      await soundObject.seekTo(0).catch(() => {});
       soundObject.play();
     }
   } catch {

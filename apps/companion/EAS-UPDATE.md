@@ -89,6 +89,15 @@ ahead of the stores (1.2.0 sat on main for 16 days while every install was
 like it worked. If the installed base spans two versions, publish once per live
 runtime version, from the matching release tag rather than from `main`.
 
+**Never publish from `main` across an Expo SDK change.** The runtime version only
+moves at a store cut, so `main` can run a newer Expo SDK (new native code) while
+`app.json` still names the runtime of the builds in the stores. An update
+published from `main` then reaches those builds, calls native modules they do
+not have, and crashes them on launch. Before publishing, compare `expo` in
+`apps/companion/package.json` on `main` with the release tag of the live
+version: if they differ, publish from the release tag, or bump the runtime at a
+store cut first.
+
 Three steps, in this order. JS-only fix already merged to main and checked out:
 
 ```bash

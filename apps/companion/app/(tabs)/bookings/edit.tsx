@@ -24,7 +24,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useRouter, useLocalSearchParams, usePreventRemove } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingTag } from "@/lib/api";
@@ -141,8 +142,6 @@ function EditBookingContent() {
   }, [id, currentOrg]);
 
   // ── Unsaved-changes guard (only after a REAL edit) ─────
-  const [leaving, setLeaving] = useState(false);
-
   // Compare the current form against the loaded snapshot so the discard prompt
   // only appears when something actually changed (and never on load-error).
   const snap = initialRef.current;
@@ -155,22 +154,12 @@ function EditBookingContent() {
       [...selectedTagIds].sort().join(",") !== snap.tagIds
     : false;
 
-  // `repeat` lifts the guard and replays the blocked navigation. `leaving`
-  // drops the guard in the same render, so the hook does not see it still set.
-  usePreventRemove(
-    !isLoading && hasUnsavedChanges && !leaving,
-    ({ repeat }) => {
-      const leave = () => {
-        setLeaving(true);
-        repeat();
-      };
-      if (didSubmitRef.current) return leave();
-      Alert.alert("Discard changes?", "Your edits won't be saved.", [
-        { text: "Keep Editing", style: "cancel" },
-        { text: "Discard", style: "destructive", onPress: leave },
-      ]);
-    }
-  );
+  useDiscardGuard({
+    active: !isLoading && hasUnsavedChanges,
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard changes?",
+    message: "Your edits won't be saved.",
+  });
 
   // ── Date pickers ────────────────────────────────
   const closeFromPicker = useCallback(() => setShowFromPicker(false), []);

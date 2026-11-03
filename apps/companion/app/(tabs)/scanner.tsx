@@ -2333,8 +2333,8 @@ function ScannerContent() {
                     // navigation transition into an endless render-commit
                     // loop (JS thread pegged at ~125% CPU, network
                     // callbacks starve) — verified by process sampling.
-                    // requestIdleCallback runs once the dismissal settles.
-                    requestIdleCallback(() => {
+                    // setImmediate runs after the alert's onPress returns.
+                    setImmediate(() => {
                       pushIntoTab(
                         "/(tabs)/bookings",
                         `/(tabs)/bookings/${bookingId}`
@@ -2456,7 +2456,7 @@ function ScannerContent() {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          requestIdleCallback(() => {
+          setImmediate(() => {
             pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
           });
         },
@@ -2714,7 +2714,7 @@ function ScannerContent() {
                     // falls through history and can land on Home. Deferred
                     // past the alert dismissal (same render-loop wedge as
                     // the add path — see handleBookingAdd).
-                    requestIdleCallback(() => {
+                    setImmediate(() => {
                       pushIntoTab(
                         "/(tabs)/bookings",
                         `/(tabs)/bookings/${bookingId}`
@@ -2844,7 +2844,7 @@ function ScannerContent() {
               // a tab screen falls through history and can land on Home.
               // Deferred past the alert dismissal (same render-loop wedge as
               // the add path — see handleBookingAdd).
-              requestIdleCallback(() => {
+              setImmediate(() => {
                 pushIntoTab(
                   "/(tabs)/bookings",
                   `/(tabs)/bookings/${bookingId}`

@@ -83,8 +83,7 @@
         {
           "cameraPermission": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
           "microphonePermission": false,
-          "recordAudioAndroid": false,
-          "enableBackgroundPlayback": false
+          "recordAudioAndroid": false
         }
       ],
       [

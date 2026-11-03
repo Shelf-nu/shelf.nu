@@ -29,7 +29,7 @@ import {
   ActionSheetIOS,
 } from "react-native";
 import { Image } from "expo-image";
-import { useRouter, useLocalSearchParams, usePreventRemove } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -46,6 +46,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CharacterCount } from "@/components/shared/character-count";
@@ -284,7 +285,6 @@ export default function CreateAssetScreen() {
   // ── Unsaved changes guard ─────────────────────
   // Track whether the form was submitted successfully (skip guard on success)
   const didSubmitRef = useRef(false);
-  const [leaving, setLeaving] = useState(false);
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
@@ -295,23 +295,12 @@ export default function CreateAssetScreen() {
     !!imageUri ||
     Object.values(customFieldValues).some((v) => v.trim() !== "");
 
-  // `repeat` lifts the guard and replays the blocked navigation. `leaving`
-  // drops the guard in the same render, so the hook does not see it still set.
-  usePreventRemove(hasUnsavedChanges && !leaving, ({ repeat }) => {
-    const leave = () => {
-      setLeaving(true);
-      repeat();
-    };
+  useDiscardGuard({
+    active: hasUnsavedChanges,
     // A submitted form leaves freely
-    if (didSubmitRef.current) return leave();
-    Alert.alert(
-      "Discard changes?",
-      "You have unsaved changes. Are you sure you want to leave?",
-      [
-        { text: "Keep Editing", style: "cancel" },
-        { text: "Discard", style: "destructive", onPress: leave },
-      ]
-    );
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard changes?",
+    message: "You have unsaved changes. Are you sure you want to leave?",
   });
 
   // ── Filtered picker lists ───────────────────────

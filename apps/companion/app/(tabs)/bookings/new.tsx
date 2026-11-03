@@ -28,7 +28,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useLocalSearchParams, useRouter, usePreventRemove } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
@@ -174,7 +175,6 @@ function CreateBookingContent() {
 
   // ── Unsaved-changes guard ───────────────────────
   const didSubmitRef = useRef(false);
-  const [leaving, setLeaving] = useState(false);
   const hasUnsavedChanges =
     name.trim().length > 0 ||
     description.trim().length > 0 ||
@@ -183,22 +183,11 @@ function CreateBookingContent() {
     (from ? from.getTime() : null) !== initialFromRef.current ||
     (to ? to.getTime() : null) !== initialToRef.current;
 
-  // `repeat` lifts the guard and replays the blocked navigation. `leaving`
-  // drops the guard in the same render, so the hook does not see it still set.
-  usePreventRemove(hasUnsavedChanges && !leaving, ({ repeat }) => {
-    const leave = () => {
-      setLeaving(true);
-      repeat();
-    };
-    if (didSubmitRef.current) return leave();
-    Alert.alert(
-      "Discard booking?",
-      "You have unsaved changes. Are you sure you want to leave?",
-      [
-        { text: "Keep Editing", style: "cancel" },
-        { text: "Discard", style: "destructive", onPress: leave },
-      ]
-    );
+  useDiscardGuard({
+    active: hasUnsavedChanges,
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard booking?",
+    message: "You have unsaved changes. Are you sure you want to leave?",
   });
 
   // ── Date pickers ────────────────────────────────

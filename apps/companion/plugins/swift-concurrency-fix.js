@@ -1,11 +1,11 @@
 /**
- * Expo config plugin that patches the Podfile post_install to disable
- * Swift 6 strict concurrency checking on all pods.
+ * Expo config plugin that sets SWIFT_STRICT_CONCURRENCY=minimal and
+ * SWIFT_VERSION=5.0 on every pod in the Podfile's post_install.
  *
- * This fixes expo-image 55.x compilation on Xcode 16.4+ which enables
- * strict concurrency by default, causing 36+ build errors.
- *
- * This plugin survives `npx expo prebuild --clean`.
+ * Xcode 16.4+ turns on Swift 6 strict concurrency by default, and some pods do
+ * not compile under it. The settings go right after the
+ * react_native_post_install(...) call; the plugin throws if that call is
+ * missing, so a template change fails `npx expo prebuild --clean` loudly.
  */
 const { withDangerousMod } = require("expo/config-plugins");
 const fs = require("fs");
@@ -22,8 +22,8 @@ module.exports = function swiftConcurrencyFix(config) {
       let podfile = fs.readFileSync(podfilePath, "utf8");
 
       const patch = `
-    # [swift-concurrency-fix plugin] Xcode 16.4+ enables Swift 6 strict
-    # concurrency by default, breaking expo-image and other pods.
+    # [swift-concurrency-fix plugin] Xcode 16.4+ turns on Swift 6 strict
+    # concurrency by default, and some pods do not compile under it.
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
         bc.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'

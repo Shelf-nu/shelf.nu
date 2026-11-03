@@ -77,7 +77,7 @@
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@types/node": "^24.19.2",
-    "@types/react": "^19.3.0",
+    "@types/react": "~19.2.14",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~58.0.4",
     "react-doctor": "0.0.39",
@@ -87,7 +87,8 @@
   "expo": {
     "install": {
       "exclude": [
-        "@react-native-async-storage/async-storage"
+        "@react-native-async-storage/async-storage",
+        "@types/react"
       ]
     },
     "autolinking": {
