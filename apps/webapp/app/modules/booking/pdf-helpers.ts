@@ -17,7 +17,7 @@ import {
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
 import { formatTemplateCustomFieldValue } from "~/modules/pdf-template/format";
-import { assertCanDownloadBookingTemplates } from "~/utils/booking-authorization.server";
+import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
@@ -190,7 +190,7 @@ export async function fetchAllPdfRelatedData(
     });
 
     if (access) {
-      assertCanDownloadBookingTemplates({
+      assertCanDownloadBookingDocuments({
         access,
         booking,
         userId,
@@ -505,7 +505,7 @@ export async function fetchAllPdfRelatedData(
       modelRequests,
     };
   } catch (cause) {
-    // A refusal (the caller may not see this booking or its templates) keeps
+    // A refusal (the caller may not see this booking or its documents) keeps
     // its own 4xx status; only unexpected failures become a 500.
     rethrowIfClientError(cause);
     throw new ShelfError({

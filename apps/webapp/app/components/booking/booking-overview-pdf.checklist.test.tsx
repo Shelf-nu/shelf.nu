@@ -2,8 +2,7 @@
  * The Checklist prints the booking PDF as it was before PDF templates existed.
  *
  * `__snapshots__/checklist-document.html` is the markup the booking PDF rendered
- * for one busy booking before it read a template, recorded by the commit that
- * added this test. A free workspace must keep printing exactly that page; a
+ * for one busy booking when it read no template. A free workspace must keep printing exactly that page; a
  * paid workspace's seeded "Checklist" template prints it too, titled by the
  * template ("Checklist - ...") where the page said "Booking checklist for ...".
  *

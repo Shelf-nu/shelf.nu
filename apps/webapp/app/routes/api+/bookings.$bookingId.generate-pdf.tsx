@@ -1,5 +1,5 @@
 /**
- * Booking Template API
+ * Booking Document API
  *
  * Serves `/api/bookings/:bookingId/generate-pdf`: everything a booking's PDF
  * renders, loaded when its preview opens and again when the person picks

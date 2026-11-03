@@ -120,7 +120,7 @@ export function pdfAssetOrderFromSearchParams(
  *
  * @param props.booking - The booking to print
  * @param props.disabled - The trigger's disabled state, as the shared rules
- *   (`resolveBookingActions`, its `bookingTemplate` entry) decide it
+ *   (`resolveBookingActions`, its `bookingDocument` entry) decide it
  * @param props.assetOrder - The sort to list assets in. Omitted, no sort is
  *   sent and the server default (status, descending) applies; the booking page
  *   passes the sort of its own URL.
