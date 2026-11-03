@@ -71,7 +71,7 @@ import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
-import { QR_CODES_ORDER_BY } from "../barcode/display";
+import { ASSET_CODE_RESOLUTION_SELECT } from "../barcode/display";
 import { refreshExpiredKitImages } from "../kit/service.server";
 import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -4540,6 +4540,16 @@ export async function assetActivityReport(
       "BOOKING_CHECKED_IN",
     ];
 
+    // An export pages through the timeframe by offset, so its end must not
+    // move: a range ending later today would admit events recorded while the
+    // export runs, shifting every later batch. It ends when the export starts.
+    const readTimeframe = allRows
+      ? {
+          ...timeframe,
+          to: new Date(Math.min(timeframe.to.getTime(), Date.now())),
+        }
+      : timeframe;
+
     /** Reads one page of events, with the KPI counts when `withSummary`. */
     const readEvents = (
       pageNumber: number,
@@ -4548,7 +4558,7 @@ export async function assetActivityReport(
     ) => {
       const query = {
         organizationId,
-        timeframe,
+        timeframe: readTimeframe,
         actions: assetActions,
         assetId,
         page: pageNumber,
@@ -4581,12 +4591,10 @@ export async function assetActivityReport(
             id: true,
             organizationId: true,
             title: true,
-            sequentialId: true,
-            qrCodes: {
-              take: 1,
-              orderBy: QR_CODES_ORDER_BY,
-              select: { id: true },
-            },
+            // SAM ID and the first QR code, in the order every other
+            // surface shows them.
+            ...ASSET_CODE_RESOLUTION_SELECT,
+            unitOfMeasure: true,
             mainImage: true,
             mainImageExpiration: true,
             thumbnailImage: true,
@@ -4605,7 +4613,7 @@ export async function assetActivityReport(
         const asset = event.assetId ? assetMap.get(event.assetId) : null;
         const actorSnapshot = event.actorSnapshot as UserNameFields | null;
         const { description, changedFrom, changedTo } =
-          buildActivityDescription(event, referenceNames);
+          buildActivityDescription(event, referenceNames, asset?.unitOfMeasure);
 
         return {
           id: event.id,
@@ -4707,9 +4715,8 @@ export async function assetActivityReport(
       },
     ];
 
-    // Thumbnail URLs were already refreshed when we built `assetMap` above,
-    // so the rows we just constructed have fresh URLs — no separate
-    // refresh step needed here.
+    // `toRows` re-signs thumbnails as it builds page rows, so they need no
+    // separate refresh here. Export rows keep whatever URL is stored.
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -4960,7 +4967,8 @@ function mapActionToActivityType(action: ActivityAction): AssetActivityType {
  */
 function buildActivityDescription(
   event: DescribableEvent,
-  names: ReferenceNames
+  names: ReferenceNames,
+  unitOfMeasure?: string | null
 ): ActivityDescription {
   const actionLabels: Record<string, string> = {
     ASSET_CREATED: "Asset created",
@@ -4985,5 +4993,5 @@ function buildActivityDescription(
   const label =
     actionLabels[event.action] || event.action.replace(/_/g, " ").toLowerCase();
 
-  return describeChange(label, event, names);
+  return describeChange(label, event, names, unitOfMeasure);
 }

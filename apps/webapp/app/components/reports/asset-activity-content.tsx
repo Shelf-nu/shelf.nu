@@ -91,7 +91,7 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
     // the rest is in the tooltip and the CSV.
     cell: ({ row }) => (
       <span
-        className="line-clamp-3 block min-w-48 max-w-xs whitespace-normal text-gray-700"
+        className="line-clamp-3 min-w-48 max-w-xs whitespace-normal text-gray-700"
         title={row.original.description}
       >
         {row.original.description}

@@ -807,13 +807,11 @@ function generateAssetActivityCsv(
   ]);
 
   // An export that reached its ceiling says so rather than ending silently.
-  if (rows.length < totalRows) {
+  if (rows.length >= ACTIVITY_EXPORT_MAX_ROWS && totalRows > rows.length) {
+    const written = rows.length.toLocaleString("en-US");
+    const total = totalRows.toLocaleString("en-US");
     csvRows.push([
-      `Export stopped at ${ACTIVITY_EXPORT_MAX_ROWS.toLocaleString(
-        "en-US"
-      )} of ${totalRows.toLocaleString(
-        "en-US"
-      )} rows. Narrow the date range to export the rest.`,
+      `Export stopped at ${written} of ${total} rows. Narrow the date range to export the rest.`,
     ]);
   }
 

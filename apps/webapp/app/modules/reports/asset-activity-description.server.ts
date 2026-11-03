@@ -14,10 +14,11 @@
 import type { ActivityAction } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { sanitizeUnitOfMeasureLabel } from "~/utils/asset-quantity";
 
 /**
- * Event fields whose values are ids of another record in the workspace, with
- * the word used when that record no longer exists. `tags` holds a list of ids.
+ * Kinds of record a change event can point at, with the word used when that
+ * record no longer exists.
  */
 const REFERENCE_FIELDS = {
   locationId: "location",
@@ -27,6 +28,18 @@ const REFERENCE_FIELDS = {
 } as const;
 
 type ReferenceField = keyof typeof REFERENCE_FIELDS;
+
+/**
+ * The actions whose values are record ids, and the kind of record. Decided by
+ * the action, never by `field`: a custom field event stores the custom
+ * field's own name there, and a field may be named "tags".
+ */
+const REFERENCE_ACTIONS: Partial<Record<ActivityAction, ReferenceField>> = {
+  ASSET_LOCATION_CHANGED: "locationId",
+  ASSET_CATEGORY_CHANGED: "categoryId",
+  ASSET_MODEL_CHANGED: "assetModelId",
+  ASSET_TAGS_CHANGED: "tags",
+};
 
 /** Names of the records a page of events refers to, keyed by field then id. */
 export type ReferenceNames = Record<ReferenceField, Map<string, string>>;
@@ -56,15 +69,12 @@ export type ActivityDescription = {
  * their own attribute: their `field` is the custom field's name.
  */
 const CHANGED_ATTRIBUTE: Partial<Record<ActivityAction, string>> = {
+  ASSET_DESCRIPTION_CHANGED: "Description",
   ASSET_CATEGORY_CHANGED: "Category",
   ASSET_MODEL_CHANGED: "Asset model",
   ASSET_LOCATION_CHANGED: "Location",
   ASSET_VALUATION_CHANGED: "Valuation",
 };
-
-function isReferenceField(field: string): field is ReferenceField {
-  return Object.hasOwn(REFERENCE_FIELDS, field);
-}
 
 /** The ids an event value holds: one id, a list of ids, or none. */
 function idsIn(value: unknown): string[] {
@@ -95,9 +105,10 @@ export async function loadReferenceNames(
     tags: new Set(),
   };
   for (const event of events) {
-    if (!event.field || !isReferenceField(event.field)) continue;
+    const reference = REFERENCE_ACTIONS[event.action];
+    if (!reference) continue;
     for (const id of [...idsIn(event.fromValue), ...idsIn(event.toValue)]) {
-      ids[event.field].add(id);
+      ids[reference].add(id);
     }
   }
 
@@ -132,15 +143,15 @@ function nameOf(field: ReferenceField, id: string, names: ReferenceNames) {
 
 /** One side of a change as text, or `null` when that side is empty. */
 function readableValue(
-  field: string,
+  reference: ReferenceField | undefined,
   value: unknown,
   names: ReferenceNames
 ): string | null {
   if (value === null || value === undefined || value === "") return null;
-  if (isReferenceField(field)) {
+  if (reference) {
     const ids = idsIn(value);
     return ids.length > 0
-      ? ids.map((id) => nameOf(field, id, names)).join(", ")
+      ? ids.map((id) => nameOf(reference, id, names)).join(", ")
       : null;
   }
   if (typeof value === "string") return value;
@@ -169,30 +180,54 @@ function describeTagChange(
   return null;
 }
 
+/** What a location event's `meta` says about the units it moved. */
+type UnitMove = {
+  /** The count with its unit, e.g. "12 units" or "40 kg". */
+  units: string;
+  /** Which half of a partial move this event is: "from" or "to". */
+  side?: string;
+  /** Units placed from the asset's unplaced stock, not moved from a site. */
+  fromUnplaced: boolean;
+};
+
 /**
- * The units a location event moved, for quantity-tracked assets, plus which
- * half of a partial move it is. Both live in `meta`; plain assets have none.
+ * The units a location event moved, for quantity-tracked assets. Plain assets
+ * carry no quantity in `meta`.
+ *
+ * @param meta - The event's `meta`
+ * @param unitOfMeasure - The asset's unit of measure; "unit(s)" when unset
  */
-function unitsMoved(meta: unknown): { units: string; side?: string } | null {
+function unitsMoved(
+  meta: unknown,
+  unitOfMeasure: string | null | undefined
+): UnitMove | null {
   if (!meta || typeof meta !== "object") return null;
-  const { quantity, side } = meta as { quantity?: unknown; side?: unknown };
+  const { quantity, side, placeUnplaced } = meta as {
+    quantity?: unknown;
+    side?: unknown;
+    placeUnplaced?: unknown;
+  };
   if (typeof quantity !== "number" || quantity <= 0) return null;
+  const unit =
+    sanitizeUnitOfMeasureLabel(unitOfMeasure) ||
+    (quantity === 1 ? "unit" : "units");
   return {
-    units: `${quantity.toLocaleString()} ${quantity === 1 ? "unit" : "units"}`,
+    units: `${quantity.toLocaleString()} ${unit}`,
     side: typeof side === "string" ? side : undefined,
+    fromUnplaced: placeUnplaced === true,
   };
 }
 
 /** Location sentences for quantity-tracked assets, which move units. */
 function describeUnitMove(
-  units: { units: string; side?: string },
+  units: UnitMove,
   from: string | null,
   to: string | null
 ): string | null {
   if (from && to) return `${units.units} moved: ${from} → ${to}`;
   // A partial move records its two halves as separate events.
   if (to) {
-    return units.side === "to"
+    return units.side === "to" && !units.fromUnplaced
       ? `${units.units} moved to ${to}`
       : `${units.units} placed at ${to}`;
   }
@@ -210,19 +245,22 @@ function describeUnitMove(
  * @param label - The action's label, e.g. "Location changed"
  * @param event - The event to describe
  * @param names - Names from {@link loadReferenceNames} for the same page
+ * @param unitOfMeasure - The asset's unit of measure, for unit moves
  * @returns The sentence plus the readable before and after values
  */
 export function describeChange(
   label: string,
   event: DescribableEvent,
-  names: ReferenceNames
+  names: ReferenceNames,
+  unitOfMeasure?: string | null
 ): ActivityDescription {
   if (!event.field) {
     return { description: label, changedFrom: null, changedTo: null };
   }
 
-  const changedFrom = readableValue(event.field, event.fromValue, names);
-  const changedTo = readableValue(event.field, event.toValue, names);
+  const reference = REFERENCE_ACTIONS[event.action];
+  const changedFrom = readableValue(reference, event.fromValue, names);
+  const changedTo = readableValue(reference, event.toValue, names);
   const sides = { changedFrom, changedTo };
 
   if (event.action === "ASSET_TAGS_CHANGED") {
@@ -230,7 +268,9 @@ export function describeChange(
   }
 
   const units =
-    event.action === "ASSET_LOCATION_CHANGED" ? unitsMoved(event.meta) : null;
+    event.action === "ASSET_LOCATION_CHANGED"
+      ? unitsMoved(event.meta, unitOfMeasure)
+      : null;
   const unitSentence = units
     ? describeUnitMove(units, changedFrom, changedTo)
     : null;

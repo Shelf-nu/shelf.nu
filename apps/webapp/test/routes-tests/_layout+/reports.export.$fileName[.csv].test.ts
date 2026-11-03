@@ -73,7 +73,8 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   assetInventoryReport: vi.fn(),
   assetUtilizationReport: vi.fn(),
   assetActivityReport: vi.fn(),
-  ACTIVITY_EXPORT_MAX_ROWS: 200_000,
+  // A tiny ceiling, so the ceiling case needs no 200,000-row file.
+  ACTIVITY_EXPORT_MAX_ROWS: 2,
   monthlyBookingTrendsReport: vi.fn(),
 }));
 
@@ -762,11 +763,17 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     });
 
     it("ends a file cut at the ceiling with a line saying so", async () => {
-      const lines = await exportLines([moveRow], 250_000);
+      const lines = await exportLines([moveRow, moveRow], 250_000);
 
       expect(lines.at(-1)).toBe(
-        '"Export stopped at 200,000 of 250,000 rows. Narrow the date range to export the rest."'
+        '"Export stopped at 2 of 250,000 rows. Narrow the date range to export the rest."'
       );
+    });
+
+    it("adds no notice when fewer rows than counted arrive below the ceiling", async () => {
+      const lines = await exportLines([moveRow], 3);
+
+      expect(lines).toHaveLength(2);
     });
   });
 });

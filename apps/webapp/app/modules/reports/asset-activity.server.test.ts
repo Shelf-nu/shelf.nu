@@ -197,6 +197,73 @@ describe("assetActivityReport descriptions", () => {
     ]);
   });
 
+  it("says placed, not moved, for units placed from unplaced stock, in the asset's unit", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      {
+        id: "asset-1",
+        organizationId: ORG,
+        title: "Rice",
+        unitOfMeasure: "kg",
+        qrCodes: [],
+      },
+    ] as never);
+
+    const descriptions = (
+      await readableRows([
+        location(null, "loc-hull", {
+          quantity: 40,
+          side: "to",
+          placeUnplaced: true,
+        }),
+        location("loc-hull", "loc-leeds", { quantity: 12 }),
+      ])
+    ).map((row) => row.description);
+
+    expect(descriptions).toEqual([
+      "40 kg placed at Hull depot",
+      "12 kg moved: Hull depot → Leeds unit",
+    ]);
+  });
+
+  it("keeps a custom field's own values even when it is named like a record field", async () => {
+    expect(
+      await readableRows([
+        event("ASSET_CUSTOM_FIELD_CHANGED", {
+          field: "tags",
+          fromValue: "red",
+          toValue: "blue",
+        }),
+      ])
+    ).toEqual([
+      {
+        description: "tags changed: red → blue",
+        changedFrom: "red",
+        changedTo: "blue",
+      },
+    ]);
+    expect(db.tag.findMany).not.toHaveBeenCalled();
+  });
+
+  it("says what a cleared or first description was", async () => {
+    const descriptions = (
+      await readableRows([
+        event("ASSET_DESCRIPTION_CHANGED", {
+          field: "description",
+          fromValue: "Dry goods",
+        }),
+        event("ASSET_DESCRIPTION_CHANGED", {
+          field: "description",
+          toValue: "Frozen goods",
+        }),
+      ])
+    ).map((row) => row.description);
+
+    expect(descriptions).toEqual([
+      "Description removed, was Dry goods",
+      "Description set to Frozen goods",
+    ]);
+  });
+
   it("names categories, models, tags and custom fields", async () => {
     const descriptions = (
       await readableRows([
@@ -386,6 +453,23 @@ describe("assetActivityReport export mode (allRows)", () => {
       [5000, 0],
       [5000, 5000],
     ]);
+  });
+
+  it("ends the export's timeframe when the export starts", async () => {
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([] as never);
+    const before = Date.now();
+
+    await assetActivityReport({
+      organizationId: ORG,
+      // A range ending later than now, as a custom range ending today does.
+      timeframe: { ...TIMEFRAME, to: new Date(before + 6 * 60 * 60 * 1000) },
+      allRows: true,
+    });
+
+    const [args] = vi.mocked(db.activityEvent.findMany).mock.calls[0];
+    const end = (args?.where?.occurredAt as { lte: Date }).lte.getTime();
+    expect(end).toBeGreaterThanOrEqual(before);
+    expect(end).toBeLessThanOrEqual(Date.now());
   });
 
   it("stops at the ceiling and reports the full total", async () => {
