@@ -396,7 +396,7 @@ export default function BookingsIndexPage({
               <Th>Custodian</Th>
               <Th>Created by</Th>
               {/* Check-in/out icons and the ⋯ menu, see BookingQuickActions */}
-              <Th>Quick actions</Th>
+              <Th className="whitespace-nowrap">Quick actions</Th>
             </>
           }
           headerExtraContent={

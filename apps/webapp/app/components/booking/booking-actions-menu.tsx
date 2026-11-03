@@ -126,16 +126,21 @@ const MenuTrigger = forwardRef<HTMLButtonElement, MenuTriggerProps>(
           aria-label="More actions"
           {...props}
           className={tw(
-            "flex items-center justify-center rounded text-gray-600 outline-none hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-primary-500",
+            "flex rounded outline-none focus-visible:ring-2 focus-visible:ring-primary-500",
             className
           )}
         >
-          <span
-            aria-hidden="true"
-            className="flex size-6 items-center justify-center"
-          >
-            <VerticalDotsIcon />
-          </span>
+          {/* Same face as the row's check-in/out icon buttons
+              (BookingActionTrigger's "icon" variant), so the cell reads as
+              one set of buttons. */}
+          <Button variant="secondary" size="sm" as="span" className="p-2">
+            <span
+              aria-hidden="true"
+              className="flex size-4 items-center justify-center"
+            >
+              <VerticalDotsIcon />
+            </span>
+          </Button>
         </button>
       );
     }
