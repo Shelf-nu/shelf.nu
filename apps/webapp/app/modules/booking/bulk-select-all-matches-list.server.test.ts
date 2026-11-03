@@ -26,6 +26,7 @@ import { db } from "~/database/db.server";
 import { loader as assetTabLoader } from "~/routes/_layout+/assets.$assetId.bookings";
 import { loader as indexLoader } from "~/routes/_layout+/bookings._index";
 import { loader as kitTabLoader } from "~/routes/_layout+/kits.$kitId.bookings";
+import { createFilterCookie } from "~/utils/cookies.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
@@ -392,6 +393,44 @@ describe("the Pending approval filter", () => {
     expect((response as Response).headers.get("Location")).toBe(
       "/bookings?teamMember=tm-1"
     );
+    // why: the saved filter cookie is rewritten from the cleaned query, so a
+    // later visit without a query cannot restore the stale status.
+    const cookie = (response as Response).headers.get("Set-Cookie") ?? "";
+    const saved = await createFilterCookie({
+      orgId: ORG,
+      name: "bookingFilter_v2",
+      path: "/",
+    }).parse(cookie);
+    expect(saved).toBe("teamMember=tm-1");
+  });
+
+  it("expires a saved filter cookie that only held the stale status", async () => {
+    // why: a cookie holding only status=PENDING_APPROVAL would otherwise
+    // restore the status on the next visit and loop back to this redirect.
+    vitest
+      .mocked(db.bookingSettings.findUnique)
+      .mockResolvedValueOnce({ requireBookingApproval: false } as never);
+    requirePermissionMock.mockResolvedValue({
+      organizationId: ORG,
+      access: ADMIN,
+      currentOrganization: { id: ORG },
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    const response = await BOOKINGS_INDEX.loader({
+      context: { getSession: () => ({ userId: ME }) },
+      request: new Request(
+        "http://localhost/bookings?status=PENDING_APPROVAL",
+        {
+          headers: { Cookie: `${ORG}_bookingFilter_v2=stale` },
+        }
+      ),
+      params: {},
+    } as unknown as LoaderFunctionArgs);
+
+    expect((response as Response).headers.get("Location")).toBe("/bookings");
+    const cookie = (response as Response).headers.get("Set-Cookie") ?? "";
+    expect(cookie).toContain(`${ORG}_bookingFilter_v2=`);
+    expect(cookie).toMatch(/Max-Age=0/);
   });
 
   it("is not a status: a lowercase value resolves the same way", async () => {

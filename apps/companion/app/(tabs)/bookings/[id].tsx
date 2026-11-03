@@ -2137,7 +2137,11 @@ function BookingDetailScreen({ id }: { id: string }) {
                     // the disabled state without setting it by hand.
                     disabled={!!reserveBlockedReason}
                     onPress={handleReserve}
-                    accessibilityLabel="Reserve this booking"
+                    accessibilityLabel={
+                      reservationIsRequest
+                        ? "Request a reservation for this booking"
+                        : "Reserve this booking"
+                    }
                     accessibilityHint={reserveBlockedReason ?? undefined}
                     accessibilityRole="button"
                   >

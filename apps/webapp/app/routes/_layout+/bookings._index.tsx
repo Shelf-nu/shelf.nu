@@ -28,6 +28,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { cleanParamsForFilterCookie } from "~/hooks/search-params";
 import { useListContextLinkState } from "~/hooks/use-list-context";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -48,7 +49,12 @@ import {
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
-import { setCookie, userPrefs } from "~/utils/cookies.server";
+import {
+  createFilterCookie,
+  serializeFilterCookieForUrl,
+  setCookie,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error } from "~/utils/http.server";
@@ -141,7 +147,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         const cleaned = new URLSearchParams(searchParams);
         cleaned.delete("status");
         const query = cleaned.toString();
-        return redirect(query ? `/bookings?${query}` : "/bookings");
+        /**
+         * The saved filter cookie may still hold the stale status. Rewrite it
+         * from the cleaned query (or expire it) in the same response, or the
+         * next visit restores it from the cookie and redirects back here.
+         */
+        const rewrittenFilterCookie = await serializeFilterCookieForUrl(
+          createFilterCookie({
+            orgId: organizationId,
+            name: "bookingFilter_v2",
+            path: "/",
+          }),
+          cleanParamsForFilterCookie(query),
+          request.headers.get("Cookie")
+        );
+        return redirect(query ? `/bookings?${query}` : "/bookings", {
+          headers: rewrittenFilterCookie
+            ? [setCookie(rewrittenFilterCookie)]
+            : [],
+        });
       }
     }
 
