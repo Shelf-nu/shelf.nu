@@ -207,24 +207,58 @@ test("removes a foreign key that a migration adds and drops again", () => {
 
 /**
  * The foreign key names Prisma expects from `schema.prisma`: an explicit
- * `map:` name, or the default `<Model>_<field>[_<field>]_fkey`.
+ * `map:` name, or the default `<table>_<column>[_<column>]_fkey`, built from
+ * database names, so a model's `@@map` and a field's `@map` apply.
  */
-function foreignKeysDescribedBySchema() {
-  const schema = fs.readFileSync(path.join(prismaDir, "schema.prisma"), "utf8");
+function foreignKeysDescribedBySchema(
+  schema = fs.readFileSync(path.join(prismaDir, "schema.prisma"), "utf8")
+) {
   const names = new Set<string>();
   for (const [, model, body] of schema.matchAll(
     /^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm
   )) {
+    const table = /@@map\(\s*"([^"]+)"\s*\)/.exec(body)?.[1] ?? model;
+    const columnOf = new Map<string, string>();
+    for (const [, field, column] of body.matchAll(
+      /^\s*(\w+)\s[^\n]*?[^@]@map\(\s*"([^"]+)"\s*\)/gm
+    )) {
+      columnOf.set(field, column);
+    }
     for (const [, args] of body.matchAll(/@relation\(([^)]*)\)/g)) {
       const fields = /fields:\s*\[([^\]]*)\]/.exec(args);
       if (!fields) continue;
       const mapped = /map:\s*"([^"]+)"/.exec(args);
-      const columns = fields[1].split(",").map((field) => field.trim());
-      names.add(mapped ? mapped[1] : `${model}_${columns.join("_")}_fkey`);
+      const columns = fields[1]
+        .split(",")
+        .map((field) => field.trim())
+        .map((field) => columnOf.get(field) ?? field);
+      names.add(mapped ? mapped[1] : `${table}_${columns.join("_")}_fkey`);
     }
   }
   return names;
 }
+
+test("names schema foreign keys after database table and column names", () => {
+  const schema = [
+    "model Note {",
+    '  ownerId String @map("owner_id")',
+    "  owner   User   @relation(fields: [ownerId], references: [id])",
+    "  tagId   String",
+    '  tag     Tag    @relation(fields: [tagId], references: [id], map: "note_tag_fk")',
+    "}",
+    "",
+    "model Comment {",
+    "  noteId String",
+    "  note   Note   @relation(fields: [noteId], references: [id])",
+    '  @@map("comments")',
+    "}",
+  ].join("\n");
+
+  assert.deepEqual(
+    [...foreignKeysDescribedBySchema(schema)].sort(),
+    ["Note_owner_id_fkey", "comments_noteId_fkey", "note_tag_fk"].sort()
+  );
+});
 
 test("every foreign key the migrations create is in the schema or protected", () => {
   const described = foreignKeysDescribedBySchema();

@@ -1481,8 +1481,10 @@ model AssetModelCustomFieldDefault {
   // TS's recursion limit (TS2321) in `organization/service.server`. Services
   // read the field rows with a second query keyed on these ids. Because the
   // schema does not describe the FK, `prisma migrate dev` treats it as drift
-  // and generates a drop for it; it is listed in `PROTECTED_FOREIGN_KEYS`
-  // (`src/protected-indexes.ts`), which strips that drop after generating.
+  // and generates a drop for it. `pnpm db:prepare-migration` then runs
+  // `src/post-migration.ts`, which strips that drop because the FK is listed in
+  // `PROTECTED_FOREIGN_KEYS` (`src/protected-indexes.ts`). Plain
+  // `prisma migrate dev` keeps the drop.
   customFieldId String
 
   createdAt DateTime @default(now())
