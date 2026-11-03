@@ -162,12 +162,12 @@ export const BookingOverviewPDF = ({
   // The template just picked, shown in the picker before its load answers.
   const [pickedId, setPickedId] = useState<string | null>(null);
   const shownTemplateId = pickedId ?? response?.template?.id ?? "";
-  // Only a workspace whose tier includes PDF templates gets a choice.
+  // A workspace with no templates (personal, on shelf.nu) gets no picker.
   const canChoose = templateList.length > 0;
 
   const handlePrint = useReactToPrint({
     contentRef: componentRef,
-    templateTitle: response?.template
+    documentTitle: response?.template
       ? bookingPdfTitle(response.template.name, booking.name)
       : `booking-${booking.name}-${Date.now()}`,
   });
