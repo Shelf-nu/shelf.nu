@@ -85,7 +85,7 @@ export function ExplicitRequirementSettingsCard({
   }, [fetcher.state, fetcher.data]);
 
   return (
-    <Card className="my-0">
+    <Card className="mt-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
