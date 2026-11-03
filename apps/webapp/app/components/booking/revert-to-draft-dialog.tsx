@@ -31,11 +31,19 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const disabled = useDisabled();
   const actionData = useActionData<DataOrErrorResponse>();
+  /**
+   * The route's action data outlives this dialog, so a refusal from an earlier
+   * opening would show on the next one. Remember what was current when the
+   * dialog opened and show only a result that arrived after that.
+   */
+  const [actionDataAtOpen, setActionDataAtOpen] = useState(actionData);
   /** Server-side validation errors, the fallback when the client check is bypassed. */
-  const validationErrors = getValidationErrors<typeof RevertToDraftSchema>(
-    actionData?.error
-  );
+  const validationErrors =
+    actionData === actionDataAtOpen
+      ? undefined
+      : getValidationErrors<typeof RevertToDraftSchema>(actionData?.error);
   function handleOpenDialog() {
+    setActionDataAtOpen(actionData);
     setIsDialogOpen(true);
   }
 

@@ -87,10 +87,11 @@ vitest.mock("~/database/db.server", () => {
         ),
       // why: `lockBookingForStatusCheck` takes its row lock through a raw
       // `SELECT … FOR UPDATE`, which the model-shaped mocks below cannot
-      // express. ONGOING is the one status that satisfies both the open and
-      // the in-flight assertion, so a single default serves every path this
-      // suite exercises. String literal — this factory is hoisted.
-      $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
+      // express. The first scan of a RESERVED booking is the only path here
+      // that locks, and it moves on only when the locked row still says
+      // RESERVED, so that is the default; the stale-snapshot tests override
+      // it per test. String literal — this factory is hoisted.
+      $queryRaw: vitest.fn().mockResolvedValue([{ status: "RESERVED" }]),
       // why: the first-scan approval gate reads the org's
       // `requireBookingApproval` through the tx. Default off: the approval
       // feature's own tests cover the pending branch.
@@ -506,6 +507,19 @@ describe("partialCheckoutBooking", () => {
     pbcHooks.__resetPbcState?.();
     pbcHooks.__installStatefulPbcMocks?.(db);
 
+    // why: the first-scan gate reads the approval switch, the locked status
+    // and the fresh row through `tx`; the approval tests override all three
+    // persistently, so put the defaults back (switch off, row still RESERVED).
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ requireBookingApproval: false });
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { status: BookingStatus.RESERVED },
+    ]);
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+    });
+
     // why: clearAllMocks resets call history but not mockResolvedValue overrides
     // set by a prior test. Restore the default "echo requested ids, no conflicts"
     // implementation so each test starts from a clean happy-path baseline.
@@ -631,6 +645,78 @@ describe("partialCheckoutBooking", () => {
         data: expect.objectContaining({ status: BookingStatus.ONGOING }),
       })
     );
+  });
+
+  it("refuses the first scan when the locked row is no longer open (reverted to DRAFT meanwhile)", async () => {
+    expect.assertions(2);
+
+    // The pre-tx snapshot still says RESERVED, but the row lock inside the
+    // transaction sees a revert to DRAFT that committed in between.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.DRAFT },
+    ]);
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow(/current status/);
+
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
+  it("does not repeat the RESERVED -> ONGOING transition when a concurrent first scan already made it", async () => {
+    expect.assertions(1);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.ONGOING },
+    ]);
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+    });
+
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
+  it("uses the locked row's approval, not the pre-transaction snapshot", async () => {
+    expect.assertions(1);
+
+    // Snapshot says approved; the row read under the lock says the approval
+    // was cleared (revert + re-reserve) while the scan was in flight.
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ requireBookingApproval: true });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, approvedAt: new Date() });
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow(/not been approved yet/);
   });
 
   it("flips a RESERVED booking to ONGOING and scanned assets to CHECKED_OUT on the first partial scan", async () => {

@@ -11530,61 +11530,103 @@ export async function partialCheckoutBooking({
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
         let bookingStatusChanged = false;
         if (bookingFound.status === BookingStatus.RESERVED) {
-          // Approval gate: a pending reservation request cannot start its
-          // checkout. This is the mobile scanner's entry point into ONGOING,
-          // so the guard must live here, not just in the web dialog.
-          const partialApprovalGate = await tx.bookingSettings.findUnique({
-            where: { organizationId },
-            select: { requireBookingApproval: true },
-          });
-          // The row is re-read through `tx` like the full check-out gate does:
-          // a revert that cleared the approval after the pre-tx read must
-          // still refuse this first scan.
-          const approvalRow = await tx.booking.findUnique({
-            where: { id, organizationId },
-            select: { status: true, approvedAt: true },
-          });
-          assertBookingIsApproved({
-            status: approvalRow?.status ?? bookingFound.status,
-            approvedAt: approvalRow?.approvedAt ?? bookingFound.approvedAt,
-            requireBookingApproval:
-              partialApprovalGate?.requireBookingApproval ?? false,
-            bookingId: id,
-          });
-
-          // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
-          const transitionData: Prisma.BookingUpdateInput = {
-            status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
-          };
-
-          // Early checkout: if the booking hasn't started yet and the user chose
-          // to adjust the date (via the early-checkout dialog), move `from` to now
-          // and preserve the original start in `originalFrom`. Mirrors the
-          // all-at-once checkoutBooking path so a partial early checkout doesn't
-          // leave a future start time while custody has already begun.
+          // The pre-tx snapshot said RESERVED. Decide the transition on the
+          // row as it is NOW, under a lock held until commit: a revert to
+          // DRAFT or a cancellation that committed since the snapshot must
+          // refuse this scan, and a first scan that already moved the booking
+          // to ONGOING must not be repeated. A plain re-read takes no lock
+          // under READ COMMITTED, so it could still race the update below.
+          const lockedStatus = await lockBookingForStatusCheck(
+            tx,
+            id,
+            organizationId
+          );
           if (
-            bookingFound.from &&
-            isBookingEarlyCheckout(bookingFound.from) &&
-            intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+            lockedStatus !== BookingStatus.RESERVED &&
+            lockedStatus !== BookingStatus.ONGOING &&
+            lockedStatus !== BookingStatus.OVERDUE
           ) {
-            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
-            const fromDateStr = DateTime.fromJSDate(new Date(), {
-              zone: hints.timeZone,
-            }).toFormat(DATE_TIME_FORMAT);
-            transitionData.from = DateTime.fromFormat(
-              fromDateStr,
-              DATE_TIME_FORMAT,
-              { zone: hints.timeZone }
-            ).toJSDate();
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message:
+                "This booking can't be checked out in its current status. Only reserved, ongoing, or overdue bookings can have items checked out.",
+              additionalData: { bookingId: id, status: lockedStatus },
+              shouldBeCaptured: false,
+            });
           }
+          // A concurrent first scan may already have moved the booking on;
+          // then this batch only checks out its items.
+          if (lockedStatus === BookingStatus.RESERVED) {
+            // Approval gate: a pending reservation request cannot start its
+            // checkout. This is the mobile scanner's entry point into ONGOING,
+            // so the guard must live here, not just in the web dialog. Both
+            // reads run on `tx` after the row lock above, so a revert that
+            // cleared the approval after the pre-tx snapshot is seen here and
+            // nothing falls back to that snapshot.
+            const [partialApprovalGate, approvalRow] = await Promise.all([
+              tx.bookingSettings.findUnique({
+                where: { organizationId },
+                select: { requireBookingApproval: true },
+              }),
+              tx.booking.findUnique({
+                where: { id, organizationId },
+                select: { status: true, approvedAt: true },
+              }),
+            ]);
+            if (!approvalRow) {
+              throw new ShelfError({
+                cause: null,
+                message: "Booking not found",
+                additionalData: { bookingId: id, organizationId },
+                label,
+                status: 404,
+              });
+            }
+            assertBookingIsApproved({
+              status: approvalRow.status,
+              approvedAt: approvalRow.approvedAt ?? null,
+              requireBookingApproval:
+                partialApprovalGate?.requireBookingApproval ?? false,
+              bookingId: id,
+            });
 
-          await tx.booking.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
-            where: { id },
-            data: transitionData,
-            select: { id: true },
-          });
-          bookingStatusChanged = true;
+            // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
+            const transitionData: Prisma.BookingUpdateInput = {
+              status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+            };
+
+            // Early checkout: if the booking hasn't started yet and the user chose
+            // to adjust the date (via the early-checkout dialog), move `from` to now
+            // and preserve the original start in `originalFrom`. Mirrors the
+            // all-at-once checkoutBooking path so a partial early checkout doesn't
+            // leave a future start time while custody has already begun.
+            if (
+              bookingFound.from &&
+              isBookingEarlyCheckout(bookingFound.from) &&
+              intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+            ) {
+              transitionData.originalFrom =
+                plannedStartToPreserve(bookingFound);
+              const fromDateStr = DateTime.fromJSDate(new Date(), {
+                zone: hints.timeZone,
+              }).toFormat(DATE_TIME_FORMAT);
+              transitionData.from = DateTime.fromFormat(
+                fromDateStr,
+                DATE_TIME_FORMAT,
+                { zone: hints.timeZone }
+              ).toJSDate();
+            }
+
+            await tx.booking.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
+              where: { id },
+              data: transitionData,
+              select: { id: true },
+            });
+            bookingStatusChanged = true;
+          }
         }
 
         // BOOKING ACTIVITY LOG: Log partial check-out activity.

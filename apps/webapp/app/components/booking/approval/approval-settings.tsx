@@ -73,9 +73,9 @@ export function ApprovalSettings({
                 wait for approval by an administrator or manager before they can
                 be checked out. The requested items are still held for the
                 booking period. Reservations made while this is off stay
-                approved; requests still waiting when you switch it off are
-                pending again when you switch it back on: only new requests need
-                approval.
+                approved. Requests still waiting when you switch it off can be
+                checked out meanwhile, and need a decision again if you switch
+                it back on.
               </div>
             }
             className="border-b-0 pb-[10px] pt-0"

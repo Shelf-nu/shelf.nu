@@ -165,6 +165,8 @@ describe("booking page approve-booking intent", () => {
     // A success is the route's plain payload, not a Response; only a refusal
     // arrives as one.
     expect(response instanceof Response ? response.status : 200).toBe(200);
+    // `payload()` stamps `error: null` on every success, so test the value.
+    expect(response).toMatchObject({ success: true });
     expect(approveBookingMock).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "booking-1",
