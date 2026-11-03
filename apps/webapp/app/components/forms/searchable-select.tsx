@@ -11,7 +11,7 @@
  * @see {@link file://./../assets/import-mapping/target-select.tsx} the pattern this follows
  */
 import type { KeyboardEvent } from "react";
-import { useId, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -130,6 +130,8 @@ export function SearchableSelect({
 
   const baseId = useId();
   const labelId = `${baseId}-label`;
+  const triggerId = `${baseId}-trigger`;
+  const valueId = `${baseId}-value`;
   const listId = `${baseId}-options`;
   const errorId = `${baseId}-error`;
 
@@ -141,6 +143,20 @@ export function SearchableSelect({
       (o) => !o.hiddenFromList && o.label.toLowerCase().includes(needle)
     );
   }, [options, query, searchable]);
+
+  /** DOM id of the option at `index`, referenced by `aria-activedescendant`. */
+  const optionId = (index: number) => `${listId}-${index}`;
+  const activeOptionId = visible[activeIndex]
+    ? optionId(activeIndex)
+    : undefined;
+
+  // Keeps the keyboard highlight visible inside the scrolling list.
+  useEffect(() => {
+    if (!open || !activeOptionId) return;
+    document.getElementById(activeOptionId)?.scrollIntoView?.({
+      block: "nearest",
+    });
+  }, [open, activeOptionId]);
 
   const choose = (option: SearchableSelectOption) => {
     setValue(option.value);
@@ -165,9 +181,13 @@ export function SearchableSelect({
 
   return (
     <div className="flex flex-col gap-1">
-      <span id={labelId} className="text-sm font-medium text-gray-700">
+      <label
+        id={labelId}
+        htmlFor={triggerId}
+        className="text-sm font-medium text-gray-700"
+      >
         {label}
-      </span>
+      </label>
       <input type="hidden" name={name} value={selected?.value ?? ""} />
       <Popover
         open={open}
@@ -175,10 +195,11 @@ export function SearchableSelect({
       >
         <PopoverTrigger asChild>
           <button
+            id={triggerId}
             type="button"
             aria-haspopup="listbox"
             aria-expanded={open}
-            aria-labelledby={labelId}
+            aria-labelledby={`${labelId} ${valueId}`}
             aria-describedby={error ? errorId : undefined}
             className={tw(
               "flex w-full items-center justify-between gap-2 rounded border bg-white px-3.5 py-2 text-left text-[16px] text-gray-900",
@@ -186,7 +207,7 @@ export function SearchableSelect({
               error ? "border-error-300" : "border-gray-300"
             )}
           >
-            <span className="min-w-0 truncate">
+            <span id={valueId} className="min-w-0 truncate">
               {selected?.label}
               {selected?.hint ? (
                 <span className="ml-2 text-sm text-gray-500">
@@ -214,7 +235,11 @@ export function SearchableSelect({
                 <input
                   ref={searchRef}
                   aria-label={`Search ${label}`}
+                  role="combobox"
+                  aria-expanded={open}
                   aria-controls={listId}
+                  aria-autocomplete="list"
+                  aria-activedescendant={activeOptionId}
                   placeholder={searchPlaceholder}
                   className="w-full border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
                   value={query}
@@ -229,6 +254,7 @@ export function SearchableSelect({
               id={listId}
               role="listbox"
               aria-labelledby={labelId}
+              aria-activedescendant={searchable ? undefined : activeOptionId}
               tabIndex={-1}
               className="max-h-72 overflow-y-auto focus:outline-none"
             >
@@ -237,6 +263,7 @@ export function SearchableSelect({
                 return (
                   <div
                     key={option.value}
+                    id={optionId(index)}
                     role="option"
                     aria-selected={isSelected}
                     tabIndex={-1}

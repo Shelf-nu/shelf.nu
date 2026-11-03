@@ -10,7 +10,7 @@
 import type { ComponentProps } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SearchableSelectOption } from "./searchable-select";
 import { SearchableSelect } from "./searchable-select";
 
@@ -67,7 +67,7 @@ describe("SearchableSelect", () => {
     await user.click(trigger());
 
     await user.type(
-      screen.getByRole("textbox", { name: "Search Custom field 1" }),
+      screen.getByRole("combobox", { name: "Search Custom field 1" }),
       "seri"
     );
 
@@ -81,7 +81,7 @@ describe("SearchableSelect", () => {
     await user.click(trigger());
 
     await user.type(
-      screen.getByRole("textbox", { name: "Search Custom field 1" }),
+      screen.getByRole("combobox", { name: "Search Custom field 1" }),
       "zzz{Enter}"
     );
 
@@ -109,7 +109,7 @@ describe("SearchableSelect", () => {
     await user.click(trigger());
 
     expect(screen.getByRole("listbox")).toBeVisible();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
   it("shows a hidden-from-list current value on the trigger but not in the list", async () => {
@@ -123,5 +123,38 @@ describe("SearchableSelect", () => {
     expect(
       screen.queryByRole("option", { name: /Retired field/ })
     ).not.toBeInTheDocument();
+  });
+
+  it("calls onChange with the picked value", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect({ onChange });
+
+    await user.click(trigger());
+    await user.click(screen.getByRole("option", { name: /Owner/ }));
+
+    expect(onChange).toHaveBeenCalledWith("owner");
+  });
+
+  it("posts the first option when the default value is unknown", () => {
+    const { posted } = renderSelect({ defaultValue: "missing" });
+
+    expect(posted()).toBe("");
+    expect(trigger()).toHaveTextContent("None");
+  });
+
+  it("moves aria-activedescendant to the next option on ArrowDown", async () => {
+    const user = userEvent.setup();
+    renderSelect();
+    await user.click(trigger());
+    const search = screen.getByRole("combobox", {
+      name: "Search Custom field 1",
+    });
+    const [first, second] = screen.getAllByRole("option");
+    expect(search).toHaveAttribute("aria-activedescendant", first.id);
+
+    await user.keyboard("{ArrowDown}");
+
+    expect(search).toHaveAttribute("aria-activedescendant", second.id);
   });
 });
