@@ -98,6 +98,14 @@ export function stripProtectedDrops(sql: string): {
     }
   }
 
+  if (protectedNames.length > 0) {
+    // Each removed block leaves the blank line that separated it from the
+    // next one; fold those so the migration reads as if Prisma wrote it.
+    content = content
+      .replace(/^\s+/, "")
+      .replace(/\n(?:[^\S\n]*\n){2,}/g, "\n\n");
+  }
+
   return { sql: content, protectedNames };
 }
 

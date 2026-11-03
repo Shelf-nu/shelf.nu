@@ -99,6 +99,39 @@ test("strips a schema-qualified drop of a protected index", () => {
   assert.equal(result.sql.trim(), "");
 });
 
+test("leaves no blank lines where it removed drops", () => {
+  // The shape Prisma generates: blocks separated by one blank line.
+  const sql = [
+    "-- DropForeignKey",
+    'ALTER TABLE "BookingAsset" DROP CONSTRAINT "BookingAsset_assetKitId_fkey";',
+    "",
+    "-- DropForeignKey",
+    'ALTER TABLE "ConsumptionLog" DROP CONSTRAINT "ConsumptionLog_bookingAssetId_fkey";',
+    "",
+    "-- DropIndex",
+    'DROP INDEX "Note_content_idx";',
+    "",
+    "-- DropForeignKey",
+    'ALTER TABLE "BookingAsset" DROP CONSTRAINT "BookingAsset_sourceKitId_fkey";',
+    "",
+    "-- AlterTable",
+    'ALTER TABLE "Tag" ADD COLUMN "qaProbe" TEXT;',
+    "",
+  ].join("\n");
+
+  assert.equal(
+    stripProtectedDrops(sql).sql,
+    [
+      "-- DropIndex",
+      'DROP INDEX "Note_content_idx";',
+      "",
+      "-- AlterTable",
+      'ALTER TABLE "Tag" ADD COLUMN "qaProbe" TEXT;',
+      "",
+    ].join("\n")
+  );
+});
+
 test("leaves a migration without protected drops unchanged", () => {
   const sql =
     '-- AlterTable\nALTER TABLE "Asset" ADD COLUMN "nickname" TEXT;\n';
