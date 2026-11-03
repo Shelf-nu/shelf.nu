@@ -302,6 +302,35 @@ describe("BookingActionsMenu", () => {
     expect(getTrigger("More actions")).toBeInTheDocument();
   });
 
+  it("returns focus to the visible mobile trigger when the sheet is dismissed", async () => {
+    const user = userEvent.setup();
+    render(
+      <BookingActionsMenu trigger="icon">
+        <button type="button">Duplicate</button>
+      </BookingActionsMenu>
+    );
+
+    const [desktopTrigger, mobileTrigger] = screen.getAllByRole("button", {
+      name: "More actions",
+    });
+    // why: happy-dom applies no CSS, so `hidden md:flex` never hides the
+    // desktop trigger; reporting no boxes is how a browser shows display:none.
+    vi.spyOn(desktopTrigger, "getClientRects").mockReturnValue(
+      [] as unknown as DOMRectList
+    );
+
+    mobileTrigger.focus();
+    await user.click(mobileTrigger);
+    expect(mobileTrigger).toHaveAttribute("aria-expanded", "true");
+
+    await user.keyboard("{Escape}");
+
+    expect(mobileTrigger).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(mobileTrigger);
+    });
+  });
+
   it("opens with keyboard Enter", async () => {
     const user = userEvent.setup();
     render(

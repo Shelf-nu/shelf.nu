@@ -22,7 +22,7 @@
  * @see {@link file://./asset-row-actions-dropdown.tsx} the Popover pattern
  * @see {@link file://./booking-action-trigger.tsx} the menu rows the entries render
  */
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import {
   Popover,
@@ -238,6 +238,22 @@ function InteractiveBookingActionsMenu({
   );
   const desktopTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
+  /**
+   * Whether the menu last closed from a pointer press outside it. Focus then
+   * stays where the operator pressed, as Radix does for its own trigger.
+   */
+  const closedFromOutsideRef = useRef(false);
+
+  /**
+   * Focuses whichever trigger is rendered at this width. Only one is: the
+   * other is `display: none`, which reports no boxes and cannot take focus.
+   */
+  const focusVisibleTrigger = useCallback(() => {
+    const visible = [desktopTriggerRef.current, mobileTriggerRef.current].find(
+      (el) => el && el.getClientRects().length > 0
+    );
+    visible?.focus();
+  }, []);
 
   /**
    * Closes the menu when an entry is activated (click, or Enter / Space on a
@@ -311,10 +327,7 @@ function InteractiveBookingActionsMenu({
           !active.isConnected ||
           Boolean(content?.contains(active));
         if (!focusLost) return;
-        desktopTriggerRef.current?.focus();
-        if (document.activeElement !== desktopTriggerRef.current) {
-          mobileTriggerRef.current?.focus();
-        }
+        focusVisibleTrigger();
       }, 0);
     }
 
@@ -342,7 +355,7 @@ function InteractiveBookingActionsMenu({
       observer.disconnect();
       window.clearTimeout(graceTimer);
     };
-  }, [held, contentRef]);
+  }, [held, contentRef, focusVisibleTrigger]);
 
   return (
     <>
@@ -385,7 +398,21 @@ function InteractiveBookingActionsMenu({
             forceMount={held ? true : undefined}
             onOpenAutoFocus={(event) => {
               event.preventDefault();
+              closedFromOutsideRef.current = false;
               contentRef.current?.focus();
+            }}
+            onPointerDownOutside={() => {
+              closedFromOutsideRef.current = true;
+            }}
+            // Radix returns focus to the PopoverTrigger, which is the desktop
+            // copy. Below `md` that copy is not rendered, so focus would drop
+            // to the page; the visible mobile trigger takes it instead.
+            onCloseAutoFocus={(event) => {
+              if (closedFromOutsideRef.current) return;
+              const desktop = desktopTriggerRef.current;
+              if (desktop && desktop.getClientRects().length > 0) return;
+              event.preventDefault();
+              focusVisibleTrigger();
             }}
             // Held content is closed: hidden, but still mounted for its dialog.
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right outline-none data-[state=closed]:hidden md:static md:mt-auto md:w-[220px] md:rounded md:shadow-md"
