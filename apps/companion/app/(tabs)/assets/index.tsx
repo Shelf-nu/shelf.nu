@@ -82,6 +82,7 @@ function AssetsListContent() {
   // (BASE/SELF_SERVICE) that would only get a 403.
   const canCreate = userHasPermission({
     roles: currentOrg?.roles,
+    workspace: currentOrg,
     entity: "asset",
     action: "create",
   });

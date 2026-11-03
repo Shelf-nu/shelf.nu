@@ -227,6 +227,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // is the `roles[0]` trap that bit the mobile audit guards.
       roles: userOrganizations.find((o) => o.organization.id === organizationId)
         ?.roles,
+      workspace: access.workspaceGrants,
     });
     // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
     // `email`, and this route is gated on `kit: read` — held by BASE and

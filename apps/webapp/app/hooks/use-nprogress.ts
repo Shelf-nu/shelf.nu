@@ -24,6 +24,7 @@ const excludeFetchers = [
   "cancel-audit",
   "sidebar-toggler",
   "team-upgrade-banner",
+  "managersCanEditAssets",
 ];
 
 /** Prefixes of per-item fetcher keys that never move the progress bar. */

@@ -12,6 +12,7 @@ import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
 import { linkInputProps } from "~/components/links/link-input-props";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -61,6 +62,8 @@ export default function AssetCustomFields({
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const { prefs } = useDateFormatter();
+  /** Managing the definitions is for members who may create custom fields. */
+  const canManageCustomFields = useInlineCreatePermissions().customField;
 
   const getSavedValue = (id: string) =>
     customFieldsValues?.find((cfv) => cfv.customFieldId === id)?.value;
@@ -229,14 +232,16 @@ export default function AssetCustomFields({
     <div className="border-b pb-6">
       <div className=" border-t py-5">
         <h2 className="mb-1 text-[18px] font-semibold">Custom Fields</h2>
-        <Button
-          to="/settings/custom-fields"
-          className="font-medium text-primary-600"
-          target="_blank"
-          variant="link"
-        >
-          Manage custom fields
-        </Button>
+        {canManageCustomFields ? (
+          <Button
+            to="/settings/custom-fields"
+            className="font-medium text-primary-600"
+            target="_blank"
+            variant="link"
+          >
+            Manage custom fields
+          </Button>
+        ) : null}
       </div>
       {customFields.length > 0 ? (
         <>
@@ -315,9 +320,11 @@ export default function AssetCustomFields({
                 <SearchIcon />
               </div>
               <h4 className="mb-6 text-base">No active custom fields</h4>
-              <Button to="/settings/custom-fields/new" variant="primary">
-                Create custom fields
-              </Button>
+              {canManageCustomFields ? (
+                <Button to="/settings/custom-fields/new" variant="primary">
+                  Create custom fields
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>

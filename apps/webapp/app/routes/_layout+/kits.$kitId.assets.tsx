@@ -125,6 +125,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       organizationId,
       roles,
+      workspace: access.workspaceGrants,
       entity: PermissionEntity.kit,
       action: PermissionAction.update,
     });
@@ -211,10 +212,12 @@ export default function KitAssets() {
         })
       : null;
 
+  // Adding and removing kit assets is `kit:update` on the server
+  // (manage-assets, scan-assets, `removeAsset`), so the buttons ask the same.
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
-    action: PermissionAction.manageAssets,
+    action: PermissionAction.update,
   });
 
   return (
@@ -417,11 +420,13 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
         <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
 
+      {/* The row menu removes the asset from the kit: `kit:update`, like the
+          `removeAsset` intent it posts to. */}
       <When
         truthy={userHasPermission({
           roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.manageAssets,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.update,
         })}
       >
         <Td className="pr-4 text-right">

@@ -16,14 +16,19 @@
  * - "Update location" stays enabled while the asset is checked out. A booking
  *   owns status and custody, not location, and no server path refuses the
  *   move. A kit member stays disabled, because its kit owns its location.
+ * - A Manager edits the asset (Edit, Update location) only while "Managers can
+ *   edit assets" is on, and never sees Delete: the switch adds `asset:update`,
+ *   not `asset:delete`.
  *
  * @see {@link file://./actions-dropdown.tsx}
  * @see {@link file://./../../modules/asset/utils.ts} isIndividualKitMember
  */
+import type { ReactNode } from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { withWorkspaceGrants } from "~/utils/permissions/member-roles";
 import ActionsDropdown from "./actions-dropdown";
 
 /** The caller each suite renders as: roles for the matrix, access for reach. */
@@ -90,8 +95,11 @@ vi.mock("~/hooks/use-user-data", () => ({
 
 // why: these items and dialogs each bring their own fetchers and loaders, and
 // nothing here asserts on them. The relink dialog also pulls in the QR/barcode
-// scanner, which touches canvas APIs Happy DOM does not implement.
-vi.mock("./delete-asset", () => ({ DeleteAsset: () => null }));
+// scanner, which touches canvas APIs Happy DOM does not implement. The delete
+// dialog renders only the trigger the menu hands it, which is the menu item.
+vi.mock("./delete-asset", () => ({
+  DeleteAsset: ({ trigger }: { trigger: ReactNode }) => trigger,
+}));
 vi.mock("./update-gps-coordinates-form", () => ({
   UpdateGpsCoordinatesForm: () => null,
 }));
@@ -244,5 +252,49 @@ describe("ActionsDropdown: location of a checked-out asset", () => {
     expect(item).toHaveAccessibleDescription(
       /location is managed by its parent kit/i
     );
+  });
+});
+
+describe('ActionsDropdown: a Manager under "Managers can edit assets"', () => {
+  beforeEach(() => {
+    caller.assign = "anyone";
+  });
+
+  it("offers a Manager Edit and Update location but not Delete once the switch is on", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+      managersCanEditAssets: true,
+    });
+
+    renderMenu();
+
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute(
+      "href",
+      "/edit"
+    );
+    expect(
+      screen.getByRole("link", { name: "Update location" })
+    ).toHaveAttribute("href", "/overview/update-location");
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("offers a Manager neither Edit nor Update location while the switch is off", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+      managersCanEditAssets: false,
+    });
+
+    renderMenu();
+
+    expect(screen.queryByRole("link", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Update location" })).toBeNull();
+  });
+
+  it("offers an Administrator Delete", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.ADMIN], {
+      managersCanEditAssets: true,
+    });
+
+    renderMenu();
+
+    expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
   });
 });

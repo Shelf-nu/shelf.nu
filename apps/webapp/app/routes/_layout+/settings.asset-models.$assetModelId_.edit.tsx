@@ -139,11 +139,14 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
 
     if (formData.get("intent") === "fillLinkedAssets") {
       // Filling writes to assets, so it also needs the asset write permission.
+      // It rewrites every linked asset at once, a bulk edit no workspace
+      // switch opens, so the matrix alone decides.
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.update,
+        matrixOnly: true,
       });
 
       const { assetsFilled } = await fillLinkedAssetsFromModel({
