@@ -143,7 +143,9 @@ export function CodePreviewDialog({
               <When truthy={!!error}>
                 <p className="text-center text-error-500">{error}</p>
               </When>
-              <When truthy={!isLoading}>
+              {/* No preview on a failed request: it would load the chunk to render
+                  nothing, and the error above already says what went wrong. */}
+              <When truthy={!isLoading && !error}>
                 <LazyLoadBoundary
                   loading={<CodesLoading />}
                   failed={
