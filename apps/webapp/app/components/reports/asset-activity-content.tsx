@@ -60,6 +60,8 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         BOOKING_CHECKED_IN: "Checked in",
         LOCATION_CHANGED: "Location changed",
         CATEGORY_CHANGED: "Category changed",
+        ARCHIVED: "Archived",
+        REINSTATED: "Reinstated",
       };
       // Semantic colors for activity types
       const colors: Record<string, string> = {
@@ -71,6 +73,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         BOOKING_CHECKED_IN: "bg-green-100 text-green-700",
         LOCATION_CHANGED: "bg-blue-100 text-blue-700",
         CATEGORY_CHANGED: "bg-blue-100 text-blue-700",
+        // Taken out of service and back: neutral, like the archived badge.
+        ARCHIVED: "bg-gray-100 text-gray-700",
+        REINSTATED: "bg-gray-100 text-gray-700",
       };
       return (
         <span
@@ -200,6 +205,9 @@ export function AssetActivityContent({
             </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
               Checked in
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+              Archived / Reinstated
             </span>
           </div>
         </div>

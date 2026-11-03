@@ -821,6 +821,8 @@ function formatActivityType(type: string): string {
     BOOKING_CHECKED_IN: "Checked in",
     LOCATION_CHANGED: "Location changed",
     CATEGORY_CHANGED: "Category changed",
+    ARCHIVED: "Archived",
+    REINSTATED: "Reinstated",
   };
   return labels[type] || type;
 }
