@@ -1,7 +1,7 @@
 /**
  * PDF Templates Settings
  *
- * The "PDF templates" card on Settings > General: the workspace's list of
+ * The "PDF templates" card on Settings > Bookings: the workspace's list of
  * templates, each a saved layout for a booking's PDF. Owners and admins add,
  * edit, duplicate, delete and pick the default template here; the Generate PDF
  * dialog on a booking then offers them by name.
@@ -11,7 +11,7 @@
  * Every change posts to the settings route's action, which re-checks the
  * caller's permission and scopes every write to the workspace.
  *
- * @see {@link file://../../routes/_layout+/settings.general.tsx}
+ * @see {@link file://../../routes/_layout+/settings.bookings.tsx}
  * @see {@link file://../../modules/pdf-template/service.server.ts}
  * @see {@link file://./booking-overview-pdf.tsx}
  */
@@ -36,13 +36,8 @@ import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import Input from "../forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
+import type { SearchableSelectOption } from "../forms/searchable-select";
+import { SearchableSelect } from "../forms/searchable-select";
 import { Switch } from "../forms/switch";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -98,7 +93,7 @@ export function PdfTemplatesSettings({
           What prints when someone generates a PDF for a booking. Each template
           is a saved layout with its own columns, rows and header lines, picked
           by name when the PDF is generated. Code pictures follow the "Print
-          code images on PDFs" switch above on every template.
+          code images on PDFs" switch in Settings, General on every template.
         </p>
       </div>
 
@@ -350,43 +345,45 @@ function TemplateSwitch({
   );
 }
 
-/** A labelled select that posts its value under `name`. */
-function TemplateSelect({
-  id,
-  name,
-  label,
-  defaultValue,
-  options,
-}: {
-  id: string;
-  name: string;
-  label: string;
-  defaultValue: string;
-  options: ReadonlyArray<{ value: string; label: string }>;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span id={`${id}-label`} className="text-sm font-medium text-gray-700">
-        {label}
-      </span>
-      <Select name={name} defaultValue={defaultValue}>
-        <SelectTrigger aria-labelledby={`${id}-label`}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent
-          position="popper"
-          className="w-[var(--radix-select-trigger-width)]"
-          align="start"
-        >
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value} className="p-2">
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
+/**
+ * The options of one custom-field slot: "None" and every active field. A slot
+ * whose saved field has since been deactivated also carries that field, marked
+ * inactive and hidden from the list, so the slot still shows its value and
+ * saving without a change keeps it.
+ *
+ * @param customFields - Every custom field of the workspace
+ * @param value - The field id currently in the slot, or {@link EMPTY_SLOT}
+ * @returns The options to hand to the slot's select
+ */
+export function customFieldSlotOptions(
+  customFields: TemplateCustomField[],
+  value: string
+): SearchableSelectOption[] {
+  /** Type name, plus where the field prints when it is not a column. */
+  const hintFor = (field: TemplateCustomField) =>
+    `${FIELD_TYPE_NAME[field.type]}${
+      printsAsColumn(field.type) ? "" : ", prints under the asset"
+    }`;
+  const options: SearchableSelectOption[] = [
+    { value: EMPTY_SLOT, label: "None" },
+    ...customFields
+      .filter((field) => field.active)
+      .map((field) => ({
+        value: field.id,
+        label: field.name,
+        hint: hintFor(field),
+      })),
+  ];
+  const saved = customFields.find((field) => field.id === value);
+  if (saved && !saved.active) {
+    options.push({
+      value: saved.id,
+      label: saved.name,
+      hint: `${hintFor(saved)}, inactive`,
+      hiddenFromList: true,
+    });
+  }
+  return options;
 }
 
 /** The edit form of one template, in a dialog. */
@@ -416,15 +413,9 @@ function EditTemplateDialog({
     if (outcome.status === "accepted") onClose();
   }, [outcome.status, onClose]);
 
-  const fieldOptions = [
-    { value: EMPTY_SLOT, label: "None" },
-    ...customFields.map((field) => ({
-      value: field.id,
-      label: `${field.name} (${FIELD_TYPE_NAME[field.type]}${
-        printsAsColumn(field.type) ? "" : ", prints under the asset"
-      }${field.active ? "" : ", inactive"})`,
-    })),
-  ];
+  /** Options of one slot: "None" and the active fields, plus the slot's saved field if inactive. */
+  const optionsForSlot = (value: string) =>
+    customFieldSlotOptions(customFields, value);
   const slots = Array.from(
     { length: MAX_TEMPLATE_CUSTOM_FIELDS },
     (_, i) => config.customFieldIds[i] ?? EMPTY_SLOT
@@ -491,13 +482,14 @@ function EditTemplateDialog({
               </p>
             ) : (
               slots.map((value, i) => (
-                <TemplateSelect
+                <SearchableSelect
                   key={i}
-                  id={`${idPrefix}-custom-field-${i}`}
                   name={`customFieldIds[${i}]`}
                   label={`Custom field ${i + 1}`}
                   defaultValue={value}
-                  options={fieldOptions}
+                  options={optionsForSlot(value)}
+                  searchPlaceholder="Search custom fields"
+                  emptyMessage="No custom fields match"
                 />
               ))
             )}
@@ -518,19 +510,19 @@ function EditTemplateDialog({
               label="Asset description under each asset"
               defaultChecked={config.assetDescription}
             />
-            <TemplateSelect
-              id={`${idPrefix}-group-by`}
+            <SearchableSelect
               name="groupBy"
               label="Group by"
               defaultValue={config.groupBy}
               options={TEMPLATE_GROUP_BY_OPTIONS}
+              searchable={false}
             />
-            <TemplateSelect
-              id={`${idPrefix}-sort-by`}
+            <SearchableSelect
               name="sortBy"
               label="Sort by"
               defaultValue={config.sortBy}
               options={TEMPLATE_SORT_BY_OPTIONS}
+              searchable={false}
             />
           </fieldset>
 

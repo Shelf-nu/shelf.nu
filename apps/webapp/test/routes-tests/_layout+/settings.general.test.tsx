@@ -10,29 +10,13 @@ import {
   updateOrganization,
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
-import {
-  createPdfTemplate,
-  deletePdfTemplate,
-  getPdfTemplates,
-  updatePdfTemplate,
-} from "~/modules/pdf-template/service.server";
 import { action, loader } from "~/routes/_layout+/settings.general";
-import { ShelfError } from "~/utils/error";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   userHasActiveSubscription,
 } from "~/utils/stripe.server";
-import {
-  assertCanUseBookings,
-  canHideShelfBranding,
-  canUseBookings,
-} from "~/utils/subscription.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 // why: mock parseFormData to avoid actual file upload in tests
 vi.mock("@remix-run/form-data-parser", () => ({
@@ -51,18 +35,6 @@ vi.mock("~/database/db.server", () => ({
       findMany: vi.fn().mockResolvedValue([]),
     },
   },
-}));
-
-// why: the template rules run against the database and have their own tests
-// (`modules/pdf-template/service.server.test.ts`); this suite is about the
-// route's gate and how it reads the form.
-vi.mock("~/modules/pdf-template/service.server", () => ({
-  getPdfTemplates: vi.fn().mockResolvedValue([]),
-  createPdfTemplate: vi.fn(),
-  updatePdfTemplate: vi.fn(),
-  duplicatePdfTemplate: vi.fn(),
-  setDefaultPdfTemplate: vi.fn(),
-  deletePdfTemplate: vi.fn(),
 }));
 
 // why: mock Stripe functions to avoid real Stripe API calls in tests
@@ -87,13 +59,9 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-// why: whether a workspace can use bookings also depends on the premium
-// switch of the environment; each test that needs a personal workspace
-// refusal sets the answer itself.
+// why: the branding rule depends on the tier, which each test sets itself
 vi.mock("~/utils/subscription.server", () => ({
   canHideShelfBranding: vi.fn(),
-  canUseBookings: vi.fn(() => true),
-  assertCanUseBookings: vi.fn(),
 }));
 
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -782,12 +750,8 @@ describe("settings.general SSO settings write", () => {
   });
 });
 
-describe("settings.general PDF templates", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    getOrganizationTierLimitMock.mockResolvedValue({ id: "tier_2" } as any);
-    canHideShelfBrandingMock.mockReturnValue(true);
-    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+describe("settings.general PDF templates moved to Settings > Bookings", () => {
+  it("has no template intents", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       currentOrganization: baseOrganization(),
@@ -797,176 +761,24 @@ describe("settings.general PDF templates", () => {
       userOrganizations: [],
       canUseBarcodes: false,
     } as any);
-  });
+    getOrganizationTierLimitMock.mockResolvedValue({ id: "tier_2" } as any);
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
 
-  function post(fields: [string, string][]) {
-    const body = new URLSearchParams(fields);
-    return action(
+    const response = (await action(
       createActionArgs({
         context: mockContext,
         request: new Request("http://localhost/settings/general", {
           method: "POST",
-          body,
+          body: new URLSearchParams([
+            ["intent", "add-template"],
+            ["name", "Client quote"],
+          ]),
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
         }),
         params: {},
       })
-    ) as Promise<{ init?: { status?: number } }>;
-  }
-
-  const templateForm = (customFieldIds: string[]): [string, string][] => [
-    ["intent", "save-template"],
-    ["templateId", "template-1"],
-    ["name", "  Client quote  "],
-    ["columns.image", "off"],
-    ["columns.quantity", "off"],
-    ["columns.quantity", "on"],
-    ["columns.kit", "on"],
-    ["columns.category", "on"],
-    ["columns.location", "off"],
-    ...customFieldIds.map((id, i): [string, string] => [
-      `customFieldIds[${i}]`,
-      id,
-    ]),
-    ["assetDescription", "off"],
-    ["groupBy", "category"],
-    ["sortBy", "name"],
-    ["bookingDescription", "off"],
-    ["totalValue", "on"],
-    ["signatureLines", "on"],
-  ];
-
-  it("lets only owners and admins change templates: the gate is general settings update", async () => {
-    const refusal = new ShelfError({
-      cause: null,
-      message: "You are not allowed to do this.",
-      label: "Permission",
-      status: 403,
-      shouldBeCaptured: false,
-    });
-    requirePermissionMock.mockRejectedValue(refusal);
-
-    const response = await post([
-      ["intent", "delete-template"],
-      ["templateId", "template-1"],
-    ]);
-
-    expect(response.init?.status).toBe(403);
-    expect(deletePdfTemplate).not.toHaveBeenCalled();
-    expect(requirePermissionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        entity: PermissionEntity.generalSettings,
-        action: PermissionAction.update,
-      })
-    );
-    for (const role of [
-      OrganizationRoles.BASE,
-      OrganizationRoles.SELF_SERVICE,
-    ]) {
-      expect(
-        userHasPermission({
-          roles: [role],
-          entity: PermissionEntity.generalSettings,
-          action: PermissionAction.update,
-        })
-      ).toBe(false);
-    }
-  });
-
-  it("deletes a template in the caller's workspace only", async () => {
-    await post([
-      ["intent", "delete-template"],
-      ["templateId", "template-1"],
-    ]);
-
-    expect(deletePdfTemplate).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      templateId: "template-1",
-    });
-  });
-
-  it("saves the form as the template's name and config, empty custom field slots dropped", async () => {
-    await post(templateForm(["cf-price", "none", "cf-serial"]));
-
-    expect(updatePdfTemplate).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      templateId: "template-1",
-      name: "Client quote",
-      config: {
-        columns: {
-          image: false,
-          quantity: true,
-          kit: true,
-          category: true,
-          location: false,
-        },
-        customFieldIds: ["cf-price", "cf-serial"],
-        assetDescription: false,
-        groupBy: "category",
-        sortBy: "name",
-        bookingDescription: false,
-        totalValue: true,
-        signatureLines: true,
-      },
-    });
-  });
-
-  it("refuses a fourth custom field before anything is saved", async () => {
-    const response = await post(templateForm(["cf-1", "cf-2", "cf-3", "cf-4"]));
+    )) as { init?: { status?: number } };
 
     expect(response.init?.status).toBe(400);
-    expect(updatePdfTemplate).not.toHaveBeenCalled();
-  });
-
-  it("refuses a template write from a personal workspace", async () => {
-    const personalOrg = {
-      ...baseOrganization(),
-      type: OrganizationType.PERSONAL,
-    };
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      organizations: [personalOrg],
-      currentOrganization: personalOrg,
-      role: OrganizationRoles.OWNER,
-      access: accessFor([OrganizationRoles.OWNER]),
-      userOrganizations: [],
-      canUseBarcodes: false,
-    } as any);
-    vi.mocked(assertCanUseBookings).mockImplementationOnce(() => {
-      throw new ShelfError({
-        cause: null,
-        title: "Not allowed",
-        message: "You cannot use bookings in a personal workspace.",
-        label: "Tier",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    });
-
-    const response = await post([
-      ["intent", "add-template"],
-      ["name", "Client quote"],
-    ]);
-
-    expect(response.init?.status).toBe(403);
-    expect(assertCanUseBookings).toHaveBeenCalledWith(personalOrg);
-    expect(createPdfTemplate).not.toHaveBeenCalled();
-  });
-
-  it("reads no templates for a workspace that cannot use bookings", async () => {
-    vi.mocked(canUseBookings).mockReturnValueOnce(false);
-
-    const response = (await loader(
-      createLoaderArgs({
-        context: mockContext,
-        request: new Request("http://localhost/settings/general"),
-        params: {},
-      })
-    )) as unknown as { data?: Record<string, unknown> };
-    const body = (response.data ?? response) as Record<string, unknown>;
-
-    expect(getPdfTemplates).not.toHaveBeenCalled();
-    expect(body.showPdfTemplates).toBe(false);
-    expect(body.pdfTemplates).toEqual([]);
   });
 });

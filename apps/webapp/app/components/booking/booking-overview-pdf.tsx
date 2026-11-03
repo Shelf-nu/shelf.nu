@@ -256,7 +256,7 @@ export const BookingOverviewPDF = ({
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-gray-500">
-                    Owners and admins set up templates in Settings, General.
+                    Owners and admins set up templates in Settings, Bookings.
                   </p>
                 </div>
               </When>

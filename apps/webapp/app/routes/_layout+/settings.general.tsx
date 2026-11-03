@@ -8,7 +8,6 @@ import type {
 import { data, redirect, useLoaderData } from "react-router";
 
 import { z } from "zod";
-import { PdfTemplatesSettings } from "~/components/booking/pdf-templates-settings";
 import { ErrorContent } from "~/components/errors";
 
 import type { HeaderData } from "~/components/layout/header/types";
@@ -30,19 +29,6 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
-import {
-  AddTemplateFormSchema,
-  PdfTemplateFormSchema,
-  templateFromForm,
-} from "~/modules/pdf-template/form";
-import {
-  createPdfTemplate,
-  deletePdfTemplate,
-  duplicatePdfTemplate,
-  getPdfTemplates,
-  setDefaultPdfTemplate,
-  updatePdfTemplate,
-} from "~/modules/pdf-template/service.server";
 import { generateScimToken } from "~/modules/scim/auth.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -61,11 +47,7 @@ import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
 } from "~/utils/stripe.server";
-import {
-  assertCanUseBookings,
-  canHideShelfBranding,
-  canUseBookings,
-} from "~/utils/subscription.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -153,24 +135,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : Promise.resolve([]),
       ]);
 
-    // PDF templates belong to bookings: a workspace that cannot use bookings
-    // has no card and none of its templates are read.
-    const showPdfTemplates = canUseBookings(currentOrganization);
-    const [pdfTemplates, templateCustomFields] = showPdfTemplates
-      ? await Promise.all([
-          getPdfTemplates({ organizationId }),
-          // The custom fields a template can print, for its edit form.
-          db.customField.findMany({
-            where: {
-              organizationId,
-              deletedAt: null,
-            },
-            select: { id: true, name: true, type: true, active: true },
-            orderBy: { name: "asc" },
-          }),
-        ])
-      : [[], []];
-
     const header: HeaderData = {
       title: "General",
     };
@@ -209,9 +173,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // ENABLE_SCIM is server-only and absent from `getBrowserEnv()`, so a
       // client-side `config.enableScim` would always be false.
       scimEnabled: config.enableScim,
-      showPdfTemplates,
-      pdfTemplates,
-      templateCustomFields,
       scimTokens: scimTokens.map((t) => ({
         id: t.id,
         label: t.label,
@@ -281,11 +242,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           "transfer-ownership",
           "generateScimToken",
           "deleteScimToken",
-          "add-template",
-          "save-template",
-          "duplicate-template",
-          "default-template",
-          "delete-template",
         ]),
       }),
       {
@@ -294,12 +250,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         },
       }
     );
-
-    // PDF templates belong to bookings, gated here as well as in the UI: a
-    // hand-made POST from a personal workspace must not create or change them.
-    if (intent.endsWith("-template")) {
-      assertCanUseBookings(currentOrganization);
-    }
 
     switch (intent) {
       case "general": {
@@ -640,55 +590,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect("/settings/general");
       }
-      case "add-template": {
-        const { name } = parseData(formData, AddTemplateFormSchema, {
-          additionalData: { userId, organizationId },
-        });
-        const template = await createPdfTemplate({ organizationId, name });
-        sendNotification({
-          title: "Template added",
-          message: `"${template.name}" is ready to set up.`,
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-        return payload({ templateId: template.id });
-      }
-      case "save-template": {
-        const form = parseData(formData, PdfTemplateFormSchema, {
-          additionalData: { userId, organizationId },
-        });
-        const { name, config } = templateFromForm(form);
-        await updatePdfTemplate({
-          organizationId,
-          templateId: form.templateId,
-          name,
-          config,
-        });
-        sendNotification({
-          title: "Template saved",
-          message: `"${name}" prints with the new settings.`,
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-        return payload({ templateId: form.templateId });
-      }
-      case "duplicate-template":
-      case "default-template":
-      case "delete-template": {
-        const { templateId } = parseData(
-          formData,
-          z.object({ templateId: z.string().min(1) }),
-          { additionalData: { userId, organizationId } }
-        );
-        if (intent === "duplicate-template") {
-          await duplicatePdfTemplate({ organizationId, templateId });
-        } else if (intent === "default-template") {
-          await setDefaultPdfTemplate({ organizationId, templateId });
-        } else {
-          await deletePdfTemplate({ organizationId, templateId });
-        }
-        return payload({ templateId });
-      }
       default: {
         throw new ShelfError({
           cause: null,
@@ -715,9 +616,6 @@ export default function GeneralPage() {
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
     isPersonalWorkspace,
-    showPdfTemplates,
-    pdfTemplates,
-    templateCustomFields,
   } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
@@ -727,14 +625,6 @@ export default function GeneralPage() {
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
         scimEnabled={scimEnabled}
         scimTokens={scimTokens}
-        afterGeneral={
-          showPdfTemplates ? (
-            <PdfTemplatesSettings
-              templates={pdfTemplates}
-              customFields={templateCustomFields}
-            />
-          ) : null
-        }
       />
 
       <TransferOwnershipCard

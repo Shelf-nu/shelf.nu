@@ -1,9 +1,10 @@
 /**
- * The PDF templates card on Settings > General.
+ * The PDF templates card on Settings > Bookings.
  *
  * @see {@link file://./pdf-templates-settings.tsx}
  */
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
 import { describe, expect, it } from "vitest";
 
@@ -32,11 +33,11 @@ const TEMPLATES = [
 function renderCard(props: Parameters<typeof PdfTemplatesSettings>[0]) {
   const Stub = createRoutesStub([
     {
-      path: "/settings/general",
+      path: "/settings/bookings",
       Component: () => <PdfTemplatesSettings {...props} />,
     },
   ]);
-  render(<Stub initialEntries={["/settings/general"]} />);
+  render(<Stub initialEntries={["/settings/bookings"]} />);
 }
 
 describe("PDF templates card", () => {
@@ -52,5 +53,56 @@ describe("PDF templates card", () => {
       within(rows[1]).getByRole("button", { name: "Make default" })
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Add template" })).toBeVisible();
+  });
+
+  /** Opens the edit dialog of the first template. */
+  async function openEditor(user: ReturnType<typeof userEvent.setup>) {
+    const rows = await screen.findAllByRole("listitem");
+    await user.click(within(rows[0]).getByRole("button", { name: "Edit" }));
+  }
+
+  const FIELDS = [
+    { id: "cf-serial", name: "Serial number", type: "TEXT", active: true },
+    { id: "cf-old", name: "Old tag", type: "TEXT", active: false },
+  ] as const;
+
+  it("offers only active custom fields", async () => {
+    const user = userEvent.setup();
+    renderCard({ templates: TEMPLATES, customFields: [...FIELDS] });
+    await openEditor(user);
+
+    await user.click(screen.getByRole("button", { name: /Custom field 1/ }));
+
+    expect(screen.getByRole("option", { name: /Serial number/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /None/ })).toBeVisible();
+    expect(screen.queryByRole("option", { name: /Old tag/ })).toBeNull();
+  });
+
+  it("shows a saved inactive field in its slot, marked inactive", async () => {
+    const user = userEvent.setup();
+    renderCard({
+      templates: [
+        {
+          ...TEMPLATES[0],
+          config: { ...TEMPLATES[0].config, customFieldIds: ["cf-old"] },
+        },
+      ],
+      customFields: [...FIELDS],
+    });
+    await openEditor(user);
+
+    const slot = screen.getByRole("button", { name: /Custom field 1/ });
+    expect(slot).toHaveTextContent("Old tag");
+    expect(slot).toHaveTextContent("inactive");
+  });
+
+  it("sorts and groups through plain selects without search", async () => {
+    const user = userEvent.setup();
+    renderCard({ templates: TEMPLATES, customFields: [] });
+    await openEditor(user);
+
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    expect(screen.getByRole("listbox")).toBeVisible();
+    expect(screen.queryByRole("combobox")).toBeNull();
   });
 });
