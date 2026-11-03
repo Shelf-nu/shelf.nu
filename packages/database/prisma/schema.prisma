@@ -1480,9 +1480,9 @@ model AssetModelCustomFieldDefault {
   // back-relation on `CustomField` pushes the extended client's generics past
   // TS's recursion limit (TS2321) in `organization/service.server`. Services
   // read the field rows with a second query keyed on these ids. Because the
-  // schema does not describe the FK, `prisma migrate dev` reports it as drift
-  // and proposes dropping it: remove that statement from any generated
-  // migration, or the cascade on field delete is lost.
+  // schema does not describe the FK, `prisma migrate dev` treats it as drift
+  // and generates a drop for it; it is listed in `PROTECTED_FOREIGN_KEYS`
+  // (`src/protected-indexes.ts`), which strips that drop after generating.
   customFieldId String
 
   createdAt DateTime @default(now())
