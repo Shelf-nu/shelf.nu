@@ -1,5 +1,5 @@
 /**
- * Printed Template Service
+ * PDF Template Service
  *
  * Reads and writes a workspace's PDF templates: the named layouts of the
  * booking PDF. Every function takes the caller's `organizationId` and scopes
@@ -8,10 +8,11 @@
  * A workspace that can use bookings always has at least one template and
  * exactly one default. New team workspaces get the built-in templates when they
  * are created; a workspace that has none gets them the first time its
- * templates are read. Callers gate on `canUseBookings`; this module does not. Template names are unique per workspace, ignoring case.
+ * templates are read. Callers gate on `canUseBookings`; this module does not.
+ * Template names are unique per workspace, ignoring case.
  *
  * @see {@link file://./config.ts}
- * @see {@link file://../../routes/_layout+/settings.general.tsx}
+ * @see {@link file://../../routes/_layout+/settings.bookings.tsx}
  * @see {@link file://../../routes/api+/bookings.$bookingId.generate-pdf.tsx}
  */
 import type { Prisma, PdfTemplate } from "@prisma/client";

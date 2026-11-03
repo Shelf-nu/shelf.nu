@@ -1,5 +1,5 @@
 /**
- * Booking Document API
+ * Booking PDF API
  *
  * Serves `/api/bookings/:bookingId/generate-pdf`: everything a booking's PDF
  * renders, loaded when its preview opens and again when the person picks
@@ -7,12 +7,11 @@
  * asset photos are signed for print (read-only, no row cap) so every photo
  * prints, and one `pdf_preview_opened` event is sent per preview.
  *
- * PDF templates are a paid feature. A workspace whose tier includes them picks
- * one with `?template=<id>`: it must be one of the workspace's templates, or
- * the answer is a 404, and the pick is remembered for this person and
- * workspace. Without it the template is the person's last pick, then the
- * workspace default. Every other workspace prints the built-in Checklist and
- * `?template=` is ignored. Refusals are returned with their status, for the
+ * A workspace that can use bookings picks a template with `?template=<id>`:
+ * it must be one of the workspace's templates, or the answer is a 404, and the
+ * pick is remembered for this person and workspace. Without it the template is
+ * the person's last pick, then the workspace default. Every other workspace
+ * prints the built-in Checklist and `?template=` is ignored. Refusals are returned with their status, for the
  * dialog to show.
  *
  * @see {@link file://./../../modules/booking/pdf-helpers.ts}
@@ -82,8 +81,8 @@ export const loader = async ({
 
     // A workspace that cannot use bookings prints the Checklist: its
     // templates are never read and a `?template=` never reaches the database.
-    const canCustomize = canUseBookings(currentOrganization);
-    const requestedTemplateId = canCustomize
+    const canUseTemplates = canUseBookings(currentOrganization);
+    const requestedTemplateId = canUseTemplates
       ? searchParams.get("template")
       : null;
 
@@ -91,7 +90,7 @@ export const loader = async ({
     // field dates included, render per their settings rather than the
     // request locale.
     const [resolved, prefs] = await Promise.all([
-      canCustomize
+      canUseTemplates
         ? resolvePdfTemplateForPrint({
             organizationId,
             requestedId: requestedTemplateId,
