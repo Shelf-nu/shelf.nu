@@ -20,7 +20,7 @@
  */
 import { memo, useMemo } from "react";
 import { View } from "react-native";
-import type { StyleProp, TextStyle } from "react-native";
+import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import type { TextSegment } from "@shelf/links";
 import { paragraphLinks } from "@/lib/paragraph-links";
 import { getActiveServer } from "@/lib/server/active-server";
@@ -39,6 +39,9 @@ import { LinkedText } from "./linked-text";
  * @param props.segments - The text and link runs, when the caller has read
  *   them (an activity note).
  * @param props.style - Text style.
+ * @param props.containerStyle - Style of the wrapper around the text and
+ *   its chips; put the screen's padding here so the chips line up with
+ *   the text.
  * @param props.expandable - Clip the text to `numberOfLines` with a "Show
  *   more" toggle; `label` names the text for screen readers.
  * @param props.selectable - Whether the text can be selected and copied.
@@ -52,6 +55,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   text,
   segments,
   style,
+  containerStyle,
   expandable,
   selectable,
   inModal,
@@ -60,6 +64,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   text: string;
   segments?: readonly TextSegment[];
   style?: StyleProp<TextStyle>;
+  containerStyle?: StyleProp<ViewStyle>;
   expandable?: { label: string; numberOfLines: number };
   selectable?: boolean;
   inModal?: boolean;
@@ -73,7 +78,10 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   );
 
   return (
-    <View style={styles.container} testID={onlyChip ? testID : undefined}>
+    <View
+      style={[styles.container, containerStyle]}
+      testID={onlyChip ? testID : undefined}
+    >
       {onlyChip ? null : expandable ? (
         <ExpandableText
           text={runs.map((run) => run.text).join("")}

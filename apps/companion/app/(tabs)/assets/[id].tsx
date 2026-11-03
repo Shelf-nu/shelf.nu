@@ -783,6 +783,7 @@ export default function AssetDetailScreen() {
             <LinkedParagraph
               text={asset.description}
               style={styles.description}
+              containerStyle={styles.descriptionBlock}
             />
           ) : null}
 
@@ -1557,6 +1558,8 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  descriptionBlock: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
