@@ -16,8 +16,8 @@
 import { lazy } from "react";
 import type { ComponentProps } from "react";
 import type AvailabilityCalendar from "./availability-calendar";
-import FallbackLoading from "../dashboard/fallback-loading";
 import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
+import { Spinner } from "../shared/spinner";
 
 const LazyCalendar = lazy(() => import("./availability-calendar"));
 
@@ -25,7 +25,7 @@ const LazyCalendar = lazy(() => import("./availability-calendar"));
 function CalendarChunkLoading() {
   return (
     <div className="flex flex-col items-center gap-4 py-[300px]">
-      <FallbackLoading className="size-16" />
+      <Spinner className="size-8" />
       <p className="text-sm text-gray-600">Loading calendar...</p>
     </div>
   );
