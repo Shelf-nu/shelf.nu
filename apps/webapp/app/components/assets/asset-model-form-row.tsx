@@ -35,9 +35,8 @@ export type AssetModelFormRowProps = {
   assetModelId?: string | null;
   /**
    * Fired when the user picks (or clears) a model. The parent uses
-   * this to apply the model's `defaultCategoryId` to the form's
-   * category param so the Category selector re-renders with the new
-   * default — see `handleAssetModelChange` in `form.tsx`.
+   * this to show the model's `defaultCategoryId` in an empty Category
+   * selector. See `handleAssetModelChange` in `form.tsx`.
    */
   onChange: (modelId: string | undefined) => void;
   /**
@@ -61,7 +60,8 @@ export function AssetModelFormRow({
       required={required}
       subHeading={
         <p>
-          Assign a model to group similar assets together.{" "}
+          Assign a model to group similar assets together. When an asset joins a
+          model, the model's defaults fill its empty fields.{" "}
           <Button
             to="/settings/asset-models/new"
             variant="link-gray"

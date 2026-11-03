@@ -31,6 +31,7 @@ function makeAsset(overrides: Partial<AssetForUpdate> = {}): AssetForUpdate {
     description: null,
     sequentialId: "SAM-0001",
     valuation: null,
+    categoryId: null,
     availableToBook: true,
     category: null,
     location: null,

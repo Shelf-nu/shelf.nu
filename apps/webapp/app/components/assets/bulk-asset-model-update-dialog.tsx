@@ -99,7 +99,7 @@ export default function BulkAssetModelUpdateDialog() {
       type="asset-model"
       arrayFieldId="assetIds"
       title={`Group (${totalSelected}) assets into an asset model`}
-      description="Pick the model these assets belong to. Their category, value and custody are not changed."
+      description="Pick the model these assets belong to. The model's defaults fill their empty fields. Values they already have, and custody, are not changed."
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div>
