@@ -34,7 +34,8 @@ function row(activityType: AssetActivityRow["activityType"]) {
     mainImage: null,
     assetModel: null,
     activityType,
-    description: activityType,
+    // Neutral text, so only the badge can show the type.
+    description: "Changed",
     occurredAt: new Date("2026-10-15T10:00:00Z"),
     performedBy: "Sam Mover",
     context: null,
