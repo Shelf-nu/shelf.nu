@@ -2,7 +2,9 @@
  * Team member row actions
  *
  * The actions menu on a team member row and on the member page: resend or
- * cancel a pending invite, change a member's role and revoke access. Each
+ * cancel a pending invite, change a member's role, revoke access and, in SSO
+ * workspaces, log out of Shelf a member who signs in through that workspace's
+ * SSO. Each
  * control is locked, with its reason, when the signed-in member may not make
  * that change; the server refuses the same changes in `resolveUserAction`.
  *
@@ -13,6 +15,7 @@ import { useState, type ReactNode } from "react";
 import type { InviteStatuses, OrganizationRoles, User } from "@prisma/client";
 import { useFetcher } from "react-router";
 import {
+  LogoutIcon,
   PenIcon,
   RefreshIcon,
   RemoveUserIcon,
@@ -26,15 +29,18 @@ import {
 } from "~/components/shared/dropdown";
 
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
+import { emailMatchesDomains } from "~/utils/misc";
 import {
   canInviteRole,
   roleChangeRequiresOwner,
 } from "~/utils/permissions/membership-access";
-import { ROLE_LABELS } from "~/utils/permissions/role-access";
+import { ROLE_LABELS, isWorkspaceOwner } from "~/utils/permissions/role-access";
 import { ChangeRoleDialog } from "./change-role-dialog";
+import { LogoutUserDialog } from "./logout-user-dialog";
 import { RevokeAccessDialog } from "./revoke-access-dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
@@ -95,6 +101,22 @@ export function TeamUsersActionsDropdown({
 
   const [changeRoleOpen, setChangeRoleOpen] = useState(false);
   const [revokeAccessOpen, setRevokeAccessOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const currentOrganization = useCurrentOrganization();
+  /**
+   * "Log out of Shelf" exists for SSO workspaces: an SSO member's role is
+   * applied at sign-in, so ending their sessions applies an IdP role change
+   * now. Only members who sign in through this workspace's SSO (an SSO user
+   * whose email domain is one of its SSO domains) have such a role. Mirrors
+   * `assertCanLogoutMember`, which refuses everyone else.
+   */
+  const canBeLoggedOut =
+    (currentOrganization?.enabledSso ?? false) &&
+    isSSO &&
+    emailMatchesDomains(
+      email.split("@")[1] ?? "",
+      currentOrganization?.ssoDetails?.domain ?? null
+    );
 
   /** Most users will have an invite, however we have to handle SSO case:
    *
@@ -239,6 +261,33 @@ export function TeamUsersActionsDropdown({
                     <RemoveUserIcon /> Revoke access
                   </span>
                 </Button>
+                {canBeLoggedOut ? (
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                    width="full"
+                    disabled={
+                      isCurrentUser
+                        ? { reason: "You cannot log yourself out from here" }
+                        : // Mirrors `assertCanLogoutMember`. Admins may log
+                        // out other admins, so only the owner is off limits.
+                        isWorkspaceOwner(roles)
+                        ? {
+                            reason: "The workspace owner cannot be logged out",
+                          }
+                        : disabled
+                    }
+                    onClick={() => {
+                      setOpen(false);
+                      setLogoutOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <LogoutIcon /> Log out of Shelf
+                    </span>
+                  </Button>
+                ) : null}
               </>
             ) : null}
           </fetcher.Form>
@@ -262,6 +311,15 @@ export function TeamUsersActionsDropdown({
             open={revokeAccessOpen}
             onOpenChange={setRevokeAccessOpen}
           />
+          {canBeLoggedOut ? (
+            <LogoutUserDialog
+              userId={userId}
+              name={name}
+              email={email}
+              open={logoutOpen}
+              onOpenChange={setLogoutOpen}
+            />
+          ) : null}
         </>
       ) : null}
     </>

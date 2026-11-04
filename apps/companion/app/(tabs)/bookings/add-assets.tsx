@@ -32,10 +32,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Platform,
 } from "react-native";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  type Edge,
+} from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -69,6 +75,14 @@ const assetKeyExtractor = (item: AvailableAsset) => item.id;
  * latency/-payload tradeoff, not a cap: nothing is unreachable at any size.
  */
 const PICKER_PAGE_SIZE = 50;
+
+/**
+ * Side edges this modal pads for itself: only on iOS, where it sits outside
+ * the content column. On Android it sits inside the column, which already
+ * pads both sides.
+ */
+const MODAL_SIDE_EDGES: readonly Edge[] =
+  Platform.OS === "ios" ? ["left", "right"] : [];
 
 const kitKeyExtractor = (item: AvailableKit) => item.id;
 const modelKeyExtractor = (item: AvailableModel) => item.id;
@@ -733,8 +747,8 @@ export default function AddBookingAssetsScreen() {
     [modelRequestsById, isSubmitting, colors, styles, handleRemoveModel]
   );
 
-  return (
-    <View style={styles.container}>
+  const screen = (
+    <SafeAreaView edges={MODAL_SIDE_EDGES} style={styles.container}>
       {/* Segmented Assets / Kits / Models */}
       <View style={styles.segment}>
         {(["assets", "kits", "models"] as Mode[]).map((m) => {
@@ -935,9 +949,10 @@ export default function AddBookingAssetsScreen() {
         onClose={() => setActiveQtyAsset(null)}
       />
 
-      {/* Add bar */}
+      {/* Add bar. Absolute, so the screen's padding does not move it: the bar
+          pads itself for a side rail or cutout, its background running under. */}
       {totalSelected > 0 && (
-        <View style={styles.bottomBar}>
+        <SafeAreaView edges={MODAL_SIDE_EDGES} style={styles.bottomBar}>
           <TouchableOpacity
             style={styles.addButton}
             onPress={handleAdd}
@@ -963,9 +978,19 @@ export default function AddBookingAssetsScreen() {
               </>
             )}
           </TouchableOpacity>
-        </View>
+        </SafeAreaView>
       )}
-    </View>
+    </SafeAreaView>
+  );
+
+  // On iOS this modal sits outside the content column, so it keeps clear of a
+  // side rail or cutout itself. A provider of its own measures the sheet's
+  // overlap with them: a card centred in a wide window touches neither edge,
+  // a full-width sheet in a narrow window touches both.
+  return Platform.OS === "ios" ? (
+    <SafeAreaProvider>{screen}</SafeAreaProvider>
+  ) : (
+    screen
   );
 }
 
