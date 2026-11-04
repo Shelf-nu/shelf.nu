@@ -345,7 +345,6 @@ function CreateBookingContent() {
             placeholder="Optional notes..."
             placeholderTextColor={colors.placeholderText}
             multiline
-            numberOfLines={3}
             textAlignVertical="top"
             maxLength={1000}
             accessibilityLabel="Description"
@@ -591,7 +590,10 @@ const useStyles = createStyles((colors, shadows) => ({
     ...shadows.sm,
   },
   textArea: {
+    // Grows with the text to about ten lines, then scrolls inside. A
+    // `numberOfLines` prop would cap it at that many lines on iOS.
     minHeight: 80,
+    maxHeight: 260,
     paddingTop: 12,
   },
   errorHint: {

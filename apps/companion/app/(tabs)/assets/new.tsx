@@ -675,7 +675,6 @@ export default function CreateAssetScreen() {
             placeholder="Optional description..."
             placeholderTextColor={colors.placeholderText}
             multiline
-            numberOfLines={3}
             textAlignVertical="top"
             accessibilityLabel="Description"
           />
@@ -1163,7 +1162,10 @@ const useStyles = createStyles((colors, shadows) => ({
     ...shadows.sm,
   },
   textArea: {
+    // Grows with the text to about ten lines, then scrolls inside. A
+    // `numberOfLines` prop would cap it at that many lines on iOS.
     minHeight: 80,
+    maxHeight: 260,
     paddingTop: 12,
   },
   errorHint: {
