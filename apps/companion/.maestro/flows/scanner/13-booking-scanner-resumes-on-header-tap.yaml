@@ -21,8 +21,9 @@ appId: com.shelf.companion.carlos
     optional: true
 # DRAFT bookings live under the "All" filter. The filter pills scroll
 # horizontally and "All" sits off-screen to the right on a phone-sized screen.
+# Any pill: the tab keeps the filter an earlier run selected.
 - extendedWaitUntil:
-    visible: "Filter: Active.*"
+    visible: "Filter: .*"
     timeout: 15000
 - swipe:
     start: "90%,21%"
@@ -31,11 +32,15 @@ appId: com.shelf.companion.carlos
     start: "90%,21%"
     end: "18%,21%"
 - tapOn: "Filter: All.*"
-- scrollUntilVisible:
-    element:
-      text: ".*QA Scan Booking.*"
-    direction: DOWN
-    timeout: 60000
+# Search rather than scroll: the QA workspace holds enough bookings that
+# scrolling to a June draft takes longer than any sane timeout.
+- tapOn: "Search bookings.*"
+# A partial term, so the search field's own text never matches the card.
+- inputText: "QA Scan Book"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: ".*QA Scan Booking.*"
+    timeout: 20000
 - tapOn: ".*QA Scan Booking.*"
 - extendedWaitUntil:
     visible: ".*Scan assets or kits to add.*"

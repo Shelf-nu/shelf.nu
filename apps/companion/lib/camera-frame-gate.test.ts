@@ -3,7 +3,8 @@
  *
  * Runs under Node's test runner via tsx, so neither this file nor the module
  * it tests may import React Native, Expo, or `@/`-aliased paths. The screen
- * check reads the scanner sources from disk instead of mounting them.
+ * checks parse the scanner sources with the TypeScript compiler instead of
+ * mounting them.
  *
  * @see ./camera-frame-gate.ts
  */
@@ -11,6 +12,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import ts from "typescript";
 
 import { createFrameGate, type FrameGateState } from "./camera-frame-gate";
 
@@ -78,35 +80,87 @@ function appScreens(): [string, string][] {
   return out;
 }
 
+/** Every CameraView element and useCameraScanHandler call in a screen. */
+function cameraSites(source: string) {
+  const file = ts.createSourceFile(
+    "screen.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  const cameras: { spread: boolean; handlers: string[] }[] = [];
+  const gateCalls: string[][] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      node.tagName.getText(file) === "CameraView"
+    ) {
+      const props = node.attributes.properties;
+      cameras.push({
+        spread: props.some(ts.isJsxSpreadAttribute),
+        handlers: props
+          .filter(ts.isJsxAttribute)
+          .filter((a) => a.name.getText(file) === "onBarcodeScanned")
+          .map((a) =>
+            a.initializer && ts.isJsxExpression(a.initializer)
+              ? a.initializer.expression?.getText(file) ?? ""
+              : a.initializer?.getText(file) ?? ""
+          ),
+      });
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(file) === "useCameraScanHandler"
+    ) {
+      gateCalls.push(
+        node.arguments.map((arg) => arg.getText(file).replace(/\s+/g, " "))
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return { cameras, gateCalls };
+}
+
 test("every camera keeps one stable onBarcodeScanned", () => {
   // A conditional handler (`busy ? undefined : handler`) turns iOS scanning
   // off and on per scan, which switches the torch off. Screens gate frames
-  // through useCameraScanHandler instead.
-  const uses = appScreens().flatMap(([file, source]) =>
-    [...source.matchAll(/onBarcodeScanned=\{([^}]*)\}/g)].map((m) => ({
-      file,
-      value: m[1].trim(),
-    }))
-  );
+  // through useCameraScanHandler instead, and pass it with no props spread
+  // that could replace it.
+  const screens = appScreens().map(([file, source]) => ({
+    file,
+    ...cameraSites(source),
+  }));
   assert.ok(
-    uses.some((u) => u.file === path.join("(tabs)", "scanner.tsx")),
+    screens.some(
+      (s) =>
+        s.file === path.join("(tabs)", "scanner.tsx") && s.cameras.length > 0
+    ),
     "the main scanner must be found"
   );
-  for (const use of uses) {
-    assert.equal(
-      use.value,
-      "handleCameraScan",
-      `${use.file} passes onBarcodeScanned={${use.value}}`
-    );
+  for (const { file, cameras } of screens) {
+    for (const camera of cameras) {
+      assert.equal(camera.spread, false, `${file} spreads props on CameraView`);
+      assert.deepEqual(
+        camera.handlers,
+        ["handleCameraScan"],
+        `${file} passes onBarcodeScanned=${JSON.stringify(camera.handlers)}`
+      );
+    }
   }
-  // One literal handler per CameraView, so none can slip in through a spread.
-  for (const [file, source] of appScreens()) {
-    const cameras = (source.match(/<CameraView\b/g) ?? []).length;
-    const handlers = uses.filter((u) => u.file === file).length;
-    assert.equal(
-      handlers,
-      cameras,
-      `${file} has ${cameras} CameraView and ${handlers} onBarcodeScanned`
-    );
-  }
+});
+
+test("the main scanner ignores frames while a View result card is up", () => {
+  const scanner = appScreens().find(
+    ([file]) => file === path.join("(tabs)", "scanner.tsx")
+  );
+  assert.ok(scanner, "the main scanner must be found");
+  const { gateCalls } = cameraSites(scanner[1]);
+  assert.deepEqual(gateCalls, [
+    [
+      "handleBarCodeScanned",
+      'Boolean(scanResult && action === "view" && !isBookingMode)',
+    ],
+  ]);
 });

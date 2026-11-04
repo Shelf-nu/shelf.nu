@@ -196,6 +196,7 @@ appId: com.shelf.companion.carlos
 - extendedWaitUntil:
     visible: "5 items scanned.*"
     timeout: 15000
+- assertVisible: "Turn off flashlight"
 - tapOn: "Close manual entry"
 - tapOn: "Expand scanned items"
 - assertVisible: "Collapse scanned items"
