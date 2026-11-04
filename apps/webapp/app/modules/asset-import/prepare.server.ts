@@ -59,6 +59,8 @@ export async function userCanStillImport({
     userId,
     organizationId,
     roles: membership.roles,
+    // why: no workspace switch grants this action.
+    workspace: null,
     entity: PermissionEntity.asset,
     action: PermissionAction.import,
   });

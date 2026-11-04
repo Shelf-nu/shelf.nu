@@ -94,7 +94,7 @@ const permissionResult = {
   role: OrganizationRoles.ADMIN,
   canUseBarcodes: false,
   access: accessFor([OrganizationRoles.ADMIN]),
-  currentOrganization: { auditsEnabled: true },
+  currentOrganization: { auditsEnabled: true, currency: "USD" },
 } as Awaited<ReturnType<typeof requirePermission>>;
 
 /** Builds the result shape the service returns, with link-success defaults. */
@@ -108,6 +108,7 @@ function serviceResult(
     moved: 0,
     skippedQuantityTracked: 0,
     modelName: "Panasonic PT-VZ580",
+    filled: 0,
     ...overrides,
   };
 }
@@ -198,6 +199,8 @@ describe("api/assets/bulk-update-asset-model", () => {
         currentSearchParams: "category=cat-1&status=AVAILABLE",
         settings: { mode: "SIMPLE" },
         lastAuditDateAccess: "available",
+        locale: expect.any(String),
+        currency: "USD",
         // An admin sees every asset, so the list scope is null.
         bookableScope: null,
       });
@@ -263,6 +266,18 @@ describe("api/assets/bulk-update-asset-model", () => {
 
       expect(sentNotification().message).toBe(
         "3 asset(s) were grouped into Panasonic PT-VZ580. 1 of them were moved from another asset model."
+      );
+    });
+
+    it("says how many assets the model's defaults filled", async () => {
+      // Filling changes asset data the user did not type, so the toast has to
+      // say it happened.
+      bulkUpdateAssetModelMock.mockResolvedValue(serviceResult({ filled: 2 }));
+
+      await callAction();
+
+      expect(sentNotification().message).toBe(
+        "3 asset(s) were grouped into Panasonic PT-VZ580. The model's defaults filled empty fields on 2 of them."
       );
     });
 

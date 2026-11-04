@@ -19,6 +19,10 @@ import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { isModelShortfallMessage } from "~/modules/asset/archive-shortfall";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
+import {
+  applyAssetModelDefaultsToAssets,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
 import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNotes } from "~/modules/booking-note/service.server";
 import { getCategory } from "~/modules/category/service.server";
@@ -254,6 +258,11 @@ vitest.mock("~/database/db.server", () => ({
     booking: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
+    // why: bulk linking reads the workspace currency for the defaults-fill
+    // notes, only when the target model has defaults.
+    organization: {
+      findUniqueOrThrow: vitest.fn(),
+    },
   },
 }));
 
@@ -275,6 +284,15 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
 // why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
 // mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
 // the guard's own behaviour is what these suites assert on.
+// why: the defaults fill has its own suite (`asset-model/defaults.server.test.ts`);
+// here the question is only whether bulk linking asks for it, and for which assets.
+vitest.mock("~/modules/asset-model/defaults.server", () => ({
+  getAssetModelDefaults: vitest.fn().mockResolvedValue(null),
+  applyAssetModelDefaultsToAssets: vitest
+    .fn()
+    .mockResolvedValue({ assetsFilled: 0, fieldsFilled: 0 }),
+}));
+
 vitest.mock("~/modules/asset/archive-lock.server", () => ({
   lockAssetsForArchiveGuard: vitest.fn(),
 }));
@@ -4853,6 +4871,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -4903,6 +4923,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -4943,6 +4965,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -4992,6 +5016,8 @@ describe("bulkUpdateAssetModel", () => {
     db.asset.findMany.mockResolvedValue(rows);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5031,6 +5057,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5046,6 +5074,58 @@ describe("bulkUpdateAssetModel", () => {
     });
   });
 
+  it("fills the empty fields of the assets that join the model, in the transaction", async () => {
+    // Joining a model is joining it, whatever the button: the bulk link has to
+    // apply the model's defaults the way the edit form does, to the assets
+    // that actually changed and to no others.
+    const modelDefaults = {
+      id: "model-1",
+      name: "Panasonic PT-VZ580",
+      defaultCategoryId: "cat-1",
+      defaultValuation: null,
+      customFieldDefaults: [],
+    };
+    vitest.mocked(getAssetModelDefaults).mockResolvedValueOnce(modelDefaults);
+    vitest
+      .mocked(applyAssetModelDefaultsToAssets)
+      .mockResolvedValueOnce({ assetsFilled: 1, fieldsFilled: 1 });
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
+      { id: "asset-2", type: "INDIVIDUAL", assetModelId: "model-1" },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      locale: "en-AU",
+      currency: "AUD",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    expect(applyAssetModelDefaultsToAssets).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        model: modelDefaults,
+        // asset-2 was already on the model, so it is not filled.
+        assetIds: ["asset-1"],
+        currency: "AUD",
+        locale: "en-AU",
+      })
+    );
+    // The defaults are read inside the transaction, on its client.
+    expect(getAssetModelDefaults).toHaveBeenCalledWith(
+      { assetModelId: "model-1", organizationId: "org-1" },
+      expect.anything()
+    );
+    expect(result.filled).toBe(1);
+  });
+
   it("links the individually tracked assets and skips quantity-tracked ones", async () => {
     expect.assertions(5);
     //@ts-expect-error mock setup
@@ -5056,6 +5136,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "available",
       bookableScope: null,
       userId: "user-1",
@@ -5074,6 +5156,7 @@ describe("bulkUpdateAssetModel", () => {
       moved: 0,
       skippedQuantityTracked: 1,
       modelName: "Panasonic PT-VZ580",
+      filled: 0,
     });
     // The model is read ONCE. `assertAssetModelBelongsToOrg` returns the row it
     // already had to fetch, so the toast label costs no second round trip —
@@ -5118,6 +5201,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5141,6 +5226,8 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5176,6 +5263,8 @@ describe("bulkUpdateAssetModel", () => {
     // Removing a model from assets that can never have had one is a no-op,
     // not a rule violation. Only the LINK direction rejects.
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5203,6 +5292,8 @@ describe("bulkUpdateAssetModel", () => {
 
     await expect(
       bulkUpdateAssetModel({
+        locale: "en-US",
+        currency: "USD",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         userId: "user-1",
@@ -5230,6 +5321,8 @@ describe("bulkUpdateAssetModel", () => {
 
     await expect(
       bulkUpdateAssetModel({
+        locale: "en-US",
+        currency: "USD",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         userId: "user-1",
@@ -5259,6 +5352,8 @@ describe("bulkUpdateAssetModel", () => {
     db.asset.findMany.mockResolvedValue([]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5277,6 +5372,8 @@ describe("bulkUpdateAssetModel", () => {
     expect.assertions(2);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -5294,6 +5391,7 @@ describe("bulkUpdateAssetModel", () => {
       moved: 0,
       skippedQuantityTracked: 0,
       modelName: null,
+      filled: 0,
     });
     expect(db.asset.updateMany).not.toHaveBeenCalled();
   });

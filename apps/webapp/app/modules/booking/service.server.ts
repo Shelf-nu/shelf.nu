@@ -13989,6 +13989,7 @@ export async function extendBooking({
       userId,
       organizationId,
       roles,
+      workspace: access.workspaceGrants,
       entity: PermissionEntity.booking,
       action: PermissionAction.extend,
     });

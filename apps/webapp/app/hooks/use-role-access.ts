@@ -10,13 +10,16 @@
 import { useRouteLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/_layout";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import {
+  NO_WORKSPACE_GRANTS,
+  resolveRoleAccess,
+} from "~/utils/permissions/role-access";
 
 /**
  * The access every component reads before the `_layout` loader has run
  * (first paint, or a route rendered outside that loader's data). BASE, with
- * every workspace toggle off, so a gate reads "deny" rather than "unknown"
- * during that window.
+ * every workspace toggle and permission switch off, so a gate reads "deny"
+ * rather than "unknown" during that window.
  */
 const LOADING_ACCESS = resolveRoleAccess({
   roles: [],
@@ -25,6 +28,7 @@ const LOADING_ACCESS = resolveRoleAccess({
     baseUserCanSeeBookings: false,
     selfServiceCanSeeCustody: false,
     baseUserCanSeeCustody: false,
+    ...NO_WORKSPACE_GRANTS,
   },
 });
 

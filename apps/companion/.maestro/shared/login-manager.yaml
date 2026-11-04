@@ -1,0 +1,61 @@
+appId: com.shelf.companion.carlos
+---
+# Shared login flow for MANAGER user
+# Credentials: SHELF_TEST_MANAGER_EMAIL / SHELF_TEST_MANAGER_PASSWORD
+# Role: Manager on the ${SHELF_TEST_WORKSPACE} workspace
+
+- clearState
+- clearKeychain
+- launchApp
+
+# Dismiss any pending deep link alerts from previous test runs
+- tapOn:
+    text: "Cancel"
+    optional: true
+
+# Expo dev client launcher: tap the dev server to load the app
+- assertVisible: "http://localhost:8081"
+- tapOn: "http://localhost:8081"
+
+# Dismiss Expo developer menu overlays if they appear
+- tapOn:
+    text: "Continue"
+    optional: true
+- swipe:
+    direction: DOWN
+    duration: 500
+
+# Wait for login screen
+- extendedWaitUntil:
+    visible:
+      id: "email-input"
+    timeout: 120000
+
+# Enter manager credentials
+- tapOn:
+    id: "email-input"
+- inputText: ${SHELF_TEST_MANAGER_EMAIL}
+
+- tapOn:
+    id: "password-input"
+- inputText: ${SHELF_TEST_MANAGER_PASSWORD}
+
+# Dismiss keyboard by tapping on static text
+- tapOn: "Welcome back"
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Dismiss the iOS "Save Password?" AutoFill prompt (appears on fresh simulators
+# after clearKeychain; it covers the tab bar and blocks the Home assertion).
+- tapOn:
+    text: "Not Now"
+    optional: true
+
+# Wait for main app to load
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 30000
+
+- tapOn: "Home"
+- waitForAnimationToEnd

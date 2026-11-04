@@ -19,6 +19,7 @@ import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkUpdateAssetModel } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { getLocale } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
@@ -48,6 +49,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+      // Bulk edits other than location stay closed to the workspace switches.
+      matrixOnly: true,
     });
 
     // Fetch asset index settings to determine mode
@@ -70,6 +73,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       moved,
       skippedQuantityTracked,
       modelName,
+      filled,
     } = await bulkUpdateAssetModel({
       userId,
       assetIds,
@@ -78,6 +82,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currentSearchParams,
       settings,
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      locale: getLocale(request),
+      currency: currentOrganization.currency,
       bookableScope: resolveBookableListScope({ access, userId }),
     });
 
@@ -125,13 +131,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         moved > 0
           ? ` ${moved} of them were moved from another asset model.`
           : "";
+      const filledSuffix =
+        filled > 0
+          ? ` The model's defaults filled empty fields on ${filled} of them.`
+          : "";
 
       // Branch on `linked`, never on `modelName`: the name is only a label.
       sendNotification({
         title: "Assets grouped",
         message: `${updated} asset(s) were grouped into ${
           modelName || "the selected asset model"
-        }.${movedSuffix}${skippedSuffix}`,
+        }.${movedSuffix}${filledSuffix}${skippedSuffix}`,
         icon: { name: "success", variant: "success" },
         senderId: userId,
       });
