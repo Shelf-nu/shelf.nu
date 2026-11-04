@@ -13,14 +13,13 @@ import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import { AuditAssetListItem } from "~/components/audit/audit-asset-list-item";
+import { AuditFindings } from "~/components/audit/audit-findings";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import BulkActionsDropdown from "~/components/audit/bulk-actions-dropdown";
 import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-assets-from-audit-dialog";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
-import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
@@ -128,10 +127,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       auditId,
     });
 
-    // Split images into general and asset-specific
-    const generalImages = allImages.filter((img) => img.auditAssetId === null);
-    const assetImages = allImages.filter((img) => img.auditAssetId !== null);
-
     /**
      * The condition notes people wrote during the audit.
      *
@@ -184,8 +179,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         canRemoveAssets,
         userId,
         header,
-        generalImages,
-        assetImages,
+        // Every photo of the audit; `AuditFindings` splits audit-wide from
+        // per-asset ones.
+        images: allImages,
         conditionNotes,
         ...assetsData,
         modelName: {
@@ -342,63 +338,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export default function AuditOverview() {
-  const {
-    session,
-    totalItems,
-    generalImages,
-    assetImages,
-    conditionNotes,
-    canRemoveAssets,
-  } = useLoaderData<typeof loader>();
+  const { session, totalItems, images, conditionNotes, canRemoveAssets } =
+    useLoaderData<typeof loader>();
 
-  /**
-   * One entry per asset somebody recorded something about, holding BOTH the
-   * words and the photographs.
-   *
-   * why merged: a note about the Laerdal and a photo of the Laerdal are one
-   * observation. Splitting them into a notes list and a photo wall makes the
-   * reader join them up by asset name, which is work this page should do.
-   */
-  const findings = (() => {
-    const groups = new Map<
-      string,
-      {
-        assetName: string;
-        images: typeof assetImages;
-        notes: typeof conditionNotes;
-      }
-    >();
-
-    const groupFor = (assetId: string, assetName: string) => {
-      if (!groups.has(assetId)) {
-        groups.set(assetId, { assetName, images: [], notes: [] });
-      }
-      return groups.get(assetId)!;
-    };
-
-    for (const img of assetImages) {
-      const asset = img.auditAsset?.asset;
-      if (!asset?.id) continue;
-      groupFor(asset.id, asset.title || "Unknown").images.push(img);
-    }
-    for (const note of conditionNotes) {
-      const asset = note.auditAsset?.asset;
-      if (!asset?.id) continue;
-      groupFor(asset.id, asset.title || "Unknown").notes.push(note);
-    }
-
-    return [...groups.entries()].sort((a, b) =>
-      a[1].assetName.localeCompare(b[1].assetName)
-    );
-  })();
-
-  /** Notes about the audit as a whole — the completion note lives here. */
-  const generalNotes = conditionNotes.filter(
-    (note) => !note.auditAsset?.asset?.id
-  );
-
-  const hasFindings =
-    findings.length > 0 || generalNotes.length > 0 || generalImages.length > 0;
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
     "auditStatus"
@@ -591,159 +533,8 @@ export default function AuditOverview() {
           </div>
         </div>
 
-        {/*
-          Right column: FINDINGS. What people recorded while auditing, grouped
-          by the asset they recorded it about, words and photographs together:
-          a note and a photo of the same asset are one observation. Notes about
-          the audit as a whole (the completion note) come first.
-
-          The card is absolutely positioned on large screens so its content
-          never contributes to the row height. The left column decides how
-          tall the row is and this list scrolls inside it. Below `lg` the
-          columns stack and the card caps itself with a max height instead.
-        */}
-        <div className="flex min-w-0 flex-col">
-          <h2 className="mb-4 flex items-center gap-1 text-lg font-semibold">
-            Findings
-            <InfoTooltip
-              iconClassName="size-4"
-              content={
-                <p className="mb-3 text-sm text-gray-600">
-                  The condition notes and photos people recorded while auditing,
-                  grouped by the asset they were recorded against. Notes about
-                  the audit itself, such as a completion note, appear first.
-                  System activity lives on the Activity tab.
-                </p>
-              }
-            />
-            {findings.length > 0 && (
-              <span className="ml-1 text-sm font-normal text-gray-500">
-                {findings.length} {findings.length === 1 ? "asset" : "assets"}
-              </span>
-            )}
-          </h2>
-
-          <div className="relative min-h-[120px] flex-1">
-            <div className="flex max-h-[480px] flex-col overflow-hidden rounded border bg-white lg:absolute lg:inset-0 lg:max-h-none">
-              {hasFindings ? (
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  {/* About the audit as a whole */}
-                  {(generalNotes.length > 0 || generalImages.length > 0) && (
-                    <div className="flex flex-col gap-3 border-b border-gray-200 px-4 py-3">
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        About this audit
-                      </h3>
-                      {generalNotes.map((note) => (
-                        <div key={note.id}>
-                          {/* Audit notes are Markdoc source, not plain text:
-                              the completion note carries `**bold**` stats, a
-                              receipt link and an `{% audit_images %}` tag.
-                              `allowExternalLinks` stays false because this
-                              bucket holds the SYSTEM-composed completion note;
-                              only notes a person authored through the editor
-                              may link off-origin. */}
-                          <div className="text-sm text-gray-900">
-                            <MarkdownViewer content={note.content} />
-                          </div>
-                          <p className="mt-1 text-xs text-gray-500">
-                            {resolveUserDisplayName(note.user) || "Unknown"}{" "}
-                            &middot; <DateS date={note.createdAt} includeTime />
-                          </p>
-                        </div>
-                      ))}
-
-                      {generalImages.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {generalImages.map((image) => (
-                            <ImageWithPreview
-                              key={image.id}
-                              imageUrl={image.imageUrl}
-                              thumbnailUrl={image.thumbnailUrl}
-                              alt={image.description || "General audit image"}
-                              withPreview
-                              className="size-14 rounded border"
-                              images={generalImages.map((img) => ({
-                                id: img.id,
-                                imageUrl: img.imageUrl,
-                                thumbnailUrl: img.thumbnailUrl,
-                                alt: img.description || "General audit image",
-                              }))}
-                              currentImageId={image.id}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* One row per asset somebody recorded something about */}
-                  {findings.map(([assetId, { assetName, images, notes }]) => (
-                    <div
-                      key={assetId}
-                      className="flex flex-col gap-2 border-b border-gray-100 px-4 py-3 last:border-b-0"
-                    >
-                      <div className="flex items-baseline justify-between gap-3">
-                        <h3 className="min-w-0 truncate text-sm font-medium text-gray-900">
-                          {assetName}
-                        </h3>
-                        <span className="shrink-0 text-xs text-gray-500">
-                          {findingSummary(images.length, notes.length)}
-                        </span>
-                      </div>
-
-                      {notes.map((note) => (
-                        <div
-                          key={note.id}
-                          className="rounded bg-gray-50 px-2.5 py-1.5"
-                        >
-                          {/* Condition notes are authored through the editor,
-                              so they may link out, same as the details panel
-                              renders these rows. */}
-                          <div className="text-sm text-gray-900">
-                            <MarkdownViewer
-                              content={note.content}
-                              allowExternalLinks
-                            />
-                          </div>
-                          <p className="mt-0.5 text-xs text-gray-500">
-                            {resolveUserDisplayName(note.user) || "Unknown"}{" "}
-                            &middot; <DateS date={note.createdAt} includeTime />
-                          </p>
-                        </div>
-                      ))}
-
-                      {images.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {images.map((image) => (
-                            <ImageWithPreview
-                              key={image.id}
-                              imageUrl={image.imageUrl}
-                              thumbnailUrl={image.thumbnailUrl}
-                              alt={`Photo of ${assetName}`}
-                              withPreview
-                              className="size-14 rounded border"
-                              images={images.map((img) => ({
-                                id: img.id,
-                                imageUrl: img.imageUrl,
-                                thumbnailUrl: img.thumbnailUrl,
-                                alt: `Photo of ${assetName}`,
-                              }))}
-                              currentImageId={image.id}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-1 items-center justify-center px-4 py-6 text-center text-sm text-gray-500">
-                  Nothing was recorded during this audit
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        {/* Right column: what people recorded while auditing. */}
+        <AuditFindings images={images} notes={conditionNotes} />
       </div>
 
       {/* Assets List */}
@@ -868,23 +659,4 @@ function StatCard({
       <div className="mt-1 text-3xl font-bold">{value}</div>
     </button>
   );
-}
-
-/**
- * Short count line shown beside an asset in the Findings list, so the reader
- * can see what was recorded without scanning the row.
- *
- * @param photoCount - Photos recorded against the asset during the audit
- * @param noteCount - Condition notes recorded against the asset
- * @returns e.g. "2 photos · 1 note", or "1 photo"
- */
-function findingSummary(photoCount: number, noteCount: number) {
-  const parts: string[] = [];
-  if (photoCount > 0) {
-    parts.push(`${photoCount} ${photoCount === 1 ? "photo" : "photos"}`);
-  }
-  if (noteCount > 0) {
-    parts.push(`${noteCount} ${noteCount === 1 ? "note" : "notes"}`);
-  }
-  return parts.join(" · ");
 }
