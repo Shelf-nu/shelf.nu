@@ -5,12 +5,12 @@ import {
   FlatList,
   TouchableOpacity,
   Modal,
-  Platform,
   useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
+import { useOverlayEdges } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 
@@ -33,6 +33,8 @@ type RemainingAssetsListProps = {
 export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  // Clears a side rail or camera cutout in the full-window image viewer.
+  const overlayEdges = useOverlayEdges();
   const [previewAsset, setPreviewAsset] = useState<RemainingAsset | null>(null);
   // The preview fills the live window, so it follows a rotation or a resize.
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -165,7 +167,10 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
           accessibilityLabel="Close image preview"
         >
           <TouchableOpacity
-            style={styles.previewCloseBtn}
+            style={[
+              styles.previewCloseBtn,
+              { top: overlayEdges.top, right: overlayEdges.right + 20 },
+            ]}
             onPress={() => setPreviewAsset(null)}
             accessibilityLabel="Close"
             accessibilityRole="button"
@@ -175,7 +180,15 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
 
           {previewAsset && (
             <View
-              style={styles.previewContent}
+              style={[
+                styles.previewContent,
+                // Centred between the side insets rather than the window
+                // edges, so a rail on one side never covers the image.
+                {
+                  marginLeft: overlayEdges.left,
+                  marginRight: overlayEdges.right,
+                },
+              ]}
               onStartShouldSetResponder={() => true}
             >
               <Image
@@ -183,7 +196,11 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
                   uri:
                     previewAsset.mainImage || previewAsset.thumbnailImage || "",
                 }}
-                style={{ width: windowWidth - 40, height: windowHeight * 0.55 }}
+                style={{
+                  width:
+                    windowWidth - 40 - overlayEdges.left - overlayEdges.right,
+                  height: windowHeight * 0.55,
+                }}
                 contentFit="contain"
               />
               <Text style={styles.previewAssetName} numberOfLines={2}>
@@ -276,10 +293,9 @@ const useStyles = createStyles((colors) => ({
     justifyContent: "center",
     alignItems: "center",
   },
+  // `top` and `right` come from the window's insets at render time.
   previewCloseBtn: {
     position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
     zIndex: 10,
     width: 44,
     height: 44,
