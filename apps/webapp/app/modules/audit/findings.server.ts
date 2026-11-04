@@ -7,6 +7,12 @@
  * and photos), so a page never splits one asset's evidence across requests.
  * Findings about the audit as a whole are few and are read in one go.
  *
+ * Pages are keyset-paged on (asset title, AuditAsset id): each request starts
+ * after the last row the list already holds. The set of assets with findings
+ * changes while people audit (a deleted photo can take an asset out of it),
+ * and a keyset keeps the next page correct either way, where an offset would
+ * skip or repeat a row.
+ *
  * @see {@link file://./../../routes/api+/audits.$auditId.findings.ts} Next pages
  * @see {@link file://./../../routes/_layout+/audits.$auditId.overview.tsx} First page
  * @see {@link file://./../../components/audit/audit-findings.tsx} The list
@@ -56,11 +62,20 @@ export type AssetFinding = {
   notes: FindingNote[];
 };
 
+/**
+ * Where a page starts: the sort key of the last row of the previous page.
+ * `id` is the AuditAsset id, which breaks ties between assets with the same
+ * title.
+ */
+export type FindingsCursor = { title: string; id: string };
+
 /** One page of asset findings. */
 export type AuditFindingsPage = {
   findings: AssetFinding[];
-  /** 1-based page number of `findings`. */
-  page: number;
+  /** The cursor this page was read after; null for the first page. */
+  after: FindingsCursor | null;
+  /** Where the next page starts; null when this is the last page. */
+  nextCursor: FindingsCursor | null;
   /** Assets with findings across the whole audit. */
   totalFindings: number;
   hasMore: boolean;
@@ -80,19 +95,19 @@ export type AuditWideFindings = {
  *
  * @param args.auditSessionId - The audit to read
  * @param args.organizationId - The caller's organization
- * @param args.page - 1-based page number
- * @returns The page, the total number of assets with findings and whether
- *   another page follows
+ * @param args.after - Start after this row; omit for the first page
+ * @returns The page, the cursor for the next one and the total number of
+ *   assets with findings
  * @throws {ShelfError} If the database read fails
  */
 export async function getAuditFindingsPage({
   auditSessionId,
   organizationId,
-  page,
+  after = null,
 }: {
   auditSessionId: AuditSession["id"];
   organizationId: Organization["id"];
-  page: number;
+  after?: FindingsCursor | null;
 }): Promise<AuditFindingsPage> {
   try {
     const where: Prisma.AuditAssetWhereInput = {
@@ -101,15 +116,27 @@ export async function getAuditFindingsPage({
       OR: [{ images: { some: {} } }, { notes: { some: { type: "COMMENT" } } }],
     };
 
+    // Rows strictly after the cursor in (title, id) order. A hand-written
+    // condition rather than Prisma's `cursor`, which needs the cursor row to
+    // still be in the set: it may have lost its last finding since.
+    const afterCursor: Prisma.AuditAssetWhereInput | undefined = after
+      ? {
+          OR: [
+            { asset: { title: { gt: after.title } } },
+            { asset: { title: after.title }, id: { gt: after.id } },
+          ],
+        }
+      : undefined;
+
     const [rows, totalFindings] = await Promise.all([
       db.auditAsset.findMany({
-        where,
-        // `id` breaks ties between assets with the same name, so a row can
-        // never appear on two pages or on none.
+        where: afterCursor ? { AND: [where, afterCursor] } : where,
+        // Must match `afterCursor`: title, then `id` to break ties.
         orderBy: [{ asset: { title: "asc" } }, { id: "asc" }],
-        skip: (page - 1) * AUDIT_FINDINGS_PAGE_SIZE,
-        take: AUDIT_FINDINGS_PAGE_SIZE,
+        // One extra row says whether another page follows.
+        take: AUDIT_FINDINGS_PAGE_SIZE + 1,
         select: {
+          id: true,
           asset: { select: { id: true, title: true } },
           images: {
             select: FINDING_IMAGE_SELECT,
@@ -125,22 +152,28 @@ export async function getAuditFindingsPage({
       db.auditAsset.count({ where }),
     ]);
 
+    const hasMore = rows.length > AUDIT_FINDINGS_PAGE_SIZE;
+    const pageRows = rows.slice(0, AUDIT_FINDINGS_PAGE_SIZE);
+    const last = pageRows.at(-1);
+
     return {
-      findings: rows.map((row) => ({
+      findings: pageRows.map((row) => ({
         assetId: row.asset.id,
-        assetName: row.asset.title || "Unknown",
+        assetName: row.asset.title,
         images: row.images,
         notes: row.notes,
       })),
-      page,
+      after,
+      nextCursor:
+        hasMore && last ? { title: last.asset.title, id: last.id } : null,
       totalFindings,
-      hasMore: page * AUDIT_FINDINGS_PAGE_SIZE < totalFindings,
+      hasMore,
     };
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Failed to load the audit findings",
-      additionalData: { auditSessionId, organizationId, page },
+      additionalData: { auditSessionId, organizationId, after },
       label: "Audit",
     });
   }

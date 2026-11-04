@@ -1,19 +1,31 @@
 import { describe, expect, it } from "vitest";
-import type { AuditFindingsPage } from "~/modules/audit/findings.server";
+import type {
+  AuditFindingsPage,
+  FindingsCursor,
+} from "~/modules/audit/findings.server";
 import {
   findingSummary,
+  findingsListKey,
   findingsListReducer,
   initFindingsList,
 } from "./audit-findings-helpers";
 
-/** A page of findings holding one asset per id given. */
+/** The cursor pointing after the asset with this id. */
+const cursorAt = (id: string): FindingsCursor => ({
+  title: `Asset ${id}`,
+  id: `aa-${id}`,
+});
+
+/** A page of findings holding one asset per id given, read after `after`. */
 function page(
-  number: number,
+  after: FindingsCursor | null,
   assetIds: string[],
   { hasMore = true, totalFindings = 25 } = {}
 ): AuditFindingsPage {
+  const lastId = assetIds.at(-1);
   return {
-    page: number,
+    after,
+    nextCursor: hasMore && lastId ? cursorAt(lastId) : null,
     hasMore,
     totalFindings,
     findings: assetIds.map((assetId) => ({
@@ -29,38 +41,85 @@ const ids = (state: { findings: { assetId: string }[] }) =>
   state.findings.map((f) => f.assetId);
 
 describe("findingsListReducer", () => {
-  it("appends the next page and takes its paging facts", () => {
-    const state = findingsListReducer(initFindingsList(page(1, ["a", "b"])), {
-      type: "page_loaded",
-      page: page(2, ["c"], { hasMore: false, totalFindings: 3 }),
-    });
+  it("appends the page read after its cursor and takes the next cursor", () => {
+    const state = findingsListReducer(
+      initFindingsList(page(null, ["a", "b"])),
+      {
+        type: "page_loaded",
+        page: page(cursorAt("b"), ["c"], { hasMore: false, totalFindings: 3 }),
+      }
+    );
 
     expect(ids(state)).toEqual(["a", "b", "c"]);
     expect(state).toMatchObject({
-      lastPage: 2,
+      nextCursor: null,
       hasMore: false,
       totalFindings: 3,
     });
   });
 
-  it("ignores a repeated or out-of-order page", () => {
-    const start = initFindingsList(page(1, ["a"]));
+  it("ignores a page read after any other cursor", () => {
+    const start = initFindingsList(page(null, ["a", "b"]));
 
-    expect(
-      findingsListReducer(start, { type: "page_loaded", page: page(1, ["a"]) })
-    ).toBe(start);
-    expect(
-      findingsListReducer(start, { type: "page_loaded", page: page(3, ["z"]) })
-    ).toBe(start);
+    for (const after of [null, cursorAt("a"), cursorAt("z")]) {
+      expect(
+        findingsListReducer(start, {
+          type: "page_loaded",
+          page: page(after, ["x"]),
+        })
+      ).toBe(start);
+    }
   });
 
-  it("drops an asset already listed when the pages shift", () => {
-    const state = findingsListReducer(initFindingsList(page(1, ["a", "b"])), {
-      type: "page_loaded",
-      page: page(2, ["b", "c"]),
-    });
+  it("drops an asset that is already listed", () => {
+    const state = findingsListReducer(
+      initFindingsList(page(null, ["a", "b"])),
+      { type: "page_loaded", page: page(cursorAt("b"), ["b", "c"]) }
+    );
 
     expect(ids(state)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("findingsListKey", () => {
+  /** A first page with one asset carrying one note and one photo. */
+  function firstPage({
+    noteContent = "Scratched",
+    description = null as string | null,
+    totalFindings = 1,
+  } = {}): AuditFindingsPage {
+    return {
+      ...page(null, ["a"], { totalFindings }),
+      findings: [
+        {
+          assetId: "a",
+          assetName: "Camera",
+          notes: [
+            {
+              id: "n1",
+              content: noteContent,
+              createdAt: new Date("2026-11-01"),
+              user: null,
+            },
+          ],
+          images: [
+            { id: "i1", imageUrl: "u", thumbnailUrl: null, description },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("stays the same for the same contents", () => {
+    expect(findingsListKey(firstPage())).toBe(findingsListKey(firstPage()));
+  });
+
+  it("changes when a note, a photo or the total changes", () => {
+    const key = findingsListKey(firstPage());
+
+    expect(findingsListKey(firstPage({ noteContent: "Dented" }))).not.toBe(key);
+    expect(findingsListKey(firstPage({ description: "Front" }))).not.toBe(key);
+    expect(findingsListKey(firstPage({ totalFindings: 2 }))).not.toBe(key);
   });
 });
 

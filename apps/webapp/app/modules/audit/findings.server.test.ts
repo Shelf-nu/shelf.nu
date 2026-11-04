@@ -16,58 +16,94 @@ import {
 } from "./findings.server";
 
 /** An audit asset row as the page read selects it. */
-function row(id: string, title: string | null) {
-  return { asset: { id, title }, images: [], notes: [] };
+function row(n: number) {
+  return {
+    id: `aa-${n}`,
+    asset: { id: `asset-${n}`, title: `Asset ${String(n).padStart(2, "0")}` },
+    images: [],
+    notes: [],
+  };
 }
+
+/** `count` rows, numbered from 1. */
+const rows = (count: number) =>
+  Array.from({ length: count }, (_, i) => row(i + 1));
 
 describe("getAuditFindingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    count.mockResolvedValue(25);
   });
 
-  it("reads one page of assets with findings, in the caller's workspace", async () => {
-    findMany.mockResolvedValue([row("a1", "Camera")]);
-    count.mockResolvedValue(25);
+  it("reads the first page in the caller's workspace, one extra row to see past it", async () => {
+    findMany.mockResolvedValue([]);
 
     await getAuditFindingsPage({
       auditSessionId: "audit-1",
       organizationId: "org-1",
-      page: 3,
     });
 
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          auditSessionId: "audit-1",
-          auditSession: { organizationId: "org-1" },
-        }),
-        skip: 2 * AUDIT_FINDINGS_PAGE_SIZE,
-        take: AUDIT_FINDINGS_PAGE_SIZE,
-      })
-    );
+    const query = findMany.mock.calls[0][0];
+    expect(query.where).toMatchObject({
+      auditSessionId: "audit-1",
+      auditSession: { organizationId: "org-1" },
+    });
+    expect(query.take).toBe(AUDIT_FINDINGS_PAGE_SIZE + 1);
+    expect(query.skip).toBeUndefined();
+    expect(query.orderBy).toEqual([{ asset: { title: "asc" } }, { id: "asc" }]);
   });
 
-  it("says whether another page follows", async () => {
-    findMany.mockResolvedValue([row("a1", null)]);
-    count.mockResolvedValue(AUDIT_FINDINGS_PAGE_SIZE + 1);
+  it("starts a later page strictly after the cursor row, in (title, id) order", async () => {
+    findMany.mockResolvedValue([]);
+    const after = { title: "Camera", id: "aa-7" };
 
-    const first = await getAuditFindingsPage({
+    const result = await getAuditFindingsPage({
       auditSessionId: "audit-1",
       organizationId: "org-1",
-      page: 1,
-    });
-    const second = await getAuditFindingsPage({
-      auditSessionId: "audit-1",
-      organizationId: "org-1",
-      page: 2,
+      after,
     });
 
-    expect(first).toMatchObject({ hasMore: true, totalFindings: 11 });
-    expect(second.hasMore).toBe(false);
-    // An asset without a title still gets a name to show.
-    expect(first.findings[0]).toMatchObject({
-      assetId: "a1",
-      assetName: "Unknown",
+    // The cursor is a condition, not an offset: an earlier asset leaving the
+    // set cannot move the next page's first row.
+    expect(findMany.mock.calls[0][0].where.AND).toContainEqual({
+      OR: [
+        { asset: { title: { gt: "Camera" } } },
+        { asset: { title: "Camera" }, id: { gt: "aa-7" } },
+      ],
     });
+    expect(result.after).toEqual(after);
+  });
+
+  it("returns a full page and the cursor of its last row when another follows", async () => {
+    findMany.mockResolvedValue(rows(AUDIT_FINDINGS_PAGE_SIZE + 1));
+
+    const result = await getAuditFindingsPage({
+      auditSessionId: "audit-1",
+      organizationId: "org-1",
+    });
+
+    expect(result.findings).toHaveLength(AUDIT_FINDINGS_PAGE_SIZE);
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toEqual({
+      title: "Asset 10",
+      id: "aa-10",
+    });
+    expect(result.totalFindings).toBe(25);
+  });
+
+  it("says there is no next page when the extra row is missing", async () => {
+    findMany.mockResolvedValue(rows(3));
+
+    const result = await getAuditFindingsPage({
+      auditSessionId: "audit-1",
+      organizationId: "org-1",
+    });
+
+    expect(result.findings.map((f) => f.assetId)).toEqual([
+      "asset-1",
+      "asset-2",
+      "asset-3",
+    ]);
+    expect(result).toMatchObject({ hasMore: false, nextCursor: null });
   });
 });

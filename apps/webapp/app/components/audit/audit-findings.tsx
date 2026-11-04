@@ -6,8 +6,8 @@
  * about the audit as a whole first.
  *
  * Asset findings are paged on the server, ten assets per page. The overview
- * loader sends page 1; scrolling to the end of the list requests the next
- * page from `/api/audits/:auditId/findings`. An "Expand" button opens the
+ * loader sends the first page; scrolling to the end of the list requests the
+ * page after the last row it holds from `/api/audits/:auditId/findings`. An "Expand" button opens the
  * same list in a side sheet with larger photos. The card and the sheet share
  * one paging state, so pages loaded in one are already there in the other.
  *
@@ -74,7 +74,7 @@ type FindingsPaging = {
  * with a max height instead.
  *
  * @param props.auditId - The audit whose findings these are
- * @param props.firstPage - Page 1 of asset findings, from the page loader
+ * @param props.firstPage - The first page of asset findings, from the loader
  * @param props.auditWide - Notes and photos about the audit as a whole
  */
 export function AuditFindings({
@@ -162,20 +162,24 @@ function useFindingsPaging(
   const isLoading = fetcher.state !== "idle";
   const failed = !isLoading && response?.error != null;
 
-  // The reducer only takes the page right after the last one, so running
-  // this again for a response it already has is harmless.
+  // The reducer only takes a page that answers its current cursor, so
+  // running this again for a response it already has is harmless.
   useEffect(() => {
     if (response && response.error == null) {
       dispatch({ type: "page_loaded", page: response });
     }
   }, [response]);
 
-  const { hasMore, lastPage } = state;
+  const { nextCursor } = state;
   const { load } = fetcher;
   const loadMore = useCallback(() => {
-    if (isLoading || !hasMore) return;
-    void load(`/api/audits/${auditId}/findings?page=${lastPage + 1}`);
-  }, [auditId, hasMore, isLoading, lastPage, load]);
+    if (isLoading || !nextCursor) return;
+    const search = new URLSearchParams({
+      afterTitle: nextCursor.title,
+      afterId: nextCursor.id,
+    });
+    void load(`/api/audits/${auditId}/findings?${search.toString()}`);
+  }, [auditId, isLoading, nextCursor, load]);
 
   return { state, isLoading, failed, loadMore };
 }
@@ -423,7 +427,7 @@ function FindingRow({
 
       <PhotoStrip
         images={images}
-        altFor={() => `Photo of ${assetName}`}
+        altFor={(image) => image.description || `Photo of ${assetName}`}
         variant={variant}
       />
     </div>

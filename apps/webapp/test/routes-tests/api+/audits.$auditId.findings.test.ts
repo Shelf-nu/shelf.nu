@@ -51,6 +51,11 @@ vi.mock("~/modules/audit/findings.server", () => ({
 import { loader } from "~/routes/api+/audits.$auditId.findings";
 
 const AUDIT_ID = "audit-1";
+/** The query for the page after the asset "Camera & Co" (AuditAsset aa-7). */
+const NEXT_PAGE = `?${new URLSearchParams({
+  afterTitle: "Camera & Co",
+  afterId: "aa-7",
+}).toString()}`;
 const ORG_ID = "org-1";
 
 function args(query: string) {
@@ -73,29 +78,29 @@ describe("GET /api/audits/:auditId/findings", () => {
     mockRequireAuditAssignee.mockResolvedValue(undefined);
     mockGetPage.mockResolvedValue({
       findings: [],
-      page: 2,
+      after: { title: "Camera", id: "aa-7" },
+      nextCursor: null,
       totalFindings: 12,
       hasMore: false,
     });
   });
 
-  it("returns the requested page, scoped to the caller's workspace", async () => {
-    const response = (await loader(args("?page=2"))) as unknown as Response;
+  it("returns the page after the cursor, scoped to the caller's workspace", async () => {
+    const response = (await loader(args(NEXT_PAGE))) as unknown as Response;
 
     expect(response.status).toBe(200);
     expect(mockGetPage).toHaveBeenCalledWith({
       auditSessionId: AUDIT_ID,
       organizationId: ORG_ID,
-      page: 2,
+      after: { title: "Camera & Co", id: "aa-7" },
     });
     await expect(response.json()).resolves.toMatchObject({
-      page: 2,
       totalFindings: 12,
     });
   });
 
   it("checks the assignment for a member limited to assigned audits", async () => {
-    await loader(args("?page=2"));
+    await loader(args(NEXT_PAGE));
 
     expect(mockRequireAuditAssignee).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -115,19 +120,21 @@ describe("GET /api/audits/:auditId/findings", () => {
     });
     mockRequireAuditAssignee.mockRejectedValue(refusal);
 
-    const response = (await loader(args("?page=2"))) as unknown as Response;
+    const response = (await loader(args(NEXT_PAGE))) as unknown as Response;
 
     expect(response.status).toBe(403);
     expect(mockGetPage).not.toHaveBeenCalled();
   });
 
-  it.each(["", "?page=0", "?page=-1", "?page=abc"])(
-    "rejects a missing or invalid page (%s)",
-    async (query) => {
-      const response = (await loader(args(query))) as unknown as Response;
+  it.each([
+    "",
+    "?afterTitle=Camera",
+    "?afterId=aa-7",
+    "?afterTitle=Camera&afterId=",
+  ])("rejects a missing or partial cursor (%s)", async (query) => {
+    const response = (await loader(args(query))) as unknown as Response;
 
-      expect(response.status).toBe(400);
-      expect(mockGetPage).not.toHaveBeenCalled();
-    }
-  );
+    expect(response.status).toBe(400);
+    expect(mockGetPage).not.toHaveBeenCalled();
+  });
 });

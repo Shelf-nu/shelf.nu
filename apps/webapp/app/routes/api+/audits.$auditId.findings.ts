@@ -1,10 +1,11 @@
 /**
  * Audit findings API
  *
- * GET `/api/audits/:auditId/findings?page=N` returns one page of the asset
- * findings shown on the audit overview (the condition notes and photos
- * recorded against each asset). The overview loader sends page 1; the list
- * requests the following pages from here as it is scrolled.
+ * GET `/api/audits/:auditId/findings?afterTitle=…&afterId=…` returns the page
+ * of asset findings that follows the given cursor (the condition notes and
+ * photos recorded against each asset). The overview loader sends the first
+ * page; the list requests the following ones from here as it is scrolled,
+ * passing the `nextCursor` of the page before.
  *
  * @see {@link file://./../../modules/audit/findings.server.ts} The read
  * @see {@link file://./../../components/audit/audit-findings.tsx} The consumer
@@ -42,9 +43,14 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       additionalData: { userId },
     });
 
-    const { page } = parseData(
+    // Both halves of the cursor are required: this endpoint only serves the
+    // pages after the first, which the overview loader sends.
+    const { afterTitle, afterId } = parseData(
       getCurrentSearchParams(request),
-      z.object({ page: z.coerce.number().int().min(1).max(10_000) }),
+      z.object({
+        afterTitle: z.string().max(1000),
+        afterId: z.string().min(1),
+      }),
       { additionalData: { userId, auditId } }
     );
 
@@ -63,7 +69,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     const findingsPage = await getAuditFindingsPage({
       auditSessionId: auditId,
       organizationId,
-      page,
+      after: { title: afterTitle, id: afterId },
     });
 
     return data(payload(findingsPage));

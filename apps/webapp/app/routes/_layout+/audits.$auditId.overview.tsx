@@ -14,6 +14,7 @@ import { z } from "zod";
 
 import { AuditAssetListItem } from "~/components/audit/audit-asset-list-item";
 import { AuditFindings } from "~/components/audit/audit-findings";
+import { findingsListKey } from "~/components/audit/audit-findings-helpers";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import BulkActionsDropdown from "~/components/audit/bulk-actions-dropdown";
@@ -128,11 +129,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // The first page of Findings; the list requests the rest from
     // `/api/audits/:auditId/findings` as it is scrolled.
     const [findingsPage, auditWideFindings] = await Promise.all([
-      getAuditFindingsPage({
-        auditSessionId: auditId,
-        organizationId,
-        page: 1,
-      }),
+      getAuditFindingsPage({ auditSessionId: auditId, organizationId }),
       getAuditWideFindings({ auditSessionId: auditId, organizationId }),
     ]);
 
@@ -510,8 +507,8 @@ export default function AuditOverview() {
 
         {/* Right column: what people recorded while auditing. */}
         <AuditFindings
-          // A different first page (an asset removed, a finding added) starts
-          // the list over rather than appending to pages it no longer matches.
+          // A first page with different contents (a note or photo added,
+          // edited or removed) starts the list over with fresh data.
           key={findingsListKey(findingsPage)}
           auditId={session.id}
           firstPage={findingsPage}
@@ -641,18 +638,4 @@ function StatCard({
       <div className="mt-1 text-3xl font-bold">{value}</div>
     </button>
   );
-}
-
-/**
- * Identifies the first page of findings, so the list remounts when the
- * loader sends a different one.
- *
- * @param page - Page 1 of asset findings
- * @returns The total and the asset ids on the page, joined
- */
-function findingsListKey(page: {
-  totalFindings: number;
-  findings: { assetId: string }[];
-}) {
-  return [page.totalFindings, ...page.findings.map((f) => f.assetId)].join(":");
 }
