@@ -8,18 +8,26 @@
  * single-fetch redirect React Router reads (204 + `X-Remix-Redirect`), and
  * `redirectTo` names the page, never its `.data` URL.
  *
+ * A member whose session ended (revoked, or its refresh failed) is told so on
+ * the login page through `logged_out=1` in the URL. A visitor who never had a
+ * session is not.
+ *
  * @see {@link file://./middleware.ts}
  */
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { validateSession } from "~/modules/auth/service.server";
-import { protect } from "./middleware";
+import {
+  refreshAccessToken,
+  validateSession,
+} from "~/modules/auth/service.server";
+import { protect, refreshSession } from "./middleware";
 import { authSessionKey } from "./session";
 
 // why: the session lives in a signed cookie managed by remix-hono; each case
 // supplies the session state directly and the assertions read what was flashed
 const session = {
   get: vi.fn(),
+  set: vi.fn(),
   flash: vi.fn(),
   unset: vi.fn(),
 };
@@ -31,9 +39,10 @@ vi.mock("~/modules/auth/service.server", () => ({
   refreshAccessToken: vi.fn(),
 }));
 
-/** An app with only the protect middleware in front of a page that answers 200. */
+/** The refresh and protect middlewares, in server order, in front of a page that answers 200. */
 function app() {
   const server = new Hono();
+  server.use("*", refreshSession());
   server.use(
     "*",
     protect({ onFailRedirectTo: "/login", publicPaths: ["/login"] })
@@ -42,15 +51,21 @@ function app() {
   return server;
 }
 
+/** An access token far from expiry, so the refresh middleware leaves it alone. */
+const FRESH = Math.floor(Date.now() / 1000) + 3600;
+
 describe("protect: sending a signed-out request to login", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset, not clear: some cases give the session stub an implementation
+    vi.resetAllMocks();
   });
 
   describe("when the session was revoked", () => {
     beforeEach(() => {
       session.get.mockImplementation((key: string) =>
-        key === authSessionKey ? { refreshToken: "revoked" } : undefined
+        key === authSessionKey
+          ? { refreshToken: "revoked", expiresAt: FRESH }
+          : undefined
       );
       vi.mocked(validateSession).mockResolvedValue(false);
     });
@@ -62,7 +77,7 @@ describe("protect: sending a signed-out request to login", () => {
 
       expect(res.status).toBe(204);
       expect(res.headers.get("X-Remix-Redirect")).toBe(
-        "/login?redirectTo=/kits"
+        "/login?redirectTo=/kits&logged_out=1"
       );
       expect(res.headers.get("Location")).toBeNull();
       expect(session.unset).toHaveBeenCalledWith(authSessionKey);
@@ -76,8 +91,34 @@ describe("protect: sending a signed-out request to login", () => {
       const res = await app().request("/kits");
 
       expect(res.status).toBe(302);
-      expect(res.headers.get("Location")).toBe("/login?redirectTo=/kits");
+      expect(res.headers.get("Location")).toBe(
+        "/login?redirectTo=/kits&logged_out=1"
+      );
       expect(res.headers.get("X-Remix-Redirect")).toBeNull();
+    });
+  });
+
+  describe("when refreshing the session fails", () => {
+    beforeEach(() => {
+      // An access token past its expiry sends the request through a refresh,
+      // which fails because the refresh token was revoked
+      const auth = { refreshToken: "revoked", expiresAt: 1 };
+      session.get.mockImplementation((key: string) =>
+        key === authSessionKey ? auth : undefined
+      );
+      session.unset.mockImplementation(() => {
+        session.get.mockReturnValue(undefined);
+      });
+      vi.mocked(refreshAccessToken).mockRejectedValue(new Error("revoked"));
+    });
+
+    it("tells the member they were logged out", async () => {
+      const res = await app().request("/kits.data");
+
+      expect(res.status).toBe(204);
+      expect(res.headers.get("X-Remix-Redirect")).toBe(
+        "/login?redirectTo=/kits&logged_out=1"
+      );
     });
   });
 
@@ -97,7 +138,7 @@ describe("protect: sending a signed-out request to login", () => {
   });
 
   it("lets a valid session through", async () => {
-    session.get.mockReturnValue({ refreshToken: "valid" });
+    session.get.mockReturnValue({ refreshToken: "valid", expiresAt: FRESH });
     vi.mocked(validateSession).mockResolvedValue(true);
 
     const res = await app().request("/kits.data");

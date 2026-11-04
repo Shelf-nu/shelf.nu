@@ -60,19 +60,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/");
   }
 
-  return data(
-    payload({
-      title,
-      subHeading,
-      disableSignup,
-      disableSSO,
-      /**
-       * Why the member was sent here, flashed by the auth middleware when it
-       * ends a session (logged out by an admin, expired or revoked).
-       */
-      signedOutReason: context.errorMessage,
-    })
-  );
+  return data(payload({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({
@@ -207,8 +195,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { disableSignup, disableSSO, signedOutReason } =
-    useLoaderData<typeof loader>();
+  const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -216,6 +203,11 @@ export default function IndexLoginForm() {
   const passwordReset = searchParams.get("password_reset");
   /** Set by the app layout when it ends a session whose address must use SSO. */
   const ssoRequired = searchParams.get("sso_required");
+  /**
+   * Set by the auth middleware when it ends a member's session: an admin
+   * logged them out, or the session expired or was revoked.
+   */
+  const loggedOut = searchParams.get("logged_out");
   const data = useActionData<typeof action>();
   const ssoDomainHint = Boolean(
     data && "ssoDomainHint" in data && data.ssoDomainHint
@@ -250,9 +242,9 @@ export default function IndexLoginForm() {
         </div>
       ) : null}
 
-      {signedOutReason && !ssoRequired ? (
+      {loggedOut && !ssoRequired ? (
         <div role="status" className="mb-8 text-center text-warning-700">
-          {signedOutReason}
+          You have been logged out. Please log back in again.
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">

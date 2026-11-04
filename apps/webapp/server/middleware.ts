@@ -109,6 +109,23 @@ export function applyForwardedProto() {
 }
 
 /**
+ * Context flag the refresh middleware sets when it ends the request's session
+ * because the refresh failed, so `protect` can tell a member who was just
+ * logged out from a visitor who never signed in.
+ */
+const SESSION_ENDED_KEY = "shelf.sessionEnded";
+
+/**
+ * Appended to the login URL when a member's session ended (revoked by an
+ * admin, expired or failed to refresh). The login page reads it to say they
+ * were logged out. It travels in the URL rather than as a flashed session
+ * message because the flash is read, and so consumed, by whichever request
+ * reaches the app first, which during a client-side redirect is usually the
+ * route-manifest request rather than the login page.
+ */
+const LOGGED_OUT_PARAM = "&logged_out=1";
+
+/**
  * Protected routes middleware
  *
  * @param options.publicPath - The public paths
@@ -154,9 +171,15 @@ export function protect({
         "This content is only available to logged in users."
       );
 
+      // The refresh middleware ended this session on the same request, so the
+      // member was signed in a moment ago and is told they were logged out
+      const loggedOut = c.get(SESSION_ENDED_KEY) === true;
+
       return redirectToLogin(
         c,
-        `${onFailRedirectTo}?redirectTo=${pathToCheck}`
+        `${onFailRedirectTo}?redirectTo=${pathToCheck}${
+          loggedOut ? LOGGED_OUT_PARAM : ""
+        }`
       );
     }
     const isValidSession = await validateSession(auth.refreshToken);
@@ -177,7 +200,7 @@ export function protect({
       );
       return redirectToLogin(
         c,
-        `${onFailRedirectTo}?redirectTo=${pathToCheck}`
+        `${onFailRedirectTo}?redirectTo=${pathToCheck}${LOGGED_OUT_PARAM}`
       );
     }
     return next();
@@ -255,6 +278,7 @@ export function refreshSession() {
       );
 
       session.unset(authSessionKey);
+      c.set(SESSION_ENDED_KEY, true);
     }
 
     return next();
