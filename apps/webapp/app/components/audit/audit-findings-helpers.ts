@@ -149,17 +149,26 @@ function hashString(value: string) {
 /**
  * Short count line shown beside an asset in the Findings list.
  *
- * @param photoCount - Photos recorded against the asset
- * @param noteCount - Condition notes recorded against the asset
- * @returns e.g. "2 photos · 1 note", or "" when both are zero
+ * Notes come first because the row shows its notes above its photos; keep
+ * the two in the same order.
+ *
+ * @param counts.notes - Condition notes recorded against the asset
+ * @param counts.photos - Photos recorded against the asset
+ * @returns e.g. "1 note · 2 photos", or "" when both are zero
  */
-export function findingSummary(photoCount: number, noteCount: number) {
+export function findingSummary({
+  notes,
+  photos,
+}: {
+  notes: number;
+  photos: number;
+}) {
   const parts: string[] = [];
-  if (photoCount > 0) {
-    parts.push(`${photoCount} ${photoCount === 1 ? "photo" : "photos"}`);
+  if (notes > 0) {
+    parts.push(`${notes} ${notes === 1 ? "note" : "notes"}`);
   }
-  if (noteCount > 0) {
-    parts.push(`${noteCount} ${noteCount === 1 ? "note" : "notes"}`);
+  if (photos > 0) {
+    parts.push(`${photos} ${photos === 1 ? "photo" : "photos"}`);
   }
   return parts.join(" · ");
 }

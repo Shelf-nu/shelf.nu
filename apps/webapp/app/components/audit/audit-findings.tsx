@@ -456,7 +456,7 @@ function FindingRow({
           {assetName}
         </h3>
         <span className="shrink-0 text-xs text-gray-500">
-          {findingSummary(images.length, notes.length)}
+          {findingSummary({ notes: notes.length, photos: images.length })}
         </span>
       </div>
 

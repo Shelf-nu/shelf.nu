@@ -159,9 +159,10 @@ describe("findingsListKey", () => {
 });
 
 describe("findingSummary", () => {
-  it("counts photos and notes with singular and plural words", () => {
-    expect(findingSummary(1, 2)).toBe("1 photo · 2 notes");
-    expect(findingSummary(3, 0)).toBe("3 photos");
-    expect(findingSummary(0, 1)).toBe("1 note");
+  it("counts notes then photos, in the order the row shows them", () => {
+    expect(findingSummary({ notes: 2, photos: 1 })).toBe("2 notes · 1 photo");
+    expect(findingSummary({ notes: 1, photos: 3 })).toBe("1 note · 3 photos");
+    expect(findingSummary({ notes: 0, photos: 3 })).toBe("3 photos");
+    expect(findingSummary({ notes: 1, photos: 0 })).toBe("1 note");
   });
 });
