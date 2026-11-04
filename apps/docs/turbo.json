@@ -3,7 +3,8 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/CONTRIBUTING.md"]
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/CONTRIBUTING.md"],
+      "outputs": [".vitepress/dist/**"]
     }
   }
 }

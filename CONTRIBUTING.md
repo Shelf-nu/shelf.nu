@@ -65,7 +65,9 @@ every item is done.
       can still skip commits, for example when it is rate limited or a review
       fails. Check that its latest review covers your latest commit. If it does
       not, comment `@coderabbitai review` (or `@coderabbitai resume` if it says
-      reviews are paused).
+      reviews are paused). If it skipped because of a rate limit, comment
+      `@coderabbitai rate limit` to see when it resets, and ask again after
+      that.
 - [ ] **Every CodeRabbit thread is resolved.** Fix the finding, or reply with
       why it does not apply, then resolve the thread. Do not leave threads open
       for the maintainer to sort out.

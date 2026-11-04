@@ -18,7 +18,8 @@ gh pr create --draft --title "fix(assets): ..." --body-file body.md
 ```
 
 Mark it ready (`gh pr ready`) and request a review from @DonKoko only when all
-of these hold:
+of these hold. Outside contributors cannot request reviewers on GitHub: they
+comment `@DonKoko ready for review` instead, and a maintainer adds the request.
 
 - CI is green.
 - CodeRabbit has reviewed the latest commit. If it skipped one, comment
