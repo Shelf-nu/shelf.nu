@@ -65,8 +65,9 @@ every item is done.
 - [ ] **CodeRabbit reviewed every commit.** CodeRabbit reviews each push. It
       can still skip commits, for example when it is rate limited or a review
       fails. Check that its latest review covers your latest commit. If it does
-      not, comment `@coderabbitai review` (or `@coderabbitai resume` if it says
-      reviews are paused). If it skipped because of a rate limit, comment
+      not, comment `@coderabbitai full review`. It works whether CodeRabbit
+      skipped or paused; a plain `@coderabbitai review` only works when
+      reviews are paused, and refuses otherwise. If it skipped because of a rate limit, comment
       `@coderabbitai rate limit` to see when it resets, and ask again after
       that.
 - [ ] **Every CodeRabbit thread is resolved.** Fix the finding, or reply with

@@ -23,7 +23,8 @@ comment `@DonKoko ready for review` instead, and a maintainer adds the request.
 
 - CI is green.
 - CodeRabbit has reviewed the latest commit. If it skipped one, comment
-  `@coderabbitai review` (or `@coderabbitai resume` when paused).
+  `@coderabbitai full review` (a plain `@coderabbitai review` refuses unless
+  reviews are paused).
 - Every CodeRabbit thread is fixed or answered, and resolved.
 - The branch is up to date with `main` with no conflicts (`/fix-conflicts`).
 - Team members: `/pr-review` has run and its must-fix and should-fix findings
