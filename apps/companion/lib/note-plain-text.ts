@@ -21,7 +21,7 @@
  * @see {@link file://./text-links.ts} `findTextLinks`
  */
 
-import type { TextSegment } from "@shelf/links";
+import { segmentText, type TextSegment } from "@shelf/links";
 import { findTextLinks } from "./text-links";
 
 /** How the caller formats the parts that depend on the user's preferences. */
@@ -112,8 +112,8 @@ const MARKDOWN_LINK =
 /**
  * Stand-in for a held run while the rest of the note is flattened: a
  * private-use character pair around the run's index, which no step of
- * `markdocToPlainText` rewrites. A note can contain the same characters, so
- * a match with no held run behind it stays text.
+ * `markdocToPlainText` rewrites. The same characters typed into a note are
+ * held as text before anything else, so every stand-in is a generated one.
  */
 const HELD_RUN = /\uE000(\d+)\uE001/g;
 
@@ -163,8 +163,8 @@ export interface NoteLinkOptions {
  *
  * - A `link` tag links to its page on the connected Shelf server.
  * - A `name` tag (a value someone typed) is plain text, unless the note's
- *   writer marked it `chips=true` (a custom field value), whose URLs link
- *   as typed, as on the web.
+ *   writer marked it `chips=true` (a custom field value), whose http(s)
+ *   URLs link as typed, as on the web.
  * - A Markdown link reads as its label and links, in comments only.
  * - Every other URL or bare domain in the text links as typed.
  *
@@ -182,10 +182,16 @@ export function markdocToSegments(
   shelfBaseUrl: string,
   options: NoteLinkOptions
 ): readonly TextSegment[] {
-  const held: TextSegment[] = [];
-  const hold = (run: TextSegment) => `\uE000${held.push(run) - 1}\uE001`;
+  const held: (readonly TextSegment[])[] = [];
+  const hold = (...runs: readonly TextSegment[]) =>
+    `\uE000${held.push(runs) - 1}\uE001`;
 
   let source = content
+    // The stand-in characters a note types itself are held as text first,
+    // so every stand-in left in the note is one this function made.
+    .replace(/[\uE000\uE001]/g, (character) =>
+      hold({ type: "text", text: character })
+    )
     .replace(LINK_TAG, (tag, attributes: string) => {
       const text = tagAttribute(attributes, "text");
       const to = tagAttribute(attributes, "to");
@@ -195,14 +201,21 @@ export function markdocToSegments(
     })
     .replace(NAME_TAG, (tag, attributes: string) => {
       const text = tagAttribute(attributes, "text");
-      if (text === undefined || /\bchips=true\b/.test(attributes)) return tag;
-      return hold({ type: "text", text: cleanRunText(text) });
+      if (text === undefined) return tag;
+      // A value marked chips=true (a custom field value) links its http(s)
+      // URLs, exactly as the field itself does on the phone and the web;
+      // any other typed value is plain text.
+      return /\bchips=true\b/.test(attributes)
+        ? hold(...segmentText(cleanRunText(text)))
+        : hold({ type: "text", text: cleanRunText(text) });
     });
   if (options.allowExternalLinks) {
     source = source.replace(
       MARKDOWN_LINK,
-      (_match, text: string, url: string) =>
-        hold({ type: "link", text: cleanRunText(text), url })
+      (match, text: string, url: string) =>
+        isWebUrl(url)
+          ? hold({ type: "link", text: cleanRunText(text), url })
+          : match
     );
   }
 
@@ -210,16 +223,51 @@ export function markdocToSegments(
   const segments: TextSegment[] = [];
   let cursor = 0;
   for (const match of plain.matchAll(HELD_RUN)) {
-    const run = held[Number(match[1])];
-    if (run === undefined) continue;
+    const runs = held[Number(match[1])];
+    if (runs === undefined) continue;
     if (match.index > cursor) {
       segments.push(...findTextLinks(plain.slice(cursor, match.index)));
     }
-    segments.push(run);
+    segments.push(...runs);
     cursor = match.index + match[0].length;
   }
   if (cursor < plain.length) {
     segments.push(...findTextLinks(plain.slice(cursor)));
   }
-  return segments;
+  return collapseBoundaries(segments);
+}
+
+/** Whether a URL parses as an http(s) URL, as `resolveLinkOpening` needs. */
+function isWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Collapses the whitespace where runs meet, the way `markdocToPlainText`
+ * collapses it inside one string: no space at the start or end of the note
+ * and never two in a row across a run boundary. A run's own text is left
+ * alone otherwise, so "Sam" next to " Lee" still reads "Sam Lee".
+ */
+function collapseBoundaries(segments: readonly TextSegment[]): TextSegment[] {
+  const out: TextSegment[] = [];
+  let endsWithSpace = true;
+  for (const segment of segments) {
+    let text = segment.text;
+    if (endsWithSpace) text = text.replace(/^\s+/, "");
+    if (text === "") continue;
+    out.push({ ...segment, text });
+    endsWithSpace = /\s$/.test(text);
+  }
+  const last = out[out.length - 1];
+  if (last && endsWithSpace) {
+    const text = last.text.replace(/\s+$/, "");
+    if (text === "") out.pop();
+    else out[out.length - 1] = { ...last, text };
+  }
+  return out;
 }

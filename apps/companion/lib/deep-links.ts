@@ -140,12 +140,13 @@ function parseDeepLink(url: string): ParsedLink {
  *
  * @param qrId - the scanned or linked QR code id
  * @param origin - origin the link carried, when it had one
- * @param options - `recordScan: false` for a link tapped in the app
+ * @param options - `recordScan: false` for a link tapped in the app, with
+ *   the workspace (`orgId`) the non-recording lookup needs for a SAM id
  */
 export async function resolveQrAndNavigate(
   qrId: string,
   origin?: string,
-  { recordScan = true }: { recordScan?: boolean } = {}
+  { recordScan = true, orgId }: { recordScan?: boolean; orgId?: string } = {}
 ) {
   if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
     void openShelfWebUrl(`${origin}/qr/${qrId}`);
@@ -161,7 +162,7 @@ export async function resolveQrAndNavigate(
     // scan is recorded without coordinates.
     const { data, error } = recordScan
       ? await api.qr(qrId, undefined, await getScanCoordinates())
-      : await api.getScannedItem(qrId);
+      : await api.getScannedItem(qrId, orgId);
     if (!error && data?.qr?.asset?.id) {
       pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
       return;

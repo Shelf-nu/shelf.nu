@@ -7,7 +7,7 @@
  * @see ./browser-lock.ts
  */
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 
 import { openPastStaleLock, RELEASE_CAP_MS } from "./browser-lock";
 
@@ -58,16 +58,24 @@ test("a release that fails still leads to the second open", async () => {
 });
 
 test("a release that never settles does not hold the open forever", async () => {
-  const { open, calls } = opener("locked", "cancel");
-  const started = Date.now();
-  const result = await openPastStaleLock(
-    open,
-    () => new Promise(() => undefined),
-    "locked"
-  );
-  assert.deepEqual(result, { type: "cancel" });
-  assert.equal(calls.open, 2);
-  assert.ok(Date.now() - started < RELEASE_CAP_MS + 500);
+  // why: fake timers stand in for the cap, so the test does not depend on
+  // how fast the machine runs.
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const { open, calls } = opener("locked", "cancel");
+    const pending = openPastStaleLock(
+      open,
+      () => new Promise(() => undefined),
+      "locked"
+    );
+    // Let the first open and the release start before the clock moves.
+    for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+    mock.timers.tick(RELEASE_CAP_MS);
+    assert.deepEqual(await pending, { type: "cancel" });
+    assert.equal(calls.open, 2);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("a second locked answer is returned, not retried again", async () => {

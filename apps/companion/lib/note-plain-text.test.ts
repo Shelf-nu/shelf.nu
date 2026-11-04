@@ -263,3 +263,51 @@ test("placeholder characters typed into a note stay text", () => {
     [{ type: "link", text: "https://x.com/a", url: "https://x.com/a" }]
   );
 });
+
+test("typed placeholder characters stay text next to a held link", () => {
+  const content = `\uE0000\uE001 ${SAM}`;
+  const segments = markdocToSegments(content, format, BASE, SYSTEM);
+  assert.equal(
+    segments.map((segment) => segment.text).join(""),
+    "\uE0000\uE001 Sam Lee"
+  );
+  assert.equal(segments.filter((segment) => segment.type === "link").length, 1);
+});
+
+test("held runs do not leave extra spaces where they meet the text", () => {
+  assert.equal(
+    markdocToSegments(
+      `{% name text=" Shoot " /%}  ${SAM} `,
+      format,
+      BASE,
+      SYSTEM
+    )
+      .map((segment) => segment.text)
+      .join(""),
+    "Shoot Sam Lee"
+  );
+});
+
+test("a chips=true value links its URL but not a bare domain", () => {
+  const linkUrls = (content: string) =>
+    markdocToSegments(content, format, BASE, SYSTEM).flatMap((segment) =>
+      segment.type === "link" ? [segment.url] : []
+    );
+  assert.deepEqual(
+    linkUrls('Set to {% name text="manual.example.com" chips=true /%}'),
+    []
+  );
+  assert.deepEqual(
+    linkUrls('Set to {% name text="https://x.com/m.pdf" chips=true /%}'),
+    ["https://x.com/m.pdf"]
+  );
+});
+
+test("a Markdown link to a URL that does not parse stays text", () => {
+  assert.deepEqual(
+    markdocToSegments("[Manual](https://%) here", format, BASE, COMMENT).filter(
+      (segment) => segment.type === "link"
+    ),
+    []
+  );
+});

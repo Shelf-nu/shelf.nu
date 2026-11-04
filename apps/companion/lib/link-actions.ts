@@ -72,6 +72,7 @@ export async function openLink(
         // A tapped link is not a scan of the label: record nothing.
         await resolveQrAndNavigate(opening.qrId, opening.origin, {
           recordScan: false,
+          orgId: context.currentOrgId ?? undefined,
         });
         return;
       case "browser":

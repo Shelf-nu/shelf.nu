@@ -91,11 +91,24 @@ const BARE_DOMAIN =
  */
 const BLOCKED_BEFORE = /[a-z0-9@._/:\\-]/i;
 
-/**
- * A match followed by one of these is part of a longer word or an e-mail
- * address: "lens.de-fogged", "acme.com@example.org".
- */
+/** ASCII characters that, right after a match, continue the word. */
 const BLOCKED_AFTER = /[a-z0-9@_-]/i;
+
+/**
+ * Whether a character right after a match makes it part of a longer word
+ * or an e-mail address ("lens.de-fogged", "acme.com@example.org",
+ * "acme.comへ"). Any non-ASCII character counts, so text that runs on in
+ * another script stays unlinked; ASCII is checked without a Unicode
+ * property escape, which older Hermes builds cannot parse.
+ */
+function continuesWord(character: string): boolean {
+  return character.charCodeAt(0) > 0x7f || BLOCKED_AFTER.test(character);
+}
+
+/** Whether a character after a dot continues a hostname. */
+function continuesHostname(character: string): boolean {
+  return character.charCodeAt(0) > 0x7f || /[a-z0-9]/i.test(character);
+}
 
 /**
  * The link `segmentText` reads in `https://<candidate>`: the candidate
@@ -123,9 +136,10 @@ function segmentBareDomains(text: string): TextSegment[] {
     const tld = match[1];
     if (!BARE_DOMAIN_TLDS.has(tld)) continue;
     const rest = text.slice(start + match[0].length);
-    if (BLOCKED_AFTER.test(rest.charAt(0))) continue;
-    // A hostname that runs on past the TLD ("acme.com.x") is not "acme.com".
-    if (/^\.[a-z0-9]/i.test(rest)) continue;
+    if (continuesWord(rest.charAt(0))) continue;
+    // A hostname that runs on past the TLD ("acme.com.x", "acme.com.中国")
+    // is not "acme.com".
+    if (rest.charAt(0) === "." && continuesHostname(rest.charAt(1))) continue;
 
     const link = readBareDomain(match[0]);
     // The TLD must survive trimming: "acme.com." ends at "acme.com".
