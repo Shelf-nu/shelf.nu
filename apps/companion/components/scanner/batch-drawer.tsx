@@ -121,6 +121,7 @@ export function BatchDrawer({
   const { height: windowHeight } = useWindowDimensions();
   const hasBlockers = blockers.length > 0;
   const [collapsed, setCollapsed] = useState(false);
+  const toggleCollapsed = () => setCollapsed((prev) => !prev);
   const flashTitle = useAddedFlash(items, keyField, title, collapsed);
 
   return (
@@ -132,28 +133,34 @@ export function BatchDrawer({
     >
       {/* Drawer header: the title row folds the list away */}
       <View style={styles.drawerHeader}>
-        <TouchableOpacity
-          testID="batch-drawer-toggle"
-          style={styles.drawerToggle}
-          onPress={() => setCollapsed((prev) => !prev)}
-          hitSlop={hitSlop.md}
-          accessibilityRole="button"
-          accessibilityLabel={
-            collapsed ? "Expand scanned items" : "Collapse scanned items"
-          }
-          accessibilityState={{ expanded: !collapsed }}
-          // The label names the action, so the count is read as the value.
-          accessibilityValue={{ text: flashTitle ?? title }}
-        >
-          <Ionicons
-            name={collapsed ? "chevron-up" : "chevron-down"}
-            size={18}
-            color={colors.muted}
-          />
-          <Text style={styles.drawerTitle} numberOfLines={1}>
+        <View style={styles.drawerToggle}>
+          <TouchableOpacity
+            testID="batch-drawer-toggle"
+            onPress={toggleCollapsed}
+            hitSlop={hitSlop.md}
+            accessibilityRole="button"
+            accessibilityLabel={
+              collapsed ? "Expand scanned items" : "Collapse scanned items"
+            }
+            accessibilityState={{ expanded: !collapsed }}
+          >
+            <Ionicons
+              name={collapsed ? "chevron-up" : "chevron-down"}
+              size={18}
+              color={colors.muted}
+            />
+          </TouchableOpacity>
+          {/* The title toggles too, for a bigger target, but stays plain
+              text to assistive tech so the count is read as written. */}
+          <Text
+            style={styles.drawerTitle}
+            numberOfLines={1}
+            onPress={toggleCollapsed}
+            suppressHighlighting
+          >
             {flashTitle ?? title}
           </Text>
-        </TouchableOpacity>
+        </View>
         <TouchableOpacity
           onPress={onClear}
           accessibilityLabel="Clear all scanned items"
