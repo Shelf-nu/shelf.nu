@@ -93,7 +93,9 @@ one path:
 It never does both in one run. Then you tick which findings go into the review
 or get fixed: each finding when there are 4 or fewer, otherwise whole sections
 (must fix, should fix, nits, spotted along the way), or type a custom range
-under "Other". A third question appears when prove or restore applies. If you
+under "Other". "Spotted along the way" findings never go into a posted review,
+since the PR did not cause them; the post option only appears when the PR
+caused at least one finding. A third question appears when prove or restore applies. If you
 close the picker, it waits for a typed reply to the Next line. You can also
 type "post", "fix 1-4", "restore D2", or "prove 3".
 

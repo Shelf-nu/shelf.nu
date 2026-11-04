@@ -711,7 +711,7 @@ Follow the process in [CONTRIBUTING.md](./CONTRIBUTING.md#the-pull-request-proce
 
 - Open every PR as a **draft** (`gh pr create --draft`), with a description of what the change does, why, and how it was tested.
 - Do **not** mark it ready (`gh pr ready`) or request a review until every item in "Get it ready" is done: CI green, CodeRabbit has reviewed the latest commit, every CodeRabbit thread fixed or answered and resolved, branch up to date with `main` and free of conflicts, and (for team members) `/pr-review` run with its must-fix and should-fix findings fixed.
-- After review feedback: fix or answer each comment, resolve the threads you fixed, and leave a reviewer's thread open when you replied with a question or a disagreement. Go through "Get it ready" again for the new commits, then re-request the review. A push alone does not put the PR back in the review queue.
+- After review feedback: fix or answer each comment, resolve the threads you fixed, and leave a reviewer's thread open when you replied with a question or a disagreement. CodeRabbit threads are always resolved once fixed or answered. Go through "Get it ready" again for the new commits, then re-request the review. A push alone does not put the PR back in the review queue.
 
 ## Rule Improvement Triggers
 

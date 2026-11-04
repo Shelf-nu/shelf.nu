@@ -320,7 +320,8 @@ Rules:
 - **Next** lists only options that apply, with real numbers: "fix <range>"
   only when there are findings, "prove <n>" only for a must-fix or should-fix
   a test could pin, "restore D<n>" only when Dismissed is not empty, "post this
-  as a request-changes review" only for an open PR with findings. List "post"
+  as a request-changes review" only for an open PR with at least one finding
+  the PR caused ("Spotted along the way" does not count). List "post"
   before "fix" and say it is one or the other: "post these as a request-changes
   review, or fix <range> here". With no findings at all, write "Next: nothing
   to fix.", followed by "restore D<range>" when Dismissed is not empty. For a
@@ -354,7 +355,8 @@ Ask these in one `AskUserQuestion` call:
 
 - **Question 1, header "Next"** (single select), only when there are findings.
   Options, in this order, leaving out what does not apply:
-  - "Post a request-changes review": only for an open PR. Description: "The
+  - "Post a request-changes review": only for an open PR with at least one
+    finding outside "Spotted along the way". Description: "The
     author fixes the findings. Nothing is edited here."
   - "Fix here": description "Edit the code in this checkout. Nothing is
     posted." For a merged PR, label it "Fix in a follow-up PR".
@@ -426,8 +428,9 @@ agent may handle them one at a time.
   passes, dismissed, safe because, ELI5.
 - Keep the report's numbers, so replies like "1: fixed in <sha>" line up.
 - Include only the findings ticked in Question 2.
-- "Spotted along the way" findings, when ticked, go under their own heading
-  that says not to fix them in this PR.
+- "Spotted along the way" findings never go into the review, even when ticked:
+  the PR did not cause them, so the author has nothing to change for them. They
+  stay in the report as follow-up PRs.
 
 Body shape (leave out empty sections):
 
@@ -450,11 +453,6 @@ Done when: <the test or check that proves it is fixed>
 ### <n>. <title>
 File: `<file>:<line>`
 Change: <what to do>
-
-## Not caused by this PR (do not fix here)
-### <n>. <title>
-File: `<file>:<line>`
-Problem: <one sentence>
 
 ## Before re-requesting review
 - Fix every item above, or reply to this review with why an item is wrong, by number.

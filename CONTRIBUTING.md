@@ -18,7 +18,8 @@ If you get stuck, open an issue or join us on
 1. Fork the [repository](https://github.com/Shelf-nu/shelf.nu) and clone your
    fork. Team members can branch in the main repository instead.
 2. Follow the [Get started guide](https://docs.shelf.nu/local-development) to
-   set up your local environment.
+   set up your local environment. Skip its clone step: run `pnpm install` in
+   the checkout from step 1.
 3. Create a branch from an up-to-date `main`.
 
 ## Make your change
@@ -103,8 +104,9 @@ so the "Get it ready" list still applies to every new commit.
 The review happens on the PR itself. When changes are requested:
 
 1. Address each comment: fix it, or reply with why you disagree.
-2. Resolve the threads you fixed. Leave a thread open only when you replied
-   with a question or a disagreement.
+2. Resolve the threads you fixed. Leave a reviewer's thread open only when you
+   replied with a question or a disagreement. CodeRabbit threads are always
+   resolved, once fixed or answered.
 3. Go through the "Get it ready" list again for the new commits: CI green,
    CodeRabbit has reviewed them, its new threads resolved, no conflicts with
    `main`.
