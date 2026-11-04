@@ -1,9 +1,10 @@
 /**
- * Scan feedback module — plays a short bleep + haptic burst on successful scan.
- * Respects user preference stored in AsyncStorage.
- * Can be toggled in Settings.
+ * Scan feedback module: plays a short bleep and a haptic burst on a successful
+ * scan. Respects the user preference stored in AsyncStorage, which Settings
+ * toggles.
+ *
+ * @see {@link file://./scan-sound.test.ts}
  */
-import { Platform } from "react-native";
 import {
   createAudioPlayer,
   setAudioModeAsync,
@@ -57,12 +58,11 @@ function ensureLoaded(): Promise<void> {
 
 async function loadSound(): Promise<void> {
   try {
-    // The bleep plays with the ringer silenced, mixes with other audio on
-    // iOS and ducks it on Android.
+    // The bleep plays with the ringer silenced and mixes with other audio,
+    // so music or a call on the device is never paused or lowered by a scan.
     await setAudioModeAsync({
       playsInSilentMode: true,
-      interruptionMode:
-        Platform.OS === "android" ? "duckOthers" : "mixWithOthers",
+      interruptionMode: "mixWithOthers",
     });
 
     const player = createAudioPlayer(
@@ -135,8 +135,12 @@ export async function preloadScanSound(): Promise<void> {
   }
 }
 
-/** Cleanup (call on app unmount if needed) */
+/**
+ * Releases the player. Waits for a load that is still running first, so that
+ * load cannot set the player again after it was released.
+ */
 export async function unloadScanSound(): Promise<void> {
+  if (loading) await loading;
   if (soundObject) {
     soundObject.remove();
     soundObject = null;

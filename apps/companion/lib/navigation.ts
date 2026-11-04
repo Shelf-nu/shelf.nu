@@ -52,6 +52,23 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
 }
 
 /**
+ * Open a booking's detail screen from an alert button.
+ *
+ * Navigating synchronously inside an `Alert` button's `onPress` wedges the
+ * navigation transition into an endless render-commit loop (the JS thread
+ * stays busy and network callbacks starve). The push therefore waits for the
+ * next frame, after the alert has dismissed. It goes through `pushIntoTab`,
+ * so "back" returns to the bookings list.
+ *
+ * @param bookingId - the booking to open
+ */
+export function openBookingAfterAlert(bookingId: string): void {
+  requestAnimationFrame(() => {
+    pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
+  });
+}
+
+/**
  * Open a `shelf.nu` web URL in an in-app browser (Custom Tab on Android,
  * SFSafariViewController on iOS).
  *

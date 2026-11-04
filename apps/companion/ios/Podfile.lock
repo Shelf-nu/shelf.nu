@@ -2335,7 +2335,7 @@ DEPENDENCIES:
   - "ExpoModulesJSI (from `../../../node_modules/.pnpm/expo-modules-jsi@58.0.21_react-native@0.88.1_@babel+core@7.29.7_@react-native+metro-config@0._xsuwv7klvth4rc7qondgwvgoee/node_modules/expo-modules-jsi/apple`)"
   - "ExpoModulesWorklets (from `../../../node_modules/.pnpm/expo-modules-core@58.0.29_react-native-worklets@0.13.1_@babel+core@7.29.7_@react-native+metro_co74jmdawokyow4nlcjcpzze5a/node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)"
   - "ExpoNotifications (from `../../../node_modules/.pnpm/expo-notifications@58.1.7_expo@58.0.22_react-native@0.88.1_@babel+core@7.29.7_@react-native+m_mi2raougakja5a2slhsrzrpkfm/node_modules/expo-notifications/ios`)"
-  - "ExpoQuickActions (from `../../../node_modules/.pnpm/expo-quick-actions@6.0.1_patch_hash=navx2nbha2cgapgztuzquml2na_expo@58.0.22/node_modules/expo-quick-actions/ios`)"
+  - "ExpoQuickActions (from `../../../node_modules/.pnpm/expo-quick-actions@6.0.1_patch_hash=v5ovalgdr2362fwhazpcceub7e_expo@58.0.22/node_modules/expo-quick-actions/ios`)"
   - "ExpoRouter (from `../../../node_modules/.pnpm/expo-router@58.0.29_qem6mdlfv7vqwvnfliftwfq24a/node_modules/expo-router/ios`)"
   - "ExpoScreenOrientation (from `../../../node_modules/.pnpm/expo-screen-orientation@58.0.3_expo@58.0.22_react-native@0.88.1_@babel+core@7.29.7_@react-nat_lhxpygfxekqdvvyt7cyufdhocu/node_modules/expo-screen-orientation/ios`)"
   - "ExpoSecureStore (from `../../../node_modules/.pnpm/expo-secure-store@58.0.2_expo@58.0.22/node_modules/expo-secure-store/ios`)"
@@ -2517,7 +2517,7 @@ EXTERNAL SOURCES:
   ExpoNotifications:
     :path: "../../../node_modules/.pnpm/expo-notifications@58.1.7_expo@58.0.22_react-native@0.88.1_@babel+core@7.29.7_@react-native+m_mi2raougakja5a2slhsrzrpkfm/node_modules/expo-notifications/ios"
   ExpoQuickActions:
-    :path: "../../../node_modules/.pnpm/expo-quick-actions@6.0.1_patch_hash=navx2nbha2cgapgztuzquml2na_expo@58.0.22/node_modules/expo-quick-actions/ios"
+    :path: "../../../node_modules/.pnpm/expo-quick-actions@6.0.1_patch_hash=v5ovalgdr2362fwhazpcceub7e_expo@58.0.22/node_modules/expo-quick-actions/ios"
   ExpoRouter:
     :path: "../../../node_modules/.pnpm/expo-router@58.0.29_qem6mdlfv7vqwvnfliftwfq24a/node_modules/expo-router/ios"
   ExpoScreenOrientation:
@@ -2755,7 +2755,7 @@ SPEC CHECKSUMS:
   ExpoLinking: c4c98c2c889e183ab2cdd95c5d0739a3e187e6c0
   ExpoLocation: 743cb999a9e622b6cdb76298cd3dee0956e221f1
   ExpoLogBox: ba4cb945593f38ea8b8d0a01bcb24f4ea458918f
-  ExpoModulesCore: 1e7ffbefa845da1fcf95f2ec1c944d198946147a
+  ExpoModulesCore: ac39ac5c6bff15c0220af827ce00110ca795fb73
   ExpoModulesJSI: 0c41d2327b3002cc736e81465a3e5e55b6d93b94
   ExpoModulesWorklets: 8908bee33c6f95479b209bc05ea24346da9ff606
   ExpoNotifications: 490c89589ecd1df1c014f569d833b650b44deac2

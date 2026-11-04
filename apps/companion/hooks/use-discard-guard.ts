@@ -9,9 +9,9 @@
  * @see {@link file://./use-form-validation.ts} the edit asset form's guard
  * @see {@link file://./../lib/edit-leave-guard.ts} the edit asset decision rules
  */
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
-import { usePreventRemove } from "expo-router";
+import { useFocusEffect, usePreventRemove } from "expo-router";
 
 /**
  * What a stopped leave does: go through, ask "Discard?", or keep the user on
@@ -40,6 +40,9 @@ type DiscardGuardOptions = {
  * Leaving goes through `repeat()`, which lifts `usePreventRemove`'s block and
  * replays the navigation the user started. `leaving` drops `active` in the
  * same render, so the hook's own state and its `preventRemove` argument agree.
+ * `leaving` resets when the screen gains focus and whenever `active` changes:
+ * a replayed navigation that leaves the screen mounted must not switch the
+ * guard off for the rest of the screen's life.
  *
  * @param options - When to guard, what a stopped leave does, and the alert copy
  */
@@ -50,6 +53,16 @@ export function useDiscardGuard({
   message,
 }: DiscardGuardOptions): void {
   const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    setLeaving(false);
+  }, [active]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLeaving(false);
+    }, [])
+  );
 
   usePreventRemove(active && !leaving, ({ repeat }) => {
     const leave = () => {

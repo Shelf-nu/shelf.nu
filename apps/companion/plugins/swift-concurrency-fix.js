@@ -6,22 +6,14 @@
  * not compile under it. The settings go right after the
  * react_native_post_install(...) call; the plugin throws if that call is
  * missing, so a template change fails `npx expo prebuild --clean` loudly.
+ *
+ * @see {@link file://./swift-concurrency-fix.test.cjs}
  */
 const { withDangerousMod } = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
-module.exports = function swiftConcurrencyFix(config) {
-  return withDangerousMod(config, [
-    "ios",
-    (config) => {
-      const podfilePath = path.join(
-        config.modRequest.platformProjectRoot,
-        "Podfile"
-      );
-      let podfile = fs.readFileSync(podfilePath, "utf8");
-
-      const patch = `
+const PATCH = `
     # [swift-concurrency-fix plugin] Xcode 16.4+ turns on Swift 6 strict
     # concurrency by default, and some pods do not compile under it.
     installer.pods_project.targets.each do |target|
@@ -31,22 +23,47 @@ module.exports = function swiftConcurrencyFix(config) {
       end
     end`;
 
-      // Insert right after the react_native_post_install(...) call. Its
-      // arguments hold calls of their own (`ccache_enabled?(...)`), so the
-      // pattern allows one level of nested parentheses.
-      if (!podfile.includes("SWIFT_STRICT_CONCURRENCY")) {
-        const postInstallCall =
-          /(react_native_post_install\((?:[^()]|\([^()]*\))*\))/;
-        if (!postInstallCall.test(podfile)) {
-          throw new Error(
-            "[swift-concurrency-fix] react_native_post_install(...) not found in the Podfile"
-          );
-        }
-        podfile = podfile.replace(postInstallCall, `$1\n${patch}`);
-        fs.writeFileSync(podfilePath, podfile, "utf8");
-      }
+/**
+ * The react_native_post_install(...) call. Its arguments hold calls of their
+ * own (`ccache_enabled?(...)`), so the pattern allows one level of nested
+ * parentheses.
+ */
+const POST_INSTALL_CALL =
+  /(react_native_post_install\((?:[^()]|\([^()]*\))*\))/;
 
+/**
+ * Returns the Podfile with the Swift settings inserted right after the
+ * react_native_post_install(...) call. A Podfile that already sets
+ * SWIFT_STRICT_CONCURRENCY comes back unchanged, so running it twice is safe.
+ *
+ * @param {string} podfile - Podfile contents
+ * @returns {string} the patched Podfile
+ * @throws {Error} when the Podfile has no react_native_post_install(...) call
+ */
+function addSwiftConcurrencySettings(podfile) {
+  if (podfile.includes("SWIFT_STRICT_CONCURRENCY")) return podfile;
+  if (!POST_INSTALL_CALL.test(podfile)) {
+    throw new Error(
+      "[swift-concurrency-fix] react_native_post_install(...) not found in the Podfile"
+    );
+  }
+  return podfile.replace(POST_INSTALL_CALL, `$1\n${PATCH}`);
+}
+
+module.exports = function swiftConcurrencyFix(config) {
+  return withDangerousMod(config, [
+    "ios",
+    (config) => {
+      const podfilePath = path.join(
+        config.modRequest.platformProjectRoot,
+        "Podfile"
+      );
+      const podfile = fs.readFileSync(podfilePath, "utf8");
+      const patched = addSwiftConcurrencySettings(podfile);
+      if (patched !== podfile) fs.writeFileSync(podfilePath, patched, "utf8");
       return config;
     },
   ]);
 };
+
+module.exports.addSwiftConcurrencySettings = addSwiftConcurrencySettings;

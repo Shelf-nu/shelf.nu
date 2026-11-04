@@ -34,6 +34,12 @@ const QUICK_ACTION_ITEMS: QuickActions.Action[] = [
 
 // ── Hook: register items + handle cold/warm start ──────────────────
 
+/**
+ * Set once the launch action has been read, so a re-run of the hook (a new
+ * router instance) never opens it a second time.
+ */
+let launchActionTaken = false;
+
 export function useQuickActions() {
   const router = useRouter();
 
@@ -42,26 +48,44 @@ export function useQuickActions() {
     QuickActions.setItems(QUICK_ACTION_ITEMS);
   }, []);
 
-  // Handle cold-start: check if app was opened via a quick action
+  // Listen first, then take the action that launched the app. iOS delivers a
+  // launch action either before JS listens (kept native-side, returned by
+  // takePendingActionAsync) or after (sent to the listener), so in that order
+  // every action arrives exactly once. `QuickActions.initial` covers launches
+  // outside the scene life cycle.
   useEffect(() => {
-    const initial = QuickActions.initial;
-    if (initial?.params?.route) {
-      // Small delay to let the navigation mount settle on cold start
-      const timer = setTimeout(() => {
-        router.push(initial.params!.route as any);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [router]);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-  // Handle warm-start: listen for quick actions while the app is already running
-  useEffect(() => {
     const subscription = QuickActions.addListener((action) => {
       if (action?.params?.route) {
         router.push(action.params.route as any);
       }
     });
 
-    return () => subscription.remove();
+    const launchAction = launchActionTaken
+      ? Promise.resolve(null)
+      : QuickActions.initial
+      ? Promise.resolve(QuickActions.initial)
+      : QuickActions.takePendingActionAsync();
+    launchActionTaken = true;
+    launchAction
+      .then((action) => {
+        const route = action?.params?.route;
+        if (cancelled || !route) return;
+        // Small delay to let the navigation mount settle on cold start
+        timer = setTimeout(() => {
+          router.push(route as any);
+        }, 300);
+      })
+      .catch(() => {
+        // A failed lookup only costs the launch shortcut; the app still opens.
+      });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      subscription.remove();
+    };
   }, [router]);
 }

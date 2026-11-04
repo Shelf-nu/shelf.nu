@@ -19,7 +19,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useOrg } from "@/lib/org-context";
-import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
+import {
+  openBookingAfterAlert,
+  openShelfWebUrl,
+  pushIntoTab,
+} from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
@@ -2332,18 +2336,8 @@ function ScannerContent() {
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    // Defer past the alert dismissal: navigating
-                    // synchronously from an Alert onPress wedges the
-                    // navigation transition into an endless render-commit
-                    // loop (JS thread pegged at ~125% CPU, network
-                    // callbacks starve) — verified by process sampling.
-                    // setImmediate runs after the alert's onPress returns.
-                    setImmediate(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
+                    // Opens the booking once the alert has dismissed
+                    openBookingAfterAlert(bookingId);
                   },
                 },
               ]
@@ -2460,9 +2454,7 @@ function ScannerContent() {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          setImmediate(() => {
-            pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
-          });
+          openBookingAfterAlert(bookingId);
         },
       },
     ]);
@@ -2714,16 +2706,9 @@ function ScannerContent() {
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
                   if (result?.isComplete) {
-                    // Anchored navigation — router.back() from a tab screen
-                    // falls through history and can land on Home. Deferred
-                    // past the alert dismissal (same render-loop wedge as
-                    // the add path — see handleBookingAdd).
-                    setImmediate(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
+                    // Anchored navigation: router.back() from a tab screen
+                    // falls through history and can land on Home.
+                    openBookingAfterAlert(bookingId);
                   }
                 },
               },
@@ -2844,16 +2829,9 @@ function ScannerContent() {
             // freshness gate has to be bypassed too.
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
-              // Nothing left to scan. Anchored navigation — router.back() from
+              // Nothing left to scan. Anchored navigation: router.back() from
               // a tab screen falls through history and can land on Home.
-              // Deferred past the alert dismissal (same render-loop wedge as
-              // the add path — see handleBookingAdd).
-              setImmediate(() => {
-                pushIntoTab(
-                  "/(tabs)/bookings",
-                  `/(tabs)/bookings/${bookingId}`
-                );
-              });
+              openBookingAfterAlert(bookingId);
             }
           },
         },
