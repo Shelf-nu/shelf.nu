@@ -268,6 +268,8 @@ export type AuditExpectedAsset = {
   foundQuantity: number | null;
   /** `Asset.unitOfMeasure`, for labelling the counts. */
   unitOfMeasure: string | null;
+  /** The row's stored status: MISSING once a finished audit closed it unscanned. */
+  status: AuditAssetStatus;
   auditNotesCount?: number;
   auditImagesCount?: number;
   mainImage?: string | null;
@@ -649,6 +651,7 @@ export async function createAuditSession(
         expectedQuantity: expectedQuantities.get(asset.id) ?? null,
         foundQuantity: null,
         unitOfMeasure: asset.unitOfMeasure,
+        status: AuditAssetStatus.PENDING,
       })),
     } satisfies CreateAuditSessionResult;
   });
@@ -1102,6 +1105,7 @@ export async function getAuditSessionDetails({
           expectedQuantity: auditAsset.expectedQuantity,
           foundQuantity: auditAsset.foundQuantity,
           unitOfMeasure: auditAsset.asset?.unitOfMeasure ?? null,
+          status: auditAsset.status,
           auditNotesCount: auditAsset._count?.notes ?? 0,
           auditImagesCount: auditAsset._count?.images ?? 0,
           mainImage: hasImage ? image.fullUrl : null,

@@ -330,6 +330,11 @@ export type AuditSessionInfo = {
 export type AuditAssetStatus = "found" | "missing" | "unexpected";
 
 export type AuditScannedItem = {
+  /**
+   * The audit row's stored status (`AuditAsset.status`), for expected rows the
+   * loader sends. A finished audit stores MISSING for a row never scanned.
+   */
+  rowStatus?: string;
   id: string;
   name: string;
   type: "asset" | "kit";

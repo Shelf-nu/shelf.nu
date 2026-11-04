@@ -417,6 +417,7 @@ describe("audit service", () => {
         expectedQuantity: null,
         foundQuantity: null,
         unitOfMeasure: null,
+        status: "PENDING",
       },
       {
         id: "asset-2",
@@ -425,6 +426,7 @@ describe("audit service", () => {
         expectedQuantity: null,
         foundQuantity: null,
         unitOfMeasure: null,
+        status: "PENDING",
       },
     ]);
     expect(result.session.assignments).toHaveLength(1);

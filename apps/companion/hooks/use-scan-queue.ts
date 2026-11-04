@@ -21,8 +21,9 @@ type UseScanQueueParams = {
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
   /**
    * Called when a scan is confirmed and auditAssetId is received from server.
-   * `foundQuantity` is the count the server stored, when it kept another one
-   * than the entry carried (the audit finished before a recount landed).
+   * `storedCount` is the count the server stored for a counted scan, absent
+   * when the scan carried no count or a newer count for the asset is queued
+   * (see `storedCountFor`).
    */
   onScanSynced?: (
     assetId: string,
@@ -78,8 +79,16 @@ export function useScanQueue({
         // Success: remove from queue and persist immediately
         scanQueueRef.current.shift();
 
-        // The server kept another count than this entry carried.
-        const storedCount = storedCountFor(entry.foundQuantity, data);
+        // The count the server stored, unless a newer count for this asset
+        // is still queued and will settle the row itself.
+        const storedCount = storedCountFor(
+          entry.foundQuantity,
+          data,
+          isSupersededCount(entry, [
+            ...scanQueueRef.current,
+            ...failedQueueRef.current,
+          ])
+        );
 
         // Capture auditAssetId from response so notes/photos can be attached
         if (data?.auditAssetId) {

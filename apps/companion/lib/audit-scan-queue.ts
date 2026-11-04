@@ -164,22 +164,24 @@ export function countFieldsFromScan(scan: ScanCountFields): {
 }
 
 /**
- * The count the server stored, when it kept another one than the entry sent
- * (the audit was finished, or the scan removed, before a recount landed), so
- * the row can show it. Undefined when the entry sent no count, the server
- * answered without one, or it stored what was sent.
+ * The count to show on the row after a counted scan synced: the count the
+ * server answers with, which is what it stored (another one than was sent when
+ * the audit was finished, or the scan removed, before a recount landed).
+ * Undefined, so the row keeps its count, when the entry sent no count, the
+ * server answered without one, or a newer count for the asset is still
+ * queued: that newer count's own answer settles the row.
  *
  * @param sentCount - the entry's `foundQuantity`
  * @param response - the record-scan response
+ * @param superseded - whether a newer count for the same asset is queued
  */
 export function storedCountFor(
   sentCount: number | undefined,
-  response: { foundQuantity?: number | null }
+  response: { foundQuantity?: number | null },
+  superseded: boolean
 ): number | null | undefined {
   if (sentCount === undefined || response.foundQuantity === undefined) {
     return undefined;
   }
-  return response.foundQuantity === sentCount
-    ? undefined
-    : response.foundQuantity;
+  return superseded ? undefined : response.foundQuantity;
 }

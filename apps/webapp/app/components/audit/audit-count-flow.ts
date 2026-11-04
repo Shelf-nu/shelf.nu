@@ -171,11 +171,19 @@ export function cancelDiscardsScan(prompt: AuditCountPrompt): boolean {
 }
 
 /**
- * Whether a count the auditor entered has not been saved yet. It holds
- * "Complete audit": completing first would print the previous count.
+ * Whether a count the auditor entered for a listed scan has not been saved
+ * yet. It holds "Complete audit": completing first would print the previous
+ * count. A count left behind by a scan removed from the list (one row, or the
+ * whole list cleared) holds nothing: there is no row left to save it for.
+ *
+ * @param auditCounts - the counts by asset id
+ * @param listedAssetIds - assets currently in the scanned list
  */
 export function hasUnsavedCounts(
-  auditCounts: Record<string, AuditCount>
+  auditCounts: Record<string, AuditCount>,
+  listedAssetIds: ReadonlySet<string>
 ): boolean {
-  return Object.values(auditCounts).some((count) => count.unsaved === true);
+  return Object.entries(auditCounts).some(
+    ([assetId, count]) => count.unsaved === true && listedAssetIds.has(assetId)
+  );
 }

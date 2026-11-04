@@ -74,7 +74,7 @@ export function isQuantityAuditRow(row: AuditRowQuantity): boolean {
 
 /** Unit totals across an audit's quantity rows. */
 export type AuditUnitTotals = {
-  /** Rows of quantity-tracked assets, expected or not. */
+  /** Expected rows of quantity-tracked assets. */
   quantityRows: number;
   /** Sum of `expectedQuantity` over expected rows. */
   expectedUnits: number;
@@ -82,13 +82,18 @@ export type AuditUnitTotals = {
   foundUnits: number;
   /** Expected quantity rows still without a count (not scanned yet, or scanned by a build that did not ask). */
   uncountedRows: number;
+  /** Rows of quantity-tracked assets the audit did not expect. */
+  unexpectedRows: number;
+  /** Units counted on those rows. */
+  unexpectedUnits: number;
 };
 
 /**
- * Totals the unit counts of an audit's rows. Unexpected rows add to
- * `quantityRows` only: units the audit never expected are not part of the
- * expected-versus-found comparison. A MISSING row (the audit completed without
- * it) counts as zero found, not as uncounted.
+ * Totals the unit counts of an audit's rows. Expected rows make the
+ * expected-versus-found comparison; units counted on rows the audit never
+ * expected are totalled apart, so they are reported without being compared
+ * with anything. A MISSING row (the audit completed without it) counts as
+ * zero found, not as uncounted.
  *
  * @param rows - every row of the audit, with its `expected` flag and status
  * @returns the totals, or null when the audit holds no quantity rows (surfaces
@@ -104,12 +109,18 @@ export function totalAuditUnits(
     expectedUnits: 0,
     foundUnits: 0,
     uncountedRows: 0,
+    unexpectedRows: 0,
+    unexpectedUnits: 0,
   };
 
   for (const row of rows) {
     if (!isQuantityAuditRow(row)) continue;
+    if (!row.expected) {
+      totals.unexpectedRows += 1;
+      totals.unexpectedUnits += row.foundQuantity ?? 0;
+      continue;
+    }
     totals.quantityRows += 1;
-    if (!row.expected) continue;
     totals.expectedUnits += row.expectedQuantity ?? 0;
     if (row.foundQuantity !== null && row.foundQuantity !== undefined) {
       totals.foundUnits += row.foundQuantity;
@@ -118,17 +129,31 @@ export function totalAuditUnits(
     }
   }
 
-  return totals.quantityRows > 0 ? totals : null;
+  return totals.quantityRows + totals.unexpectedRows > 0 ? totals : null;
+}
+
+/** "1 quantity-tracked asset" / "2 quantity-tracked assets". */
+function quantityAssets(count: number): string {
+  return `${count} quantity-tracked ${count === 1 ? "asset" : "assets"}`;
 }
 
 /**
  * The units line under an audit's statistics, e.g. "Units counted: 8 of 14
- * across 1 quantity-tracked asset, 1 not counted yet." One wording for the
- * overview and the receipt.
+ * across 1 quantity-tracked asset, 1 not counted yet; 5 more on 1
+ * quantity-tracked asset not on the list." One wording for the overview and
+ * the receipt.
  */
 export function describeAuditUnits(totals: AuditUnitTotals): string {
-  const assets = totals.quantityRows === 1 ? "asset" : "assets";
+  const unexpected = `${totals.unexpectedUnits} ${
+    totals.quantityRows > 0 ? "more " : ""
+  }on ${quantityAssets(totals.unexpectedRows)} not on the list`;
+  if (totals.quantityRows === 0) {
+    return `Units counted: ${unexpected}.`;
+  }
   const uncounted =
     totals.uncountedRows > 0 ? `, ${totals.uncountedRows} not counted yet` : "";
-  return `Units counted: ${totals.foundUnits} of ${totals.expectedUnits} across ${totals.quantityRows} quantity-tracked ${assets}${uncounted}.`;
+  const extra = totals.unexpectedRows > 0 ? `; ${unexpected}` : "";
+  return `Units counted: ${totals.foundUnits} of ${
+    totals.expectedUnits
+  } across ${quantityAssets(totals.quantityRows)}${uncounted}${extra}.`;
 }

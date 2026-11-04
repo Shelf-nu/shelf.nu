@@ -175,25 +175,31 @@ describe("countFieldsFromScan", () => {
 });
 
 describe("storedCountFor", () => {
-  it("returns the count the server kept when it differs from the one sent", () => {
+  it("returns the count the server stored", () => {
     // The audit was finished before this recount landed: the server answers
     // with the count it kept.
-    assert.equal(storedCountFor(9, { foundQuantity: 5 }), 5);
-  });
-
-  it("returns nothing when the server stored the count sent", () => {
-    assert.equal(storedCountFor(9, { foundQuantity: 9 }), undefined);
-  });
-
-  it("returns nothing for a scan sent without a count", () => {
-    assert.equal(storedCountFor(undefined, { foundQuantity: null }), undefined);
-  });
-
-  it("returns nothing when the server sends no count", () => {
-    assert.equal(storedCountFor(9, {}), undefined);
+    assert.equal(storedCountFor(9, { foundQuantity: 5 }, false), 5);
+    assert.equal(storedCountFor(9, { foundQuantity: 9 }, false), 9);
   });
 
   it("returns null when the server kept no count", () => {
-    assert.equal(storedCountFor(9, { foundQuantity: null }), null);
+    assert.equal(storedCountFor(9, { foundQuantity: null }, false), null);
+  });
+
+  it("leaves the row alone while a newer count is queued", () => {
+    // An older answer must not overwrite the newer count on the row; the
+    // newer count's own answer settles it.
+    assert.equal(storedCountFor(5, { foundQuantity: null }, true), undefined);
+  });
+
+  it("returns nothing for a scan sent without a count", () => {
+    assert.equal(
+      storedCountFor(undefined, { foundQuantity: null }, false),
+      undefined
+    );
+  });
+
+  it("returns nothing when the server sends no count", () => {
+    assert.equal(storedCountFor(9, {}, false), undefined);
   });
 });

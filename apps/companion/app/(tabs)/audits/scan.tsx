@@ -183,7 +183,7 @@ function AuditScannerContent() {
   const handleScanSynced = useCallback(
     (assetId: string, auditAssetId: string, storedCount?: number | null) => {
       // Update the scanned items list (clear any prior sync-failed marker).
-      // A count the server kept instead of ours replaces the local one.
+      // The count the server stored, when given, replaces the local one.
       setScannedItemsRef.current?.((prev) =>
         prev.map((item) =>
           item.assetId === assetId

@@ -300,6 +300,7 @@ export default function AuditSessionRoute() {
             expectedQuantity: asset.expectedQuantity,
             foundQuantity: asset.foundQuantity,
             unitOfMeasure: asset.unitOfMeasure,
+            rowStatus: asset.status,
           }) as AuditScannedItem
       ),
     [expectedAssets]

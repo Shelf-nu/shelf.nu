@@ -163,7 +163,10 @@ export function ScannedItemsList({
                     </Text>
                   ) : null
                 ) : (
-                  <Text style={styles.scannedItemUnexpected} numberOfLines={1}>
+                  <Text
+                    style={[styles.scannedItemUnexpected, styles.noShrink]}
+                    numberOfLines={1}
+                  >
                     {"\u00b7 Not on this audit"}
                   </Text>
                 )}
@@ -340,18 +343,25 @@ const useStyles = createStyles((colors) => ({
     // line quieter than the name and still clears the bar in both themes.
     color: colors.muted,
   },
+  // The count and the text after it share one line of fixed height: on a
+  // narrow phone or at a large font size both may truncate, so neither pushes
+  // the other out of the row.
   scannedItemCount: {
-    flexShrink: 0,
+    flexShrink: 1,
     fontSize: fontSize.xs,
     fontWeight: "600",
     color: colors.foreground,
   },
   // A count below the expectation: the pool was found, units are short.
   scannedItemShort: {
-    flexShrink: 0,
+    flexShrink: 1,
     fontSize: fontSize.xs,
     fontWeight: "600",
     color: colors.warningText,
+  },
+  // A short marker the count truncates before: it carries the row's point.
+  noShrink: {
+    flexShrink: 0,
   },
   scannedItemUnexpected: {
     fontSize: fontSize.xs,

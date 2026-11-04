@@ -456,6 +456,8 @@ export default function AuditDrawer({
       totalAuditUnits(
         expectedAssets.map((asset) => ({
           expected: true,
+          // A finished audit's unscanned row counts 0 found, not "not counted".
+          status: asset.rowStatus,
           expectedQuantity: auditCounts[asset.id]?.expectedQuantity ?? null,
           foundQuantity: scannedAssetIds.has(asset.id)
             ? auditCounts[asset.id]?.foundQuantity ?? null
@@ -656,7 +658,9 @@ export default function AuditDrawer({
   // A count the auditor entered but the server has not saved yet also holds
   // completion: completing first would print the previous count.
   const shouldDisableSubmit =
-    hasBlockers || !auditSession || hasUnsavedCounts(auditCounts);
+    hasBlockers ||
+    !auditSession ||
+    hasUnsavedCounts(auditCounts, scannedAssetIds);
 
   return (
     <ConfigurableDrawer

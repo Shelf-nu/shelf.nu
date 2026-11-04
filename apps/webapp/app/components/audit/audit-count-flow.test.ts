@@ -174,12 +174,24 @@ describe("cancelDiscardsScan", () => {
 });
 
 describe("hasUnsavedCounts", () => {
+  const listed = new Set(["pool-1"]);
+
   it("holds completion only while a count is unsaved", () => {
-    expect(hasUnsavedCounts({ "pool-1": POOL_COUNT })).toBe(false);
+    expect(hasUnsavedCounts({ "pool-1": POOL_COUNT }, listed)).toBe(false);
     expect(
-      hasUnsavedCounts({
-        "pool-1": { ...POOL_COUNT, foundQuantity: 9, unsaved: true },
-      })
+      hasUnsavedCounts(
+        { "pool-1": { ...POOL_COUNT, foundQuantity: 9, unsaved: true } },
+        listed
+      )
     ).toBe(true);
+  });
+
+  it("ignores an unsaved count whose scan left the list", () => {
+    expect(
+      hasUnsavedCounts(
+        { "pool-1": { ...POOL_COUNT, foundQuantity: 9, unsaved: true } },
+        new Set()
+      )
+    ).toBe(false);
   });
 });

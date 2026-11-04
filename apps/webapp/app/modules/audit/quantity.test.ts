@@ -53,21 +53,33 @@ describe("totalAuditUnits", () => {
       expectedUnits: 20,
       foundUnits: 8,
       uncountedRows: 1,
+      unexpectedRows: 0,
+      unexpectedUnits: 0,
     });
   });
 
-  it("keeps units the audit never expected out of the comparison", () => {
+  it("totals units the audit never expected apart from the comparison", () => {
     expect(
       totalAuditUnits([
         { expected: true, expectedQuantity: 14, foundQuantity: 14 },
         { expected: false, expectedQuantity: 5, foundQuantity: 5 },
       ])
     ).toEqual({
-      quantityRows: 2,
+      quantityRows: 1,
       expectedUnits: 14,
       foundUnits: 14,
       uncountedRows: 0,
+      unexpectedRows: 1,
+      unexpectedUnits: 5,
     });
+  });
+
+  it("reports an audit whose only pool was not on the list", () => {
+    expect(
+      totalAuditUnits([
+        { expected: false, expectedQuantity: 0, foundQuantity: 5 },
+      ])
+    ).toMatchObject({ quantityRows: 0, unexpectedRows: 1, unexpectedUnits: 5 });
   });
 
   it("counts a MISSING row as zero found, not as uncounted", () => {
@@ -91,6 +103,8 @@ describe("totalAuditUnits", () => {
       expectedUnits: 28,
       foundUnits: 8,
       uncountedRows: 0,
+      unexpectedRows: 0,
+      unexpectedUnits: 0,
     });
   });
 });
@@ -103,6 +117,8 @@ describe("describeAuditUnits", () => {
         expectedUnits: 20,
         foundUnits: 8,
         uncountedRows: 1,
+        unexpectedRows: 0,
+        unexpectedUnits: 0,
       })
     ).toBe(
       "Units counted: 8 of 20 across 2 quantity-tracked assets, 1 not counted yet."
@@ -116,8 +132,38 @@ describe("describeAuditUnits", () => {
         expectedUnits: 14,
         foundUnits: 8,
         uncountedRows: 0,
+        unexpectedRows: 0,
+        unexpectedUnits: 0,
       })
     ).toBe("Units counted: 8 of 14 across 1 quantity-tracked asset.");
+  });
+
+  it("adds units found on assets not on the list", () => {
+    expect(
+      describeAuditUnits({
+        quantityRows: 1,
+        expectedUnits: 4,
+        foundUnits: 6,
+        uncountedRows: 0,
+        unexpectedRows: 1,
+        unexpectedUnits: 3,
+      })
+    ).toBe(
+      "Units counted: 6 of 4 across 1 quantity-tracked asset; 3 more on 1 quantity-tracked asset not on the list."
+    );
+  });
+
+  it("words an audit whose only counted pool was not on the list", () => {
+    expect(
+      describeAuditUnits({
+        quantityRows: 0,
+        expectedUnits: 0,
+        foundUnits: 0,
+        uncountedRows: 0,
+        unexpectedRows: 1,
+        unexpectedUnits: 5,
+      })
+    ).toBe("Units counted: 5 on 1 quantity-tracked asset not on the list.");
   });
 });
 
