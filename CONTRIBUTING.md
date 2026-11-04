@@ -46,8 +46,9 @@ are how you tell us a PR is ready.
 
 ### 1. Open the PR as a draft
 
-Open every PR as a **draft**, even when you think it is finished. Fill in the
-PR template: what the change does, why, and how you tested it.
+Open every PR as a **draft**, even when you think it is finished. In the
+description, say what the change does, why, and how you tested it. Link the
+issue it closes ("Closes #123").
 
 A draft is not hidden: CodeRabbit and CI run on it as usual. You can push to it
 as often as you like.
@@ -83,8 +84,7 @@ every item is done.
 When the list above is done:
 
 1. Click **Ready for review** on the PR.
-2. Request a review from [@DonKoko](https://github.com/DonKoko). Right now he
-   is the only reviewer, so every PR goes to him.
+2. Request a review from [@DonKoko](https://github.com/DonKoko).
 
 A PR that is still a draft, or has no review request, is not in the review
 queue and will not be reviewed.

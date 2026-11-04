@@ -705,6 +705,14 @@ multi-file features, or anything genuinely needing an independent review.
 - dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
 - Include test readability and mock discipline in PR reviews. Overly mocked or verbose tests should be refactored before merge.
 
+### Opening a pull request
+
+Follow the process in [CONTRIBUTING.md](./CONTRIBUTING.md#the-pull-request-process):
+
+- Open every PR as a **draft** (`gh pr create --draft`), with a description of what the change does, why, and how it was tested.
+- Do **not** mark it ready (`gh pr ready`) or request a review until every item in "Get it ready" is done: CI green, CodeRabbit has reviewed the latest commit, every CodeRabbit thread fixed or answered and resolved, branch up to date with `main` and free of conflicts, and (for team members) `/pr-review` run with its findings fixed.
+- After review feedback: fix or answer each comment, resolve the fixed threads, go through "Get it ready" again for the new commits, then re-request the review. A push alone does not put the PR back in the review queue.
+
 ## Rule Improvement Triggers
 
 - New code patterns not covered by existing rules
