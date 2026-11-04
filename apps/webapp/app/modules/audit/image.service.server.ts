@@ -14,6 +14,7 @@ import {
 } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { assertAuditAssetBelongsToAudit } from "~/utils/org-validation.server";
 import {
   getFileUploadPath,
   parseFileFormData,
@@ -83,6 +84,19 @@ export async function uploadAuditImage({
   description?: string;
   returnParsedFormData?: boolean;
 }): Promise<AuditImage | { image: AuditImage; formData: FormData }> {
+  // Every caller passes an `auditAssetId` that came from the request (a form
+  // field or a URL segment), and the database links the image to it by id
+  // alone. Prove it belongs to this audit and workspace before anything is
+  // stored. Outside the `try` so its 400 is not re-wrapped as an upload
+  // failure.
+  if (auditAssetId) {
+    await assertAuditAssetBelongsToAudit({
+      auditAssetId,
+      auditSessionId,
+      organizationId,
+    });
+  }
+
   try {
     // Check image count limits before uploading
     await validateImageLimits({

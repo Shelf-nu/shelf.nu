@@ -13,6 +13,9 @@ vi.mock("~/utils/storage.server", () => ({
 vi.mock("~/database/db.server", () => ({
   // why: We need to mock database queries to avoid hitting the real database during tests
   db: {
+    auditAsset: {
+      findFirst: vi.fn(),
+    },
     auditImage: {
       count: vi.fn(),
       create: vi.fn(),
@@ -36,6 +39,8 @@ import {
 describe("audit image service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // An audit asset named by a test is in its audit unless the test says not.
+    vi.mocked(db.auditAsset.findFirst).mockResolvedValue({ id: "aa" } as any);
   });
 
   describe("uploadAuditImage", () => {
@@ -117,6 +122,32 @@ describe("audit image service", () => {
           uploadedById: "user-1",
         })
       ).rejects.toThrow();
+    });
+
+    it("refuses an audit asset from another audit before storing anything", async () => {
+      vi.mocked(db.auditAsset.findFirst).mockResolvedValue(null);
+
+      await expect(
+        uploadAuditImage({
+          request: new Request("http://localhost", { method: "POST" }),
+          auditSessionId: "audit-1",
+          auditAssetId: "auditasset-of-another-audit",
+          organizationId: "org-1",
+          uploadedById: "user-1",
+        })
+      ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+      expect(db.auditAsset.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: "auditasset-of-another-audit",
+          auditSessionId: "audit-1",
+          auditSession: { organizationId: "org-1" },
+        },
+        select: { id: true },
+      });
+      // Nothing reaches storage or the database.
+      expect(parseFileFormData).not.toHaveBeenCalled();
+      expect(db.auditImage.create).not.toHaveBeenCalled();
     });
 
     it("validates limit for asset-specific images (3 max)", async () => {

@@ -110,10 +110,21 @@ export async function getAuditFindingsPage({
   after?: FindingsCursor | null;
 }): Promise<AuditFindingsPage> {
   try {
+    // A photo or note is linked to its audit asset by id alone, so the
+    // nested reads also match the audit and workspace: evidence filed under
+    // this audit's asset from anywhere else never shows or counts here.
+    const imageWhere: Prisma.AuditImageWhereInput = {
+      auditSessionId,
+      organizationId,
+    };
+    const noteWhere: Prisma.AuditNoteWhereInput = {
+      auditSessionId,
+      type: "COMMENT",
+    };
     const where: Prisma.AuditAssetWhereInput = {
       auditSessionId,
       auditSession: { organizationId },
-      OR: [{ images: { some: {} } }, { notes: { some: { type: "COMMENT" } } }],
+      OR: [{ images: { some: imageWhere } }, { notes: { some: noteWhere } }],
     };
 
     // Rows strictly after the cursor in (title, id) order. A hand-written
@@ -139,11 +150,12 @@ export async function getAuditFindingsPage({
           id: true,
           asset: { select: { id: true, title: true } },
           images: {
+            where: imageWhere,
             select: FINDING_IMAGE_SELECT,
             orderBy: { createdAt: "asc" },
           },
           notes: {
-            where: { type: "COMMENT" },
+            where: noteWhere,
             select: FINDING_NOTE_SELECT,
             orderBy: { createdAt: "asc" },
           },

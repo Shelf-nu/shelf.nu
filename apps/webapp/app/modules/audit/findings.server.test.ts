@@ -49,6 +49,16 @@ describe("getAuditFindingsPage", () => {
       auditSession: { organizationId: "org-1" },
     });
     expect(query.take).toBe(AUDIT_FINDINGS_PAGE_SIZE + 1);
+    // Photos and notes must belong to this audit (and workspace) too: the
+    // database links them to an audit asset by id alone.
+    const imageScope = { auditSessionId: "audit-1", organizationId: "org-1" };
+    const noteScope = { auditSessionId: "audit-1", type: "COMMENT" };
+    expect(query.where.OR).toEqual([
+      { images: { some: imageScope } },
+      { notes: { some: noteScope } },
+    ]);
+    expect(query.select.images.where).toEqual(imageScope);
+    expect(query.select.notes.where).toEqual(noteScope);
     expect(query.skip).toBeUndefined();
     expect(query.orderBy).toEqual([{ asset: { title: "asc" } }, { id: "asc" }]);
   });

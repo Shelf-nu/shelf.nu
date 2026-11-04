@@ -23,6 +23,8 @@
 import type {
   Asset,
   AssetModel,
+  AuditAsset,
+  AuditSession,
   Category,
   Kit,
   Location,
@@ -147,6 +149,16 @@ export type OrgValidationTxClient = {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string }[]>;
+  };
+  auditAsset: {
+    findFirst: (args: {
+      where: {
+        id: string;
+        auditSessionId: string;
+        auditSession: { organizationId: string };
+      };
+      select: { id: true };
+    }) => Promise<{ id: string } | null>;
   };
 };
 
@@ -918,6 +930,59 @@ export async function assertUserBelongsToOrg(
       status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, userId },
+    });
+  }
+}
+
+/**
+ * Asserts that an audit asset belongs to the given audit, in `organizationId`.
+ *
+ * An `AuditAsset` id is a reference into ONE audit. The database ties an
+ * audit photo or note to an audit asset by id alone, so a request that names
+ * audit A in its URL and an audit asset of audit B (or of another workspace's
+ * audit) would file its evidence under B's asset, where B's viewers see it.
+ * Check it before writing anything that carries the id.
+ *
+ * @param params.auditAssetId - AuditAsset ID sourced from request/form input
+ * @param params.auditSessionId - The audit the caller was authorized for
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if the audit asset is missing, in another audit or
+ *   in another organization
+ */
+export async function assertAuditAssetBelongsToAudit(
+  {
+    auditAssetId,
+    auditSessionId,
+    organizationId,
+  }: {
+    auditAssetId: AuditAsset["id"];
+    auditSessionId: AuditSession["id"];
+    organizationId: string;
+  },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  const client = tx ?? db;
+
+  const found = await client.auditAsset.findFirst({
+    where: {
+      id: auditAssetId,
+      auditSessionId,
+      auditSession: { organizationId },
+    },
+    select: { id: true },
+  });
+
+  if (!found) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid audit asset",
+      message:
+        "The selected asset could not be found in this audit. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId, auditSessionId, auditAssetId },
     });
   }
 }
