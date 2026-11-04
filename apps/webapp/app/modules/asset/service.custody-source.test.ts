@@ -396,7 +396,8 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 }));
 
 // why: location timeline notes are asserted through the mock, not stored.
-vi.mock("~/modules/location-note/service.server", () => ({
+vi.mock("~/modules/location-note/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createSystemLocationNote: vi.fn().mockResolvedValue({}),
   // why: a move's "added / removed" lines have their own tests; these are
   // about where custody goes.

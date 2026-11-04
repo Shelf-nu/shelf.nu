@@ -9470,6 +9470,56 @@ describe("kit-driven moves write the location activity log", () => {
     ]);
   });
 
+  it("logs a quantity-tracked asset joining a kit as units arriving from nowhere", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      name: "Kit 1",
+      locationId: "loc-kit",
+      location: { id: "loc-kit", name: "Kit Shelf" },
+      assetKits: [],
+      custody: null,
+    });
+    // Hand-placed units elsewhere stay there; the kit gets its own slice.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        ...sandbagsSlice(0, [{ location: { id: "loc-store", name: "Store" } }])
+          .asset,
+        assetKits: [],
+        custody: null,
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      {
+        id: "ak-qty",
+        assetId: "asset-qty",
+        quantity: 20,
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["asset-qty"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(locationLog()).toEqual([
+      [
+        "loc-kit",
+        `${JOHN} added 20 pcs of ${asset("asset-qty", "Sandbags")} to ${loc(
+          "loc-kit",
+          "Kit Shelf"
+        )}.`,
+      ],
+    ]);
+  });
+
   it("logs an asset that joins a kit and moves to the kit's location", async () => {
     //@ts-expect-error missing vitest type
     db.kit.findUniqueOrThrow.mockResolvedValue({

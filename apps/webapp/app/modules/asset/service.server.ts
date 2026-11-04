@@ -2495,8 +2495,15 @@ export async function updateAsset({
 
       if (shouldUpdatePlacement) {
         // `updated.assetLocations` is the pre-delete snapshot.
+        // Oldest first, as the mobile route reads them, so both surfaces pair
+        // the same moves.
         manualPlacementsBefore = updated.assetLocations
           .filter((al) => al.assetKitId == null)
+          .sort(
+            (a, b) =>
+              a.createdAt.getTime() - b.createdAt.getTime() ||
+              a.id.localeCompare(b.id)
+          )
           .map((al) => ({
             location: { id: al.location.id, name: al.location.name },
             quantity: al.quantity,
@@ -4573,6 +4580,8 @@ export async function replaceAssetPlacements({
        */
       const lockedManual = await tx.assetLocation.findMany({
         where: { assetId, assetKitId: null },
+        // Oldest first, so the location log pairs moves the same way each time.
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           locationId: true,
           quantity: true,
@@ -4815,20 +4824,16 @@ export async function replaceAssetPlacements({
         ),
         ...qtyChangeNoteCalls,
         createAssetLocationMoveNotes({
-          moves: [
-            ...toCreate.map((p) => ({
-              asset,
-              from: null,
-              to: submittedLocations.get(p.locationId) ?? null,
-              quantity: p.quantity,
-            })),
-            ...toDelete.map((al) => ({
-              asset,
-              from: al.location,
-              to: null,
-              quantity: al.quantity,
-            })),
-          ],
+          // Each location's amount before and after the save, so units that
+          // left one location for another read as one move.
+          moves: placementChangeMoves({
+            asset,
+            before: [...manualByLocation.values()],
+            after: placements.flatMap((p) => {
+              const location = submittedLocations.get(p.locationId);
+              return location ? [{ location, quantity: p.quantity }] : [];
+            }),
+          }),
           actor: { ...user, id: userId },
         }),
       ]);

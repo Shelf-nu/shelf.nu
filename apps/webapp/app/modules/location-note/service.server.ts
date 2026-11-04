@@ -92,9 +92,11 @@ export async function createSystemLocationNote({
 }
 
 /**
- * One asset leaving a location, arriving at one, or both. Mirrors a single
- * `ASSET_LOCATION_CHANGED` event: `from` is its `fromValue`, `to` its
- * `toValue`.
+ * One asset leaving a location, arriving at one, or both, as the location
+ * activity log describes it. Usually the same change an
+ * `ASSET_LOCATION_CHANGED` event records; where a flow rewrites several
+ * placements at once, {@link placementChangeMoves} derives the moves from the
+ * amounts, which can pair units the events record separately.
  */
 export type AssetLocationMove = {
   asset: {

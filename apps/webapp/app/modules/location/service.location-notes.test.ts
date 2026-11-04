@@ -364,7 +364,7 @@ describe("location service activity logging", () => {
 
       expect(
         dbMocks.locationNote.createMany.mock.calls.flatMap(
-          ([args]: any) => args.data
+          ([args]: Array<{ data: unknown[] }>) => args.data
         )
       ).toEqual([
         {
@@ -414,7 +414,7 @@ describe("location service activity logging", () => {
 
       expect(
         dbMocks.locationNote.createMany.mock.calls.flatMap(
-          ([args]: any) => args.data
+          ([args]: Array<{ data: unknown[] }>) => args.data
         )
       ).toEqual([
         {
@@ -456,7 +456,7 @@ describe("location service activity logging", () => {
 
       expect(
         dbMocks.locationNote.createMany.mock.calls.flatMap(
-          ([args]: any) => args.data
+          ([args]: Array<{ data: unknown[] }>) => args.data
         )
       ).toEqual([
         {

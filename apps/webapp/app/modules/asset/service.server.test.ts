@@ -3193,7 +3193,7 @@ describe("updateAsset location activity", () => {
     // asset-model suite above does.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
-      (q?: any) => {
+      (q?: { select?: Record<string, unknown> }) => {
         if (q?.select?.assetKits)
           return Promise.resolve({
             type: "INDIVIDUAL",
@@ -3271,7 +3271,7 @@ describe("updateAsset location activity", () => {
       organizationId: "org-1",
       currentLocationId: "loc-old",
       newLocationId: "loc-new",
-    } as any);
+    } as unknown as Parameters<typeof updateAsset>[0]);
 
     const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
     expect(locationLog()).toEqual([
@@ -3286,10 +3286,25 @@ describe("updateAsset location activity", () => {
     ]);
   });
 
+  it("logs a removal only when the location is cleared", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: null,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
+    expect(locationLog()).toEqual([
+      ["loc-old", `${john} removed ${tripod} from ${oldLoc}.`],
+    ]);
+  });
+
   it("counts a quantity move the same way the phone route does", async () => {
     // 10 pens at Old Office; 4 placed at New Office, 6 left unplaced.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
-      (q?: any) => {
+      (q?: { select?: Record<string, unknown> }) => {
         if (q?.select?.assetKits)
           return Promise.resolve({
             type: "QUANTITY_TRACKED",
@@ -3338,7 +3353,7 @@ describe("updateAsset location activity", () => {
       currentLocationId: "loc-old",
       newLocationId: "loc-new",
       newLocationQuantity: 4,
-    } as any);
+    } as unknown as Parameters<typeof updateAsset>[0]);
 
     const penLink = '{% link to="/assets/asset-1" text="Pens" /%}';
     expect(locationLog()).toEqual([
@@ -3465,7 +3480,7 @@ describe("replaceAssetPlacements", () => {
     );
   });
 
-  it("logs each placement it adds or removes on that location's activity", async () => {
+  it("logs units that leave one location for another as a move", async () => {
     (
       db.assetLocation.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -3485,6 +3500,8 @@ describe("replaceAssetPlacements", () => {
 
     const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
     const pens = '{% link to="/assets/asset-1" text="Pens" /%}';
+    const baghdad = '{% link to="/locations/loc-1" text="Baghdad Store" /%}';
+    const warehouse = '{% link to="/locations/loc-9" text="Warehouse" /%}';
     expect(
       (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
         .flatMap(([args]) => args.data)
@@ -3495,12 +3512,13 @@ describe("replaceAssetPlacements", () => {
     ).toEqual([
       [
         "loc-1",
-        `${john} added 20 pcs of ${pens} to {% link to="/locations/loc-1" text="Baghdad Store" /%}.`,
+        `${john} added 20 pcs of ${pens} to ${baghdad}. Moved from ${warehouse}.`,
       ],
       [
         "loc-9",
-        `${john} removed 40 pcs of ${pens} from {% link to="/locations/loc-9" text="Warehouse" /%}.`,
+        `${john} removed 20 pcs of ${pens} from ${warehouse}. Moved to ${baghdad}.`,
       ],
+      ["loc-9", `${john} removed 20 pcs of ${pens} from ${warehouse}.`],
     ]);
   });
 });

@@ -464,6 +464,28 @@ describe("placementChangeMoves", () => {
     ).toEqual([[null, "Van", 6]]);
   });
 
+  it("pairs several losses with several gains in the order of the rows", () => {
+    const shelf = { id: "loc-shelf", name: "Shelf" };
+    const bench = { id: "loc-bench", name: "Bench" };
+    expect(
+      moves({
+        asset: cords,
+        before: [
+          { location: storage, quantity: 6 },
+          { location: van, quantity: 4 },
+        ],
+        after: [
+          { location: shelf, quantity: 5 },
+          { location: bench, quantity: 5 },
+        ],
+      })
+    ).toEqual([
+      ["Storage", "Shelf", 5],
+      ["Storage", "Bench", 1],
+      ["Van", "Bench", 4],
+    ]);
+  });
+
   it("moves an individual asset as one unit", () => {
     expect(
       moves({
@@ -510,7 +532,9 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
 
   /** Removes line and block comments, so a mention in prose does not count. */
   function withoutComments(source: string) {
-    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
   }
 
   /**
@@ -556,5 +580,13 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
       )
       .map(({ key }) => key);
     expect(missing).toEqual([]);
+
+    // An allow-listed declaration that no longer records the event is stale.
+    const writerKeys = new Set(writers.map(({ key }) => key));
+    expect(
+      Object.keys(WRITES_ITS_LOCATION_LINE_ELSEWHERE).filter(
+        (key) => !writerKeys.has(key)
+      )
+    ).toEqual([]);
   });
 });

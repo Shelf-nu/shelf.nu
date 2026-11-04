@@ -55,6 +55,7 @@ import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
 import { readStockState, recordStockChanges } from "./stock-ledger.server";
 
@@ -920,13 +921,33 @@ export async function adjustQuantity({
     /**
      * A placement the adjustment created or emptied is a move onto or off the
      * location, so the location's activity log records it like any other
-     * `ASSET_LOCATION_CHANGED`. Written after the commit; never throws.
+     * `ASSET_LOCATION_CHANGED`. A pool at two or more locations already gets
+     * the "restocked / lost at L" line below, which names the same units, so
+     * it does not get a second one. Written after the commit; never throws.
      */
-    if (result.placementChange && result.location.locationId) {
-      const actor = await db.user.findUnique({
-        where: { id: userId },
-        select: { id: true, ...USER_NAME_SELECT },
-      });
+    if (
+      result.placementChange &&
+      result.location.locationId &&
+      !result.location.multiSource
+    ) {
+      // The adjustment is already saved: a failed lookup only loses the line.
+      const actor = await db.user
+        .findUnique({
+          where: { id: userId },
+          select: { id: true, ...USER_NAME_SELECT },
+        })
+        .catch((cause: unknown) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Could not load the user for the location activity line.",
+              additionalData: { assetId, userId },
+              label,
+            })
+          );
+          return null;
+        });
       const at = {
         id: result.location.locationId,
         name: result.location.locationName ?? "",

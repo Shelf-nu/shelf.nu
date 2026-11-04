@@ -5627,12 +5627,13 @@ export async function updateKitLocation({
             })
           )
         );
-        // The rows dropped above are this kit's slices at `currentLocationId`,
-        // so that is the location each asset left.
+        // The rows dropped above are this kit's slices, which sat at the
+        // kit's stored location (the caller's `currentLocationId` is form
+        // input and can be stale).
         await createAssetLocationMoveNotes({
           moves: unplacedAssetsForNotes.map((asset) => ({
             asset,
-            from: currentLocation,
+            from: kit.location ?? currentLocation,
             to: null,
             quantity: asset.kitQuantity,
           })),
