@@ -71,7 +71,7 @@ import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
-import { QR_CODES_ORDER_BY } from "../barcode/display";
+import { ASSET_CODE_RESOLUTION_SELECT } from "../barcode/display";
 import { refreshExpiredKitImages } from "../kit/service.server";
 import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -4582,8 +4582,10 @@ export async function assetActivityReport(
     const rowAssetSelect = {
       id: true,
       title: true,
-      sequentialId: true,
-      qrCodes: { take: 1, orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+      // The shared code fragment's SAM ID and QR parts, without its barcode
+      // list, which a row never shows.
+      sequentialId: ASSET_CODE_RESOLUTION_SELECT.sequentialId,
+      qrCodes: ASSET_CODE_RESOLUTION_SELECT.qrCodes,
       unitOfMeasure: true,
     } as const satisfies Prisma.AssetSelect;
 
@@ -4890,6 +4892,9 @@ async function fetchActivityEvents({
         ? {
             AND: [
               where,
+              // The plain bound lets the (organizationId, occurredAt) index
+              // start at the cursor; the OR settles same-instant events.
+              { occurredAt: { lte: after.occurredAt } },
               {
                 OR: [
                   { occurredAt: { lt: after.occurredAt } },
@@ -4981,7 +4986,7 @@ async function fetchFilteredActivityEvents({
       WHERE ${eventWhereSql}
       ${
         after
-          ? Prisma.sql`AND (e."occurredAt" < ${after.occurredAt} OR (e."occurredAt" = ${after.occurredAt} AND e.id > ${after.id}))`
+          ? Prisma.sql`AND e."occurredAt" <= ${after.occurredAt} AND (e."occurredAt" < ${after.occurredAt} OR (e."occurredAt" = ${after.occurredAt} AND e.id > ${after.id}))`
           : Prisma.empty
       }
       ORDER BY e."occurredAt" DESC, e.id ASC

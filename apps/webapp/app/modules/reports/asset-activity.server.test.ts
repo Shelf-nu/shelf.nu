@@ -185,6 +185,8 @@ describe("assetActivityReport descriptions", () => {
         location("loc-leeds", null, { quantity: 5, side: "from" }),
         location(null, "loc-hull", { quantity: 5, side: "to" }),
         location("loc-hull", null, { quantity: 3 }),
+        // No usable quantity: the plain location sentence.
+        location(null, "loc-leeds", { quantity: 0 }),
       ])
     ).map((row) => row.description);
 
@@ -194,6 +196,7 @@ describe("assetActivityReport descriptions", () => {
       "5 units moved from Leeds unit",
       "5 units moved to Hull depot",
       "3 units removed from Hull depot",
+      "Location set to Leeds unit",
     ]);
   });
 
@@ -280,6 +283,11 @@ describe("assetActivityReport descriptions", () => {
           fromValue: ["tag-cold", "tag-gone"],
           toValue: ["tag-cold", "tag-fragile"],
         }),
+        event("ASSET_TAGS_CHANGED", {
+          field: "tags",
+          fromValue: ["tag-cold", "tag-fragile"],
+          toValue: ["tag-fragile"],
+        }),
         event("ASSET_CUSTOM_FIELD_CHANGED", {
           field: "Serial number",
           toValue: "SN-1234",
@@ -303,6 +311,7 @@ describe("assetActivityReport descriptions", () => {
       "Category set to Food parcels",
       "Asset model removed, was Euro pallet",
       "Tags added: Fragile; removed: (deleted tag)",
+      "Tags removed: Keep cold",
       "Serial number set to SN-1234",
       "Serial number changed: SN-1234 → SN-9999",
       "Valuation set to 1,200",
@@ -419,6 +428,7 @@ describe("assetActivityReport export mode (allRows)", () => {
       where: {
         AND: [
           { assetId: "asset-1" },
+          { occurredAt: { lte: new Date("2026-10-15T10:00:00Z") } },
           {
             OR: [
               { occurredAt: { lt: new Date("2026-10-15T10:00:00Z") } },
@@ -462,6 +472,12 @@ describe("assetActivityReport export mode (allRows)", () => {
       .mock.calls.map(([query]) => query as unknown as Prisma.Sql)
       .filter((query) => query.sql.includes("OFFSET"));
     expect(pageQueries).toHaveLength(2);
+    // The KPI counts (two GROUP BY queries) run for the first batch only.
+    const summaryQueries = vi
+      .mocked(db.$queryRaw)
+      .mock.calls.map(([query]) => query as unknown as Prisma.Sql)
+      .filter((query) => query.sql.includes("GROUP BY"));
+    expect(summaryQueries).toHaveLength(2);
     for (const query of pageQueries) {
       expect(query.sql).toContain('FROM "Asset"');
       expect(query.values).toContain("cat-food");
