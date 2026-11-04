@@ -11,6 +11,7 @@
  * @see {@link file://../../../app/utils/csv-utf8.ts}
  */
 import { HARDCODED_DEFAULT_PREFS } from "@shelf/datetime";
+import { parse } from "csv-parse/sync";
 import type { LoaderFunctionArgs } from "react-router";
 import type { Mock } from "vitest";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -765,16 +766,22 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     it("ends a file cut at the ceiling with a line saying so", async () => {
       const lines = await exportLines([moveRow, moveRow], 250_000);
 
+      // Full width, sentence under Description: strict parsers keep the file.
       expect(lines.at(-1)).toBe(
-        '"Export stopped at 2 of 250,000 rows. Narrow the date range to export the rest."'
+        ',,,,,,"Export stopped at 2 of 250,000 rows. Narrow the date range to export the rest.",,,'
       );
+      // A strict parser (no ragged rows) reads the whole file.
+      const records = parse(lines.join("\n"), {
+        relax_column_count: false,
+      }) as string[][];
+      expect(records.at(-1)).toHaveLength(10);
     });
 
     it("says so when a file below the ceiling holds a different number of rows than counted", async () => {
       const lines = await exportLines([moveRow], 3);
 
       expect(lines.at(-1)).toBe(
-        "Rows in this file: 1. Rows counted when the export started: 3. Assets changed while it ran; export again for a matching file."
+        ",,,,,,Rows in this file: 1. Rows counted when the export started: 3. Assets changed while it ran; export again for a matching file.,,,"
       );
     });
   });

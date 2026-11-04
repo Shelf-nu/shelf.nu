@@ -808,17 +808,24 @@ function generateAssetActivityCsv(
 
   // A file that does not hold every counted event says why, rather than
   // ending silently: either it reached its ceiling, or assets joined or left
-  // the filter while it was being written.
+  // the filter while it was being written. The note is a full-width row with
+  // the sentence under Description, so strict CSV parsers still read the file.
   const written = rows.length.toLocaleString("en-US");
   const total = totalRows.toLocaleString("en-US");
+  const noteRow = (sentence: string) =>
+    headers.map((header) => (header === "Description" ? sentence : ""));
   if (rows.length >= ACTIVITY_EXPORT_MAX_ROWS && totalRows > rows.length) {
-    csvRows.push([
-      `Export stopped at ${written} of ${total} rows. Narrow the date range to export the rest.`,
-    ]);
+    csvRows.push(
+      noteRow(
+        `Export stopped at ${written} of ${total} rows. Narrow the date range to export the rest.`
+      )
+    );
   } else if (rows.length !== totalRows) {
-    csvRows.push([
-      `Rows in this file: ${written}. Rows counted when the export started: ${total}. Assets changed while it ran; export again for a matching file.`,
-    ]);
+    csvRows.push(
+      noteRow(
+        `Rows in this file: ${written}. Rows counted when the export started: ${total}. Assets changed while it ran; export again for a matching file.`
+      )
+    );
   }
 
   return buildCsv(headers, csvRows);

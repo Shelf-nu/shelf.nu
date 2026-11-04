@@ -71,7 +71,7 @@ import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
-import { ASSET_CODE_RESOLUTION_SELECT } from "../barcode/display";
+import { QR_CODES_ORDER_BY } from "../barcode/display";
 import { refreshExpiredKitImages } from "../kit/service.server";
 import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -4576,43 +4576,69 @@ export async function assetActivityReport(
     };
 
     /**
-     * Turns a batch of events into rows. Thumbnails are re-signed for the
-     * page only: a file never shows them.
+     * The asset fields a row reads. SAM ID and the first QR code come in the
+     * order every other surface shows them.
      */
-    const toRows = async (
-      events: ActivityEventRecord[]
-    ): Promise<AssetActivityRow[]> => {
-      // `mainImage`, `mainImageExpiration` and `organizationId` are selected
-      // so assets can go through `refreshExpiredAssetImages` without an extra
-      // round-trip.
-      const assetIds = [
-        ...new Set(events.map((e) => e.assetId).filter(Boolean)),
-      ] as string[];
-      const [assets, referenceNames] = await Promise.all([
-        db.asset.findMany({
+    const rowAssetSelect = {
+      id: true,
+      title: true,
+      sequentialId: true,
+      qrCodes: { take: 1, orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+      unitOfMeasure: true,
+    } as const satisfies Prisma.AssetSelect;
+
+    /**
+     * Assets for the page: the row fields plus images, re-signed when expired.
+     * `organizationId` and `mainImageExpiration` feed the re-signing.
+     */
+    const readPageAssets = async (assetIds: string[]) =>
+      refreshExpiredAssetImages(
+        await db.asset.findMany({
           // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
           where: { id: { in: assetIds }, organizationId },
           select: {
-            id: true,
+            ...rowAssetSelect,
             organizationId: true,
-            title: true,
-            // SAM ID and the first QR code, in the order every other
-            // surface shows them.
-            ...ASSET_CODE_RESOLUTION_SELECT,
-            unitOfMeasure: true,
             mainImage: true,
             mainImageExpiration: true,
             thumbnailImage: true,
             // Model cover image for assets with no image of their own
             ...ASSET_MODEL_IMAGE_SELECT,
           },
-        }),
+        })
+      );
+
+    /**
+     * Assets for a file: only the fields it writes. Image URLs run to hundreds
+     * of characters each, and an export holds up to
+     * {@link ACTIVITY_EXPORT_MAX_ROWS} rows, so it never reads them.
+     */
+    const readExportAssets = async (assetIds: string[]) => {
+      const assets = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still name their asset
+        where: { id: { in: assetIds }, organizationId },
+        select: rowAssetSelect,
+      });
+      return assets.map((asset) => ({
+        ...asset,
+        mainImage: null,
+        thumbnailImage: null,
+        assetModel: null,
+      }));
+    };
+
+    /** Turns a batch of events into rows. */
+    const toRows = async (
+      events: ActivityEventRecord[]
+    ): Promise<AssetActivityRow[]> => {
+      const assetIds = [
+        ...new Set(events.map((e) => e.assetId).filter(Boolean)),
+      ] as string[];
+      const [assets, referenceNames] = await Promise.all([
+        allRows ? readExportAssets(assetIds) : readPageAssets(assetIds),
         loadReferenceNames(organizationId, events),
       ]);
-      const shownAssets = allRows
-        ? assets
-        : await refreshExpiredAssetImages(assets);
-      const assetMap = new Map(shownAssets.map((a) => [a.id, a]));
+      const assetMap = new Map(assets.map((a) => [a.id, a]));
 
       return events.map((event) => {
         const asset = event.assetId ? assetMap.get(event.assetId) : null;
@@ -4762,7 +4788,7 @@ export async function assetActivityReport(
 const ACTIVITY_EXPORT_BATCH_SIZE = 5000;
 
 /**
- * Most rows one Activity Summary export writes: three times the busiest
+ * Most rows one Activity Summary export writes: about six times the busiest
  * workspace's whole history. A file that reaches it says so in its last line.
  */
 export const ACTIVITY_EXPORT_MAX_ROWS = 200_000;

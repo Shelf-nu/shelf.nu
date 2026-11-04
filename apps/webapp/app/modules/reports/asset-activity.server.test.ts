@@ -476,6 +476,37 @@ describe("assetActivityReport export mode (allRows)", () => {
     expect(pageQueries[1].values).toContain("evt-5000");
   });
 
+  it("reads only the asset fields a file writes", async () => {
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([
+      location("loc-leeds", "loc-hull"),
+    ] as never);
+
+    await assetActivityReport({
+      organizationId: ORG,
+      timeframe: TIMEFRAME,
+      allRows: true,
+    });
+
+    const [args] = vi.mocked(db.asset.findMany).mock.calls[0];
+    expect(Object.keys(args?.select ?? {}).sort()).toEqual([
+      "id",
+      "qrCodes",
+      "sequentialId",
+      "title",
+      "unitOfMeasure",
+    ]);
+  });
+
+  it("reads images for the page", async () => {
+    await readableRows([event("ASSET_CREATED")]);
+
+    const [args] = vi.mocked(db.asset.findMany).mock.calls[0];
+    expect(args?.select).toMatchObject({
+      mainImage: true,
+      thumbnailImage: true,
+    });
+  });
+
   it("ends the export's timeframe when the export starts", async () => {
     vi.mocked(db.activityEvent.findMany).mockResolvedValue([] as never);
     const before = Date.now();
