@@ -32,7 +32,8 @@ If you get stuck, open an issue or join us on
   characters.
 - Before you push, run the checks for what you changed:
   `pnpm webapp:validate` runs lint, typecheck and the tests affected by your
-  change. CI runs the full suite on every PR.
+  change, and `pnpm docs:build` builds the docs site when you changed
+  `apps/docs/` or this guide. CI runs the full suite on every PR.
 - Follow the conventions in
   [CLAUDE.md](https://github.com/Shelf-nu/shelf.nu/blob/main/CLAUDE.md) and
   [`.claude/rules/`](https://github.com/Shelf-nu/shelf.nu/tree/main/.claude/rules).

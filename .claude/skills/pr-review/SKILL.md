@@ -307,6 +307,9 @@ Rules:
     `db.schema` is null, and `Names:` when nothing is new or renamed. Put a
     blank line before every table so it renders.
 - The header counts exclude "Spotted along the way" items.
+- An intent-check claim marked ❌ that no finding already covers is also a
+  numbered must-fix finding: "The PR description says <claim>; the code does
+  not do it." It counts in the header and can be picked like any other.
 - Number continuously across all sections so the user can say "fix 1-6, skip 7".
 - Omit empty sections ("Dismissed" included), except "Must fix", which says "None." when empty.
 - Verdict: `DO NOT SHIP` when a must-fix breaks security or data, or the PR
@@ -420,9 +423,7 @@ agent may handle them one at a time.
 - None of this skill's internal terms: tier, passes, validators, found by N
   passes, dismissed, safe because, ELI5.
 - Keep the report's numbers, so replies like "1: fixed in <sha>" line up.
-- Include only the findings ticked in Question 2. An intent-check claim marked
-  ❌ that is not already a finding goes in as a must-fix: "The PR description
-  says <claim>; the code does not do it."
+- Include only the findings ticked in Question 2.
 - "Spotted along the way" findings, when ticked, go under their own heading
   that says not to fix them in this PR.
 
