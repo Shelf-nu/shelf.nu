@@ -58,6 +58,7 @@ Existing mirrors:
 | `lib/push/preferences.ts` → `NotificationPreferences`                                          | `apps/webapp/app/modules/push/types.ts` (lands with PUSH-2)                                                                      | a pure `packages/*` push module (none yet)         |
 | `lib/audit-scan-queue.ts` → `MAX_AUDIT_COUNT`                                                  | `apps/webapp/app/modules/audit/quantity.ts` → `MAX_AUDIT_FOUND_QUANTITY`                                                         | `@shelf/quantity-control`                          |
 | `lib/audit-scan-queue.ts` → `countTargetFor`                                                   | `apps/webapp/app/modules/audit/quantity.ts` → `expectedQuantityFor`                                                              | `@shelf/quantity-control`                          |
+| `lib/audit-scan-queue.ts` → `countExpectation`                                                 | `apps/webapp/app/components/audit/audit-count-flow.ts` → `countExpectation`                                                      | `@shelf/quantity-control`                          |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

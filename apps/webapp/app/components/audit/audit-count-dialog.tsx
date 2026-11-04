@@ -8,8 +8,9 @@
  * For an asset on the audit's list, the field starts at the count already
  * recorded, or at the expected units for a first count, so a full pool is one
  * confirm away, and "All here" records the expected units directly. An asset
- * that is not on the list has no expectation to confirm: the field starts at
- * its recorded count or blank, and there is no "All here". A count may go past
+ * with nothing expected (a pool with no units at the audited location) and an
+ * asset that is not on the list have no expectation to confirm: the field
+ * starts at its recorded count or blank, and there is no "All here". A count may go past
  * the expectation: a surplus is a finding the audit must record. Zero is a
  * real answer (the pool was located, empty); a blank field is not, and keeps
  * Save disabled.
@@ -25,6 +26,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { useAtomValue } from "jotai";
 import { auditCountPromptAtom } from "~/atoms/qr-scanner";
+import { countExpectation } from "~/components/audit/audit-count-flow";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import {
@@ -92,7 +94,9 @@ function AuditCountDialogContent({
   onSave,
   onCancel,
 }: AuditCountDialogContentProps) {
-  const initial = foundQuantity ?? (isExpected ? expectedQuantity : null);
+  const expectation = countExpectation({ isExpected, expectedQuantity });
+  const initial =
+    foundQuantity ?? (expectation === "expected" ? expectedQuantity : null);
   const [value, setValue] = useState(initial === null ? "" : String(initial));
   const inputRef = useAutoFocus<HTMLInputElement>();
   const unit = unitOfMeasure && unitOfMeasure !== "units" ? unitOfMeasure : "";
@@ -121,10 +125,12 @@ function AuditCountDialogContent({
             {mode === "recount" ? "Update count" : "How many did you find?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {isExpected
+            {expectation === "expected"
               ? `${assetTitle} is tracked by quantity. ${expectedQuantity}${
                   unit ? ` ${unit}` : ""
                 } expected.`
+              : expectation === "none-expected"
+              ? `${assetTitle} is tracked by quantity. None expected here. Count the units you found.`
               : `${assetTitle} is tracked by quantity and is not on this audit's list. Count the units you found.`}
             {mode === "recount" && foundQuantity !== null
               ? ` Counted so far: ${foundQuantity}.`
@@ -161,7 +167,7 @@ function AuditCountDialogContent({
             <Button type="button" variant="secondary" onClick={onCancel}>
               {mode === "first" ? "Discard scan" : "Cancel"}
             </Button>
-            {isExpected ? (
+            {expectation === "expected" ? (
               <Button
                 type="button"
                 variant="secondary"

@@ -185,3 +185,22 @@ export function storedCountFor(
   }
   return superseded ? undefined : response.foundQuantity;
 }
+
+/**
+ * What the count sheet can promise about the units: `"expected"` for a listed
+ * asset with units expected (the sheet shows them as its target),
+ * `"none-expected"` for a listed asset with nothing expected (a pool with no
+ * units at the audited location), `"unlisted"` for an asset not on the audit's
+ * list. Only `"expected"` prefills and shows a target.
+ *
+ * MIRROR of `countExpectation` in
+ * apps/webapp/app/components/audit/audit-count-flow.ts; cosmetic only.
+ * Extraction target: `@shelf/quantity-control`.
+ */
+export function countExpectation(request: {
+  isExpected: boolean;
+  expectedQuantity: number;
+}): "expected" | "none-expected" | "unlisted" {
+  if (!request.isExpected) return "unlisted";
+  return request.expectedQuantity > 0 ? "expected" : "none-expected";
+}

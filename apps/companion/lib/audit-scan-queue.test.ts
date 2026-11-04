@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  countExpectation,
   countFieldsFromScan,
   countTargetFor,
   dropSupersededCounts,
@@ -201,5 +202,29 @@ describe("storedCountFor", () => {
 
   it("returns nothing when the server sends no count", () => {
     assert.equal(storedCountFor(9, {}, false), undefined);
+  });
+});
+
+describe("countExpectation", () => {
+  it("shows the expected units of a listed asset as the target", () => {
+    assert.equal(
+      countExpectation({ isExpected: true, expectedQuantity: 14 }),
+      "expected"
+    );
+  });
+
+  it("has no target when a listed asset expects nothing", () => {
+    // A pool added to a location audit with no units placed there.
+    assert.equal(
+      countExpectation({ isExpected: true, expectedQuantity: 0 }),
+      "none-expected"
+    );
+  });
+
+  it("has no target for an asset not on the list", () => {
+    assert.equal(
+      countExpectation({ isExpected: false, expectedQuantity: 50 }),
+      "unlisted"
+    );
   });
 });

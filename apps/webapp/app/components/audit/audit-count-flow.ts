@@ -163,6 +163,24 @@ export function recountPromptFor({
 }
 
 /**
+ * What the count prompt can promise about the units:
+ * - `"expected"`: a listed asset with units expected, confirmable with
+ *   "All here (14)";
+ * - `"none-expected"`: a listed asset with nothing expected, such as a pool
+ *   with no units at the audited location, so there is nothing to confirm;
+ * - `"unlisted"`: an asset not on the audit's list.
+ * Only `"expected"` prefills the expectation and offers "All here".
+ *
+ * @param prompt - the open prompt
+ */
+export function countExpectation(
+  prompt: Pick<AuditCountPrompt, "isExpected" | "expectedQuantity">
+): "expected" | "none-expected" | "unlisted" {
+  if (!prompt.isExpected) return "unlisted";
+  return prompt.expectedQuantity > 0 ? "expected" : "none-expected";
+}
+
+/**
  * Whether closing the prompt without a count drops the scan: a first count
  * does (the scan is not saved without one), a recount keeps the saved scan.
  */

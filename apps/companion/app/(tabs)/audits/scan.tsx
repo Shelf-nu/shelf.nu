@@ -58,7 +58,11 @@ import {
 } from "@/components/audit/segmented-control";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
-import { countTargetFor, MAX_AUDIT_COUNT } from "@/lib/audit-scan-queue";
+import {
+  countExpectation,
+  countTargetFor,
+  MAX_AUDIT_COUNT,
+} from "@/lib/audit-scan-queue";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
 import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
@@ -111,6 +115,10 @@ function AuditScannerContent() {
   const [countRequest, setCountRequest] = useState<AuditCountRequest | null>(
     null
   );
+  // What the open sheet can promise: a target only when units are expected.
+  const countExpectationValue = countRequest
+    ? countExpectation(countRequest)
+    : null;
   // Records the first scan once its count is confirmed.
   const pendingCommitRef = useRef<((foundQuantity: number) => void) | null>(
     null
@@ -1724,9 +1732,13 @@ function AuditScannerContent() {
         }
         subtitle={
           countRequest
-            ? countRequest.isExpected
-              ? `${countRequest.assetTitle} · ${countRequest.expectedQuantity} expected`
-              : `${countRequest.assetTitle} · not on this audit's list`
+            ? `${countRequest.assetTitle} · ${
+                countExpectationValue === "expected"
+                  ? `${countRequest.expectedQuantity} expected`
+                  : countExpectationValue === "none-expected"
+                  ? "none expected here"
+                  : "not on this audit's list"
+              }`
             : undefined
         }
         min={0}
@@ -1735,12 +1747,16 @@ function AuditScannerContent() {
         // asset not on the audit's list has no expectation to count against.
         max={MAX_AUDIT_COUNT}
         target={
-          countRequest?.isExpected ? countRequest.expectedQuantity : undefined
+          countExpectationValue === "expected"
+            ? countRequest?.expectedQuantity
+            : undefined
         }
         placeholder="Units found"
         defaultValue={
           countRequest?.foundQuantity ??
-          (countRequest?.isExpected ? countRequest.expectedQuantity : 0)
+          (countExpectationValue === "expected"
+            ? countRequest?.expectedQuantity
+            : 0)
         }
         unitOfMeasure={countRequest?.unitOfMeasure}
         confirmLabel={countRequest?.mode === "recount" ? "Update" : "Record"}

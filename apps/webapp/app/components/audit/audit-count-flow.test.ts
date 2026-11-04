@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditCount, ScanListItems } from "~/atoms/qr-scanner";
 import {
   cancelDiscardsScan,
+  countExpectation,
   countScansToSave,
   hasUnsavedCounts,
   isWaitingForCount,
@@ -193,5 +194,26 @@ describe("hasUnsavedCounts", () => {
         new Set()
       )
     ).toBe(false);
+  });
+});
+
+describe("countExpectation", () => {
+  it("offers the expectation of a listed asset with units expected", () => {
+    expect(countExpectation({ isExpected: true, expectedQuantity: 14 })).toBe(
+      "expected"
+    );
+  });
+
+  it("has nothing to confirm when a listed asset expects no units", () => {
+    // A pool added to a location audit with no units placed there.
+    expect(countExpectation({ isExpected: true, expectedQuantity: 0 })).toBe(
+      "none-expected"
+    );
+  });
+
+  it("has nothing to confirm for an asset not on the list", () => {
+    expect(countExpectation({ isExpected: false, expectedQuantity: 50 })).toBe(
+      "unlisted"
+    );
   });
 });
