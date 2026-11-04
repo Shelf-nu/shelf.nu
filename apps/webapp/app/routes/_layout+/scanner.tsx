@@ -72,6 +72,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       roles:
         userOrganizations.find((o) => o.organization.id === organizationId)
           ?.roles ?? [],
+      workspace: access.workspaceGrants,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });

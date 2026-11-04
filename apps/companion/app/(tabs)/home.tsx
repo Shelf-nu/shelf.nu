@@ -224,6 +224,7 @@ function HomeContent() {
           />
           {userHasPermission({
             roles: currentOrg?.roles,
+            workspace: currentOrg,
             entity: "asset",
             action: "create",
           }) && (

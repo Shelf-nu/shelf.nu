@@ -92,7 +92,10 @@ export default {
         collapsed: true,
         items: [
           { text: "Database Triggers", link: "/database-triggers" },
-          { text: "Protected Indexes", link: "/protected-indexes" },
+          {
+            text: "Protected Indexes and Foreign Keys",
+            link: "/protected-indexes",
+          },
         ],
       },
       {

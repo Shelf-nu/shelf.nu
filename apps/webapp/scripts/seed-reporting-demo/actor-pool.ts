@@ -22,18 +22,22 @@ import type { ExtendedPrismaClient } from "@shelf/database";
 import { weightedPick, zipfWeights, type RNG } from "./distributions";
 import { NAME_SUFFIX } from "./markers";
 import type { ActorSnapshot } from "../../app/modules/activity-event/types";
-import type { WorkspaceAccessSettings } from "../../app/utils/permissions/role-access";
+import type {
+  WorkspaceAccessSettings,
+  WorkspaceGrantSettings,
+} from "../../app/utils/permissions/role-access";
 import { resolveRoleAccess } from "../../app/utils/permissions/role-access";
 
 /**
- * Every workspace visibility toggle off. The ranking reads only ownership and
- * booking write scope, which the toggles never widen.
+ * Every workspace visibility toggle and permission switch off. The ranking
+ * reads only ownership and booking write scope, which neither ever widens.
  */
-const TOGGLES_OFF: WorkspaceAccessSettings = {
+const TOGGLES_OFF: WorkspaceAccessSettings & WorkspaceGrantSettings = {
   selfServiceCanSeeBookings: false,
   baseUserCanSeeBookings: false,
   selfServiceCanSeeCustody: false,
   baseUserCanSeeCustody: false,
+  managersCanEditAssets: false,
 };
 
 /**

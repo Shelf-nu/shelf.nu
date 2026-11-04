@@ -17,7 +17,7 @@ import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
-import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { Spinner } from "~/components/shared/spinner";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import type { CalendarExtendedProps } from "~/routes/_layout+/calendar";
@@ -252,7 +252,7 @@ function CalendarLoadingFallback() {
   return (
     <div className="absolute inset-0 z-10 flex justify-center bg-white/90">
       <div className="flex flex-col items-center gap-4 pt-[300px]">
-        <FallbackLoading className="size-16" />
+        <Spinner className="size-8" />
         <p className="text-sm text-gray-600">Loading calendar...</p>
       </div>
     </div>

@@ -11,6 +11,8 @@
  * @see {@link file://./settings-tabs.ts}
  */
 import type { OrganizationRoles } from "@prisma/client";
+import type { MemberRoles } from "./member-roles";
+import { workspaceGrantsOf } from "./member-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -51,7 +53,8 @@ export type AdminArea = keyof typeof ADMIN_AREA_GATES;
 /**
  * Whether a member may see an admin area.
  *
- * @param args.roles - Every role on the membership
+ * @param args.roles - Every role on the membership; roles from
+ *   `useOrganizationRoles()` carry the workspace's permission switches
  * @param args.area - The area
  * @returns `true` when the membership holds the area's permission
  */
@@ -59,8 +62,12 @@ export function canSeeAdminArea({
   roles,
   area,
 }: {
-  roles: readonly OrganizationRoles[] | undefined;
+  roles: readonly OrganizationRoles[] | MemberRoles | undefined;
   area: AdminArea;
 }): boolean {
-  return roleHasPermission({ roles, ...ADMIN_AREA_GATES[area] });
+  return roleHasPermission({
+    roles,
+    ...ADMIN_AREA_GATES[area],
+    workspace: workspaceGrantsOf(roles),
+  });
 }
