@@ -72,8 +72,10 @@ every item is done.
 - [ ] **Every CodeRabbit thread is resolved.** Fix the finding, or reply with
       why it does not apply, then resolve the thread. Do not leave threads open
       for the maintainer to sort out.
-- [ ] **The branch is up to date with `main` and has no conflicts.** Merge
-      `main` into your branch (do not rebase a branch that is already pushed).
+- [ ] **The branch is up to date with `main` and has no conflicts.** Fetch
+      the latest `main` from Shelf's repository first (in a fork, that is the
+      `upstream` remote, not `origin`), then merge it into your branch. Do not
+      rebase a branch that is already pushed.
       With Claude Code, the [`/fix-conflicts`](https://github.com/Shelf-nu/shelf.nu/blob/main/.claude/commands/fix-conflicts.md)
       command resolves the conflicts, verifies the result and concludes the
       merge commit.

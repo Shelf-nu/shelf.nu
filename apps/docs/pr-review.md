@@ -97,7 +97,8 @@ under "Other". "Spotted along the way" findings never go into a posted review,
 since the PR did not cause them; the post option only appears when the PR
 caused at least one finding. A third question appears when prove or restore applies. If you
 close the picker, it waits for a typed reply to the Next line. You can also
-type "post", "fix 1-4", "restore D2", or "prove 3".
+type "post" (every finding the PR caused), "post 1-4", "fix 1-4", "restore D2",
+or "prove 3".
 
 The posted review is written for the author's AI agent to act on: no
 greetings or praise, no hedging, and every finding stands on its own with the

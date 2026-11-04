@@ -388,7 +388,8 @@ section; a per-finding tick or a typed range stays exactly as picked.
 "Nothing for now", "None", or no finding ticked means post nothing and fix
 nothing. If `AskUserQuestion` is unavailable, or the user dismisses it, stop
 and wait for a typed reply to the Next line. A typed "post" or "fix 1-4" picks
-the same paths, with the same rule: one or the other, never both.
+the same paths, with the same rule: one or the other, never both. A bare "post"
+means every finding the PR caused; "post 1-4" means those numbers.
 
 **"restore D<n>":** bring that dismissed entry back as a normal finding with
 the next free number, at its original severity, with its saved impact, trigger
@@ -427,7 +428,9 @@ agent may handle them one at a time.
 - None of this skill's internal terms: tier, passes, validators, found by N
   passes, dismissed, safe because, ELI5.
 - Keep the report's numbers, so replies like "1: fixed in <sha>" line up.
-- Include only the findings ticked in Question 2.
+- Include only the findings ticked in Question 2 (or typed with "post").
+- When that leaves no finding the PR caused (only "Spotted along the way" was
+  ticked), post nothing: say so and ask the picker again.
 - "Spotted along the way" findings never go into the review, even when ticked:
   the PR did not cause them, so the author has nothing to change for them. They
   stay in the report as follow-up PRs.
