@@ -50,6 +50,7 @@ import {
   loadCustodySources,
 } from "~/modules/asset/custody-source.server";
 import { assertStockNotBelowManualPlacements } from "~/modules/asset/placement-reconcile.server";
+import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import type { ErrorLabel } from "~/utils/error";
@@ -637,6 +638,11 @@ export async function adjustQuantity({
       const multiSource = sources ? hasMultipleSources(sources.state) : false;
       let atLocationName: string | null = null;
       let existingPlacement: { id: string; quantity: number } | null = null;
+      /**
+       * Whether the write created or deleted the placement at `atLocationId`,
+       * i.e. whether it recorded an `ASSET_LOCATION_CHANGED` event.
+       */
+      let placementChange: "arrived" | "left" | null = null;
 
       if (atLocationId) {
         const location = await tx.location.findFirst({
@@ -819,6 +825,7 @@ export async function adjustQuantity({
               },
               tx
             );
+            placementChange = "arrived";
           }
         } else if (existingPlacement) {
           const remaining = existingPlacement.quantity - quantity;
@@ -843,6 +850,7 @@ export async function adjustQuantity({
               },
               tx
             );
+            placementChange = "left";
           } else {
             await tx.assetLocation.update({
               // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
@@ -905,8 +913,38 @@ export async function adjustQuantity({
           locationName: atLocationName,
           multiSource,
         } satisfies AdjustmentLocationOutcome,
+        placementChange,
       };
     });
+
+    /**
+     * A placement the adjustment created or emptied is a move onto or off the
+     * location, so the location's activity log records it like any other
+     * `ASSET_LOCATION_CHANGED`. Written after the commit; never throws.
+     */
+    if (result.placementChange && result.location.locationId) {
+      const actor = await db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, ...USER_NAME_SELECT },
+      });
+      const at = {
+        id: result.location.locationId,
+        name: result.location.locationName ?? "",
+      };
+      if (actor) {
+        await createAssetLocationMoveNotes({
+          moves: [
+            {
+              asset: result.asset,
+              from: result.placementChange === "left" ? at : null,
+              to: result.placementChange === "arrived" ? at : null,
+              quantity,
+            },
+          ],
+          actor,
+        });
+      }
+    }
 
     /**
      * The location's timeline records the restock or loss, for pools

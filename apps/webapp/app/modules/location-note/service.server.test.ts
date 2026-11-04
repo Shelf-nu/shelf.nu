@@ -8,6 +8,7 @@ import { Logger } from "~/utils/logger";
 import {
   createAssetLocationMoveNotes,
   createLocationNote,
+  placementChangeMoves,
   createSystemLocationNote,
   deleteLocationNote,
   getLocationNotes,
@@ -408,25 +409,94 @@ describe("createAssetLocationMoveNotes", () => {
   });
 });
 
+describe("placementChangeMoves", () => {
+  const cords = {
+    id: "cords",
+    title: "Cords",
+    type: "QUANTITY_TRACKED" as const,
+    unitOfMeasure: "pcs",
+  };
+  const storage = { id: "loc-storage", name: "Storage" };
+  const van = { id: "loc-van", name: "Van" };
+
+  /** Moves as `[from, to, quantity]`, for readable expectations. */
+  function moves(args: Parameters<typeof placementChangeMoves>[0]) {
+    return placementChangeMoves(args).map((move) => [
+      move.from?.name ?? null,
+      move.to?.name ?? null,
+      move.quantity,
+    ]);
+  }
+
+  it("splits a replace into the units that moved and the units left unplaced", () => {
+    expect(
+      moves({
+        asset: cords,
+        before: [{ location: storage, quantity: 10 }],
+        after: [{ location: van, quantity: 4 }],
+      })
+    ).toEqual([
+      ["Storage", "Van", 4],
+      ["Storage", null, 6],
+    ]);
+  });
+
+  it("leaves out a location whose amount did not change", () => {
+    expect(
+      moves({
+        asset: cords,
+        before: [
+          { location: storage, quantity: 6 },
+          { location: van, quantity: 4 },
+        ],
+        after: [{ location: van, quantity: 4 }],
+      })
+    ).toEqual([["Storage", null, 6]]);
+  });
+
+  it("takes extra units at a location from the unplaced pool", () => {
+    expect(
+      moves({
+        asset: cords,
+        before: [{ location: van, quantity: 4 }],
+        after: [{ location: van, quantity: 10 }],
+      })
+    ).toEqual([[null, "Van", 6]]);
+  });
+
+  it("moves an individual asset as one unit", () => {
+    expect(
+      moves({
+        asset: { id: "tripod", title: "Tripod", type: "INDIVIDUAL" },
+        before: [{ location: storage, quantity: 1 }],
+        after: [{ location: van, quantity: 1 }],
+      })
+    ).toEqual([["Storage", "Van", 1]]);
+  });
+});
+
 /**
  * Every flow that records `ASSET_LOCATION_CHANGED` has to write the location
  * activity log too, or a location's Activity tab and CSV silently miss the
- * move. Checked per top-level function, so a new writer in a file that already
- * has others cannot skip it.
+ * move. Checked per top-level declaration (function, or `const` such as an
+ * arrow-function route handler), with comments stripped, so a new writer
+ * cannot skip it by living in a file that already calls the helper. It checks
+ * that the helper is called, not how many times: one call covers a batch.
  */
 describe("ASSET_LOCATION_CHANGED writers", () => {
   /**
-   * Functions that write their location line another way, keyed
-   * `<file>#<function>`, with the reason.
+   * Declarations that write their location line another way, keyed
+   * `<file>#<declaration>`, with the reason.
    */
   const WRITES_ITS_LOCATION_LINE_ELSEWHERE: Record<string, string> = {
-    "app/modules/consumption-log/service.server.ts#adjustQuantity":
-      "logs its own '(adjustment)' line via createCustodySourceLocationNote",
     "app/modules/asset/service.server.ts#placeUnplacedUnits":
       "logs its own 'placed N units at L' line",
     "app/modules/location/service.server.ts#updateLocationAssets":
       "writes its lines through createBulkLocationChangeNotes",
   };
+
+  const RECORDS_THE_EVENT =
+    /action:\s*(?:["'`]ASSET_LOCATION_CHANGED["'`]|ActivityAction\.ASSET_LOCATION_CHANGED)/;
 
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -438,30 +508,46 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
     });
   }
 
-  /** Splits a source file into its top-level functions, by name. */
-  function topLevelFunctions(source: string) {
+  /** Removes line and block comments, so a mention in prose does not count. */
+  function withoutComments(source: string) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  /**
+   * Splits a source file into its top-level declarations, by name. Code
+   * before the first one is kept as `<module>`.
+   */
+  function topLevelDeclarations(source: string) {
     const starts = [
-      ...source.matchAll(/^(?:export )?(?:async )?function (\w+)/gm),
+      ...source.matchAll(
+        /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+(\w+)|(?:const|let)\s+(\w+)\s*[=:])/gm
+      ),
     ];
-    return starts.map((match, i) => ({
-      name: match[1],
-      body: source.slice(match.index, starts[i + 1]?.index ?? source.length),
-    }));
+    const head = { name: "<module>", body: source.slice(0, starts[0]?.index) };
+    return [
+      head,
+      ...starts.map((match, i) => ({
+        name: match[1] ?? match[2],
+        body: source.slice(match.index, starts[i + 1]?.index ?? source.length),
+      })),
+    ];
   }
 
   it("also write the location activity log", () => {
     const appRoot = join(__dirname, "../..");
     const webappRoot = join(appRoot, "..");
-    const writers = sourceFiles(appRoot).flatMap((path) =>
-      topLevelFunctions(readFileSync(path, "utf8"))
-        .filter(({ body }) => /action:\s*"ASSET_LOCATION_CHANGED"/.test(body))
+    const writers = sourceFiles(appRoot).flatMap((path) => {
+      const source = readFileSync(path, "utf8");
+      if (!source.includes("ASSET_LOCATION_CHANGED")) return [];
+      return topLevelDeclarations(withoutComments(source))
+        .filter(({ body }) => RECORDS_THE_EVENT.test(body))
         .map(({ name, body }) => ({
           key: `${relative(webappRoot, path)}#${name}`,
           body,
-        }))
-    );
+        }));
+    });
 
-    expect(writers.length).toBeGreaterThan(0);
+    expect(writers.length).toBeGreaterThan(5);
     const missing = writers
       .filter(
         ({ key, body }) =>

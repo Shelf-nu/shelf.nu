@@ -112,13 +112,94 @@ export type AssetLocationMove = {
    * Only named in the note for a QUANTITY_TRACKED asset moving alone.
    */
   quantity?: number | null;
-  /**
-   * Units that left `from`, when that differs from `quantity`: a replace that
-   * drops a 10-unit placement and places 4 elsewhere took 10 away from the
-   * source. Defaults to `quantity`.
-   */
-  fromQuantity?: number | null;
 };
+
+/** One location's amount of an asset, for {@link placementChangeMoves}. */
+type PlacementAmount = {
+  location: Pick<Location, "id" | "name">;
+  quantity: number;
+};
+
+/**
+ * Describes a rewrite of one asset's placements as moves, from each location's
+ * amount before and after. Units a location lost and another gained moved
+ * between them; units gained with no matching loss came from the unplaced
+ * pool; units lost with no matching gain became unplaced. A location whose
+ * amount is unchanged did not take part.
+ *
+ * Losses are paired with gains in the order of `before`, so pass the rows in a
+ * stable order.
+ *
+ * @example
+ * // 10 at Storage replaced by 4 at the Van: 4 moved, 6 became unplaced.
+ * placementChangeMoves({
+ *   asset,
+ *   before: [{ location: storage, quantity: 10 }],
+ *   after: [{ location: van, quantity: 4 }],
+ * });
+ * // => [{ from: storage, to: van, quantity: 4 },
+ * //     { from: storage, to: null, quantity: 6 }]
+ *
+ * @param params.asset - The asset whose placements changed
+ * @param params.before - Its placements before the rewrite
+ * @param params.after - Its placements after the rewrite
+ * @returns The moves to hand to {@link createAssetLocationMoveNotes}
+ */
+export function placementChangeMoves({
+  asset,
+  before,
+  after,
+}: {
+  asset: AssetLocationMove["asset"];
+  before: PlacementAmount[];
+  after: PlacementAmount[];
+}): AssetLocationMove[] {
+  const amounts = new Map<
+    string,
+    { location: PlacementAmount["location"]; before: number; after: number }
+  >();
+  const amountAt = (location: PlacementAmount["location"]) => {
+    const entry = amounts.get(location.id) ?? { location, before: 0, after: 0 };
+    amounts.set(location.id, entry);
+    return entry;
+  };
+  for (const row of before) amountAt(row.location).before += row.quantity;
+  for (const row of after) amountAt(row.location).after += row.quantity;
+
+  const losses = [...amounts.values()]
+    .filter((entry) => entry.before > entry.after)
+    .map((entry) => ({
+      location: entry.location,
+      left: entry.before - entry.after,
+    }));
+  const moves: AssetLocationMove[] = [];
+
+  for (const entry of amounts.values()) {
+    let gained = entry.after - entry.before;
+    for (const loss of losses) {
+      if (gained <= 0) break;
+      const moved = Math.min(gained, loss.left);
+      if (moved <= 0) continue;
+      moves.push({
+        asset,
+        from: loss.location,
+        to: entry.location,
+        quantity: moved,
+      });
+      loss.left -= moved;
+      gained -= moved;
+    }
+    if (gained > 0) {
+      moves.push({ asset, from: null, to: entry.location, quantity: gained });
+    }
+  }
+  for (const loss of losses) {
+    if (loss.left > 0) {
+      moves.push({ asset, from: loss.location, to: null, quantity: loss.left });
+    }
+  }
+  return moves;
+}
 
 /**
  * Writes the location activity log lines for a set of asset moves: on each
@@ -201,10 +282,7 @@ export async function createAssetLocationMoveNotes({
       type: "UPDATE",
       userId: actor.id,
       content: `${userLink} removed ${assetMarkup(
-        group.map((move) => ({
-          ...move,
-          quantity: move.fromQuantity ?? move.quantity,
-        })),
+        group,
         "removed"
       )} from ${formatLocationLink(from!)}.${movedTo}`,
     });

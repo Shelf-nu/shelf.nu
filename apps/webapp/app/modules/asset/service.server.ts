@@ -268,6 +268,7 @@ import { createKitsIfNotExists } from "../kit/service.server";
 import {
   createAssetLocationMoveNotes,
   createSystemLocationNote,
+  placementChangeMoves,
 } from "../location-note/service.server";
 import {
   buildAssetModelChangeNote,
@@ -2315,6 +2316,15 @@ export async function updateAsset({
     // captured `assetLocations`). Captured inside the tx so the removal qty
     // survives the deleteMany below. `null` for INDIVIDUAL via the helpers.
     let locationChangeQuantity: number | null = null;
+    /**
+     * The manual placements as they stood before a placement rewrite, read
+     * inside the transaction, so the location activity log can say what left
+     * each location.
+     */
+    let manualPlacementsBefore: Array<{
+      location: { id: string; name: string };
+      quantity: number;
+    }> = [];
 
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
@@ -2484,6 +2494,13 @@ export async function updateAsset({
       });
 
       if (shouldUpdatePlacement) {
+        // `updated.assetLocations` is the pre-delete snapshot.
+        manualPlacementsBefore = updated.assetLocations
+          .filter((al) => al.assetKitId == null)
+          .map((al) => ({
+            location: { id: al.location.id, name: al.location.name },
+            quantity: al.quantity,
+          }));
         if (newLocationId) {
           locationChangeQuantity = resolveNewLocationQuantity(
             updated,
@@ -2777,20 +2794,22 @@ export async function updateAsset({
         meta: assetQtyMeta(asset, locationChangeQuantity),
       });
 
+      // The rewrite collapses every manual placement into at most one, so the
+      // log reads each location's amount before and after, the same way the
+      // mobile route does.
       await createAssetLocationMoveNotes({
-        moves: [
-          {
-            asset: {
-              id: asset.id,
-              title: asset.title,
-              type: asset.type,
-              unitOfMeasure: asset.unitOfMeasure,
-            },
-            from: currentLocation,
-            to: newLocation,
-            quantity: locationChangeQuantity,
+        moves: placementChangeMoves({
+          asset: {
+            id: asset.id,
+            title: asset.title,
+            type: asset.type,
+            unitOfMeasure: asset.unitOfMeasure,
           },
-        ],
+          before: manualPlacementsBefore,
+          after: newLocation
+            ? [{ location: newLocation, quantity: locationChangeQuantity ?? 1 }]
+            : [],
+        }),
         actor: { ...user, id: userId },
       });
     }

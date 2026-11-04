@@ -53,6 +53,14 @@ vitest.mock("./stock-ledger.server", () => ({
   recordStockChanges: (...args: unknown[]) => recordStockChangesMock(...args),
 }));
 
+// why: the custody sources come from real custody and booking reads with
+// their own tests; here a test seeds the placements an adjustment starts from.
+const loadCustodySourcesMock = vitest.fn();
+vitest.mock("~/modules/asset/custody-source.server", () => ({
+  loadCustodySources: (...args: unknown[]) => loadCustodySourcesMock(...args),
+  createCustodySourceLocationNote: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: isolating adjustQuantity from real database operations. `$transaction`
 // routes its callback through this same mocked `db` object so inner `tx.*`
 // calls hit the stubs below (mirrors `asset/service.server.test.ts`'s
@@ -82,11 +90,25 @@ vitest.mock("~/database/db.server", () => ({
     user: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    // why: an adjustment at a named location reads it, then creates, updates
+    // or deletes the asset's manual placement there.
+    location: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
+    // why: a placement the adjustment creates or empties is logged on the
+    // location's activity; the rows handed over are asserted below.
+    locationNote: {
+      createMany: vitest.fn().mockResolvedValue({ count: 1 }),
+    },
     // why: a subtract also runs `assertStockNotBelowManualPlacements`, which
     // reads the asset's manual placement rows. Default to none so the existing
     // subtract scenarios stay about the reservations guard.
     assetLocation: {
       findMany: vitest.fn().mockResolvedValue([]),
+      findFirst: vitest.fn().mockResolvedValue(null),
+      create: vitest.fn().mockResolvedValue({}),
+      update: vitest.fn().mockResolvedValue({}),
+      delete: vitest.fn().mockResolvedValue({}),
     },
   },
 }));
@@ -360,5 +382,125 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
     ).rejects.toMatchObject({ status: 400 });
 
     expect(assertAssetQuantityNotBelowReservationsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("adjustQuantity: location activity", () => {
+  const ana = '{% link to="/settings/team/users/user-1" text="Ana Admin" /%}';
+  const widget = '{% link to="/assets/asset-1" text="Widget" /%}';
+  const loc = (id: string, name: string) =>
+    `{% link to="/locations/${id}" text="${name}" /%}`;
+
+  /** The rows handed to `createMany`, as `[locationId, content]`. */
+  function locationLog() {
+    // @ts-expect-error mocked
+    return db.locationNote.createMany.mock.calls
+      .flatMap(([args]: [{ data: unknown[] }]) => args.data)
+      .map((row: { locationId: string; content: string }) => [
+        row.locationId,
+        row.content,
+      ]);
+  }
+
+  /** The pool's manual placements, before the adjustment, by location id. */
+  function placedAt(placements: Array<[string, number]>) {
+    loadCustodySourcesMock.mockResolvedValue({
+      state: {
+        total: 10,
+        placements: placements.map(([locationId, quantity]) => ({
+          locationId,
+          quantity,
+        })),
+        operatorCustody: [],
+        bookedOut: [],
+      },
+    });
+  }
+
+  function setup() {
+    resetMocks();
+    // @ts-expect-error mocked
+    db.user.findUnique.mockResolvedValue({
+      id: USER_ID,
+      firstName: "Ana",
+      lastName: "Admin",
+      displayName: null,
+    });
+    // @ts-expect-error mocked
+    db.location.findFirst.mockImplementation(({ where }) =>
+      Promise.resolve({ name: where.id === "loc-van" ? "Van" : "Warehouse" })
+    );
+    // @ts-expect-error mocked
+    db.asset.update.mockImplementation(({ data }) =>
+      Promise.resolve({ ...lockedAsset(), quantity: data.quantity })
+    );
+  }
+
+  it("logs an arrival when the units go to a location the pool was not at", async () => {
+    setup();
+    placedAt([["loc-wh", 10]]);
+
+    await adjustQuantity({
+      assetId: ASSET_ID,
+      quantity: 20,
+      category: ConsumptionCategory.RESTOCK,
+      direction: "add",
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      locationId: "loc-van",
+    });
+
+    expect(locationLog()).toEqual([
+      [
+        "loc-van",
+        `${ana} added 20 boards of ${widget} to ${loc("loc-van", "Van")}.`,
+      ],
+    ]);
+  });
+
+  it("logs a departure when a loss empties the pool's only placement", async () => {
+    setup();
+    placedAt([["loc-wh", 5]]);
+    // @ts-expect-error mocked
+    db.assetLocation.findFirst.mockResolvedValue({ id: "al-wh", quantity: 5 });
+
+    await adjustQuantity({
+      assetId: ASSET_ID,
+      quantity: 5,
+      category: ConsumptionCategory.LOSS,
+      direction: "subtract",
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      locationId: "loc-wh",
+    });
+
+    expect(locationLog()).toEqual([
+      [
+        "loc-wh",
+        `${ana} removed 5 boards of ${widget} from ${loc(
+          "loc-wh",
+          "Warehouse"
+        )}.`,
+      ],
+    ]);
+  });
+
+  it("writes no move line when the placement only grows", async () => {
+    setup();
+    placedAt([["loc-wh", 10]]);
+    // @ts-expect-error mocked
+    db.assetLocation.findFirst.mockResolvedValue({ id: "al-wh", quantity: 10 });
+
+    await adjustQuantity({
+      assetId: ASSET_ID,
+      quantity: 5,
+      category: ConsumptionCategory.RESTOCK,
+      direction: "add",
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      locationId: "loc-wh",
+    });
+
+    expect(locationLog()).toEqual([]);
   });
 });

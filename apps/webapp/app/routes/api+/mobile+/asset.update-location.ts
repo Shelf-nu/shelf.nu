@@ -19,7 +19,10 @@ import {
   readStockState,
   recordStockChanges,
 } from "~/modules/consumption-log/stock-ledger.server";
-import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  placementChangeMoves,
+} from "~/modules/location-note/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -178,7 +181,7 @@ export async function action({ request }: ActionFunctionArgs) {
       placedQuantity,
       previousLocation,
       previousQuantity,
-      collapsedPlacements,
+      placementsBefore,
       rehome,
     } = await db.$transaction(async (tx) => {
       /**
@@ -243,6 +246,8 @@ export async function action({ request }: ActionFunctionArgs) {
        */
       const placementsBefore = await tx.assetLocation.findMany({
         where: { assetId, assetKitId: null },
+        // Oldest first, so the primary and the pairing of moves are stable.
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           quantity: true,
           location: { select: { id: true, name: true } },
@@ -372,7 +377,7 @@ export async function action({ request }: ActionFunctionArgs) {
         placedQuantity: pivotQuantity,
         previousLocation: primaryBefore,
         previousQuantity: primaryQuantityBefore,
-        collapsedPlacements,
+        placementsBefore,
         rehome: rehomeResult,
       };
     });
@@ -447,32 +452,20 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     /**
-     * The location activity log gets the same lines the web writes for each
-     * event above: the arrival at the requested location and every placement
-     * the replace collapsed. A collapsed placement AT the requested location
-     * did not leave it (its units are part of the new placement), so it gets
-     * no removal line.
+     * The location activity log reads each location's amount before and after
+     * the replace, so it names only what really moved: units that went to the
+     * requested location, and units that became unplaced.
      */
     await createAssetLocationMoveNotes({
-      moves: [
-        ...collapsedPlacements
-          .filter((placement) => placement.location?.id !== location.id)
-          .map((placement) => ({
-            asset,
-            from: placement.location,
-            to: null,
-            quantity: placement.quantity,
-          })),
-        {
-          asset,
-          from: previousLocation,
-          to: location,
-          quantity: placedQuantity,
-          // The replace dropped the whole placement there, not just the
-          // units it placed at the new location.
-          fromQuantity: previousQuantity,
-        },
-      ],
+      moves: placementChangeMoves({
+        asset,
+        before: placementsBefore.flatMap((placement) =>
+          placement.location
+            ? [{ location: placement.location, quantity: placement.quantity }]
+            : []
+        ),
+        after: [{ location, quantity: placedQuantity }],
+      }),
       actor: user,
     });
 
