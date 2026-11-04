@@ -554,7 +554,7 @@ describe("resolveUserAction: log a member out of Shelf", () => {
     member = true,
   }: {
     enabledSso?: boolean;
-    targetRoles?: OrganizationRoles[];
+    targetRoles?: readonly OrganizationRoles[];
     targetSso?: boolean;
     member?: boolean;
   } = {}) {
@@ -647,10 +647,7 @@ describe("resolveUserAction: log a member out of Shelf", () => {
   ] as const)(
     "refuses to log out %s",
     async (_label, setup, target, message) => {
-      arrange({
-        ...setup,
-        targetRoles: setup.targetRoles && [...setup.targetRoles],
-      });
+      arrange(setup);
 
       await expect(
         resolveUserAction(
