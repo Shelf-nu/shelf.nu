@@ -232,7 +232,10 @@ export async function createAssetLocationMoveNotes({
   );
   if (realMoves.length === 0) return;
 
-  /** Arrivals grouped by destination; departures by source AND destination. */
+  /**
+   * Arrivals grouped by destination and by whether they came from a location;
+   * departures by source AND destination.
+   */
   const arrivals = new Map<string, AssetLocationMove[]>();
   const departures = new Map<string, AssetLocationMove[]>();
   const addTo = (
@@ -245,7 +248,15 @@ export async function createAssetLocationMoveNotes({
     else groups.set(key, [move]);
   };
   for (const move of realMoves) {
-    if (move.to) addTo(arrivals, move.to.id, move);
+    // Units from the unplaced pool get their own line, so "Moved from" names
+    // the source of every unit on its line.
+    if (move.to) {
+      addTo(
+        arrivals,
+        `${move.to.id}:${move.from ? "placed" : "unplaced"}`,
+        move
+      );
+    }
     if (move.from) {
       addTo(departures, `${move.from.id}:${move.to?.id ?? ""}`, move);
     }

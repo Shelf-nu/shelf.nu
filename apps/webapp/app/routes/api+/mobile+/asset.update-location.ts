@@ -401,6 +401,25 @@ export async function action({ request }: ActionFunctionArgs) {
       location: getPrimaryLocation(refreshedAsset),
     };
 
+    /**
+     * The location activity log reads each location's amount before and after
+     * the replace, so it names only what really moved: units that went to the
+     * requested location, and units that became unplaced. Written before the
+     * asset note: it never throws, so a failing asset note cannot skip it.
+     */
+    await createAssetLocationMoveNotes({
+      moves: placementChangeMoves({
+        asset,
+        before: placementsBefore.flatMap((placement) =>
+          placement.location
+            ? [{ location: placement.location, quantity: placement.quantity }]
+            : []
+        ),
+        after: [{ location, quantity: placedQuantity }],
+      }),
+      actor: user,
+    });
+
     // Create activity note (matches webapp format)
     const actor = wrapUserLinkForNote({
       id: user.id,
@@ -449,24 +468,6 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       assetId: asset.id,
       organizationId,
-    });
-
-    /**
-     * The location activity log reads each location's amount before and after
-     * the replace, so it names only what really moved: units that went to the
-     * requested location, and units that became unplaced.
-     */
-    await createAssetLocationMoveNotes({
-      moves: placementChangeMoves({
-        asset,
-        before: placementsBefore.flatMap((placement) =>
-          placement.location
-            ? [{ location: placement.location, quantity: placement.quantity }]
-            : []
-        ),
-        after: [{ location, quantity: placedQuantity }],
-      }),
-      actor: user,
     });
 
     return data({

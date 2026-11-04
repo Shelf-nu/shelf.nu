@@ -305,6 +305,37 @@ describe("createAssetLocationMoveNotes", () => {
     ]);
   });
 
+  it("gives units from the unplaced pool their own arrival line", async () => {
+    const sandbags = {
+      id: "sandbags",
+      title: "Sandbags",
+      type: "QUANTITY_TRACKED" as const,
+      unitOfMeasure: "bags",
+    };
+    await createAssetLocationMoveNotes({
+      actor,
+      moves: [
+        { asset: sandbags, from: unitA, to: dock, quantity: 6 },
+        { asset: sandbags, from: null, to: dock, quantity: 2 },
+      ],
+    });
+
+    const bags = '{% link to="/assets/sandbags" text="Sandbags" /%}';
+    expect(rows().slice(0, 2)).toEqual([
+      [
+        "loc-dock",
+        `${ADA} added 6 bags of ${bags} to ${loc(
+          "loc-dock",
+          "Dock"
+        )}. Moved from ${loc("loc-a", "Unit A")}.`,
+      ],
+      [
+        "loc-dock",
+        `${ADA} added 2 bags of ${bags} to ${loc("loc-dock", "Dock")}.`,
+      ],
+    ]);
+  });
+
   it("names the unit count when one quantity-tracked asset moves", async () => {
     await createAssetLocationMoveNotes({
       actor,
