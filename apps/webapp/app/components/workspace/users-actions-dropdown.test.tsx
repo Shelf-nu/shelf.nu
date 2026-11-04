@@ -7,7 +7,8 @@
  * role needs the owner. A locked control stays in the menu with its reason
  * (`aria-disabled`), an open one is a plain enabled button.
  *
- * Also pins where "Log out of Shelf" appears (SSO workspace, SSO member) and
+ * Also pins where "Log out of Shelf" appears (SSO workspace, SSO member whose
+ * email domain is the workspace's SSO domain) and
  * when it locks (yourself, the workspace owner), mirroring
  * `assertCanLogoutMember`.
  *
@@ -93,6 +94,7 @@ function renderMenu({
   targetUserId = "target-user",
   isSSO = false,
   enabledSso = false,
+  email = "target@example.com",
 }: {
   callerRoles: readonly OrganizationRoles[];
   target: OrganizationRoles;
@@ -101,9 +103,11 @@ function renderMenu({
   targetUserId?: string;
   isSSO?: boolean;
   enabledSso?: boolean;
+  email?: string;
 }) {
   vi.mocked(useCurrentOrganization).mockReturnValue({
     enabledSso,
+    ssoDetails: { domain: "example.com" },
   } as ReturnType<typeof useCurrentOrganization>);
   vi.mocked(useRoleAccess).mockReturnValue(
     resolveRoleAccess({
@@ -123,7 +127,7 @@ function renderMenu({
       inviteStatus={inviteStatus}
       name="Target"
       teamMemberId="tm-1"
-      email="target@example.com"
+      email={email}
       isSSO={isSSO}
       role={ROLE_LABELS[target]}
       roleEnum={target}
@@ -195,6 +199,10 @@ describe("TeamUsersActionsDropdown: log out of Shelf", () => {
     [
       "a member who does not sign in through SSO",
       { enabledSso: true, isSSO: false },
+    ],
+    [
+      "an SSO member from another company's identity provider",
+      { enabledSso: true, isSSO: true, email: "jane@othercompany.com" },
     ],
   ])("is not offered for %s", (_label, flags) => {
     renderMenu({

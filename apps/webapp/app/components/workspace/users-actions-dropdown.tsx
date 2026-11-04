@@ -3,7 +3,8 @@
  *
  * The actions menu on a team member row and on the member page: resend or
  * cancel a pending invite, change a member's role, revoke access and, in SSO
- * workspaces, log an SSO member out of Shelf. Each
+ * workspaces, log out of Shelf a member who signs in through that workspace's
+ * SSO. Each
  * control is locked, with its reason, when the signed-in member may not make
  * that change; the server refuses the same changes in `resolveUserAction`.
  *
@@ -32,6 +33,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
+import { emailMatchesDomains } from "~/utils/misc";
 import {
   canInviteRole,
   roleChangeRequiresOwner,
@@ -100,12 +102,21 @@ export function TeamUsersActionsDropdown({
   const [changeRoleOpen, setChangeRoleOpen] = useState(false);
   const [revokeAccessOpen, setRevokeAccessOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const currentOrganization = useCurrentOrganization();
   /**
    * "Log out of Shelf" exists for SSO workspaces: an SSO member's role is
    * applied at sign-in, so ending their sessions applies an IdP role change
-   * now. Members who do not sign in through SSO have no such role to refresh.
+   * now. Only members who sign in through this workspace's SSO (an SSO user
+   * whose email domain is one of its SSO domains) have such a role. Mirrors
+   * `assertCanLogoutMember`, which refuses everyone else.
    */
-  const ssoEnabled = useCurrentOrganization()?.enabledSso ?? false;
+  const canBeLoggedOut =
+    (currentOrganization?.enabledSso ?? false) &&
+    isSSO &&
+    emailMatchesDomains(
+      email.split("@")[1] ?? "",
+      currentOrganization?.ssoDetails?.domain ?? null
+    );
 
   /** Most users will have an invite, however we have to handle SSO case:
    *
@@ -250,7 +261,7 @@ export function TeamUsersActionsDropdown({
                     <RemoveUserIcon /> Revoke access
                   </span>
                 </Button>
-                {ssoEnabled && isSSO ? (
+                {canBeLoggedOut ? (
                   <Button
                     type="button"
                     variant="link"
@@ -300,7 +311,7 @@ export function TeamUsersActionsDropdown({
             open={revokeAccessOpen}
             onOpenChange={setRevokeAccessOpen}
           />
-          {ssoEnabled && isSSO ? (
+          {canBeLoggedOut ? (
             <LogoutUserDialog
               userId={userId}
               name={name}

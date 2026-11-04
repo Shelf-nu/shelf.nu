@@ -22,8 +22,9 @@
  *    the role write back.
  *
  * 5. "Log out of Shelf" ends a member's sessions only in an SSO workspace, only
- *    for an SSO member of it, never for the caller themselves and never for
- *    the workspace owner. Admins may log out other admins.
+ *    for an SSO member whose email domain is that workspace's SSO domain, never
+ *    for the caller themselves and never for the workspace owner. Admins may
+ *    log out other admins.
  *
  * @see {@link file://./utils.server.ts}
  * @see {@link file://./../invite/roles.ts}
@@ -551,17 +552,26 @@ describe("resolveUserAction: log a member out of Shelf", () => {
     enabledSso = true,
     targetRoles = [OrganizationRoles.BASE],
     targetSso = true,
+    targetEmail = "member@acme.com",
     member = true,
   }: {
     enabledSso?: boolean;
     targetRoles?: readonly OrganizationRoles[];
     targetSso?: boolean;
+    targetEmail?: string;
     member?: boolean;
   } = {}) {
-    orgMock.mockResolvedValue({ enabledSso, userId: "owner-user" } as never);
+    orgMock.mockResolvedValue({
+      enabledSso,
+      userId: "owner-user",
+      ssoDetails: { domain: "acme.com, acme.io" },
+    } as never);
     userOrgMock.mockResolvedValue(
       member
-        ? ({ roles: targetRoles, user: { sso: targetSso } } as never)
+        ? ({
+            roles: targetRoles,
+            user: { sso: targetSso, email: targetEmail },
+          } as never)
         : null
     );
   }
@@ -591,6 +601,19 @@ describe("resolveUserAction: log a member out of Shelf", () => {
       "org-1",
       "owner-user",
       accessFor([OrganizationRoles.OWNER])
+    );
+
+    expect(endAllSessionsForUser).toHaveBeenCalledWith("member");
+  });
+
+  it("accepts any of the workspace's SSO domains, in any letter case", async () => {
+    arrange({ targetEmail: "Member@ACME.io" });
+
+    await resolveUserAction(
+      logoutRequest("member"),
+      "org-1",
+      "admin-user",
+      accessFor([OrganizationRoles.ADMIN])
     );
 
     expect(endAllSessionsForUser).toHaveBeenCalledWith("member");
@@ -637,6 +660,12 @@ describe("resolveUserAction: log a member out of Shelf", () => {
       { targetSso: false },
       "member",
       /does not sign in through SSO/i,
+    ],
+    [
+      "an SSO member from another company's identity provider",
+      { targetEmail: "jane@othercompany.com" },
+      "member",
+      /does not sign in through this workspace's SSO/i,
     ],
     [
       "a user who is not a member of this workspace",

@@ -23,6 +23,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
+import { emailMatchesDomains } from "~/utils/misc";
 import { roleChangeRequiresOwner } from "~/utils/permissions/membership-access";
 import {
   PermissionAction,
@@ -610,7 +611,11 @@ export async function generateUniqueUsername(email: string): Promise<string> {
  *
  * The action exists for SSO workspaces, where a role changed in the identity
  * provider is applied only when the member next signs in. So the workspace
- * must have SSO enabled and the target must be an SSO member of it. Nobody
+ * must have SSO enabled and the target must sign in through it: an SSO user
+ * whose email domain is one of the workspace's SSO domains. SSO sign-in only
+ * reconciles roles in workspaces that claim the user's email domain, so an SSO
+ * user invited from another company's identity provider has no role here to
+ * refresh, and their sessions are not this workspace's to end. Nobody
  * logs themselves out here, and nobody logs out the workspace owner. Admins
  * may log out other admins.
  *
@@ -620,7 +625,8 @@ export async function generateUniqueUsername(email: string): Promise<string> {
  * @param args.organizationId - The caller's current organization
  * @param args.actorUserId - The member asking for the logout
  * @param args.targetUserId - The member to log out, from the form
- * @throws {ShelfError} 400 for a self-logout or a non-SSO workspace or member,
+ * @throws {ShelfError} 400 for a self-logout, a non-SSO workspace, or a member
+ *   who does not sign in through this workspace's SSO,
  *   403 for the owner, 404 when the target is not a member of this workspace
  */
 async function assertCanLogoutMember({
@@ -650,12 +656,16 @@ async function assertCanLogoutMember({
   const [org, membership] = await Promise.all([
     db.organization.findUnique({
       where: { id: organizationId },
-      select: { enabledSso: true, userId: true },
+      select: {
+        enabledSso: true,
+        userId: true,
+        ssoDetails: { select: { domain: true } },
+      },
     }),
     // Scoped by organizationId: a user id from another workspace finds nothing
     db.userOrganization.findFirst({
       where: { userId: targetUserId, organizationId },
-      select: { roles: true, user: { select: { sso: true } } },
+      select: { roles: true, user: { select: { sso: true, email: true } } },
     }),
   ]);
 
@@ -673,6 +683,18 @@ async function assertCanLogoutMember({
   if (!membership.user.sso) {
     throw refuse(
       "This member does not sign in through SSO, so there is no SSO role to refresh.",
+      400
+    );
+  }
+
+  if (
+    !emailMatchesDomains(
+      membership.user.email.split("@")[1] ?? "",
+      org.ssoDetails?.domain ?? null
+    )
+  ) {
+    throw refuse(
+      "This member does not sign in through this workspace's SSO, so there is no SSO role to refresh.",
       400
     );
   }
