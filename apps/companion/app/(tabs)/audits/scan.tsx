@@ -42,6 +42,7 @@ import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 import { useAuditInit } from "@/hooks/use-audit-init";
 import { useScanQueue } from "@/hooks/use-scan-queue";
+import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
 import {
   useToastNotification,
   type ScanResult,
@@ -835,6 +836,9 @@ function AuditScannerContent() {
     ]
   );
 
+  /** The camera's frame callback; the handler's processing lock drops frames during a lookup. */
+  const handleCameraScan = useCameraScanHandler(handleBarCodeScanned, false);
+
   // ── Complete audit ───────────────────────────────────
 
   // Performs the actual completion request + cleanup. Extracted so it can be
@@ -1192,7 +1196,10 @@ function AuditScannerContent() {
             barcodeScannerSettings={{
               barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
             }}
-            onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+            // Always a function: swapping it for undefined reconfigures the
+            // iOS capture session and switches the torch off. The handler's
+            // processing lock drops frames during a lookup instead.
+            onBarcodeScanned={handleCameraScan}
           />
         )}
 
