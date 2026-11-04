@@ -185,6 +185,22 @@ export function resolveLinkOpening(
 }
 
 /**
+ * Whether a Shelf link opens something in the app: a screen, or a QR code
+ * resolved to one. A Shelf page the app has no screen for (a team member,
+ * a location, settings) opens in the in-app browser instead, which holds no
+ * Shelf session and shows the web login. A link the app writes itself, such
+ * as a note's `link` tag, links only when this is true.
+ *
+ * @param url - The link's absolute URL.
+ * @param activeServerUrl - Base URL of the connected Shelf server.
+ * @returns True when tapping the link opens an app screen.
+ */
+export function opensInApp(url: string, activeServerUrl: string): boolean {
+  const opening = resolveLinkOpening(url, activeServerUrl);
+  return opening !== null && opening.opener !== "browser";
+}
+
+/**
  * Whether a link leaves Shelf: it opens a page of another website in the
  * browser. Screens such links get a link chip under the text they appear
  * in; links to Shelf's own screens and pages stay inline.

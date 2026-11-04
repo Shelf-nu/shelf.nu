@@ -9,8 +9,9 @@
  * its words instead of leaving a gap in the sentence.
  *
  * `markdocToSegments` reads the same note as text and link runs: each `link`
- * tag (a booking, kit, asset or person the note names) links to its page on
- * the connected Shelf server, a value someone typed stays text, a comment's
+ * tag the app has a screen for (a booking, kit or asset the note names)
+ * links to it, one it has none for (a person) stays text, a value someone
+ * typed stays text, a comment's
  * Markdown `[label](https://...)` link reads as its label, and every other
  * URL or bare domain in the text links as typed.
  *
@@ -22,6 +23,7 @@
  */
 
 import { segmentText, type TextSegment } from "@shelf/links";
+import { opensInApp } from "./open-link";
 import { findTextLinks } from "./text-links";
 
 /** How the caller formats the parts that depend on the user's preferences. */
@@ -161,7 +163,10 @@ export interface NoteLinkOptions {
  * Reads an activity note as text and link runs, for a note shown with
  * tappable links.
  *
- * - A `link` tag links to its page on the connected Shelf server.
+ * - A `link` tag links to the app screen for its page on the connected
+ *   Shelf server. A page the app has no screen for (a team member) reads as
+ *   its text: the in-app browser holds no Shelf session, so it would only
+ *   show the web login.
  * - A `name` tag (a value someone typed) is plain text, unless the note's
  *   writer marked it `chips=true` (a custom field value), whose http(s)
  *   URLs link as typed, as on the web.
@@ -197,7 +202,9 @@ export function markdocToSegments(
       const to = tagAttribute(attributes, "to");
       const url = to === undefined ? null : shelfPageUrl(to, shelfBaseUrl);
       if (text === undefined || url === null) return tag;
-      return hold({ type: "link", text: cleanRunText(text), url });
+      return opensInApp(url, shelfBaseUrl)
+        ? hold({ type: "link", text: cleanRunText(text), url })
+        : hold({ type: "text", text: cleanRunText(text) });
     })
     .replace(NAME_TAG, (tag, attributes: string) => {
       const text = tagAttribute(attributes, "text");
@@ -260,7 +267,14 @@ function collapseBoundaries(segments: readonly TextSegment[]): TextSegment[] {
     let text = segment.text;
     if (endsWithSpace) text = text.replace(/^\s+/, "");
     if (text === "") continue;
-    out.push({ ...segment, text });
+    const previous = out[out.length - 1];
+    // Neighbouring text runs read as one run, so a held name and the words
+    // around it render as a single piece of text.
+    if (segment.type === "text" && previous?.type === "text") {
+      out[out.length - 1] = { ...previous, text: previous.text + text };
+    } else {
+      out.push({ ...segment, text });
+    }
     endsWithSpace = /\s$/.test(text);
   }
   const last = out[out.length - 1];

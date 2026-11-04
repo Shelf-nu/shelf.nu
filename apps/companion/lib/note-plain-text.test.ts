@@ -80,7 +80,7 @@ const BASE = "https://app.shelf.nu";
 const COMMENT = { allowExternalLinks: true };
 const SYSTEM = { allowExternalLinks: false };
 
-test("a link tag links to its page on the connected server", () => {
+test("a link tag links to the app screen for its page", () => {
   assert.deepEqual(
     markdocToSegments(
       `${SAM} checked out via {% link to="/bookings/bk-1" text="Shoot &quot;B&quot;" /%}.`,
@@ -89,12 +89,7 @@ test("a link tag links to its page on the connected server", () => {
       SYSTEM
     ),
     [
-      {
-        type: "link",
-        text: "Sam Lee",
-        url: "https://app.shelf.nu/settings/team/users/u-1",
-      },
-      { type: "text", text: " checked out via " },
+      { type: "text", text: "Sam Lee checked out via " },
       {
         type: "link",
         text: 'Shoot "B"',
@@ -190,10 +185,7 @@ test("a typed name that looks like a domain stays text", () => {
       BASE,
       SYSTEM
     ),
-    [
-      { type: "text", text: "Renamed to " },
-      { type: "text", text: "Shoot at canon.com" },
-    ]
+    [{ type: "text", text: "Renamed to Shoot at canon.com" }]
   );
 });
 
@@ -206,11 +198,6 @@ test("a value marked chips=true links its URL, as on the web", () => {
       SYSTEM
     ).filter((segment) => segment.type === "link"),
     [
-      {
-        type: "link",
-        text: "Sam Lee",
-        url: "https://app.shelf.nu/settings/team/users/u-1",
-      },
       {
         type: "link",
         text: "https://example.com/m.pdf",
@@ -265,11 +252,11 @@ test("placeholder characters typed into a note stay text", () => {
 });
 
 test("typed placeholder characters stay text next to a held link", () => {
-  const content = `\uE0000\uE001 ${SAM}`;
+  const content = `\uE0000\uE001 {% link to="/kits/k-1" text="Kit A" /%}`;
   const segments = markdocToSegments(content, format, BASE, SYSTEM);
   assert.equal(
     segments.map((segment) => segment.text).join(""),
-    "\uE0000\uE001 Sam Lee"
+    "\uE0000\uE001 Kit A"
   );
   assert.equal(segments.filter((segment) => segment.type === "link").length, 1);
 });
@@ -309,5 +296,23 @@ test("a Markdown link to a URL that does not parse stays text", () => {
       (segment) => segment.type === "link"
     ),
     []
+  );
+});
+
+test("a link tag to a page the app has no screen for reads as its text", () => {
+  // A team member and a location only have web pages, which the in-app
+  // browser would show behind the web login.
+  assert.deepEqual(
+    markdocToSegments(
+      `${SAM} moved it to {% link to="/locations/loc-1" text="Studio" /%}, ` +
+        'kit {% link to="/kits/k-1" text="Kit A" /%}',
+      format,
+      BASE,
+      SYSTEM
+    ),
+    [
+      { type: "text", text: "Sam Lee moved it to Studio, kit " },
+      { type: "link", text: "Kit A", url: "https://app.shelf.nu/kits/k-1" },
+    ]
   );
 });
