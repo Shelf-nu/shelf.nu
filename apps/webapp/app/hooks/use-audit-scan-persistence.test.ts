@@ -342,6 +342,48 @@ describe("useAuditScanPersistence", () => {
     expect(lastSubmit?.[0].get("foundQuantity")).toBe("6");
   });
 
+  it("reports counts the server refused to save, with its message", () => {
+    const refs = makeRefs();
+    const onCountFailed = vi.fn();
+    const counts = {
+      "pool-1": {
+        expectedQuantity: 14,
+        foundQuantity: 9,
+        unitOfMeasure: "pcs",
+        unsaved: true,
+      },
+    };
+    let fetcher = makeFetcher();
+    const pool = {
+      "qr-pool": {
+        data: { id: "pool-1", title: "Sandbag" } as unknown as AssetFromQr,
+        type: "asset" as const,
+      },
+    };
+
+    const { rerender } = renderHook(() =>
+      useAuditScanPersistence({
+        auditSession,
+        scannedItems: pool,
+        expectedAssets: [],
+        scanPersistFetcher: fetcher,
+        ...refs,
+        auditCounts: counts,
+        onCountFailed,
+      })
+    );
+    fetcher = makeFetcher({
+      state: "idle",
+      data: { error: { message: "This audit is archived." } },
+    });
+    rerender();
+
+    expect(onCountFailed).toHaveBeenCalledWith(
+      ["pool-1"],
+      "This audit is archived."
+    );
+  });
+
   it("reports the count the server kept when it differs from the one sent", () => {
     const refs = makeRefs();
     const onCountSaved = vi.fn();
@@ -380,7 +422,7 @@ describe("useAuditScanPersistence", () => {
     });
     rerender();
 
-    expect(onCountSaved).toHaveBeenCalledWith("pool-1", 6);
+    expect(onCountSaved).toHaveBeenCalledWith("pool-1", 6, true);
     expect(refs.persistedItemsRef.current.has("pool-1")).toBe(true);
   });
 });

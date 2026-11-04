@@ -10,13 +10,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  auditScanDecision,
+  carryFirstScan,
   countExpectation,
+  countSheetDefault,
   countWasRefused,
   countFieldsFromScan,
   countTargetFor,
   dropSupersededCounts,
   entriesToResync,
   isSupersededCount,
+  recountQueueEntry,
   storedCountFor,
   type CountedQueueEntry,
 } from "./audit-scan-queue";
@@ -240,5 +244,165 @@ describe("countWasRefused", () => {
     assert.equal(countWasRefused(9, 9), false);
     assert.equal(countWasRefused(9, undefined), false);
     assert.equal(countWasRefused(undefined, 6), false);
+  });
+});
+
+describe("countSheetDefault", () => {
+  it("opens on the count already recorded", () => {
+    assert.equal(
+      countSheetDefault({
+        isExpected: true,
+        expectedQuantity: 14,
+        foundQuantity: 8,
+      }),
+      8
+    );
+  });
+
+  it("opens on the expected units of a listed pool", () => {
+    assert.equal(
+      countSheetDefault({
+        isExpected: true,
+        expectedQuantity: 14,
+        foundQuantity: null,
+      }),
+      14
+    );
+  });
+
+  it("opens blank when nothing is expected or the asset is not on the list", () => {
+    assert.equal(
+      countSheetDefault({
+        isExpected: true,
+        expectedQuantity: 0,
+        foundQuantity: null,
+      }),
+      null
+    );
+    assert.equal(
+      countSheetDefault({
+        isExpected: false,
+        expectedQuantity: 50,
+        foundQuantity: null,
+      }),
+      null
+    );
+  });
+});
+
+describe("carryFirstScan", () => {
+  it("makes a recount a first scan when it replaces an unsent first scan", () => {
+    const first = entry({ foundQuantity: 5, queuedAt: 1 });
+    const recount = entry({ foundQuantity: 9, queuedAt: 2, recount: true });
+    assert.equal(carryFirstScan(recount, [first]).recount, false);
+  });
+
+  it("keeps a recount that replaces only older recounts", () => {
+    const older = entry({ foundQuantity: 5, queuedAt: 1, recount: true });
+    const recount = entry({ foundQuantity: 9, queuedAt: 2, recount: true });
+    assert.equal(carryFirstScan(recount, [older]).recount, true);
+  });
+
+  it("ignores entries for other assets", () => {
+    const other = entry({ assetId: "camera-1", foundQuantity: 1 });
+    const recount = entry({ foundQuantity: 9, queuedAt: 2, recount: true });
+    assert.equal(carryFirstScan(recount, [other]).recount, true);
+  });
+});
+
+describe("auditScanDecision", () => {
+  const pool = { type: "QUANTITY_TRACKED", quantity: 20, unitOfMeasure: "pcs" };
+  const camera = { type: "INDIVIDUAL" };
+
+  it("asks the first count of a listed pool against its row's snapshot", () => {
+    assert.deepEqual(
+      auditScanDecision({
+        scannedRow: undefined,
+        expectedRecord: { expectedQuantity: 14, unitOfMeasure: "pcs" },
+        lookedUp: pool,
+        isExpected: true,
+      }),
+      {
+        kind: "first",
+        expectedQuantity: 14,
+        isExpected: true,
+        unitOfMeasure: "pcs",
+      }
+    );
+  });
+
+  it("asks the first count of an unlisted pool", () => {
+    assert.equal(
+      auditScanDecision({
+        scannedRow: undefined,
+        expectedRecord: undefined,
+        lookedUp: pool,
+        isExpected: false,
+      }).kind,
+      "first"
+    );
+  });
+
+  it("recounts a pool already scanned, keeping its row's numbers", () => {
+    assert.deepEqual(
+      auditScanDecision({
+        scannedRow: {
+          isExpected: true,
+          expectedQuantity: 14,
+          foundQuantity: 8,
+          unitOfMeasure: "pcs",
+        },
+        expectedRecord: { expectedQuantity: 14 },
+        lookedUp: pool,
+        isExpected: true,
+      }),
+      {
+        kind: "recount",
+        expectedQuantity: 14,
+        foundQuantity: 8,
+        isExpected: true,
+        unitOfMeasure: "pcs",
+      }
+    );
+  });
+
+  it("treats a second scan of an individual asset as a duplicate", () => {
+    assert.deepEqual(
+      auditScanDecision({
+        scannedRow: { isExpected: true },
+        expectedRecord: { expectedQuantity: null },
+        lookedUp: camera,
+        isExpected: true,
+      }),
+      { kind: "duplicate" }
+    );
+  });
+
+  it("records the first scan of an individual asset without a count", () => {
+    assert.deepEqual(
+      auditScanDecision({
+        scannedRow: undefined,
+        expectedRecord: { expectedQuantity: null },
+        lookedUp: camera,
+        isExpected: true,
+      }),
+      { kind: "record", isExpected: true }
+    );
+  });
+});
+
+describe("recountQueueEntry", () => {
+  it("marks the entry as a recount, so crash recovery replays it", () => {
+    const queued = recountQueueEntry({
+      auditSessionId: "audit-1",
+      qrId: "qr-1",
+      assetId: "pool-1",
+      isExpected: true,
+      foundQuantity: 9,
+    });
+    assert.equal(queued.recount, true);
+    assert.deepEqual(entriesToResync([queued], [], new Set(["pool-1"])), [
+      queued,
+    ]);
   });
 });

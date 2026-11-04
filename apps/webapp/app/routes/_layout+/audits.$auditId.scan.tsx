@@ -329,14 +329,51 @@ export default function AuditSessionRoute() {
 
   /** A count was saved: show the stored count and stop preferring ours. */
   const handleCountSaved = useCallback(
-    (assetId: string, foundQuantity: number | null) => {
+    (assetId: string, foundQuantity: number | null, refused: boolean) => {
       const count = store.get(auditCountsAtom)[assetId];
       if (!count) return;
       mergeAuditCounts({
         [assetId]: { ...count, foundQuantity, unsaved: false },
       });
+      // The count the auditor entered did not stick; the row has just
+      // changed back, so say why.
+      if (refused) {
+        showNotification({
+          title: "Count not saved",
+          message:
+            foundQuantity === null
+              ? "This scan is no longer in the audit."
+              : `The audit kept ${foundQuantity}.`,
+          icon: { name: "x", variant: "error" },
+          senderId: null,
+        });
+      }
     },
-    [store, mergeAuditCounts]
+    [store, mergeAuditCounts, showNotification]
+  );
+
+  /**
+   * The server refused to save these counts (no permission any more, or the
+   * audit was archived): stop holding "Complete audit" for them and say why.
+   */
+  const handleCountFailed = useCallback(
+    (assetIds: string[], message: string) => {
+      const counts = store.get(auditCountsAtom);
+      mergeAuditCounts(
+        Object.fromEntries(
+          assetIds
+            .filter((assetId) => counts[assetId])
+            .map((assetId) => [assetId, { ...counts[assetId], unsaved: false }])
+        )
+      );
+      showNotification({
+        title: "Count not saved",
+        message,
+        icon: { name: "x", variant: "error" },
+        senderId: null,
+      });
+    },
+    [store, mergeAuditCounts, showNotification]
   );
 
   /** The server refused a scan for want of a count: ask for one. */
@@ -385,6 +422,7 @@ export default function AuditSessionRoute() {
     auditCounts,
     onCountRequired: handleCountRequired,
     onCountSaved: handleCountSaved,
+    onCountFailed: handleCountFailed,
   });
 
   /**

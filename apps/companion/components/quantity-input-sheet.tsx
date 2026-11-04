@@ -72,8 +72,11 @@ type Props = {
    * it and no `target`, the echo and accessible label leave the ceiling out.
    */
   placeholder?: string;
-  /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
-  defaultValue?: number;
+  /**
+   * Initial value when the sheet opens (clamped to [min, max]). Defaults to
+   * `min`; `null` opens the field blank, so the operator must type a number.
+   */
+  defaultValue?: number | null;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
   /**
@@ -190,7 +193,7 @@ export function QuantityInputSheet({
         Math.max(defaultValue ?? min, min),
         Math.max(max, min)
       );
-      setValue(String(seed));
+      setValue(defaultValue === null ? "" : String(seed));
       if (hasSecondaryField) {
         // The secondary seed is clamped to the primary seed: the two fields
         // move together and the secondary never exceeds the units released.

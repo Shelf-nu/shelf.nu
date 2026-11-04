@@ -1,5 +1,4 @@
 import { useEffect, useReducer, useRef } from "react";
-import { AssetType } from "@prisma/client";
 import { type FetcherWithComponents } from "react-router";
 import type {
   AuditCount,
@@ -7,6 +6,7 @@ import type {
   AuditScannedItem,
   ScanListItems,
 } from "~/atoms/qr-scanner";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type { AuditScanCountRequired } from "~/modules/audit/service.server";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 
@@ -21,7 +21,7 @@ export function isQuantityScan(
 ): boolean {
   return (
     auditCounts[data.id] !== undefined ||
-    data.type === AssetType.QUANTITY_TRACKED
+    isQuantityTracked(data as { type?: string | null })
   );
 }
 
@@ -53,10 +53,22 @@ type UseAuditScanPersistenceProps = {
   /**
    * Called when a quantity-tracked scan is saved, with the count the server
    * stored. That is the count sent, unless the server kept another (the audit
-   * finished, or the scan was removed, before a recount landed). The caller
-   * adopts it so the drawer shows what is stored.
+   * finished, or the scan was removed, before a recount landed, or another
+   * scanner's first count claimed the row). The caller adopts it so the drawer
+   * shows what is stored; `refused` is true in that case so it can say why.
    */
-  onCountSaved: (assetId: string, foundQuantity: number | null) => void;
+  onCountSaved: (
+    assetId: string,
+    foundQuantity: number | null,
+    refused: boolean
+  ) => void;
+  /**
+   * Called when the server refuses a save that carried counts (no permission
+   * any more, the audit archived), with the assets whose count it refused and
+   * the server's message. The caller stops treating those counts as about to
+   * be saved, so a refusal that keeps repeating cannot hold "Complete audit".
+   */
+  onCountFailed?: (assetIds: string[], message: string) => void;
 };
 
 /**
@@ -90,6 +102,7 @@ export function useAuditScanPersistence({
   auditCounts,
   onCountRequired,
   onCountSaved,
+  onCountFailed,
 }: UseAuditScanPersistenceProps) {
   // The count each in-flight scan carried, keyed by assetId. A recount saved
   // while that request is in flight differs from it, and the scan is sent again.
@@ -233,7 +246,11 @@ export function useAuditScanPersistence({
           }
           persistedItemsRef.current.add(assetId);
           if (isCount) {
-            onCountSaved(assetId, keptOther ? storedCount ?? null : sent);
+            onCountSaved(
+              assetId,
+              keptOther ? storedCount ?? null : sent,
+              keptOther
+            );
           }
         });
         pendingPersistsRef.current.clear();
@@ -244,6 +261,18 @@ export function useAuditScanPersistence({
       } else if ("error" in data && data.error) {
         // eslint-disable-next-line no-console
         console.error("Failed to persist scan:", data.error);
+        const refusedCounts = [...sentCountsRef.current]
+          .filter(([, sent]) => sent !== null && sent !== undefined)
+          .map(([assetId]) => assetId);
+        if (refusedCounts.length > 0) {
+          const refusal = (data as { error?: { message?: unknown } | null })
+            .error;
+          const message =
+            typeof refusal?.message === "string"
+              ? refusal.message
+              : "The server refused it.";
+          onCountFailed?.(refusedCounts, message);
+        }
         // Clear pending so it can be retried
         pendingPersistsRef.current.clear();
         sentCountsRef.current.clear();
@@ -257,5 +286,6 @@ export function useAuditScanPersistence({
     pendingPersistsRef,
     onCountRequired,
     onCountSaved,
+    onCountFailed,
   ]);
 }

@@ -1,5 +1,6 @@
-import { AssetType, AuditAssetStatus } from "@prisma/client";
+import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
+import type { AssetType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type {
   AuditAssignment,
@@ -78,7 +79,7 @@ import {
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetImage } from "../asset/image-resolution";
-import { getPrimaryLocation } from "../asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "../asset/utils";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
@@ -465,9 +466,7 @@ async function snapshotExpectedQuantities(
   const snapshots = new Map<string, number | null>(
     assets.map((asset) => [asset.id, expectedQuantityFor(asset)])
   );
-  const pools = assets.filter(
-    (asset) => asset.type === AssetType.QUANTITY_TRACKED
-  );
+  const pools = assets.filter((asset) => isQuantityTracked(asset));
   if (!scope || pools.length === 0) return snapshots;
 
   const poolIds = { in: pools.map((asset) => asset.id) };
@@ -1651,7 +1650,7 @@ export async function recordAuditScan(
       });
     }
 
-    const isQuantityAsset = scannedAsset.type === AssetType.QUANTITY_TRACKED;
+    const isQuantityAsset = isQuantityTracked(scannedAsset);
     // Individual assets count as one: a count sent for one is ignored.
     const count = isQuantityAsset
       ? parseFoundQuantity(input.foundQuantity, { auditSessionId, assetId })
@@ -2012,15 +2011,30 @@ export async function recordAuditScan(
           // removed but the row survived, or a concurrent scanner just inserted
           // it. The unique constraint rules out a second row, so reuse this one
           // and refresh its scan metadata.
+          //
+          // A row a concurrent first scan just inserted already carries that
+          // scanner's count, which stays (a recount replaces it, not a racing
+          // first scan): this scan reports and records what is stored.
+          const keepsStoredCount =
+            isQuantityAsset &&
+            auditAssetRow.status === AuditAssetStatus.UNEXPECTED;
           await tx.auditAsset.update({
             where: { id: auditAssetRow.id },
             data: {
               status: AuditAssetStatus.UNEXPECTED,
               scannedAt: new Date(),
               scannedById: userId,
-              ...countData,
+              ...(keepsStoredCount ? {} : countData),
             },
           });
+          if (keepsStoredCount) {
+            const stored = await tx.auditAsset.findUnique({
+              where: { auditSessionId_assetId: { auditSessionId, assetId } },
+              select: { expectedQuantity: true, foundQuantity: true },
+            });
+            storedCount = stored?.foundQuantity ?? null;
+            storedExpected = stored?.expectedQuantity ?? expectedQuantity;
+          }
 
           // Only count it if it was not already counted as unexpected. A row a
           // concurrent scanner just inserted is already UNEXPECTED and already
@@ -2794,6 +2808,52 @@ async function updateAuditSessionWhileInStatus(
 }
 
 /**
+ * Gives every quantity-tracked row of an audit that still has no expected
+ * units its snapshot, by the audit's scope rule. Rows created without one
+ * (by code that predates unit counts, for example during a deploy) would
+ * otherwise read as individual assets on the receipt, and a pool never
+ * scanned would drop out of the units line instead of reading "0 of N".
+ *
+ * @param args.auditSessionId - the audit being completed
+ * @param args.scopeMeta - the audit's stored scope
+ * @param args.tx - the completion transaction
+ */
+async function fillMissingExpectedQuantities({
+  auditSessionId,
+  scopeMeta,
+  tx,
+}: {
+  auditSessionId: string;
+  scopeMeta: unknown;
+  tx: Pick<typeof db, "auditAsset" | "assetLocation" | "assetKit" | "custody">;
+}) {
+  const rows = await tx.auditAsset.findMany({
+    where: {
+      auditSessionId,
+      expectedQuantity: null,
+      asset: { type: "QUANTITY_TRACKED" },
+    },
+    select: {
+      id: true,
+      asset: { select: { id: true, type: true, quantity: true } },
+    },
+  });
+  if (rows.length === 0) return;
+
+  const snapshots = await snapshotExpectedQuantities(
+    rows.map((row) => row.asset),
+    auditUnitScope(scopeMeta),
+    tx
+  );
+  for (const row of rows) {
+    await tx.auditAsset.update({
+      where: { id: row.id },
+      data: { expectedQuantity: snapshots.get(row.asset.id) ?? 0 },
+    });
+  }
+}
+
+/**
  * Completes an audit session by finalizing all asset statuses.
  * Expected assets that were not scanned are marked as MISSING.
  * Updates the session status to COMPLETED and sets completedAt timestamp.
@@ -2818,7 +2878,7 @@ export async function completeAuditSession({
       // Verify session exists and belongs to organization
       const session = await tx.auditSession.findUnique({
         where: { id: sessionId, organizationId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, scopeMeta: true },
       });
 
       if (!session) {
@@ -2851,6 +2911,12 @@ export async function completeAuditSession({
           label,
         });
       }
+
+      await fillMissingExpectedQuantities({
+        auditSessionId: sessionId,
+        scopeMeta: session.scopeMeta,
+        tx,
+      });
 
       // Mark all expected assets that weren't scanned as MISSING
       await tx.auditAsset.updateMany({

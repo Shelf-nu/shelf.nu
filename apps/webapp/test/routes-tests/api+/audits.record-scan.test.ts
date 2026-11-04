@@ -255,7 +255,59 @@ describe("POST /api/audits/record-scan", () => {
 
     const response = await callAction();
 
-    expect(JSON.stringify(response)).toContain('"success":false');
-    expect(JSON.stringify(response)).toContain('"status":"count-required"');
+    // Top level, as use-audit-scan-persistence reads it.
+    expect(responseBody(response)).toMatchObject({
+      success: false,
+      status: "count-required",
+      assetId: "pool-1",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    });
+  });
+
+  it("answers a counted scan with the count the server stored, at the top level", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+    recordAuditScan.mockResolvedValue({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+      expectedQuantity: 14,
+      foundQuantity: 6,
+    });
+
+    const response = await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-pool",
+        assetId: "pool-1",
+        countAware: "1",
+        foundQuantity: "8",
+      })
+    );
+
+    // The hook compares this `foundQuantity` with the count it sent to tell
+    // whether the server kept another one (here 6, not 8).
+    expect(responseBody(response)).toMatchObject({
+      success: true,
+      expectedQuantity: 14,
+      foundQuantity: 6,
+    });
   });
 });
+
+/** The payload of an action result, whether wrapped by `data()` or not. */
+function responseBody(response: unknown): Record<string, unknown> {
+  const wrapped = response as { data?: unknown };
+  return (
+    wrapped && typeof wrapped === "object" && "data" in wrapped
+      ? wrapped.data
+      : response
+  ) as Record<string, unknown>;
+}

@@ -186,8 +186,15 @@ function AuditDrawerTitle({
       </span>
       {units ? (
         <span className="block text-xs text-gray-500">
-          Units counted: {units.foundUnits}/{units.expectedUnits}
+          Units counted:{" "}
+          {units.quantityRows > 0
+            ? `${units.foundUnits}/${units.expectedUnits}`
+            : null}
           {units.uncountedRows > 0 && ` • ${units.uncountedRows} not counted`}
+          {units.unexpectedRows > 0 &&
+            `${units.quantityRows > 0 ? " • " : ""}${
+              units.unexpectedUnits
+            } not on the list`}
         </span>
       ) : null}
       {pendingScanCount > 0 ? (
@@ -457,18 +464,30 @@ export default function AuditDrawer({
   // only once scanned here, so a count left from a removed scan is ignored.
   const units = useMemo(
     () =>
-      totalAuditUnits(
-        expectedAssets.map((asset) => ({
+      totalAuditUnits([
+        ...expectedAssets.map((asset) => ({
           expected: true,
           // A finished audit's unscanned row counts 0 found, not "not counted".
           status: asset.rowStatus,
           expectedQuantity: auditCounts[asset.id]?.expectedQuantity ?? null,
-          foundQuantity: scannedAssetIds.has(asset.id)
-            ? auditCounts[asset.id]?.foundQuantity ?? null
-            : null,
-        }))
-      ),
-    [expectedAssets, auditCounts, scannedAssetIds]
+          // A row scanned here, or saved by another auditor (the loader's
+          // FOUND), carries its count; a removed scan's count is ignored.
+          foundQuantity:
+            scannedAssetIds.has(asset.id) || asset.rowStatus === "FOUND"
+              ? auditCounts[asset.id]?.foundQuantity ?? null
+              : null,
+        })),
+        // Scanned pools that are not on the list, as the overview and the
+        // receipt count them.
+        ...[...scannedAssetIds]
+          .filter((assetId) => !expectedAssetIds.has(assetId))
+          .map((assetId) => ({
+            expected: false,
+            expectedQuantity: auditCounts[assetId]?.expectedQuantity ?? null,
+            foundQuantity: auditCounts[assetId]?.foundQuantity ?? null,
+          })),
+      ]),
+    [expectedAssets, expectedAssetIds, auditCounts, scannedAssetIds]
   );
 
   /** Opens the count dialog to correct a scanned quantity-tracked row. */

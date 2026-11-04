@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import {
+  carryFirstScan,
   dropSupersededCounts,
   isSupersededCount,
   countWasRefused,
@@ -138,6 +139,13 @@ export function useScanQueue({
           ])
         ) {
           scanQueueRef.current.shift();
+          // This failed entry may have been the asset's first scan: the
+          // newer counts then carry it.
+          for (const queue of [scanQueueRef.current, failedQueueRef.current]) {
+            queue.forEach((other, index) => {
+              queue[index] = carryFirstScan(other, [entry]);
+            });
+          }
           saveAuditScanState(
             entry.auditSessionId,
             scannedItemsRef.current,
@@ -222,20 +230,26 @@ export function useScanQueue({
 
   const enqueueScan = useCallback(
     (incoming: ScanQueueEntry) => {
-      const entry = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
+      const queued = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
       // A new count replaces any older count for the same asset still
       // waiting. The request in flight (queue head while processing) stays:
       // the queue removes it by position when it settles.
       const keptQueue = dropSupersededCounts(
         scanQueueRef.current,
-        entry,
+        queued,
         isProcessingQueueRef.current
       );
       const keptFailed = dropSupersededCounts(
         failedQueueRef.current,
-        entry,
+        queued,
         false
       );
+      // A first scan that never reached the server makes this one a first
+      // scan too.
+      const entry = carryFirstScan(queued, [
+        ...scanQueueRef.current.filter((old) => !keptQueue.includes(old)),
+        ...failedQueueRef.current.filter((old) => !keptFailed.includes(old)),
+      ]);
       // Mutate in place: a pending debounced save holds these array references.
       scanQueueRef.current.length = 0;
       scanQueueRef.current.push(...keptQueue);

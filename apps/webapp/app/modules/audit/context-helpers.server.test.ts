@@ -26,16 +26,24 @@ import {
 // client; mock it so the suite is DB-free. `vitest.hoisted` makes the spies
 // available inside the (hoisted) mock factory. Each test sets the return values
 // it needs.
-const { locationFindMany, kitFindMany, assetFindMany } = vitest.hoisted(() => ({
+const {
+  locationFindMany,
+  locationFindFirst,
+  kitFindMany,
+  kitFindFirst,
+  assetFindMany,
+} = vitest.hoisted(() => ({
   locationFindMany: vitest.fn(),
+  locationFindFirst: vitest.fn(),
   kitFindMany: vitest.fn(),
+  kitFindFirst: vitest.fn(),
   assetFindMany: vitest.fn(),
 }));
 
 vitest.mock("~/database/db.server", () => ({
   db: {
-    location: { findMany: locationFindMany },
-    kit: { findMany: kitFindMany },
+    location: { findMany: locationFindMany, findFirst: locationFindFirst },
+    kit: { findMany: kitFindMany, findFirst: kitFindFirst },
     asset: { findMany: assetFindMany },
   },
 }));
@@ -52,7 +60,9 @@ const ORG = "org-1";
 
 beforeEach(() => {
   locationFindMany.mockReset();
+  locationFindFirst.mockReset();
   kitFindMany.mockReset();
+  kitFindFirst.mockReset();
   assetFindMany.mockReset();
 });
 
@@ -290,6 +300,7 @@ describe("resolveAuditUnitScope", () => {
   });
 
   it("scopes a location page audit to that location", async () => {
+    locationFindFirst.mockResolvedValueOnce({ id: "studio" });
     expect(
       await resolveAuditUnitScope({
         organizationId: ORG,
@@ -301,6 +312,7 @@ describe("resolveAuditUnitScope", () => {
   });
 
   it("adds the child locations when the auditor included them", async () => {
+    locationFindFirst.mockResolvedValueOnce({ id: "studio" });
     expect(
       await resolveAuditUnitScope({
         organizationId: ORG,
@@ -312,6 +324,7 @@ describe("resolveAuditUnitScope", () => {
   });
 
   it("keeps the selected locations of a multi-select, once each", async () => {
+    locationFindMany.mockResolvedValueOnce([{ id: "a" }, { id: "b" }]);
     expect(
       await resolveAuditUnitScope({
         organizationId: ORG,
@@ -337,6 +350,7 @@ describe("resolveAuditUnitScope", () => {
   });
 
   it("scopes a kit page audit to that kit", async () => {
+    kitFindFirst.mockResolvedValueOnce({ id: "kit-1" });
     expect(
       await resolveAuditUnitScope({
         organizationId: ORG,
@@ -348,6 +362,7 @@ describe("resolveAuditUnitScope", () => {
   });
 
   it("keeps the selected kits of a multi-select, once each", async () => {
+    kitFindMany.mockResolvedValueOnce([{ id: "k1" }, { id: "k2" }]);
     expect(
       await resolveAuditUnitScope({
         organizationId: ORG,
@@ -380,5 +395,31 @@ describe("resolveAuditUnitScope", () => {
         includeChildLocations: false,
       })
     ).toEqual({ custodianUserId: "user-7" });
+  });
+  it("drops ids from another workspace, and the scope with them", async () => {
+    locationFindFirst.mockResolvedValueOnce(null);
+    kitFindMany.mockResolvedValueOnce([]);
+
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "location",
+        contextId: "foreign-location",
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        kitIds: ["foreign-kit"],
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+    expect(kitFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["foreign-kit"] }, organizationId: ORG },
+      })
+    );
   });
 });

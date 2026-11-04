@@ -41,6 +41,7 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { auditRowHeading } from "~/modules/audit/quantity";
 import {
   assertAuditAcceptsComments,
   assertAuditAcceptsCommentsOnLockedRow,
@@ -193,14 +194,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const header = {
       title: auditAsset.asset.title,
-      subHeading: countLabel
-        ? `${
-            auditAsset.foundQuantity !== null &&
-            auditAsset.status !== "UNEXPECTED"
-              ? "Counted: "
-              : ""
-          }${countLabel} • Notes and images`
-        : "Notes and images",
+      subHeading: auditRowHeading(countLabel, auditAsset),
     };
 
     return payload({

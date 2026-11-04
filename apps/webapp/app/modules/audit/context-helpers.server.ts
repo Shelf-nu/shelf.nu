@@ -418,8 +418,10 @@ export async function resolveAssetIdsForKitSelection({
  *   or for "select all" every kit matching the list.
  * - Custody: from a person's page, that person.
  *
- * Every id comes from the request but is only ever used to sum units of the
- * caller's own assets, which are org-scoped where they are read.
+ * Location and kit ids come from the request, so only those of the caller's
+ * workspace are kept; a scope left empty by that becomes no scope (whole
+ * pools). A person's id is only ever matched against custody of the caller's
+ * own assets.
  *
  * @returns the scope fields for `scopeMeta`, or null for an unscoped audit
  */
@@ -448,7 +450,13 @@ export async function resolveAuditUnitScope({
   if (contextType === "location") {
     if (locationIds && locationIds.length > 0) {
       if (!locationIds.includes(ALL_SELECTED_KEY)) {
-        return { locationIds: [...new Set(locationIds)] };
+        const owned = await db.location.findMany({
+          where: { id: { in: [...new Set(locationIds)] }, organizationId },
+          select: { id: true },
+        });
+        return owned.length > 0
+          ? { locationIds: owned.map((location) => location.id) }
+          : null;
       }
       const matching = await db.location.findMany({
         where: getLocationsWhereInput({ organizationId, currentSearchParams }),
@@ -457,6 +465,11 @@ export async function resolveAuditUnitScope({
       return { locationIds: matching.map((location) => location.id) };
     }
     if (!contextId) return null;
+    const page = await db.location.findFirst({
+      where: { id: contextId, organizationId },
+      select: { id: true },
+    });
+    if (!page) return null;
     return {
       locationIds: await locationPageScope({
         organizationId,
@@ -469,7 +482,11 @@ export async function resolveAuditUnitScope({
   if (contextType === "kit") {
     if (kitIds && kitIds.length > 0) {
       if (!kitIds.includes(ALL_SELECTED_KEY)) {
-        return { kitIds: [...new Set(kitIds)] };
+        const owned = await db.kit.findMany({
+          where: { id: { in: [...new Set(kitIds)] }, organizationId },
+          select: { id: true },
+        });
+        return owned.length > 0 ? { kitIds: owned.map((kit) => kit.id) } : null;
       }
       const matching = await db.kit.findMany({
         where: getKitsWhereInput({
@@ -483,7 +500,12 @@ export async function resolveAuditUnitScope({
       });
       return { kitIds: matching.map((kit) => kit.id) };
     }
-    return contextId ? { kitIds: [contextId] } : null;
+    if (!contextId) return null;
+    const kit = await db.kit.findFirst({
+      where: { id: contextId, organizationId },
+      select: { id: true },
+    });
+    return kit ? { kitIds: [kit.id] } : null;
   }
 
   if (contextType === "user" && contextId) {

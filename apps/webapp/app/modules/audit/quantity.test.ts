@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeAuditUnits,
   expectedQuantityFor,
+  auditRowHeading,
   auditUnitScope,
   scopedExpectedUnits,
   totalAuditUnits,
@@ -56,6 +57,7 @@ describe("totalAuditUnits", () => {
       uncountedRows: 1,
       unexpectedRows: 0,
       unexpectedUnits: 0,
+      unexpectedUncountedRows: 0,
     });
   });
 
@@ -72,6 +74,7 @@ describe("totalAuditUnits", () => {
       uncountedRows: 0,
       unexpectedRows: 1,
       unexpectedUnits: 5,
+      unexpectedUncountedRows: 0,
     });
   });
 
@@ -106,12 +109,13 @@ describe("totalAuditUnits", () => {
       uncountedRows: 0,
       unexpectedRows: 0,
       unexpectedUnits: 0,
+      unexpectedUncountedRows: 0,
     });
   });
 });
 
 describe("describeAuditUnits", () => {
-  it("words the totals, naming rows not counted yet", () => {
+  it("words the totals, naming rows not counted", () => {
     expect(
       describeAuditUnits({
         quantityRows: 2,
@@ -120,9 +124,10 @@ describe("describeAuditUnits", () => {
         uncountedRows: 1,
         unexpectedRows: 0,
         unexpectedUnits: 0,
+        unexpectedUncountedRows: 0,
       })
     ).toBe(
-      "Units counted: 8 of 20 across 2 quantity-tracked assets, 1 not counted yet."
+      "Units counted: 8 of 20 across 2 quantity-tracked assets, 1 not counted."
     );
   });
 
@@ -135,6 +140,7 @@ describe("describeAuditUnits", () => {
         uncountedRows: 0,
         unexpectedRows: 0,
         unexpectedUnits: 0,
+        unexpectedUncountedRows: 0,
       })
     ).toBe("Units counted: 8 of 14 across 1 quantity-tracked asset.");
   });
@@ -148,6 +154,7 @@ describe("describeAuditUnits", () => {
         uncountedRows: 0,
         unexpectedRows: 1,
         unexpectedUnits: 3,
+        unexpectedUncountedRows: 0,
       })
     ).toBe(
       "Units counted: 6 of 4 across 1 quantity-tracked asset; 3 more on 1 quantity-tracked asset not on the list."
@@ -163,8 +170,25 @@ describe("describeAuditUnits", () => {
         uncountedRows: 0,
         unexpectedRows: 1,
         unexpectedUnits: 5,
+        unexpectedUncountedRows: 0,
       })
     ).toBe("Units counted: 5 on 1 quantity-tracked asset not on the list.");
+  });
+});
+
+describe("unlisted pools without a count", () => {
+  it("counts them as not counted, not as zero units", () => {
+    const totals = totalAuditUnits([
+      { expected: false, expectedQuantity: 14, foundQuantity: null },
+    ]);
+    expect(totals).toMatchObject({
+      unexpectedRows: 1,
+      unexpectedUnits: 0,
+      unexpectedUncountedRows: 1,
+    });
+    expect(describeAuditUnits(totals!)).toBe(
+      "Units counted: 0 on 1 quantity-tracked asset not on the list, 1 not counted."
+    );
   });
 });
 
@@ -208,5 +232,34 @@ describe("scopedExpectedUnits", () => {
 
   it("expects the whole pool when none are in scope", () => {
     expect(scopedExpectedUnits(0, 14)).toBe(14);
+  });
+});
+
+describe("auditRowHeading", () => {
+  it("prefixes a counted expected row", () => {
+    expect(
+      auditRowHeading("8 of 14 pcs", { status: "FOUND", foundQuantity: 8 })
+    ).toBe("Counted: 8 of 14 pcs • Notes and images");
+  });
+
+  it("shows the label alone for an uncounted row", () => {
+    expect(
+      auditRowHeading("Not counted", { status: "FOUND", foundQuantity: null })
+    ).toBe("Not counted • Notes and images");
+  });
+
+  it("does not repeat 'counted' on an unexpected row", () => {
+    expect(
+      auditRowHeading("8 pcs counted", {
+        status: "UNEXPECTED",
+        foundQuantity: 8,
+      })
+    ).toBe("8 pcs counted • Notes and images");
+  });
+
+  it("has no count for an individual asset", () => {
+    expect(
+      auditRowHeading(null, { status: "FOUND", foundQuantity: null })
+    ).toBe("Notes and images");
   });
 });

@@ -1,5 +1,6 @@
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
@@ -176,12 +177,7 @@ export async function createAuditCountUpdatedNote({
     prefetchedUser ??
       tx.user.findUnique({
         where: { id: userId },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        },
+        select: { id: true, ...USER_NAME_SELECT },
       }),
   ]);
 

@@ -3,10 +3,12 @@
  *
  * An audit row (`AuditAsset`) of a QUANTITY_TRACKED asset carries two numbers:
  * `expectedQuantity`, snapshotted when the row is created, and
- * `foundQuantity`, what the auditor counted. The snapshot is the units placed
- * at the audited locations for a location audit, and the whole pool
- * (`Asset.quantity`) otherwise. Both are null on
- * INDIVIDUAL assets, which count as one.
+ * `foundQuantity`, what the auditor counted. The snapshot is the units in the
+ * audit's scope (see `AuditUnitScope`): placed at the audited locations, held
+ * in the audited kits, or held by the audited person, never more than the
+ * pool. It is the whole pool (`Asset.quantity`) when none of the pool is in
+ * scope or the audit has no scope. Both are null on INDIVIDUAL assets, which
+ * count as one.
  *
  * The row status keeps answering "was the pool located?" (FOUND / MISSING /
  * UNEXPECTED). A shortfall is not a status: a FOUND row with
@@ -17,14 +19,17 @@
  * server share one wording.
  */
 
-import { AssetType } from "@prisma/client";
+import type { AssetType } from "@prisma/client";
+import { MAX_AUDIT_COUNT } from "@shelf/quantity-control";
+import { isQuantityTracked } from "~/modules/asset/utils";
 
 /**
- * Largest count the server stores for one row: the Postgres INTEGER ceiling.
+ * Largest count the server stores for one row: the Postgres INTEGER ceiling,
+ * shared with the phone (`MAX_AUDIT_COUNT` in `@shelf/quantity-control`).
  * `Asset.quantity` has no lower cap, so a smaller bound would refuse a full
  * count of a large pool.
  */
-export const MAX_AUDIT_FOUND_QUANTITY = 2_147_483_647;
+export const MAX_AUDIT_FOUND_QUANTITY = MAX_AUDIT_COUNT;
 
 /**
  * The expected-units snapshot for a new audit row.
@@ -37,7 +42,7 @@ export function expectedQuantityFor(asset: {
   type: AssetType | null | undefined;
   quantity: number | null | undefined;
 }): number | null {
-  if (asset.type !== AssetType.QUANTITY_TRACKED) return null;
+  if (!isQuantityTracked(asset)) return null;
   return asset.quantity ?? 0;
 }
 
@@ -127,6 +132,8 @@ export type AuditUnitTotals = {
   unexpectedRows: number;
   /** Units counted on those rows. */
   unexpectedUnits: number;
+  /** Those rows still without a count (scanned by a build that did not ask). */
+  unexpectedUncountedRows: number;
 };
 
 /**
@@ -152,13 +159,18 @@ export function totalAuditUnits(
     uncountedRows: 0,
     unexpectedRows: 0,
     unexpectedUnits: 0,
+    unexpectedUncountedRows: 0,
   };
 
   for (const row of rows) {
     if (!isQuantityAuditRow(row)) continue;
     if (!row.expected) {
       totals.unexpectedRows += 1;
-      totals.unexpectedUnits += row.foundQuantity ?? 0;
+      if (row.foundQuantity === null || row.foundQuantity === undefined) {
+        totals.unexpectedUncountedRows += 1;
+      } else {
+        totals.unexpectedUnits += row.foundQuantity;
+      }
       continue;
     }
     totals.quantityRows += 1;
@@ -180,21 +192,49 @@ function quantityAssets(count: number): string {
 
 /**
  * The units line under an audit's statistics, e.g. "Units counted: 8 of 14
- * across 1 quantity-tracked asset, 1 not counted yet; 5 more on 1
+ * across 1 quantity-tracked asset, 1 not counted; 5 more on 1
  * quantity-tracked asset not on the list." One wording for the overview and
  * the receipt.
  */
 export function describeAuditUnits(totals: AuditUnitTotals): string {
+  const unexpectedUncounted =
+    totals.unexpectedUncountedRows > 0
+      ? `, ${totals.unexpectedUncountedRows} not counted`
+      : "";
   const unexpected = `${totals.unexpectedUnits} ${
     totals.quantityRows > 0 ? "more " : ""
-  }on ${quantityAssets(totals.unexpectedRows)} not on the list`;
+  }on ${quantityAssets(
+    totals.unexpectedRows
+  )} not on the list${unexpectedUncounted}`;
   if (totals.quantityRows === 0) {
     return `Units counted: ${unexpected}.`;
   }
   const uncounted =
-    totals.uncountedRows > 0 ? `, ${totals.uncountedRows} not counted yet` : "";
+    totals.uncountedRows > 0 ? `, ${totals.uncountedRows} not counted` : "";
   const extra = totals.unexpectedRows > 0 ? `; ${unexpected}` : "";
   return `Units counted: ${totals.foundUnits} of ${
     totals.expectedUnits
   } across ${quantityAssets(totals.quantityRows)}${uncounted}${extra}.`;
+}
+
+/**
+ * The heading of an audit row's details panel, led by its count label:
+ * "Counted: 8 of 14 pcs • Notes and images" for a counted expected row, the
+ * label alone otherwise ("Not counted", "14 pcs expected", and "8 pcs counted"
+ * for an unexpected row, whose label already says counted), and "Notes and
+ * images" for an individual asset (no label).
+ *
+ * @param countLabel - `auditCountLabel` for the row, or null
+ * @param row - the row's status and count
+ */
+export function auditRowHeading(
+  countLabel: string | null,
+  row: { status: string; foundQuantity: number | null }
+): string {
+  if (!countLabel) return "Notes and images";
+  const prefix =
+    row.foundQuantity !== null && row.status !== "UNEXPECTED"
+      ? "Counted: "
+      : "";
+  return `${prefix}${countLabel} • Notes and images`;
 }

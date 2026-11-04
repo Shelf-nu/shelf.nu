@@ -18,6 +18,8 @@
  * @see {@link file://../hooks/use-audit-init.ts}
  */
 
+import { countExpectation } from "@shelf/quantity-control";
+
 /** The fields of a queued scan these rules read. */
 export type CountedQueueEntry = {
   auditSessionId: string;
@@ -58,6 +60,26 @@ export function dropSupersededCounts<T extends CountedQueueEntry>(
       (keepFirst && index === 0) ||
       !(isCounted(entry) && sameAsset(entry, incoming))
   );
+}
+
+/**
+ * The entry to queue in place of `replaced`: when any of them was a first
+ * scan (not a recount), the server may not have the scan yet, so the newest
+ * count must be sent as a first scan too. Otherwise a lost first scan would
+ * be reported, if it failed, as a lost count correction while the server
+ * never recorded the asset.
+ *
+ * @param entry - the newer entry for the asset
+ * @param replaced - the older counted entries for the same asset it replaces
+ */
+export function carryFirstScan<T extends CountedQueueEntry>(
+  entry: T,
+  replaced: readonly CountedQueueEntry[]
+): T {
+  const replacesFirstScan = replaced.some(
+    (old) => isCounted(old) && sameAsset(old, entry) && old.recount !== true
+  );
+  return replacesFirstScan ? { ...entry, recount: false } : entry;
 }
 
 /**
@@ -130,13 +152,10 @@ export function countTargetFor(
 }
 
 /**
- * Largest count the server stores for one audit row: the Postgres INTEGER
- * ceiling. MIRROR of `MAX_AUDIT_FOUND_QUANTITY` in
- * apps/webapp/app/modules/audit/quantity.ts; the server enforces it, this copy
- * only bounds the count sheet so a count above the expectation (a surplus) can
- * be entered. Extraction target: `@shelf/quantity-control`.
+ * The audit count bound and what the count sheet can promise, shared with the
+ * web scanner through `@shelf/quantity-control`.
  */
-export const MAX_AUDIT_COUNT = 2_147_483_647;
+export { countExpectation, MAX_AUDIT_COUNT } from "@shelf/quantity-control";
 
 /** The count fields of an audit scan as the mobile audit endpoint returns it. */
 export type ScanCountFields = {
@@ -187,25 +206,6 @@ export function storedCountFor(
 }
 
 /**
- * What the count sheet can promise about the units: `"expected"` for a listed
- * asset with units expected (the sheet shows them as its target),
- * `"none-expected"` for a listed asset with nothing expected (a pool with no
- * units at the audited location), `"unlisted"` for an asset not on the audit's
- * list. Only `"expected"` prefills and shows a target.
- *
- * MIRROR of `countExpectation` in
- * apps/webapp/app/components/audit/audit-count-flow.ts; cosmetic only.
- * Extraction target: `@shelf/quantity-control`.
- */
-export function countExpectation(request: {
-  isExpected: boolean;
-  expectedQuantity: number;
-}): "expected" | "none-expected" | "unlisted" {
-  if (!request.isExpected) return "unlisted";
-  return request.expectedQuantity > 0 ? "expected" : "none-expected";
-}
-
-/**
  * Whether the server kept another count than the scan sent, so the auditor
  * must be told the count they entered did not stick.
  *
@@ -221,4 +221,110 @@ export function countWasRefused(
     storedCount !== undefined &&
     storedCount !== sentCount
   );
+}
+
+/**
+ * The value the count sheet opens with: the count already recorded, else the
+ * expected units when there are some to confirm, else blank (null), so an
+ * asset with nothing expected or not on the list is counted, not confirmed.
+ * Mirrors the web dialog's initial value in `audit-count-dialog.tsx`.
+ */
+export function countSheetDefault(request: {
+  isExpected: boolean;
+  expectedQuantity: number;
+  foundQuantity: number | null;
+}): number | null {
+  if (request.foundQuantity !== null) return request.foundQuantity;
+  return countExpectation(request) === "expected"
+    ? request.expectedQuantity
+    : null;
+}
+
+/** What a scan of an asset in an audit leads to. */
+export type AuditScanDecision =
+  /** A listed quantity-tracked asset scanned again: correct its count. */
+  | {
+      kind: "recount";
+      expectedQuantity: number;
+      foundQuantity: number | null;
+      isExpected: boolean;
+      unitOfMeasure: string | null;
+    }
+  /** A quantity-tracked asset scanned for the first time: ask for a count. */
+  | {
+      kind: "first";
+      expectedQuantity: number;
+      isExpected: boolean;
+      unitOfMeasure: string | null;
+    }
+  /** An asset already scanned that is not counted: "Already scanned". */
+  | { kind: "duplicate" }
+  /** An individual asset scanned for the first time: record it. */
+  | { kind: "record"; isExpected: boolean };
+
+/**
+ * Decides what a scan in an audit leads to: a recount of an already-scanned
+ * pool, a first count, a plain duplicate, or a plain record.
+ *
+ * @param args.scannedRow - the asset's row in the scanned list, when scanned
+ * @param args.expectedRecord - the audit's row for the asset, when expected
+ * @param args.lookedUp - the asset as the code lookup returned it
+ * @param args.isExpected - whether the asset is on the audit's list
+ */
+export function auditScanDecision({
+  scannedRow,
+  expectedRecord,
+  lookedUp,
+  isExpected,
+}: {
+  scannedRow:
+    | {
+        isExpected: boolean;
+        expectedQuantity?: number | null;
+        foundQuantity?: number | null;
+        unitOfMeasure?: string | null;
+      }
+    | undefined;
+  expectedRecord:
+    | { expectedQuantity?: number | null; unitOfMeasure?: string | null }
+    | undefined;
+  lookedUp: {
+    type?: string;
+    quantity?: number | null;
+    unitOfMeasure?: string | null;
+  };
+  isExpected: boolean;
+}): AuditScanDecision {
+  const target = countTargetFor(expectedRecord, lookedUp);
+  const unitOfMeasure =
+    expectedRecord?.unitOfMeasure ?? lookedUp.unitOfMeasure ?? null;
+
+  if (scannedRow) {
+    const rowExpected = scannedRow.expectedQuantity ?? target;
+    if (typeof rowExpected !== "number") return { kind: "duplicate" };
+    return {
+      kind: "recount",
+      expectedQuantity: rowExpected,
+      foundQuantity: scannedRow.foundQuantity ?? null,
+      isExpected: scannedRow.isExpected,
+      unitOfMeasure: scannedRow.unitOfMeasure ?? unitOfMeasure,
+    };
+  }
+
+  if (target === null) return { kind: "record", isExpected };
+  return { kind: "first", expectedQuantity: target, isExpected, unitOfMeasure };
+}
+
+/**
+ * The queue entry for a recount: marked `recount` so crash recovery replays it
+ * even though the server already has the scan (see `entriesToResync`).
+ */
+export function recountQueueEntry(args: {
+  auditSessionId: string;
+  qrId: string;
+  assetId: string;
+  isExpected: boolean;
+  foundQuantity: number;
+}): CountedQueueEntry & { qrId: string; isExpected: boolean } {
+  return { ...args, recount: true };
 }
