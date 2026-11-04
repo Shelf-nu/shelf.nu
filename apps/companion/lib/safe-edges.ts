@@ -67,9 +67,39 @@ export function overlayTopOffset(topInset: number, minimum: number): number {
 }
 
 /**
+ * Where a column of `maxWidth` sits across `available` points of width with
+ * side insets on either edge: centred when the insets allow it, otherwise
+ * moved just far enough to clear the inset it would overlap, and narrowed
+ * only when the space between the insets is less than `maxWidth`.
+ *
+ * Centring on the whole width rather than between the insets keeps a column
+ * from shifting off centre whenever a cutout or rail sits on one side only.
+ *
+ * @param available - the width the column sits in, in points
+ * @param maxWidth - the column's width cap
+ * @param insets - the insets on that width's edges; only `left` and `right` are read
+ * @returns the column's `width` and its `left` edge, from the left of `available`
+ */
+export function columnSpan(
+  available: number,
+  maxWidth: number,
+  insets: Pick<EdgeInsets, "left" | "right">
+): { width: number; left: number } {
+  const width = Math.max(
+    0,
+    Math.min(maxWidth, available - insets.left - insets.right)
+  );
+  const centred = Math.floor((available - width) / 2);
+  const left = Math.min(
+    Math.max(centred, insets.left),
+    available - insets.right - width
+  );
+  return { width, left };
+}
+
+/**
  * Width and left offset of a bottom sheet held to a column of `maxWidth` in a
- * full-window overlay, centred in the space between the side insets so a rail
- * or cutout on one side never covers it.
+ * full-window overlay (see `columnSpan`).
  *
  * @param windowWidth - the window's width, in points
  * @param maxWidth - the sheet's width cap
@@ -81,11 +111,29 @@ export function centredSheetSpan(
   maxWidth: number,
   insets: Pick<EdgeInsets, "left" | "right">
 ): { width: number; marginLeft: number } {
-  const room = Math.max(0, windowWidth - insets.left - insets.right);
-  const width = Math.min(maxWidth, room);
+  const { width, left } = columnSpan(windowWidth, maxWidth, insets);
+  return { width, marginLeft: left };
+}
+
+/**
+ * Side padding that holds a full-screen sheet's content to a column of
+ * `maxWidth`, for a container that already pads each side by its inset (a
+ * `SafeAreaView`): the column's distance from each edge (see `columnSpan`)
+ * less the inset the container adds there.
+ *
+ * @param windowWidth - the window's width, in points
+ * @param maxWidth - the column's width cap
+ * @param insets - the window's insets; only `left` and `right` are read
+ */
+export function sheetColumnPadding(
+  windowWidth: number,
+  maxWidth: number,
+  insets: Pick<EdgeInsets, "left" | "right">
+): { paddingLeft: number; paddingRight: number } {
+  const { width, left } = columnSpan(windowWidth, maxWidth, insets);
   return {
-    width,
-    marginLeft: insets.left + Math.floor((room - width) / 2),
+    paddingLeft: left - insets.left,
+    paddingRight: windowWidth - left - width - insets.right,
   };
 }
 

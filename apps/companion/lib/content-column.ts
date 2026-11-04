@@ -71,3 +71,24 @@ const TAB_SIDEBAR_MIN_WIDTH = 900;
 export function showsTabSidebar(windowWidth: number): boolean {
   return windowWidth >= TAB_SIDEBAR_MIN_WIDTH;
 }
+
+/**
+ * Width of the tab sidebar, in points: React Navigation's default for a
+ * sidebar with labels beside the icons, which every window wide enough for
+ * the sidebar gets (`getDefaultSidebarWidth` caps it at 360 from a 416 pt
+ * window up).
+ */
+export const TAB_SIDEBAR_WIDTH = 360;
+
+/**
+ * Width a screen inside the tab navigator gets in a window this wide: the
+ * window less the sidebar when it shows. A first guess for layouts that
+ * measure the screen, so their first frame already matches.
+ *
+ * @param windowWidth - the window's width, in points
+ */
+export function tabScreenWidth(windowWidth: number): number {
+  return showsTabSidebar(windowWidth)
+    ? windowWidth - TAB_SIDEBAR_WIDTH
+    : windowWidth;
+}

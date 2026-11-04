@@ -3,6 +3,8 @@
  * offset, lower on a short screen, or the top strip when it cannot fit.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -32,5 +34,23 @@ describe("closedManualEntryBottom", () => {
 
   it("moves to the top strip when no offset clears both the controls and the edge", () => {
     assert.equal(closedManualEntryBottom(50, 20), null);
+  });
+
+  it("stays in the bottom strip down to the home-indicator cut-off", () => {
+    // Bottom inset 20: the lowest allowed offset is 20 + 8 = 28.
+    // 60 pt under the controls: 60 - 8 - 24 = 28, just allowed.
+    assert.equal(closedManualEntryBottom(60, 20), 28);
+    // One point less and the pill would sit in the 8 pt above the inset.
+    assert.equal(closedManualEntryBottom(59, 20), null);
+  });
+
+  it("is given the pill's measured height by the scanner", () => {
+    const scannerSource = readFileSync(
+      path.resolve(__dirname, "../app/(tabs)/scanner.tsx"),
+      "utf8"
+    );
+    const call = scannerSource.match(/closedManualEntryBottom\(([\s\S]*?)\);/);
+    assert.ok(call, "scanner.tsx calls closedManualEntryBottom");
+    assert.match(call[1], /closedPillHeight/);
   });
 });

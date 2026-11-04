@@ -12,6 +12,7 @@
 import { Platform, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CONTENT_MAX_WIDTH, contentGutter } from "@/lib/content-column";
+import { sheetColumnPadding } from "@/lib/safe-edges";
 
 /**
  * Side padding that keeps a screen's content in the reading column (see
@@ -35,18 +36,15 @@ export function useContentGutter(maxWidth: number = CONTENT_MAX_WIDTH): number {
  *
  * Spread it onto the sheet's outermost container, a `SafeAreaView` padding
  * all edges. That view already pads each side by its inset (a turned
- * foldable's camera cutout), so each side here adds only what the gutter
- * needs beyond it: the column stays centred and clear of the cutout.
+ * foldable's camera cutout), so each side here adds only the rest of the way
+ * to the column (`sheetColumnPadding`): centred, and clear of the cutout.
  */
 export function useSheetColumnStyle(): {
   paddingLeft: number;
   paddingRight: number;
 } {
-  const gutter = useContentGutter();
+  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   if (Platform.OS !== "android") return { paddingLeft: 0, paddingRight: 0 };
-  return {
-    paddingLeft: Math.max(0, gutter - insets.left),
-    paddingRight: Math.max(0, gutter - insets.right),
-  };
+  return sheetColumnPadding(width, CONTENT_MAX_WIDTH, insets);
 }

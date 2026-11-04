@@ -6,8 +6,14 @@
  * @see lib/safe-edges.ts for the maths and why the sides differ
  */
 
-import { Platform, useWindowDimensions } from "react-native";
+import { useCallback, useState } from "react";
+import {
+  Platform,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { tabScreenWidth } from "@/lib/content-column";
 import {
   centredSheetSpan,
   overlayTopOffset,
@@ -76,4 +82,24 @@ export function useCentredSheetSpan(maxWidth: number): {
     ...centredSheetSpan(width, maxWidth, insets),
     alignSelf: "flex-start",
   };
+}
+
+/**
+ * The width of the screen this is called in, for a screen inside the tab
+ * navigator: measured from the view that receives `onLayout`, and until the
+ * first measurement the window less the tab sidebar (`tabScreenWidth`), which
+ * is what the measurement returns there, so the first frame already matches.
+ *
+ * @returns the width, and the `onLayout` to put on the screen's outer view
+ */
+export function useTabScreenWidth(): {
+  width: number;
+  onLayout: (event: LayoutChangeEvent) => void;
+} {
+  const { width: windowWidth } = useWindowDimensions();
+  const [measured, setMeasured] = useState<number | null>(null);
+  const onLayout = useCallback((event: LayoutChangeEvent) => {
+    setMeasured(Math.round(event.nativeEvent.layout.width));
+  }, []);
+  return { width: measured ?? tabScreenWidth(windowWidth), onLayout };
 }

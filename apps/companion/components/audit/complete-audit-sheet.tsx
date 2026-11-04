@@ -92,16 +92,7 @@ export function CompleteAuditSheet({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <SafeAreaView
-        style={[
-          styles.container,
-          // The sheet's own side padding, plus the column on Android.
-          {
-            paddingLeft: spacing.lg + sheetColumn.paddingLeft,
-            paddingRight: spacing.lg + sheetColumn.paddingRight,
-          },
-        ]}
-      >
+      <SafeAreaView style={[styles.container, sheetColumn]}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === "ios" ? "padding" : undefined}

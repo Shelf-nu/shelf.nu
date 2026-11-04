@@ -8,8 +8,10 @@ import { describe, it } from "node:test";
 
 import {
   centredSheetSpan,
+  columnSpan,
   overlayTopOffset,
   scanSplit,
+  sheetColumnPadding,
   tabScreenInsets,
 } from "./safe-edges";
 
@@ -89,11 +91,71 @@ describe("centredSheetSpan", () => {
     });
   });
 
-  it("centres between the insets, not the window edges", () => {
-    const span = centredSheetSpan(951, 720, { left: 0, right: 84 });
-    assert.equal(span.width, 720);
-    assert.equal(span.marginLeft, 73);
-    assert.ok(span.marginLeft + span.width <= 951 - 84);
+  it("stays centred in the window when a one-sided rail leaves room", () => {
+    // Duo sideways, rail on the right: 115 pt either side clears an 84 pt rail.
+    assert.deepEqual(centredSheetSpan(951, 720, { left: 0, right: 84 }), {
+      width: 720,
+      marginLeft: 115,
+    });
+  });
+});
+
+describe("columnSpan", () => {
+  it("fills a phone between its edges", () => {
+    assert.deepEqual(columnSpan(390, 720, { left: 0, right: 0 }), {
+      width: 390,
+      left: 0,
+    });
+  });
+
+  it("centres the column when no inset reaches it", () => {
+    assert.deepEqual(columnSpan(1180, 720, { left: 31, right: 0 }), {
+      width: 720,
+      left: 230,
+    });
+  });
+
+  it("moves only as far as an inset the centred column would overlap", () => {
+    // 820 wide with a 84 pt rail on the left: centred would start at 50.
+    assert.deepEqual(columnSpan(820, 720, { left: 84, right: 0 }), {
+      width: 720,
+      left: 84,
+    });
+    assert.deepEqual(columnSpan(820, 720, { left: 0, right: 84 }), {
+      width: 720,
+      left: 16,
+    });
+  });
+
+  it("narrows the column when the space between the insets is smaller", () => {
+    assert.deepEqual(columnSpan(591, 720, { left: 0, right: 84 }), {
+      width: 507,
+      left: 0,
+    });
+  });
+});
+
+describe("sheetColumnPadding", () => {
+  it("adds nothing on a phone, where the container's insets are enough", () => {
+    assert.deepEqual(sheetColumnPadding(412, 720, { left: 0, right: 0 }), {
+      paddingLeft: 0,
+      paddingRight: 0,
+    });
+  });
+
+  it("centres the column on a tablet", () => {
+    // Pixel Fold inner screen upright.
+    assert.deepEqual(sheetColumnPadding(852, 720, { left: 0, right: 0 }), {
+      paddingLeft: 66,
+      paddingRight: 66,
+    });
+  });
+
+  it("adds only the rest of the way past a cutout the container pads for", () => {
+    // 31 pt cutout on the left: the container pads 31, the column needs 66.
+    const padding = sheetColumnPadding(852, 720, { left: 31, right: 0 });
+    assert.deepEqual(padding, { paddingLeft: 35, paddingRight: 66 });
+    // Column edges: 31 + 35 = 66 from the left, 66 from the right.
   });
 });
 

@@ -30,7 +30,11 @@ import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
-import { useOverlayEdges, useTabScreenInsets } from "@/lib/use-safe-edges";
+import {
+  useOverlayEdges,
+  useTabScreenInsets,
+  useTabScreenWidth,
+} from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -88,10 +92,11 @@ function AuditScannerContent() {
   // ── Layout ───────────────────────────────────────────
 
   /**
-   * The screen's own width, measured: beside the tab sidebar it is narrower
-   * than the window.
+   * The screen's own width: beside the tab sidebar it is narrower than the
+   * window. Seeded before the first layout, so a wide screen opens straight
+   * into the side-by-side layout.
    */
-  const [screenWidth, setScreenWidth] = useState(0);
+  const { width: screenWidth, onLayout: onScreenLayout } = useTabScreenWidth();
   /**
    * Height to weigh it against: the window's, which the keyboard never
    * changes. The screen's measured height shrinks while the Android keyboard
@@ -1576,9 +1581,7 @@ function AuditScannerContent() {
   return (
     <View
       style={[styles.container, sideBySide && styles.containerBeside]}
-      onLayout={(e) => {
-        setScreenWidth(e.nativeEvent.layout.width);
-      }}
+      onLayout={onScreenLayout}
     >
       {/* One element tree in both layouts, so switching between them
           restyles the camera instead of remounting it. */}
@@ -1631,10 +1634,14 @@ const useStyles = createStyles((colors, shadows) => ({
     flexGrow: 6,
     flexShrink: 1,
     flexBasis: "auto",
+    // Above the panel, which overlaps it from below: the manual-entry row
+    // inside must stay visible and take its own taps.
+    zIndex: 1,
   },
   // Beside the list on a wide screen: 6 of 11 shares of the width.
   cameraColumnBeside: {
     flex: 6,
+    zIndex: 1,
   },
   centered: {
     flex: 1,
@@ -1862,11 +1869,10 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingTop: spacing.md,
     gap: spacing.sm,
   },
-  // Beside the camera: rounded on the camera's side, overlapping it the same
-  // 12 pt it overlaps from below when upright.
+  // Beside the camera: rounded on the camera's side, without overlapping it,
+  // so the scan frame stays centred in the camera the operator sees.
   bottomPanelBeside: {
     marginTop: 0,
-    marginLeft: -12,
     borderTopRightRadius: 0,
     borderBottomLeftRadius: borderRadius.xl,
   },

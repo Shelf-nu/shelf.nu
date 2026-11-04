@@ -5,8 +5,10 @@ import {
   CONTENT_MAX_WIDTH,
   FORM_MAX_WIDTH,
   contentGutter,
+  TAB_SIDEBAR_WIDTH,
   isTabletScreen,
   showsTabSidebar,
+  tabScreenWidth,
 } from "./content-column";
 
 describe("contentGutter", () => {
@@ -97,5 +99,15 @@ describe("showsTabSidebar", () => {
 
   it("shows the sidebar on a 13-inch iPad held upright", () => {
     assert.equal(showsTabSidebar(1024), true);
+  });
+});
+
+describe("tabScreenWidth", () => {
+  it("is the window's width below the sidebar threshold", () => {
+    assert.equal(tabScreenWidth(883), 883);
+  });
+
+  it("leaves out the sidebar once it shows", () => {
+    assert.equal(tabScreenWidth(951), 951 - TAB_SIDEBAR_WIDTH);
   });
 });
