@@ -21,6 +21,10 @@
  *    role-change log last, all in one transaction: a refused recipient rolls
  *    the role write back.
  *
+ * 5. "Log out of Shelf" ends a member's sessions only in an SSO workspace, only
+ *    for an SSO member of it, never for the caller themselves and never for
+ *    the workspace owner. Admins may log out other admins.
+ *
  * @see {@link file://./utils.server.ts}
  * @see {@link file://./../invite/roles.ts}
  */
@@ -30,6 +34,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 
 import { db } from "~/database/db.server";
+import { endAllSessionsForUser } from "~/modules/auth/service.server";
 import { createInvite } from "~/modules/invite/service.server";
 import { ShelfError } from "~/utils/error";
 import {
@@ -41,6 +46,12 @@ import {
 import { resolveUserAction } from "./utils.server";
 
 // @vitest-environment node
+
+// why: ending sessions deletes auth rows; only whether the guard lets the
+// call through, and for whom, is under test
+vi.mock("~/modules/auth/service.server", () => ({
+  endAllSessionsForUser: vi.fn().mockResolvedValue(1),
+}));
 
 // why: the resend path writes invites and sends email
 vi.mock("../invite/service.server", () => ({ createInvite: vi.fn() }));
@@ -65,6 +76,7 @@ vi.mock("~/database/db.server", () => {
     invite: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     userOrganization: { findFirst: vi.fn() },
     organization: {
+      findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn().mockResolvedValue({
         name: "Org",
         customEmailFooter: null,
@@ -519,5 +531,152 @@ describe("resolveUserAction: change role", () => {
         newRole: OrganizationRoles.SELF_SERVICE,
       }),
     });
+  });
+});
+
+/** Builds the "Log out of Shelf" POST an attacker would hand-craft */
+function logoutRequest(targetUserId: string) {
+  return new Request("http://localhost/settings/team/users", {
+    method: "POST",
+    body: new URLSearchParams({ intent: "logoutUser", userId: targetUserId }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+}
+
+describe("resolveUserAction: log a member out of Shelf", () => {
+  const orgMock = vi.mocked(db.organization.findUnique);
+
+  /** An SSO workspace owned by `owner-user`, and the target's membership in it */
+  function arrange({
+    enabledSso = true,
+    targetRoles = [OrganizationRoles.BASE],
+    targetSso = true,
+    member = true,
+  }: {
+    enabledSso?: boolean;
+    targetRoles?: OrganizationRoles[];
+    targetSso?: boolean;
+    member?: boolean;
+  } = {}) {
+    orgMock.mockResolvedValue({ enabledSso, userId: "owner-user" } as never);
+    userOrgMock.mockResolvedValue(
+      member
+        ? ({ roles: targetRoles, user: { sso: targetSso } } as never)
+        : null
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("lets an ADMIN log out another ADMIN", async () => {
+    arrange({ targetRoles: [OrganizationRoles.ADMIN] });
+
+    await resolveUserAction(
+      logoutRequest("other-admin"),
+      "org-1",
+      "admin-user",
+      accessFor([OrganizationRoles.ADMIN])
+    );
+
+    expect(endAllSessionsForUser).toHaveBeenCalledWith("other-admin");
+  });
+
+  it("lets the OWNER log out a SELF_SERVICE member", async () => {
+    arrange({ targetRoles: [OrganizationRoles.SELF_SERVICE] });
+
+    await resolveUserAction(
+      logoutRequest("member"),
+      "org-1",
+      "owner-user",
+      accessFor([OrganizationRoles.OWNER])
+    );
+
+    expect(endAllSessionsForUser).toHaveBeenCalledWith("member");
+  });
+
+  it("only reads the target's membership in the caller's workspace", async () => {
+    arrange();
+
+    await resolveUserAction(
+      logoutRequest("member"),
+      "org-1",
+      "admin-user",
+      accessFor([OrganizationRoles.ADMIN])
+    );
+
+    expect(userOrgMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "member", organizationId: "org-1" },
+      })
+    );
+  });
+
+  it.each([
+    [
+      "the workspace owner",
+      { targetRoles: [OrganizationRoles.OWNER] },
+      "owner-user",
+      /owner cannot be logged out/i,
+    ],
+    [
+      "a member holding OWNER among other roles",
+      { targetRoles: [OrganizationRoles.ADMIN, OrganizationRoles.OWNER] },
+      "co-owner",
+      /owner cannot be logged out/i,
+    ],
+    [
+      "a member of a workspace without SSO",
+      { enabledSso: false },
+      "member",
+      /only available in workspaces that use SSO/i,
+    ],
+    [
+      "a member who does not sign in through SSO",
+      { targetSso: false },
+      "member",
+      /does not sign in through SSO/i,
+    ],
+    [
+      "a user who is not a member of this workspace",
+      { member: false },
+      "outsider",
+      /not a member of this workspace/i,
+    ],
+  ] as const)(
+    "refuses to log out %s",
+    async (_label, setup, target, message) => {
+      arrange({
+        ...setup,
+        targetRoles: setup.targetRoles && [...setup.targetRoles],
+      });
+
+      await expect(
+        resolveUserAction(
+          logoutRequest(target),
+          "org-1",
+          "admin-user",
+          accessFor([OrganizationRoles.ADMIN])
+        )
+      ).rejects.toThrow(message);
+
+      expect(endAllSessionsForUser).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses a caller logging themselves out", async () => {
+    arrange({ targetRoles: [OrganizationRoles.ADMIN] });
+
+    await expect(
+      resolveUserAction(
+        logoutRequest("admin-user"),
+        "org-1",
+        "admin-user",
+        accessFor([OrganizationRoles.ADMIN])
+      )
+    ).rejects.toThrow(/cannot log yourself out/i);
+
+    expect(endAllSessionsForUser).not.toHaveBeenCalled();
   });
 });

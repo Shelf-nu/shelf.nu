@@ -2,7 +2,8 @@
  * Team User Actions
  *
  * Server handlers for the actions on the team settings pages: delete a user,
- * revoke access, change a role, and resend or cancel an invite.
+ * revoke access, change a role, log a member out of Shelf, and resend or
+ * cancel an invite.
  *
  * @see {@link file://./../../routes/_layout+/settings.team.users.tsx}
  * @see {@link file://./../../routes/_layout+/settings.team.invites.tsx}
@@ -17,9 +18,11 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
+import { endAllSessionsForUser } from "~/modules/auth/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { roleChangeRequiresOwner } from "~/utils/permissions/membership-access";
 import {
   PermissionAction,
@@ -29,6 +32,7 @@ import { validatePermission } from "~/utils/permissions/permission.validator.ser
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
   ROLE_LABELS,
+  isWorkspaceOwner,
   labelToRole,
   resolveRole,
 } from "~/utils/permissions/role-access";
@@ -51,7 +55,7 @@ import { createInvite } from "../invite/service.server";
 /**
  * Handles the team actions posted from the team users list, the member page
  * and the invites list: delete a team member, revoke access, resend or cancel
- * an invite, and change a role.
+ * an invite, change a role, and log a member out of Shelf.
  *
  * @param request - The action request; its form data carries the `intent`
  * @param organizationId - The caller's current organization
@@ -77,6 +81,7 @@ export async function resolveUserAction(
         "resend",
         "cancelInvite",
         "changeRole",
+        "logoutUser",
       ]),
     }),
     {
@@ -510,6 +515,47 @@ export async function resolveUserAction(
 
       return payload(null);
     }
+    case "logoutUser": {
+      const { userId: targetUserId } = parseData(
+        formData,
+        z.object({
+          userId: z.string(),
+        }),
+        {
+          additionalData: {
+            organizationId,
+            intent,
+          },
+        }
+      );
+
+      await assertCanLogoutMember({
+        organizationId,
+        actorUserId: userId,
+        targetUserId,
+      });
+
+      const endedSessions = await endAllSessionsForUser(targetUserId);
+
+      /**
+       * The audit record of a forced logout. It changes no workspace data, so
+       * there is no activity event for it; the log line names who logged out
+       * whom, in which workspace.
+       */
+      Logger.info(
+        `Team: user ${userId} logged out user ${targetUserId} of Shelf from workspace ${organizationId} (${endedSessions} session(s) ended)`
+      );
+
+      sendNotification({
+        title: "User logged out",
+        message:
+          "They have been signed out of Shelf on every device and must sign in again through your identity provider.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return payload(null);
+    }
     default: {
       throw new ShelfError({
         cause: null,
@@ -557,4 +603,81 @@ export async function generateUniqueUsername(email: string): Promise<string> {
     label: "User",
     additionalData: { email, attempts: MAX_USERNAME_ATTEMPTS },
   });
+}
+
+/**
+ * Refuses a forced logout ("Log out of Shelf") the caller may not make.
+ *
+ * The action exists for SSO workspaces, where a role changed in the identity
+ * provider is applied only when the member next signs in. So the workspace
+ * must have SSO enabled and the target must be an SSO member of it. Nobody
+ * logs themselves out here, and nobody logs out the workspace owner. Admins
+ * may log out other admins.
+ *
+ * Reaching the action already needs `teamMember: update` (the route gate),
+ * which only admins and the owner hold.
+ *
+ * @param args.organizationId - The caller's current organization
+ * @param args.actorUserId - The member asking for the logout
+ * @param args.targetUserId - The member to log out, from the form
+ * @throws {ShelfError} 400 for a self-logout or a non-SSO workspace or member,
+ *   403 for the owner, 404 when the target is not a member of this workspace
+ */
+async function assertCanLogoutMember({
+  organizationId,
+  actorUserId,
+  targetUserId,
+}: {
+  organizationId: string;
+  actorUserId: string;
+  targetUserId: string;
+}) {
+  const refuse = (message: string, status: 400 | 403 | 404) =>
+    new ShelfError({
+      cause: null,
+      title: status === 403 ? "Insufficient permissions" : undefined,
+      message,
+      additionalData: { organizationId, actorUserId, targetUserId },
+      label: "Team",
+      status,
+      shouldBeCaptured: false,
+    });
+
+  if (targetUserId === actorUserId) {
+    throw refuse("You cannot log yourself out from here.", 400);
+  }
+
+  const [org, membership] = await Promise.all([
+    db.organization.findUnique({
+      where: { id: organizationId },
+      select: { enabledSso: true, userId: true },
+    }),
+    // Scoped by organizationId: a user id from another workspace finds nothing
+    db.userOrganization.findFirst({
+      where: { userId: targetUserId, organizationId },
+      select: { roles: true, user: { select: { sso: true } } },
+    }),
+  ]);
+
+  if (!membership) {
+    throw refuse("User is not a member of this workspace.", 404);
+  }
+
+  if (!org?.enabledSso) {
+    throw refuse(
+      "Logging members out is only available in workspaces that use SSO.",
+      400
+    );
+  }
+
+  if (!membership.user.sso) {
+    throw refuse(
+      "This member does not sign in through SSO, so there is no SSO role to refresh.",
+      400
+    );
+  }
+
+  if (org.userId === targetUserId || isWorkspaceOwner(membership.roles)) {
+    throw refuse("The workspace owner cannot be logged out.", 403);
+  }
 }
