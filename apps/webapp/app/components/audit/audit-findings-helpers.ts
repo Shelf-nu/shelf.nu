@@ -1,81 +1,82 @@
 /**
  * Audit findings helpers
  *
- * Pure functions behind the Findings list on the audit overview: grouping the
- * photos and condition notes recorded during an audit by asset, the count line
- * shown beside each asset, and how many rows the list reveals next as it is
- * scrolled.
+ * Pure pieces of the Findings list on the audit overview: the paging state
+ * that accumulates pages fetched from the server, and the count line shown
+ * beside each asset.
  *
- * @see {@link file://./audit-findings.tsx} The component that renders them
- * @see {@link file://./../../routes/_layout+/audits.$auditId.overview.tsx} The page
+ * @see {@link file://./audit-findings.tsx} The component that uses them
+ * @see {@link file://./../../modules/audit/findings.server.ts} The page read
  */
+import type {
+  AssetFinding,
+  AuditFindingsPage,
+} from "~/modules/audit/findings.server";
 
-/** How many asset rows the Findings list reveals at a time. */
-export const FINDINGS_BATCH_SIZE = 10;
-
-/** The asset a photo or note was recorded against, if any. */
-type FindingAssetLink = {
-  auditAsset?: { asset?: { id: string; title: string | null } | null } | null;
+/** The findings loaded so far, and where the next page starts. */
+export type FindingsListState = {
+  findings: AssetFinding[];
+  /** The last page appended; the next request asks for `lastPage + 1`. */
+  lastPage: number;
+  hasMore: boolean;
+  totalFindings: number;
 };
 
-/** One asset somebody recorded something about, with its photos and notes. */
-export type AuditFinding<TImage, TNote> = {
-  assetId: string;
-  assetName: string;
-  images: TImage[];
-  notes: TNote[];
+/** A page arrived from the server. */
+export type FindingsListAction = {
+  type: "page_loaded";
+  page: AuditFindingsPage;
 };
 
 /**
- * Groups audit photos and condition notes into one entry per asset, sorted by
- * asset name.
+ * The list state for the page the overview loader sent.
  *
- * A note about an asset and a photo of that asset are one observation, so they
- * share an entry. Photos and notes with no asset are skipped: they describe the
- * audit as a whole and are shown separately.
- *
- * @param args.images - Photos taken during the audit
- * @param args.notes - Condition notes written during the audit
- * @returns One entry per asset, alphabetical by asset name
+ * @param firstPage - Page 1, from the loader
  */
-export function groupAuditFindings<
-  TImage extends FindingAssetLink,
-  TNote extends FindingAssetLink,
->({
-  images,
-  notes,
-}: {
-  images: TImage[];
-  notes: TNote[];
-}): AuditFinding<TImage, TNote>[] {
-  const groups = new Map<string, AuditFinding<TImage, TNote>>();
-
-  const groupFor = (asset: { id: string; title: string | null }) => {
-    let group = groups.get(asset.id);
-    if (!group) {
-      group = {
-        assetId: asset.id,
-        assetName: asset.title || "Unknown",
-        images: [],
-        notes: [],
-      };
-      groups.set(asset.id, group);
-    }
-    return group;
+export function initFindingsList(
+  firstPage: AuditFindingsPage
+): FindingsListState {
+  return {
+    findings: firstPage.findings,
+    lastPage: firstPage.page,
+    hasMore: firstPage.hasMore,
+    totalFindings: firstPage.totalFindings,
   };
+}
 
-  for (const image of images) {
-    const asset = image.auditAsset?.asset;
-    if (asset?.id) groupFor(asset).images.push(image);
-  }
-  for (const note of notes) {
-    const asset = note.auditAsset?.asset;
-    if (asset?.id) groupFor(asset).notes.push(note);
-  }
+/**
+ * Appends a fetched page to the list.
+ *
+ * Only the page directly after the last one is taken, so a repeated or
+ * out-of-order response cannot duplicate or skip rows. Assets already listed
+ * are dropped: pages are offset-based, so a finding recorded on an asset that
+ * sorts earlier shifts the next page by one and repeats its first row.
+ *
+ * @param state - The list so far
+ * @param action - The page that arrived
+ * @returns The list with the page appended
+ */
+export function findingsListReducer(
+  state: FindingsListState,
+  action: FindingsListAction
+): FindingsListState {
+  switch (action.type) {
+    case "page_loaded": {
+      const { page } = action;
+      if (page.page !== state.lastPage + 1) return state;
 
-  return [...groups.values()].sort((a, b) =>
-    a.assetName.localeCompare(b.assetName)
-  );
+      const listed = new Set(state.findings.map((f) => f.assetId));
+      return {
+        findings: [
+          ...state.findings,
+          ...page.findings.filter((f) => !listed.has(f.assetId)),
+        ],
+        lastPage: page.page,
+        hasMore: page.hasMore,
+        totalFindings: page.totalFindings,
+      };
+    }
+  }
 }
 
 /**
@@ -94,20 +95,4 @@ export function findingSummary(photoCount: number, noteCount: number) {
     parts.push(`${noteCount} ${noteCount === 1 ? "note" : "notes"}`);
   }
   return parts.join(" · ");
-}
-
-/**
- * How many rows to show after revealing one more batch.
- *
- * @param current - Rows shown now
- * @param total - Rows there are
- * @param batchSize - Rows revealed per batch
- * @returns The new count, never above `total`
- */
-export function nextVisibleCount(
-  current: number,
-  total: number,
-  batchSize: number
-) {
-  return Math.min(current + batchSize, total);
 }

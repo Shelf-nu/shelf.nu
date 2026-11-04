@@ -32,7 +32,10 @@ import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
-import { getAuditImages } from "~/modules/audit/image.service.server";
+import {
+  getAuditFindingsPage,
+  getAuditWideFindings,
+} from "~/modules/audit/findings.server";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
@@ -97,7 +100,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { organizationId, userOrganizations, access } = permissionResult;
 
-    const [{ session }, assetsData, allImages] = await Promise.all([
+    const [{ session }, assetsData] = await Promise.all([
       getAuditSessionDetails({
         // Reads `session` only, so no photo is signed here.
         refreshExpectedAssetImages: false,
@@ -111,11 +114,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         auditSessionId: auditId,
       }),
-      getAuditImages({
-        auditSessionId: auditId,
-        organizationId,
-        // undefined = get ALL images
-      }),
     ]);
 
     // Gate here, not at the end: this is the earliest point `session` exists,
@@ -127,42 +125,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       auditId,
     });
 
-    /**
-     * The condition notes people wrote during the audit.
-     *
-     * why this page had none: every photo taken during an audit was already
-     * on this page, grouped and labelled with its asset, while the words
-     * written beside those photos appeared nowhere. Reading them meant
-     * opening rows one at a time, or scrolling the Activity feed where they
-     * sit among system rows. The written observation is the half that says
-     * "already scratched when it went out", so it is the half worth surfacing.
-     *
-     * COMMENT only: UPDATE rows are the system trail, stored as Markdoc
-     * source, and belong to the Activity tab.
-     */
-    const conditionNotes = await db.auditNote.findMany({
-      where: { auditSessionId: auditId, type: "COMMENT" },
-      select: {
-        id: true,
-        content: true,
-        createdAt: true,
-        user: {
-          select: {
-            // `displayName` first: `resolveUserDisplayName` prefers it, and an
-            // SSO account often carries only that. Selecting just first/last
-            // renders those people as "Unknown" here while the PDF, which uses
-            // the same resolver over a fuller select, names them.
-            displayName: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        auditAsset: {
-          select: { asset: { select: { id: true, title: true } } },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    // The first page of Findings; the list requests the rest from
+    // `/api/audits/:auditId/findings` as it is scrolled.
+    const [findingsPage, auditWideFindings] = await Promise.all([
+      getAuditFindingsPage({
+        auditSessionId: auditId,
+        organizationId,
+        page: 1,
+      }),
+      getAuditWideFindings({ auditSessionId: auditId, organizationId }),
+    ]);
 
     const header = { title: `${session.name} · Overview` };
 
@@ -179,10 +151,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         canRemoveAssets,
         userId,
         header,
-        // Every photo of the audit; `AuditFindings` splits audit-wide from
-        // per-asset ones.
-        images: allImages,
-        conditionNotes,
+        findingsPage,
+        auditWideFindings,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -338,8 +308,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export default function AuditOverview() {
-  const { session, totalItems, images, conditionNotes, canRemoveAssets } =
-    useLoaderData<typeof loader>();
+  const {
+    session,
+    totalItems,
+    findingsPage,
+    auditWideFindings,
+    canRemoveAssets,
+  } = useLoaderData<typeof loader>();
 
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
@@ -534,7 +509,14 @@ export default function AuditOverview() {
         </div>
 
         {/* Right column: what people recorded while auditing. */}
-        <AuditFindings images={images} notes={conditionNotes} />
+        <AuditFindings
+          // A different first page (an asset removed, a finding added) starts
+          // the list over rather than appending to pages it no longer matches.
+          key={findingsListKey(findingsPage)}
+          auditId={session.id}
+          firstPage={findingsPage}
+          auditWide={auditWideFindings}
+        />
       </div>
 
       {/* Assets List */}
@@ -659,4 +641,18 @@ function StatCard({
       <div className="mt-1 text-3xl font-bold">{value}</div>
     </button>
   );
+}
+
+/**
+ * Identifies the first page of findings, so the list remounts when the
+ * loader sends a different one.
+ *
+ * @param page - Page 1 of asset findings
+ * @returns The total and the asset ids on the page, joined
+ */
+function findingsListKey(page: {
+  totalFindings: number;
+  findings: { assetId: string }[];
+}) {
+  return [page.totalFindings, ...page.findings.map((f) => f.assetId)].join(":");
 }

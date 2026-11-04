@@ -36,6 +36,7 @@ const EXCLUDED_FETCHER_KEY_PREFIXES = [
   "quick-image-upload-",
   "mark-update-read-",
   "scan-history-",
+  "audit-findings-",
   "notification-preference-",
   RECORD_NAVIGATION_FETCHER_PREFIX,
 ] as const;
