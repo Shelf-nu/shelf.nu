@@ -44,6 +44,7 @@ import type {
 } from "@/lib/api/types";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -372,7 +373,6 @@ function ScannerContent() {
    * a tall result card can never cover the controls.
    */
   const [controlsBottom, setControlsBottom] = useState(0);
-  const insets = useSafeAreaInsets();
 
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -421,6 +421,16 @@ function ScannerContent() {
   useEffect(() => {
     if (!anyDrawerVisible) setDrawerHeight(0);
   }, [anyDrawerVisible]);
+
+  const insets = useSafeAreaInsets();
+  /**
+   * Insets the overlay's controls keep clear of: an iPhone Duo's status-bar
+   * rail or a turned foldable's camera cutout on the sides, each side its own,
+   * and the home indicator once the tab bar has moved to a sidebar. The
+   * sidebar already covers the left side when it is showing.
+   */
+  const screenInsets = useTabScreenInsets();
+  const sideInsetStyle = { left: screenInsets.left, right: screenInsets.right };
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -3222,7 +3232,11 @@ function ScannerContent() {
             // Bounded by the safe area on top, so on the shortest phones a
             // tall booking header shrinks (see bookingModeHeader) instead of
             // sliding under the status bar.
-            style={[styles.actionPickerContainer, { top: insets.top }]}
+            style={[
+              styles.actionPickerContainer,
+              sideInsetStyle,
+              { top: insets.top },
+            ]}
             pointerEvents="box-none"
             onLayout={(e) => {
               const { y, height } = e.nativeEvent.layout;
@@ -3323,7 +3337,14 @@ function ScannerContent() {
            * drawer is an absolutely-positioned sibling at `bottom: 0` and
            * needs no room from the overlay.
            */
-          style={[styles.overlaySection, styles.bottomSection]}
+          style={[
+            styles.overlaySection,
+            styles.bottomSection,
+            {
+              paddingLeft: screenInsets.left,
+              paddingRight: screenInsets.right,
+            },
+          ]}
           pointerEvents="box-none"
         >
           {/* Mode indicator dots */}
@@ -3379,6 +3400,7 @@ function ScannerContent() {
         <View
           style={[
             styles.statusAboveDrawer,
+            sideInsetStyle,
             {
               top: controlsBottom + spacing.sm,
               bottom: drawerHeight + spacing.sm,
@@ -3405,7 +3427,7 @@ function ScannerContent() {
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
         <View
-          style={styles.drawerHost}
+          style={[styles.drawerHost, sideInsetStyle]}
           pointerEvents="box-none"
           onLayout={(e) => {
             const h = Math.round(e.nativeEvent.layout.height);
@@ -3505,6 +3527,16 @@ function ScannerContent() {
               onResolveAllBlockers={resolveAllBookingBlockers}
             />
           )}
+          {/* Below a tab sidebar nothing covers the home indicator: extend
+              the drawer's white under it so its buttons stay clear. */}
+          {screenInsets.bottom > 0 ? (
+            <View
+              style={{
+                height: screenInsets.bottom,
+                backgroundColor: colors.white,
+              }}
+            />
+          ) : null}
         </View>
       )}
 
@@ -3686,10 +3718,9 @@ const useStyles = createStyles((colors) => ({
 
   // Hosts the drawers as a sibling ABOVE the paused overlay (zIndex 5) so
   // their buttons stay tappable while the camera is auto-paused.
+  // `left` and `right` come from the side insets at render time.
   drawerHost: {
     position: "absolute",
-    left: 0,
-    right: 0,
     bottom: 0,
     zIndex: 10,
   },
@@ -3747,11 +3778,10 @@ const useStyles = createStyles((colors) => ({
   },
 
   // Action picker
+  // `left` and `right` come from the side insets at render time.
   actionPickerContainer: {
     position: "absolute",
     bottom: spacing.lg,
-    left: 0,
-    right: 0,
     // Content sits on the bottom edge, just above the frame.
     justifyContent: "flex-end",
   },
@@ -3806,10 +3836,9 @@ const useStyles = createStyles((colors) => ({
     alignItems: "center",
     paddingHorizontal: spacing.xxl,
   },
+  // `left` and `right` come from the side insets at render time.
   statusAboveDrawer: {
     position: "absolute",
-    left: 0,
-    right: 0,
     justifyContent: "flex-end",
     // Same layer as the drawer host, above the paused overlay.
     zIndex: 10,

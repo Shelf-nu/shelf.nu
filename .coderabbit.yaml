@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit settings for this repository. This file takes precedence over the
+# repository and organization settings in the CodeRabbit web UI; only
+# organization "global overrides" beat it. Comment `@coderabbitai configuration`
+# on a PR to see the settings CodeRabbit actually resolved, and where each came
+# from.
+#
+# PRs are opened as drafts and only leave draft once they are ready for a human
+# review (see CONTRIBUTING.md), so CodeRabbit has to review drafts and every
+# commit pushed to them.
+reviews:
+  auto_review:
+    enabled: true
+    # Review draft PRs. The default (false) skips them.
+    drafts: true
+    # Review every push, not only the first one.
+    auto_incremental_review: true
+    # Never pause automatic reviews. The default pauses after 5 reviewed
+    # commits, which leaves later commits unreviewed until someone comments
+    # `@coderabbitai resume`.
+    auto_pause_after_reviewed_commits: 0

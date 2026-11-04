@@ -10,7 +10,9 @@
  */
 
 import { Platform, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CONTENT_MAX_WIDTH, contentGutter } from "@/lib/content-column";
+import { sheetColumnPadding } from "@/lib/safe-edges";
 
 /**
  * Side padding that keeps a screen's content in the reading column (see
@@ -32,9 +34,17 @@ export function useContentGutter(maxWidth: number = CONTENT_MAX_WIDTH): number {
  * sizes for the screen, and a gutter measured from the window would squeeze
  * that card, so on iOS this adds nothing.
  *
- * Spread it onto the sheet's outermost container.
+ * Spread it onto the sheet's outermost container, a `SafeAreaView` padding
+ * all edges. That view already pads each side by its inset (a turned
+ * foldable's camera cutout), so each side here adds only the rest of the way
+ * to the column (`sheetColumnPadding`): centred, and clear of the cutout.
  */
-export function useSheetColumnStyle(): { paddingHorizontal: number } {
-  const gutter = useContentGutter();
-  return { paddingHorizontal: Platform.OS === "android" ? gutter : 0 };
+export function useSheetColumnStyle(): {
+  paddingLeft: number;
+  paddingRight: number;
+} {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  if (Platform.OS !== "android") return { paddingLeft: 0, paddingRight: 0 };
+  return sheetColumnPadding(width, CONTENT_MAX_WIDTH, insets);
 }
