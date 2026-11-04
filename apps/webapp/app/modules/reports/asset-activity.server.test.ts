@@ -384,14 +384,15 @@ describe("assetActivityReport descriptions", () => {
       await readableRows([
         event("ASSET_VALUATION_CHANGED", {
           field: "valuation",
-          fromValue: 1234.5,
+          fromValue: 1234.5678,
           toValue: 2000,
         }),
       ])
     ).toEqual([
       {
-        description: "Valuation changed: 1,234.5 → 2,000",
-        changedFrom: "1234.5",
+        // Grouped in the sentence, never rounded.
+        description: "Valuation changed: 1,234.5678 → 2,000",
+        changedFrom: "1234.5678",
         changedTo: "2000",
       },
     ]);

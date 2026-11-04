@@ -161,7 +161,11 @@ function readableValue(
       : null;
   }
   if (typeof value === "string") return value;
-  if (typeof value === "number") return value.toLocaleString();
+  // Grouped for reading, never rounded: the sentence and the bare From/To
+  // cells must show the same value.
+  if (typeof value === "number") {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 20 });
+  }
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return JSON.stringify(value);
 }
