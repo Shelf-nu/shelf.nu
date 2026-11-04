@@ -5,9 +5,9 @@
  * The scanner supports four actions (View / Assign / Release / Location)
  * switched by tapping the pills or swiping the camera area, but the
  * affordance is subtle enough that even power users have missed it. This
- * renders a small dismissible bubble under the pills on first use; it goes
- * away forever once dismissed or once the user switches actions on their
- * own (proof they found the feature).
+ * renders a small dismissible bubble beside the mode dots under the scan
+ * frame on first use; it goes away forever once dismissed or once the user
+ * switches actions on their own (proof they found the feature).
  *
  * Persistence: a single AsyncStorage flag via `useOneTimeHint`, versioned so
  * a future redesign can re-show the hint by bumping the key.

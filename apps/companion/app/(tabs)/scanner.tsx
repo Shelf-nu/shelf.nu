@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
+  ScrollView,
   InteractionManager,
   Linking,
   Platform,
@@ -359,10 +360,17 @@ function ScannerContent() {
 
   /**
    * Measured height of the open drawer. The overlay itself never resizes (see
-   * the bottom-section comment), so this is used only to float the scan status
-   * (lookup spinner, result card) just above the drawer.
+   * the bottom-section comment). While a drawer is open, the scan status
+   * (lookup spinner, result card) moves to a host just above it, and the idle
+   * hint is not shown.
    */
   const [drawerHeight, setDrawerHeight] = useState(0);
+  /**
+   * Distance from the top of the screen to the bottom of the mode pills and
+   * camera controls. The status host above an open drawer starts below it, so
+   * a tall result card can never cover the controls.
+   */
+  const [controlsBottom, setControlsBottom] = useState(0);
 
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -507,7 +515,7 @@ function ScannerContent() {
     setBookingCheckinItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
   }, [bookingBlockers]);
 
-  // Dev-mode scan injection (stripped from production builds)
+  // Manual code entry (the `devScan` prefix keeps the e2e testIDs stable)
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
 
@@ -3035,6 +3043,22 @@ function ScannerContent() {
     update_location: "Choose Location",
   };
 
+  /** The lookup spinner or the result card; null while idle. */
+  const scanStatus =
+    isProcessing && !scanResult ? (
+      <View style={styles.statusRow}>
+        <ActivityIndicator size="small" color="#fff" />
+        <Text style={styles.instructionText}>Looking up asset...</Text>
+      </View>
+    ) : scanResult ? (
+      <ScanResultCard result={scanResult} onDismiss={dismissResult} />
+    ) : null;
+  /** The swipe transition shared by the status in either position. */
+  const statusMotion = {
+    transform: [{ translateX: swipeTranslateX }],
+    opacity: swipeOpacity,
+  };
+
   /** Submits the typed code through the camera's resolution pipeline. */
   const submitManualCode = () => {
     if (devScanInput.trim()) {
@@ -3192,7 +3216,16 @@ function ScannerContent() {
       <View style={styles.overlay} pointerEvents="box-none">
         {/* Top - Action picker or Booking header */}
         <View style={styles.overlaySection} pointerEvents="box-none">
-          <View style={styles.actionPickerContainer} pointerEvents="box-none">
+          <View
+            style={styles.actionPickerContainer}
+            pointerEvents="box-none"
+            onLayout={(e) => {
+              const { y, height } = e.nativeEvent.layout;
+              const bottom = Math.round(y + height);
+              // Guarded like the drawer height: onLayout re-fires on relayout.
+              setControlsBottom((prev) => (prev === bottom ? prev : bottom));
+            }}
+          >
             {isBookingMode ? (
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
@@ -3247,17 +3280,11 @@ function ScannerContent() {
                 </View>
               </View>
             ) : (
-              <>
-                <ActionPills
-                  actions={availableActions}
-                  currentAction={action}
-                  onActionChange={handleActionChange}
-                />
-                <ActionPillsCoachmark
-                  enabled={availableActions.length > 1}
-                  currentAction={action}
-                />
-              </>
+              <ActionPills
+                actions={availableActions}
+                currentAction={action}
+                onActionChange={handleActionChange}
+              />
             )}
             {cameraControls}
           </View>
@@ -3300,50 +3327,71 @@ function ScannerContent() {
               <ModeDots actions={availableActions} currentAction={action} />
             </View>
           )}
+          {/* One-time hint, beside the mode dots under the frame: the top
+              strip above the frame has no spare height on short phones. */}
+          {!isBookingMode && (
+            <ActionPillsCoachmark
+              enabled={availableActions.length > 1}
+              currentAction={action}
+            />
+          )}
 
-          {/* Status / instruction text -- animated for swipe transitions.
+          {/* Status / instruction text, animated for swipe transitions.
               Only the result card takes touches; plain text lets them pass.
-              While a drawer is open the status floats just above it, so a
-              lookup or an error card is never drawn under the list; the idle
-              hint gives way to the drawer, whose title and submit button say
-              what the scans are for. */}
-          <Animated.View
-            style={[
-              styles.instructionContainer,
-              drawerHeight > 0 && [
-                styles.instructionAboveDrawer,
-                { bottom: drawerHeight + spacing.sm },
-              ],
-              {
-                transform: [{ translateX: swipeTranslateX }],
-                opacity: swipeOpacity,
-              },
-            ]}
-            pointerEvents={scanResult ? "auto" : "none"}
-          >
-            {isProcessing && !scanResult ? (
-              <View style={styles.statusRow}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.instructionText}>Looking up asset...</Text>
-              </View>
-            ) : scanResult ? (
-              <ScanResultCard result={scanResult} onDismiss={dismissResult} />
-            ) : drawerHeight > 0 ? null : (
-              <Text style={styles.instructionText}>
-                {isBookingMode
-                  ? isBookingFulfilMode
-                    ? "Scan the reserved units to assign"
-                    : isBookingAddMode
-                    ? "Scan assets or kits to add"
-                    : isBookingCheckoutMode
-                    ? "Scan assets to check out"
-                    : "Scan assets to check in"
-                  : instructionMap[action]}
-              </Text>
-            )}
-          </Animated.View>
+              While a drawer is open the status moves to its own host above
+              the drawer (below), and the idle hint gives way to the drawer,
+              whose title and submit button say what the scans are for. */}
+          {drawerHeight === 0 && (
+            <Animated.View
+              style={[styles.instructionContainer, statusMotion]}
+              pointerEvents={scanResult ? "auto" : "none"}
+            >
+              {scanStatus ?? (
+                <Text style={styles.instructionText}>
+                  {isBookingMode
+                    ? isBookingFulfilMode
+                      ? "Scan the reserved units to assign"
+                      : isBookingAddMode
+                      ? "Scan assets or kits to add"
+                      : isBookingCheckoutMode
+                      ? "Scan assets to check out"
+                      : "Scan assets to check in"
+                    : instructionMap[action]}
+                </Text>
+              )}
+            </Animated.View>
+          )}
         </View>
       </View>
+
+      {/* ── Status above an open drawer ────────────────
+          Its own screen-level host, between the camera controls and the
+          drawer's top edge, so a result card is never drawn under the list,
+          never over the controls, and stays inside its parent's bounds (on
+          Android a touch outside them is not delivered). A card taller than
+          the gap scrolls. */}
+      {drawerHeight > 0 && scanStatus && (
+        <View
+          style={[
+            styles.statusAboveDrawer,
+            {
+              top: controlsBottom + spacing.sm,
+              bottom: drawerHeight + spacing.sm,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          <ScrollView
+            style={styles.statusScroll}
+            bounces={false}
+            pointerEvents={scanResult ? "auto" : "none"}
+          >
+            <Animated.View style={[styles.instructionContainer, statusMotion]}>
+              {scanStatus}
+            </Animated.View>
+          </ScrollView>
+        </View>
+      )}
 
       {/* ── Drawers ─────────────────────────────────────
           Hosted OUTSIDE the overlay view as a sibling ABOVE the paused
@@ -3741,10 +3789,17 @@ const useStyles = createStyles((colors) => ({
     alignItems: "center",
     paddingHorizontal: spacing.xxl,
   },
-  instructionAboveDrawer: {
+  statusAboveDrawer: {
     position: "absolute",
     left: 0,
     right: 0,
+    justifyContent: "flex-end",
+    // Same layer as the drawer host, above the paused overlay.
+    zIndex: 10,
+  },
+  statusScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
   statusRow: {
     flexDirection: "row",

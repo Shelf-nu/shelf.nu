@@ -73,3 +73,38 @@ export function addedFlashTitle(
   const what = added.length === 1 ? added[0].title : `${added.length} items`;
   return `${title} · ${what} added`;
 }
+
+/** Input for {@link nextAddedFlash}. */
+export type AddedFlashInput = {
+  /** Row keys as of the last change. */
+  previousKeys: ReadonlySet<string>;
+  /** The rows now in the drawer, newest first. */
+  rows: readonly KeyedRow[];
+  /** Whether the list is folded away. */
+  collapsed: boolean;
+  /** The drawer's normal title. */
+  title: string;
+};
+
+/**
+ * Decides, for one change to the drawer's rows, which keys to remember and
+ * whether the header should name what was added.
+ *
+ * Only a collapsed drawer flashes: an expanded one shows the new row in its
+ * list. The keys always move on, so a row added while expanded is not
+ * announced later when the drawer is collapsed.
+ *
+ * @returns The keys to keep for the next change, and the flash title or null.
+ */
+export function nextAddedFlash({
+  previousKeys,
+  rows,
+  collapsed,
+  title,
+}: AddedFlashInput): { keys: Set<string>; flash: string | null } {
+  const keys = new Set(rows.map((row) => row.key));
+  const added = addedRows(previousKeys, rows);
+  const flash =
+    collapsed && added.length > 0 ? addedFlashTitle(title, added) : null;
+  return { keys, flash };
+}

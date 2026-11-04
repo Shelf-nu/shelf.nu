@@ -2,11 +2,14 @@
  * Tests for the camera frame gate.
  *
  * Runs under Node's test runner via tsx, so neither this file nor the module
- * it tests may import React Native, Expo, or `@/`-aliased paths.
+ * it tests may import React Native, Expo, or `@/`-aliased paths. The screen
+ * check reads the scanner sources from disk instead of mounting them.
  *
  * @see ./camera-frame-gate.ts
  */
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import { createFrameGate, type FrameGateState } from "./camera-frame-gate";
@@ -57,4 +60,43 @@ test("the same gate calls whichever handler is current", () => {
   gate({ data: "b" });
 
   assert.deepEqual(seen, ["old:a", "new:b"]);
+});
+
+/** Every .tsx file under app/, as [relative path, source]. */
+function appScreens(): [string, string][] {
+  const appDir = path.resolve(__dirname, "../app");
+  const out: [string, string][] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".tsx"))
+        out.push([path.relative(appDir, full), readFileSync(full, "utf8")]);
+    }
+  };
+  walk(appDir);
+  return out;
+}
+
+test("every camera keeps one stable onBarcodeScanned", () => {
+  // A conditional handler (`busy ? undefined : handler`) turns iOS scanning
+  // off and on per scan, which switches the torch off. Screens gate frames
+  // through useCameraScanHandler instead.
+  const uses = appScreens().flatMap(([file, source]) =>
+    [...source.matchAll(/onBarcodeScanned=\{([^}]*)\}/g)].map((m) => ({
+      file,
+      value: m[1].trim(),
+    }))
+  );
+  assert.ok(
+    uses.some((u) => u.file === path.join("(tabs)", "scanner.tsx")),
+    "the main scanner must be found"
+  );
+  for (const use of uses) {
+    assert.equal(
+      use.value,
+      "handleCameraScan",
+      `${use.file} passes onBarcodeScanned={${use.value}}`
+    );
+  }
 });

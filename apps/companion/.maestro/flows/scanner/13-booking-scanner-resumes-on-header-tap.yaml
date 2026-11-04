@@ -55,9 +55,9 @@ appId: com.shelf.companion.carlos
     visible: "Camera paused.*"
     timeout: 45000
 - takeScreenshot: booking-scanner-paused
-# The booking name sits in the header at the bottom of the top strip.
-- tapOn:
-    point: "30%,27%"
+# Tap the booking name itself, wherever the header sits (the camera
+# controls row sits under it, so a fixed point drifts off the header).
+- tapOn: "QA Scan Booking"
 - extendedWaitUntil:
     notVisible: "Camera paused.*"
     timeout: 5000

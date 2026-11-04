@@ -128,6 +128,32 @@ appId: com.shelf.companion.carlos
     text: "Resume camera"
     optional: true
 - takeScreenshot: controls-4-items
+# assertVisible passes even for a covered view, so press the torch with the
+# drawer at its tallest: its label only flips if the tap reaches it.
+- tapOn:
+    id: "camera-torch"
+- assertVisible: "Turn on flashlight"
+- tapOn:
+    id: "camera-torch"
+- assertVisible: "Turn off flashlight"
+- takeScreenshot: controls-torch-pressed-4-items
+
+# ── An error card with the drawer open sits above it, controls still usable ──
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-9999"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*SAM ID doesn't exist.*"
+    timeout: 15000
+# The card hides manual entry while it is shown.
+- takeScreenshot: error-card-above-drawer
+- assertVisible:
+    id: "camera-pause"
+- tapOn: ".*Tap to dismiss.*"
+- tapOn: "Close manual entry"
 
 # ── 4. Collapse: the list goes, a new scan still updates the header ──
 - tapOn: "Collapse scanned items"

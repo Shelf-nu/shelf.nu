@@ -15,7 +15,13 @@
  * @see {@link file://./../../app/(tabs)/scanner.tsx} the host screen
  * @see {@link file://./batch-blockers.tsx} the blocker card above the submit
  */
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   View,
   Text,
@@ -30,9 +36,8 @@ import { Image } from "expo-image";
 import type { BlockerGroup } from "@/lib/batch-blockers";
 import {
   ADDED_FLASH_MS,
-  addedFlashTitle,
-  addedRows,
   batchDrawerMaxHeight,
+  nextAddedFlash,
 } from "@/lib/batch-drawer-layout";
 import { createStyles } from "@/lib/create-styles";
 import {
@@ -121,8 +126,16 @@ export function BatchDrawer({
   const { height: windowHeight } = useWindowDimensions();
   const hasBlockers = blockers.length > 0;
   const [collapsed, setCollapsed] = useState(false);
-  const toggleCollapsed = () => setCollapsed((prev) => !prev);
-  const flashTitle = useAddedFlash(items, keyField, title, collapsed);
+  const { flash: flashTitle, clear: clearFlash } = useAddedFlash(
+    items,
+    keyField,
+    title,
+    collapsed
+  );
+  const toggleCollapsed = () => {
+    if (collapsed) clearFlash();
+    setCollapsed((prev) => !prev);
+  };
 
   return (
     <View
@@ -305,34 +318,42 @@ export function BatchDrawer({
  * @param keyField - Which field identifies a row.
  * @param title - The drawer's normal title.
  * @param collapsed - Whether the list is folded away.
- * @returns The flash title while one is showing, otherwise null.
+ * @returns The flash title while one is showing (otherwise null), and a
+ *   `clear` the drawer calls when it expands: the list then shows the new row
+ *   itself, and a later collapse must not bring back an old flash.
  */
 function useAddedFlash(
   items: ScannedItem[],
   keyField: "qrId" | "targetId",
   title: string,
   collapsed: boolean
-): string | null {
+): { flash: string | null; clear: () => void } {
   const [flash, setFlash] = useState<string | null>(null);
   const previousKeys = useRef<Set<string>>(
     new Set(items.map((item) => item[keyField]))
   );
+  // The latest render's values, read when the key list changes.
+  const latest = useRef({ items, keyField, title, collapsed });
+  useLayoutEffect(() => {
+    latest.current = { items, keyField, title, collapsed };
+  });
   // The host rebuilds `items` on every render; the key list only changes
   // when rows are added or removed, which is what this reacts to.
   const keySignature = items.map((item) => item[keyField]).join("\n");
 
   useEffect(() => {
-    const rows = items.map((item) => ({
-      key: item[keyField],
-      title: item.title,
-    }));
-    const added = addedRows(previousKeys.current, rows);
-    previousKeys.current = new Set(rows.map((row) => row.key));
-    if (!collapsed || added.length === 0) return;
-    setFlash(addedFlashTitle(title, added));
-    // why: reacts to rows being added or removed only; the other values are
-    // read as they stand at that change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const now = latest.current;
+    const next = nextAddedFlash({
+      previousKeys: previousKeys.current,
+      rows: now.items.map((item) => ({
+        key: item[now.keyField],
+        title: item.title,
+      })),
+      collapsed: now.collapsed,
+      title: now.title,
+    });
+    previousKeys.current = next.keys;
+    if (next.flash) setFlash(next.flash);
   }, [keySignature]);
 
   // Each new flash text restarts the clock; unmounting clears it.
@@ -342,8 +363,8 @@ function useAddedFlash(
     return () => clearTimeout(timer);
   }, [flash]);
 
-  // Expanding shows the new row itself, so the flash ends there.
-  return collapsed ? flash : null;
+  const clear = useCallback(() => setFlash(null), []);
+  return { flash: collapsed ? flash : null, clear };
 }
 
 /** "46 m" for a row's cap, or "46" when the asset has no unit. */
