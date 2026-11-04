@@ -3,7 +3,7 @@
 We really appreciate your interest in contributing to Shelf! Any kind of
 contribution helps, not only code. Wondering what is up for grabs? Check out
 the issues labelled
-[Open for contributions](https://github.com/Shelf-nu/shelf.nu/labels/Open%20for%20contibutions).
+[Open for contributions](https://github.com/Shelf-nu/shelf.nu/labels/%F0%9F%90%9D%20Open%20for%20contibutions).
 
 This guide is for everyone who opens a pull request: outside contributors and
 the Shelf team alike. The PR process below is the same for both.
@@ -86,6 +86,9 @@ When the list above is done:
 
 1. Click **Ready for review** on the PR.
 2. Request a review from [@DonKoko](https://github.com/DonKoko).
+   **Outside contributors:** GitHub only lets people with write access request
+   reviewers, so comment `@DonKoko ready for review` instead. A maintainer
+   then adds the review request.
 
 A PR that is still a draft, or has no review request, is not in the review
 queue and will not be reviewed.
@@ -103,8 +106,9 @@ The review happens on the PR itself. When changes are requested:
 3. Go through the "Get it ready" list again for the new commits: CI green,
    CodeRabbit has reviewed them, its new threads resolved, no conflicts with
    `main`.
-4. Click **Re-request review** next to the reviewer's name. That is the signal
-   that the PR is ready to look at again; pushing alone is not.
+4. Click **Re-request review** next to the reviewer's name (outside
+   contributors: comment `@DonKoko ready for another review`). That is the
+   signal that the PR is ready to look at again; pushing alone is not.
 
 This repeats until the PR is approved.
 

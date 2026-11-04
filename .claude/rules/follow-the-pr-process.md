@@ -25,7 +25,8 @@ of these hold:
   `@coderabbitai review` (or `@coderabbitai resume` when paused).
 - Every CodeRabbit thread is fixed or answered, and resolved.
 - The branch is up to date with `main` with no conflicts (`/fix-conflicts`).
-- `/pr-review` has run and its must-fix and should-fix findings are fixed.
+- Team members: `/pr-review` has run and its must-fix and should-fix findings
+  are fixed. It is optional for outside contributors.
 
 After review feedback: fix or answer each comment, resolve the threads you
 fixed, go through the list again, then re-request the review. Pushing alone

@@ -322,8 +322,9 @@ Rules:
   a test could pin, "restore D<n>" only when Dismissed is not empty, "post this
   as a request-changes review" only for an open PR with findings. List "post"
   before "fix" and say it is one or the other: "post these as a request-changes
-  review, or fix <range> here". With no
-  findings at all, write "Next: nothing to fix." For a merged PR, say fixes go
+  review, or fix <range> here". With no findings at all, write "Next: nothing
+  to fix.", followed by "restore D<range>" when Dismissed is not empty. For a
+  merged PR, say fixes go
   in a follow-up PR instead of offering to post.
 - **Found by N passes.** Agreement between independent passes is a confidence
   signal. When a finding's `foundBy` has 2 or more passes, append
@@ -340,7 +341,8 @@ Rules:
 
 Do nothing until the user picks. Right after printing the report, ask with the
 `AskUserQuestion` tool, built from the same options the Next line offers. With
-"Next: nothing to fix.", skip the question and stop.
+"Next: nothing to fix." and an empty Dismissed section, skip the question and
+stop. With no findings but dismissed entries, ask only Question 3.
 
 **Posting and fixing are two separate paths, and one run takes only one.**
 "Post a request-changes review" means the PR author makes the changes: after
@@ -457,7 +459,9 @@ Problem: <one sentence>
 ## Before re-requesting review
 - Fix every item above, or reply to this review with why an item is wrong, by number.
 - CI green, CodeRabbit has reviewed the new commits, its threads resolved.
-- Click "Re-request review".
+- Branch up to date with `main`, no conflicts.
+- Team members: `/pr-review` run again, its must-fix and should-fix findings fixed.
+- Click "Re-request review". Full checklist: https://github.com/Shelf-nu/shelf.nu/blob/main/CONTRIBUTING.md#the-pull-request-process
 ```
 
 A plain comment instead of a review, when the user asks for one, uses the same
