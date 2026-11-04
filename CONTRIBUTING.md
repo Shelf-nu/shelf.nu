@@ -15,8 +15,10 @@ If you get stuck, open an issue or join us on
 
 **Prerequisites:** Node.js 24.22.1 or newer and pnpm 9.15 or newer.
 
-1. Fork the [repository](https://github.com/Shelf-nu/shelf.nu) and clone your
-   fork. Team members can branch in the main repository instead.
+1. Fork the [repository](https://github.com/Shelf-nu/shelf.nu), clone your
+   fork, and add Shelf's repository as `upstream`:
+   `git remote add upstream https://github.com/Shelf-nu/shelf.nu.git`. Team
+   members can branch in the main repository instead.
 2. Follow the [Get started guide](https://docs.shelf.nu/local-development) to
    set up your local environment. Skip its clone step: run `pnpm install` in
    the checkout from step 1.
@@ -65,11 +67,12 @@ every item is done.
 - [ ] **CodeRabbit reviewed every commit.** CodeRabbit reviews each push. It
       can still skip commits, for example when it is rate limited or a review
       fails. Check that its latest review covers your latest commit. If it does
-      not, comment `@coderabbitai full review`. It works whether CodeRabbit
-      skipped or paused; a plain `@coderabbitai review` only works when
-      reviews are paused, and refuses otherwise. If it skipped because of a rate limit, comment
-      `@coderabbitai rate limit` to see when it resets, and ask again after
-      that.
+      not: if it says reviews are paused, comment `@coderabbitai resume`, which
+      restarts automatic reviews and covers the paused commits. If it skipped
+      a commit, comment `@coderabbitai full review` (a plain
+      `@coderabbitai review` refuses for skipped commits). If it skipped
+      because of a rate limit, comment `@coderabbitai rate limit` to see when
+      it resets, and ask again after that.
 - [ ] **Every CodeRabbit thread is resolved.** Fix the finding, or reply with
       why it does not apply, then resolve the thread. Do not leave threads open
       for the maintainer to sort out.

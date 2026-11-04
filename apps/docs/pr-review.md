@@ -84,7 +84,9 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
 After the report the skill asks what to do next in a picker. First you pick
 one path:
 
-- **Post a request-changes review.** The author fixes the findings. The skill
+- **Post a request-changes review**, for an open PR someone else wrote
+  (GitHub refuses one on your own PR, so on your own PR you fix instead). The
+  author fixes the findings. The skill
   writes the review, shows it to you, posts it after you confirm, and stops. It
   edits no code and does not offer to fix anything afterwards.
 - **Fix here.** The skill fixes the findings in your checkout and posts
@@ -95,7 +97,8 @@ or get fixed: each finding when there are 4 or fewer, otherwise whole sections
 (must fix, should fix, nits, spotted along the way), or type a custom range
 under "Other". "Spotted along the way" findings never go into a posted review,
 since the PR did not cause them; the post option only appears when the PR
-caused at least one finding. A third question appears when prove or restore applies. If you
+caused at least one finding. With no findings but some dismissed entries, it skips the path picker and only
+asks which entries to restore. A third question appears when prove or restore applies. If you
 close the picker, it waits for a typed reply to the Next line. You can also
 type "post" (every finding the PR caused), "post 1-4", "fix 1-4", "restore D2",
 or "prove 3".

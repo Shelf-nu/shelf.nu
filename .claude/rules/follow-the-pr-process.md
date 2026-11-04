@@ -4,32 +4,24 @@ description: Open every pull request as a draft and follow CONTRIBUTING.md until
 
 # Follow The PR Process
 
-Every PR goes through the process in
-[CONTRIBUTING.md](../../CONTRIBUTING.md#the-pull-request-process). The review
-queue only shows PRs that are not drafts and have a review request, so marking
-a PR ready too early puts unfinished work in front of the reviewer.
+Follow [CONTRIBUTING.md](../../CONTRIBUTING.md#the-pull-request-process). The
+review queue shows only non-draft PRs with a review request.
 
 ```bash
-# ❌ Bad: ready for review on creation
-gh pr create --title "fix(assets): ..." --body-file body.md
-
-# ✅ Good: draft first
-gh pr create --draft --title "fix(assets): ..." --body-file body.md
+gh pr create --title "fix(assets): ..." --body-file body.md          # ❌ ready on creation
+gh pr create --draft --title "fix(assets): ..." --body-file body.md  # ✅ draft first
 ```
 
-Mark it ready (`gh pr ready`) and request a review from @DonKoko only when all
-of these hold. Outside contributors cannot request reviewers on GitHub: they
-comment `@DonKoko ready for review` instead, and a maintainer adds the request.
+Mark it ready (`gh pr ready`) and request a review from @DonKoko only when:
 
 - CI is green.
-- CodeRabbit has reviewed the latest commit. If it skipped one, comment
-  `@coderabbitai full review` (a plain `@coderabbitai review` refuses unless
-  reviews are paused).
+- CodeRabbit reviewed the latest commit: `@coderabbitai resume` if reviews
+  are paused, `@coderabbitai full review` if it skipped a commit.
 - Every CodeRabbit thread is fixed or answered, and resolved.
-- The branch is up to date with `main` with no conflicts (`/fix-conflicts`).
-- Team members: `/pr-review` has run and its must-fix and should-fix findings
-  are fixed. It is optional for outside contributors.
+- The branch is up to date with `main`, no conflicts (`/fix-conflicts`).
+- Team members: `/pr-review` must-fix and should-fix findings are fixed.
 
-After review feedback: fix or answer each comment, resolve the threads you
-fixed, go through the list again, then re-request the review. Pushing alone
-does not put the PR back in the queue.
+Outside contributors cannot request reviewers: they comment
+`@DonKoko ready for review` and a maintainer adds the request. After feedback,
+fix or answer each comment, resolve what you fixed, re-check the list, and
+re-request the review. A push alone does not put the PR back in the queue.

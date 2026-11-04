@@ -355,8 +355,10 @@ Ask these in one `AskUserQuestion` call:
 
 - **Question 1, header "Next"** (single select), only when there are findings.
   Options, in this order, leaving out what does not apply:
-  - "Post a request-changes review": only for an open PR with at least one
-    finding outside "Spotted along the way". Description: "The
+  - "Post a request-changes review": only for an open PR that the current
+    `gh` user did not author (GitHub refuses a request-changes review on your
+    own PR), with at least one finding outside "Spotted along the way". On
+    your own PR, fix the findings instead. Description: "The
     author fixes the findings. Nothing is edited here."
   - "Fix here": description "Edit the code in this checkout. Nothing is
     posted." For a merged PR, label it "Fix in a follow-up PR".
@@ -389,7 +391,9 @@ section; a per-finding tick or a typed range stays exactly as picked.
 nothing. If `AskUserQuestion` is unavailable, or the user dismisses it, stop
 and wait for a typed reply to the Next line. A typed "post" or "fix 1-4" picks
 the same paths, with the same rule: one or the other, never both. A bare "post"
-means every finding the PR caused; "post 1-4" means those numbers.
+means every finding the PR caused; "post 1-4" means those numbers. A typed
+"post" gets the same checks as the picker option (open PR, not your own, at
+least one finding the PR caused); when one fails, say which and ask again.
 
 **"restore D<n>":** bring that dismissed entry back as a normal finding with
 the next free number, at its original severity, with its saved impact, trigger
