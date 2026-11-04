@@ -374,7 +374,7 @@ describe("useAuditScanPersistence", () => {
     );
     fetcher = makeFetcher({
       state: "idle",
-      data: { error: { message: "This audit is archived." } },
+      data: { error: { message: "This audit is archived." }, refused: true },
     });
     rerender();
 
@@ -382,6 +382,48 @@ describe("useAuditScanPersistence", () => {
       ["pool-1"],
       "This audit is archived."
     );
+  });
+
+  it("keeps a count pending through a transient server failure", () => {
+    const refs = makeRefs();
+    const onCountFailed = vi.fn();
+    const counts = {
+      "pool-1": {
+        expectedQuantity: 14,
+        foundQuantity: 9,
+        unitOfMeasure: "pcs",
+        unsaved: true,
+      },
+    };
+    let fetcher = makeFetcher();
+    const pool = {
+      "qr-pool": {
+        data: { id: "pool-1", title: "Sandbag" } as unknown as AssetFromQr,
+        type: "asset" as const,
+      },
+    };
+
+    const { rerender } = renderHook(() =>
+      useAuditScanPersistence({
+        auditSession,
+        scannedItems: pool,
+        expectedAssets: [],
+        scanPersistFetcher: fetcher,
+        ...refs,
+        auditCounts: counts,
+        onCountFailed,
+      })
+    );
+    fetcher = makeFetcher({
+      state: "idle",
+      data: {
+        error: { message: "Failed to record audit scan" },
+        refused: false,
+      },
+    });
+    rerender();
+
+    expect(onCountFailed).not.toHaveBeenCalled();
   });
 
   it("reports the count the server kept when it differs from the one sent", () => {

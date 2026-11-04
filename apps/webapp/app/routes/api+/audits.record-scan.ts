@@ -88,6 +88,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return data(payload({ success: result.status === "recorded", ...result }));
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return data(error(reason), { status: reason.status });
+    // `refused` tells the scanner a 4xx is a final answer (no permission any
+    // more, audit archived) rather than a failure worth retrying.
+    return data(
+      {
+        ...error(reason),
+        refused: (reason.status ?? 500) >= 400 && (reason.status ?? 500) < 500,
+      },
+      { status: reason.status }
+    );
   }
 }

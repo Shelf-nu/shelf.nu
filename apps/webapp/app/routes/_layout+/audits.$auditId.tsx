@@ -26,6 +26,7 @@ import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
+  getAuditUnitTotals,
   updateAuditSession,
   cancelAuditSession,
   archiveAuditSession,
@@ -297,6 +298,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
     const header = { title: `${session.name} · Overview` };
 
+    // Units line of the Complete Audit dialog in the header.
+    const unitTotals = await getAuditUnitTotals(auditId);
+
     // Fetch team members for audit assignment (used in edit dialog)
     const teamMembers = await db.teamMember.findMany({
       where: {
@@ -320,6 +324,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         canManageOthersAudits: access.policy.audits.manageOthers,
         hasScans,
         stats,
+        unitTotals,
         userId,
         teamMembers,
       })
@@ -337,6 +342,7 @@ export default function AuditDetailsPage() {
     canManageOthersAudits,
     hasScans,
     stats,
+    unitTotals,
     userId,
   } = useLoaderData<typeof loader>();
   const roles = useOrganizationRoles();
@@ -417,7 +423,11 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog auditName={session.name} stats={stats} />
+              <CompleteAuditDialog
+                auditName={session.name}
+                stats={stats}
+                units={unitTotals}
+              />
             )}
         </div>
       </Header>

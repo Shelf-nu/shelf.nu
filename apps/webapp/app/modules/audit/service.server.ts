@@ -69,12 +69,13 @@ import {
   createAssetScanRemovedNote,
   createAuditCountUpdatedNote,
 } from "./helpers.server";
-import type { AuditUnitScope } from "./quantity";
+import type { AuditUnitScope, AuditUnitTotals } from "./quantity";
 import {
   auditUnitScope,
   expectedQuantityFor,
   MAX_AUDIT_FOUND_QUANTITY,
   scopedExpectedUnits,
+  totalAuditUnits,
 } from "./quantity";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -2366,6 +2367,30 @@ async function updateAuditScanCount({
       foundQuantity: count,
     };
   });
+}
+
+/**
+ * Unit totals of an audit's quantity-tracked rows, for the overview's
+ * statistics and the Complete Audit dialog. Callers must already have proven
+ * the audit belongs to the caller's organization (for example through
+ * `getAuditSessionDetails`).
+ *
+ * @param auditSessionId - the audit, already org-checked by the caller
+ * @returns the totals, or null when the audit has no quantity rows
+ */
+export async function getAuditUnitTotals(
+  auditSessionId: string
+): Promise<AuditUnitTotals | null> {
+  const rows = await db.auditAsset.findMany({
+    where: { auditSessionId, expectedQuantity: { not: null } },
+    select: {
+      expected: true,
+      status: true,
+      expectedQuantity: true,
+      foundQuantity: true,
+    },
+  });
+  return totalAuditUnits(rows);
 }
 
 /** Arguments for {@link removeAuditScan}. */

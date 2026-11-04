@@ -34,9 +34,10 @@ import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import { getAuditImages } from "~/modules/audit/image.service.server";
-import { describeAuditUnits, totalAuditUnits } from "~/modules/audit/quantity";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
+  getAuditUnitTotals,
   getAssetsForAuditSession,
   cancelAuditSession,
   requireAuditAssignee,
@@ -170,27 +171,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy: { createdAt: "asc" },
     });
 
-    // The audit's quantity-tracked rows, for the unit totals.
-    const quantityRowsQuery = db.auditAsset.findMany({
-      where: { auditSessionId: auditId, expectedQuantity: { not: null } },
-      select: {
-        expected: true,
-        status: true,
-        expectedQuantity: true,
-        foundQuantity: true,
-      },
-    });
-
-    const [conditionNotes, quantityRows] = await Promise.all([
+    // Unit totals across the audit's quantity-tracked rows; null when it has
+    // none, and the statistics then show asset counts only.
+    const [conditionNotes, unitTotals] = await Promise.all([
       conditionNotesQuery,
-      quantityRowsQuery,
+      getAuditUnitTotals(auditId),
     ]);
 
     const header = { title: `${session.name} · Overview` };
-
-    // Unit totals across the audit's quantity-tracked rows; null when it has
-    // none, and the statistics then show asset counts only.
-    const unitTotals = totalAuditUnits(quantityRows);
 
     // Only the creator or a caller who manages others' audits can remove
     // assets, and only from PENDING audits

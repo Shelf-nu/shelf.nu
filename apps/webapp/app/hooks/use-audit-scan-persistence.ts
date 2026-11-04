@@ -63,10 +63,13 @@ type UseAuditScanPersistenceProps = {
     refused: boolean
   ) => void;
   /**
-   * Called when the server refuses a save that carried counts (no permission
-   * any more, the audit archived), with the assets whose count it refused and
-   * the server's message. The caller stops treating those counts as about to
-   * be saved, so a refusal that keeps repeating cannot hold "Complete audit".
+   * Called when the server refuses a save that carried counts with a final
+   * answer (no permission any more, the audit archived: the response says
+   * `refused`), with the assets whose count it refused and the server's
+   * message. The caller stops treating those counts as about to be saved, so
+   * a refusal that keeps repeating cannot hold "Complete audit". A transient
+   * failure (a 5xx) does not call it: the count is retried and still holds
+   * completion until it is saved.
    */
   onCountFailed?: (assetIds: string[], message: string) => void;
 };
@@ -264,7 +267,8 @@ export function useAuditScanPersistence({
         const refusedCounts = [...sentCountsRef.current]
           .filter(([, sent]) => sent !== null && sent !== undefined)
           .map(([assetId]) => assetId);
-        if (refusedCounts.length > 0) {
+        const isFinalRefusal = (data as { refused?: unknown }).refused === true;
+        if (isFinalRefusal && refusedCounts.length > 0) {
           const refusal = (data as { error?: { message?: unknown } | null })
             .error;
           const message =

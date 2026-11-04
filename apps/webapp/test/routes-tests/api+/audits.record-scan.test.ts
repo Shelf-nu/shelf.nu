@@ -300,6 +300,38 @@ describe("POST /api/audits/record-scan", () => {
       foundQuantity: 6,
     });
   });
+
+  it("marks a 4xx refusal as final and a 5xx failure as retryable", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    recordAuditScan.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "This audit is archived.",
+        status: 400,
+        label: "Audit",
+      })
+    );
+    expect(responseBody(await callAction())).toMatchObject({
+      refused: true,
+    });
+
+    recordAuditScan.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "Failed to record audit scan",
+        status: 500,
+        label: "Audit",
+      })
+    );
+    expect(responseBody(await callAction())).toMatchObject({
+      refused: false,
+    });
+  });
 });
 
 /** The payload of an action result, whether wrapped by `data()` or not. */
