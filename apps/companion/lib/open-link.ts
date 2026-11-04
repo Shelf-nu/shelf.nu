@@ -2,16 +2,19 @@
  * Where a web link the app shows goes when someone taps it.
  *
  * A link to the Shelf server the app is connected to (`app.shelf.nu` for
- * Shelf's cloud) whose path names something the app has a screen for opens
- * that screen: an asset, kit, booking or audit, or their lists. A Shelf QR
- * link resolves through the API, which hands a code from another server to
- * the web. A screen link stays on the web when it names another workspace
- * (`?orgId=`), points at another Shelf server, or is tapped where the app
- * cannot navigate (inside a modal). Every other http(s) link opens in the in-app
- * browser (SFSafariViewController on iOS, a Custom Tab on Android), never
- * through the OS: the person stays in the app, and dismissing the browser
- * returns them to the screen they tapped on. Files behind a link (PDF,
- * images, Office documents) open in that browser too.
+ * Shelf's cloud) never opens a browser. When its path names something the
+ * app has a screen for (an asset, kit, booking or audit, or their lists) it
+ * opens that screen; a Shelf QR link resolves through the API to its asset
+ * or kit. Any other page on that server (a location, settings, a page of
+ * another workspace) is `web-only`: the in-app browser holds no Shelf
+ * session and would only show the web login, so the caller explains instead.
+ *
+ * Every other http(s) link opens in the in-app browser (SFSafariViewController
+ * on iOS, a Custom Tab on Android), never through the OS: the person stays in
+ * the app, and dismissing the browser returns them to the screen they tapped
+ * on. Files behind a link (PDF, images, Office documents) open there too, and
+ * so does a link to another Shelf server (cloud while self-hosted), whose ids
+ * mean nothing to the connected one.
  *
  * Shelf's own pages are never handed to the OS either: `app.shelf.nu` paths
  * are claimed App Links, and `Linking.openURL` of one re-enters this app
@@ -60,14 +63,16 @@ const WEB_ONLY_PAGES: Readonly<Record<string, readonly string[]>> = {
 
 /** What the caller knows about where the link was tapped. */
 export type LinkContext = {
-  /** The workspace the app is showing; a link naming another stays web. */
+  /** The workspace the app is showing; a link naming another is web-only. */
   readonly currentOrgId?: string | null;
-  /**
-   * False where the app cannot navigate, such as inside a modal: a link to
-   * an app screen then opens its web page in the in-app browser.
-   */
-  readonly screens?: boolean;
 };
+
+/** Why a page on the connected Shelf server cannot open in the app. */
+export type WebOnlyReason =
+  /** The app has no screen for the page (a location, settings, an export). */
+  | "no-screen"
+  /** The page belongs to another workspace than the one the app shows. */
+  | "other-workspace";
 
 /** Where a link opens, and what to open. */
 export type LinkOpening =
@@ -75,6 +80,12 @@ export type LinkOpening =
   | ({ readonly opener: "screen" } & PushDestination)
   /** A Shelf QR code, resolved to its asset or kit through the API. */
   | { readonly opener: "qr"; readonly qrId: string; readonly origin: string }
+  /** A page of the connected Shelf server that only the web app shows. */
+  | {
+      readonly opener: "web-only";
+      readonly url: string;
+      readonly reason: WebOnlyReason;
+    }
   /** Any other page, shown in the in-app browser. */
   | { readonly opener: "browser"; readonly url: string };
 
@@ -110,8 +121,9 @@ function isActiveServerHost(parsed: URL, activeServerUrl: string): boolean {
 }
 
 /**
- * The app screen or QR code a Shelf web link names, or null when it must
- * stay a web page.
+ * Where a link on a Shelf host goes: its app screen or QR code, `web-only`
+ * for another page of the connected server, or null for a page of another
+ * Shelf server (the browser shows it).
  *
  * @param url - The link, on a Shelf host.
  * @param onActiveServer - Whether the link's host is the connected server;
@@ -123,27 +135,33 @@ function shelfDestination(
   onActiveServer: boolean,
   context: LinkContext
 ): LinkOpening | null {
+  const webOnly = (reason: WebOnlyReason): LinkOpening | null =>
+    onActiveServer ? { opener: "web-only", url, reason } : null;
   const { segments, query } = splitLinkUrl(url);
   const match = matchResourcePath(segments);
-  if (!match) return null;
+  if (!match) return webOnly("no-screen");
   const [resource, page] = segments;
-  if (page && WEB_ONLY_PAGES[resource]?.includes(page)) return null;
+  if (page && WEB_ONLY_PAGES[resource]?.includes(page)) {
+    return webOnly("no-screen");
+  }
 
   if (match.resource === "qr") {
     // The resolver hands a code from another server to that server's web.
-    return match.id && context.screens !== false
+    return match.id
       ? { opener: "qr", qrId: match.id, origin: new URL(url).origin }
-      : null;
+      : webOnly("no-screen");
   }
-  if (!onActiveServer || context.screens === false) return null;
+  if (!onActiveServer) return null;
   const linkOrgId = new URLSearchParams(query).get("orgId")?.trim();
   if (linkOrgId && context.currentOrgId && linkOrgId !== context.currentOrgId) {
     // The web app switches workspace for a link like this; the screen would
     // look the id up in the workspace the app is showing.
-    return null;
+    return webOnly("other-workspace");
   }
   const destination = toDestination(match);
-  return destination ? { opener: "screen", ...destination } : null;
+  return destination
+    ? { opener: "screen", ...destination }
+    : webOnly("no-screen");
 }
 
 /**
@@ -153,9 +171,9 @@ function shelfDestination(
  *   note's Shelf link made absolute).
  * @param activeServerUrl - Base URL of the Shelf server the app is connected
  *   to; its host counts as Shelf's own web app, like `app.shelf.nu`.
- * @param context - Where the link was tapped (workspace, modal).
- * @returns The screen, QR code or browser page to open, or null for anything
- *   that is not an http(s) URL (nothing should open).
+ * @param context - Where the link was tapped (the workspace on show).
+ * @returns The screen, QR code, web-only notice or browser page to open, or
+ *   null for anything that is not an http(s) URL (nothing should open).
  */
 export function resolveLinkOpening(
   url: string,
@@ -187,9 +205,9 @@ export function resolveLinkOpening(
 /**
  * Whether a Shelf link opens something in the app: a screen, or a QR code
  * resolved to one. A Shelf page the app has no screen for (a team member,
- * a location, settings) opens in the in-app browser instead, which holds no
- * Shelf session and shows the web login. A link the app writes itself, such
- * as a note's `link` tag, links only when this is true.
+ * a location, settings) does not. A link the app writes itself, such as a
+ * note's `link` tag, links only when this is true; a link someone typed
+ * stays tappable and explains itself (`web-only`).
  *
  * @param url - The link's absolute URL.
  * @param activeServerUrl - Base URL of the connected Shelf server.
@@ -197,7 +215,7 @@ export function resolveLinkOpening(
  */
 export function opensInApp(url: string, activeServerUrl: string): boolean {
   const opening = resolveLinkOpening(url, activeServerUrl);
-  return opening !== null && opening.opener !== "browser";
+  return opening?.opener === "screen" || opening?.opener === "qr";
 }
 
 /**

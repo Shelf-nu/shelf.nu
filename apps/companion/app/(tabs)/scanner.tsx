@@ -1432,8 +1432,9 @@ function ScannerContent() {
           // A QR linked to a kit (kitId set, asset null) must NOT offer in-app
           // "Create Asset". createAsset only attaches a passed QR when both its
           // assetId AND kitId are null; for a kit-linked QR it silently mints a
-          // *different* QR and leaves the scanned kit QR untouched — breaking the
-          // "this QR will be linked" promise. Bridge those to the web kit view.
+          // *different* QR and leaves the scanned kit QR untouched, breaking
+          // the "this QR will be linked" promise. The card opens the kit's own
+          // screen instead.
           const isKitLinked = Boolean(kitId);
 
           // Claimed to the current org, truly unlinked, and the caller can
@@ -1443,13 +1444,18 @@ function ScannerContent() {
             codeOrgId === currentOrg?.id &&
             (canCreateAsset || canManageQrCodes);
 
-          if (qrId && isKitLinked) {
-            // QR belongs to a kit — open the web app to view the kit
+          if (qrId && kitId) {
+            // The kit is in this workspace (another workspace's code was
+            // handled above), and the app has its screen.
+            const linkedKitId = kitId;
             unlinkedQrAction = {
-              label: "Open in Browser",
-              icon: "open-outline",
+              label: "View Kit",
+              icon: "cube-outline",
               onPress: () => {
-                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
+                pushIntoTab(
+                  "/(tabs)/assets",
+                  `/(tabs)/assets/kits/${linkedKitId}`
+                );
                 dismissResult();
               },
             };
@@ -1489,7 +1495,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1517,7 +1523,7 @@ function ScannerContent() {
             title: isKitLinked ? "Linked to a Kit" : "No Asset Linked",
             message: qrId
               ? isKitLinked
-                ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
+                ? "This QR code is linked to a kit, not an asset."
                 : canActOnUnlinked
                 ? "This QR code is not linked to any asset. Create a new asset, link an existing one, or link it to a kit in the browser."
                 : "This QR code is not linked to any asset. Open the web app to link it."

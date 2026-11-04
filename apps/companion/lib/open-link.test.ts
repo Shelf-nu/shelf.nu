@@ -132,11 +132,12 @@ test("a claimed host typed in capitals is still Shelf", () => {
   );
 });
 
-test("a link naming another workspace stays on the web", () => {
+test("a link naming another workspace is web-only", () => {
   const url = "https://app.shelf.nu/assets/as_9?orgId=org_B";
   assert.deepEqual(resolveLinkOpening(url, CLOUD, { currentOrgId: "org_A" }), {
-    opener: "browser",
+    opener: "web-only",
     url,
+    reason: "other-workspace",
   });
   assert.equal(
     resolveLinkOpening(url, CLOUD, { currentOrgId: "org_B" })?.opener,
@@ -144,20 +145,8 @@ test("a link naming another workspace stays on the web", () => {
   );
 });
 
-test("inside a modal, app screens open as web pages", () => {
-  for (const url of [
-    "https://app.shelf.nu/assets/as_1",
-    "https://app.shelf.nu/qr/qr_1",
-  ]) {
-    assert.deepEqual(
-      resolveLinkOpening(url, CLOUD, { screens: false }),
-      { opener: "browser", url },
-      url
-    );
-  }
-});
-
-test("Shelf pages the app has no screen for open untouched in the browser", () => {
+test("Shelf pages the app has no screen for are web-only, never the browser", () => {
+  // The in-app browser holds no Shelf session: it would show the web login.
   for (const url of [
     "https://app.shelf.nu/locations/loc_1",
     "https://app.shelf.nu/settings/team",
@@ -171,10 +160,18 @@ test("Shelf pages the app has no screen for open untouched in the browser", () =
   ]) {
     assert.deepEqual(
       resolveLinkOpening(url, CLOUD),
-      { opener: "browser", url },
+      { opener: "web-only", url, reason: "no-screen" },
       url
     );
   }
+});
+
+test("a page of another Shelf server opens in the browser, not as web-only", () => {
+  // The connected server is self-hosted; cloud pages are another server's.
+  assert.deepEqual(
+    resolveLinkOpening("https://app.shelf.nu/locations/loc_1", SELF_HOSTED),
+    { opener: "browser", url: "https://app.shelf.nu/locations/loc_1" }
+  );
 });
 
 test("another website opens in the browser with the companion ref", () => {

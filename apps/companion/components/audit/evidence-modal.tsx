@@ -510,7 +510,7 @@ export function EvidenceModal({
                     <LinkedText
                       text={note.content}
                       style={styles.existingNoteText}
-                      inModal
+                      onLeave={handleClose}
                     />
                     <Text style={styles.existingNoteMeta}>
                       {note.authorName ?? "Unknown"}

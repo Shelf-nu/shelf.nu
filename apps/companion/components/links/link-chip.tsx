@@ -25,20 +25,21 @@ import { LinkIcon } from "./link-icon";
  *
  * @param props - Component props.
  * @param props.chip - What to draw and open, from `linkChip`.
- * @param props.inModal - True inside a React Native `Modal`.
+ * @param props.onLeave - Inside a React Native `Modal`: closes it before a
+ *   Shelf link opens its app screen underneath.
  * @returns The pressable chip.
  */
 export const LinkChip = memo(function LinkChip({
   chip,
-  inModal,
+  onLeave,
 }: {
   chip: LinkChipModel;
-  inModal?: boolean;
+  onLeave?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const { url } = chip;
-  const links = useLinkHandlers({ inModal });
+  const links = useLinkHandlers({ onLeave });
   const open = useCallback(() => links.open(url), [links, url]);
   const showMenu = useCallback(() => links.showMenu(url), [links, url]);
 

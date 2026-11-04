@@ -40,8 +40,8 @@ import { createStyles } from "@/lib/create-styles";
  * @param props.selectable - Whether the text can be selected and copied.
  * @param props.bareDomains - Whether a bare domain links too. False for
  *   custom field values, which link only http(s) URLs, as on the web.
- * @param props.inModal - True inside a React Native `Modal`, where a Shelf
- *   screen link opens its web page instead.
+ * @param props.onLeave - Inside a React Native `Modal`: closes it before a
+ *   Shelf link opens its app screen underneath.
  * @param props.testID - Test id of the outer text.
  * @returns The text element.
  */
@@ -52,7 +52,7 @@ export const LinkedText = memo(function LinkedText({
   numberOfLines,
   selectable,
   bareDomains = true,
-  inModal,
+  onLeave,
   testID,
 }: {
   text?: string;
@@ -61,11 +61,11 @@ export const LinkedText = memo(function LinkedText({
   numberOfLines?: number;
   selectable?: boolean;
   bareDomains?: boolean;
-  inModal?: boolean;
+  onLeave?: () => void;
   testID?: string;
 }) {
   const styles = useStyles();
-  const { open, showMenu } = useLinkHandlers({ inModal });
+  const { open, showMenu } = useLinkHandlers({ onLeave });
   const runs = useMemo(
     () =>
       segments ??

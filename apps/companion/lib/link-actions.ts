@@ -3,8 +3,11 @@
  *
  * - Tap (`openLink`, or `useLinkHandlers` in a component): a Shelf link the
  *   app has a screen for opens that screen; a Shelf QR link resolves to its
- *   asset or kit without recording a scan; every other web page or file
- *   opens in the in-app browser. The rule lives in `./open-link.ts`.
+ *   asset or kit without recording a scan; any other page of the connected
+ *   Shelf server gets a notice that it is on the web app (with Copy link),
+ *   never the in-app browser, which would only show the web login; every
+ *   other web page or file opens in the in-app browser. The rule lives in
+ *   `./open-link.ts`.
  * - Long-press (`showLinkMenu`): a menu with the URL as its title and Copy
  *   link and Share, the platform's own action sheet on iOS and an alert on
  *   Android.
@@ -31,7 +34,11 @@ import { useMemo } from "react";
 import * as Haptics from "expo-haptics";
 import { resolveQrAndNavigate } from "./deep-links";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
-import { resolveLinkOpening, type LinkContext } from "./open-link";
+import {
+  resolveLinkOpening,
+  type LinkContext,
+  type WebOnlyReason,
+} from "./open-link";
 import { useOrg } from "./org-context";
 import { getActiveServer } from "./server/active-server";
 
@@ -45,35 +52,74 @@ const clipboard = TurboModuleRegistry.get<ClipboardModule>("Clipboard");
 /** What a link does beyond its role, for screen readers. */
 export const LINK_HINT = "Opens the link. Long-press to copy or share it.";
 
+/** What the web-only notice says, per reason. */
+const WEB_ONLY_NOTICE: Readonly<
+  Record<WebOnlyReason, { title: string; message: string }>
+> = {
+  "no-screen": {
+    title: "Only on the web app",
+    message:
+      "This page is not in the app. Copy the link to open it in a browser where you are signed in to Shelf.",
+  },
+  "other-workspace": {
+    title: "In another workspace",
+    message:
+      "This link is to a different workspace. Switch to that workspace to open it, or copy the link.",
+  },
+};
+
 /**
- * Opens a link where it belongs: an app screen, a resolved QR code, or the
- * in-app browser.
+ * Explains that a Shelf page lives on the web app only, offering to copy the
+ * link.
+ *
+ * @param url - The link's absolute URL.
+ * @param reason - Why the app cannot open it.
+ */
+function showWebOnlyNotice(url: string, reason: WebOnlyReason) {
+  const { title, message } = WEB_ONLY_NOTICE[reason];
+  Alert.alert(title, message, [
+    ...(clipboard ? [{ text: "Copy link", onPress: () => copyLink(url) }] : []),
+    { text: "OK", style: "cancel" as const },
+  ]);
+}
+
+/**
+ * Opens a link where it belongs: an app screen, a resolved QR code, a
+ * web-only notice, or the in-app browser.
  *
  * Never throws: a link that fails to open (or a second tap while the browser
  * is already showing) leaves the screen as it was.
  *
  * @param url - The link's absolute URL.
- * @param context - Where the link was tapped (workspace, modal).
+ * @param context - Where the link was tapped (the workspace on show).
+ * @param leave - Runs before an app screen opens, for a link inside a modal:
+ *   it closes the modal so the screen is not hidden behind it.
  * @returns Resolves once the link has been handed off, or immediately when
  *   there is nothing to open or opening failed
  */
 export async function openLink(
   url: string,
-  context: LinkContext = {}
+  context: LinkContext = {},
+  leave?: () => void
 ): Promise<void> {
   const opening = resolveLinkOpening(url, getActiveServer().baseUrl, context);
   if (!opening) return;
   try {
     switch (opening.opener) {
       case "screen":
+        leave?.();
         pushIntoTab(opening.tabRoot, opening.href ?? undefined);
         return;
       case "qr":
+        leave?.();
         // A tapped link is not a scan of the label: record nothing.
         await resolveQrAndNavigate(opening.qrId, opening.origin, {
           recordScan: false,
           orgId: context.currentOrgId ?? undefined,
         });
+        return;
+      case "web-only":
+        showWebOnlyNotice(opening.url, opening.reason);
         return;
       case "browser":
         await openShelfWebUrl(opening.url);
@@ -144,23 +190,23 @@ export type LinkHandlers = {
 
 /**
  * Link handlers that know the workspace the app is showing, so a link to
- * another workspace opens on the web instead of a screen that cannot find it.
+ * another workspace explains itself instead of opening a screen that cannot
+ * find it.
  *
  * @param options - Component options.
- * @param options.inModal - True inside a React Native `Modal`, where the app
- *   cannot navigate underneath: Shelf screens open as web pages there.
+ * @param options.onLeave - For links inside a React Native `Modal`: closes
+ *   the modal before a Shelf link opens its app screen underneath.
  * @returns Stable `open` and `showMenu` handlers.
  */
 export function useLinkHandlers({
-  inModal = false,
-}: { inModal?: boolean } = {}): LinkHandlers {
+  onLeave,
+}: { onLeave?: () => void } = {}): LinkHandlers {
   const currentOrgId = useOrg().currentOrg?.id ?? null;
   return useMemo(
     () => ({
-      open: (url: string) =>
-        void openLink(url, { currentOrgId, screens: !inModal }),
+      open: (url: string) => void openLink(url, { currentOrgId }, onLeave),
       showMenu: showLinkMenu,
     }),
-    [currentOrgId, inModal]
+    [currentOrgId, onLeave]
   );
 }

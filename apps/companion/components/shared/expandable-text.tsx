@@ -39,8 +39,8 @@ import { LinkedText } from "../links/linked-text";
  * @param props.text - The text to show.
  * @param props.segments - The text's link runs, when already read; their
  *   `text` joined must equal `text`, which the overflow is measured on.
- * @param props.inModal - True inside a React Native `Modal`, where a Shelf
- *   screen link opens its web page instead.
+ * @param props.onLeave - Inside a React Native `Modal`: closes it before a
+ *   Shelf link opens its app screen underneath.
  * @param props.label - What the text is, for screen readers ("description",
  *   "note"). The toggle is announced as "Show more <label>".
  * @param props.numberOfLines - Lines shown while collapsed.
@@ -52,7 +52,7 @@ import { LinkedText } from "../links/linked-text";
 export const ExpandableText = memo(function ExpandableText({
   text,
   segments,
-  inModal,
+  onLeave,
   label,
   numberOfLines,
   style,
@@ -60,7 +60,7 @@ export const ExpandableText = memo(function ExpandableText({
 }: {
   text: string;
   segments?: readonly TextSegment[];
-  inModal?: boolean;
+  onLeave?: () => void;
   label: string;
   numberOfLines: number;
   style?: StyleProp<TextStyle>;
@@ -80,7 +80,7 @@ export const ExpandableText = memo(function ExpandableText({
       <LinkedText
         text={text}
         segments={segments}
-        inModal={inModal}
+        onLeave={onLeave}
         style={style}
         numberOfLines={expanded ? undefined : numberOfLines}
         testID={testID}

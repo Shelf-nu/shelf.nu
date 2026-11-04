@@ -80,7 +80,7 @@ export function EvidenceViewer({
         <LinkedParagraph
           text={note.content}
           style={styles.noteContent}
-          inModal
+          onLeave={onClose}
         />
         <Text style={styles.noteMeta}>
           {/* why: the account can be deleted while its evidence survives, so
@@ -89,7 +89,7 @@ export function EvidenceViewer({
         </Text>
       </View>
     ),
-    [styles, formatDateTime]
+    [styles, formatDateTime, onClose]
   );
 
   const isEmpty =

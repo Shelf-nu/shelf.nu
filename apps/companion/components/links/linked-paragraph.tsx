@@ -45,8 +45,8 @@ import { LinkedText } from "./linked-text";
  * @param props.expandable - Clip the text to `numberOfLines` with a "Show
  *   more" toggle; `label` names the text for screen readers.
  * @param props.selectable - Whether the text can be selected and copied.
- * @param props.inModal - True inside a React Native `Modal`, where a Shelf
- *   screen link opens its web page instead.
+ * @param props.onLeave - Inside a React Native `Modal`: closes it before a
+ *   Shelf link opens its app screen underneath.
  * @param props.testID - Test id of the text (of the chip's wrapper when the
  *   chip stands in for the text).
  * @returns The text and its chips.
@@ -58,7 +58,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   containerStyle,
   expandable,
   selectable,
-  inModal,
+  onLeave,
   testID,
 }: {
   text: string;
@@ -67,7 +67,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   containerStyle?: StyleProp<ViewStyle>;
   expandable?: { label: string; numberOfLines: number };
   selectable?: boolean;
-  inModal?: boolean;
+  onLeave?: () => void;
   testID?: string;
 }) {
   const styles = useStyles();
@@ -89,7 +89,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
           label={expandable.label}
           numberOfLines={expandable.numberOfLines}
           style={style}
-          inModal={inModal}
+          onLeave={onLeave}
           testID={testID}
         />
       ) : (
@@ -97,14 +97,14 @@ export const LinkedParagraph = memo(function LinkedParagraph({
           segments={runs}
           style={style}
           selectable={selectable}
-          inModal={inModal}
+          onLeave={onLeave}
           testID={testID}
         />
       )}
       {chips.length > 0 ? (
         <View style={styles.chips}>
           {chips.map((chip) => (
-            <LinkChip key={chip.url} chip={chip} inModal={inModal} />
+            <LinkChip key={chip.url} chip={chip} onLeave={onLeave} />
           ))}
         </View>
       ) : null}
