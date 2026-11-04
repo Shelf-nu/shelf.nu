@@ -29,7 +29,8 @@ type UseScanQueueParams = {
    */
   onScanSynced?: (
     assetId: string,
-    auditAssetId: string,
+    /** Null when the server has no row left for the scan (it was removed). */
+    auditAssetId: string | null,
     storedCount?: number | null,
     /**
      * True when the server kept another count than the one sent: the audit
@@ -98,15 +99,17 @@ export function useScanQueue({
           ])
         );
 
-        // Capture auditAssetId from response so notes/photos can be attached
-        if (data?.auditAssetId) {
+        // Capture auditAssetId from response so notes/photos can be attached.
+        // A count answer without a row (the scan was removed) still reaches
+        // the caller, so a refused recount is always reported.
+        if (data?.auditAssetId || storedCount !== undefined) {
           const itemIndex = scannedItemsRef.current.findIndex(
             (item) => item.assetId === entry.assetId
           );
           if (itemIndex !== -1) {
             scannedItemsRef.current[itemIndex] = {
               ...scannedItemsRef.current[itemIndex],
-              auditAssetId: data.auditAssetId,
+              ...(data.auditAssetId ? { auditAssetId: data.auditAssetId } : {}),
               // A successful (re)sync clears any prior failed marker.
               syncFailed: false,
               ...(storedCount !== undefined
@@ -117,7 +120,7 @@ export function useScanQueue({
           // Notify caller to update React state for re-render
           onScanSynced?.(
             entry.assetId,
-            data.auditAssetId,
+            data.auditAssetId ?? null,
             storedCount,
             countWasRefused(entry.foundQuantity, storedCount)
           );

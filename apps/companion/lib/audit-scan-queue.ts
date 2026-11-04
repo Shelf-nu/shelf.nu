@@ -328,3 +328,48 @@ export function recountQueueEntry(args: {
 }): CountedQueueEntry & { qrId: string; isExpected: boolean } {
   return { ...args, recount: true };
 }
+
+/** A recount the auditor confirmed, waiting for the server's answer. */
+export type PendingRecount = {
+  assetTitle: string;
+  /** The count the auditor typed. */
+  entered: number;
+  expectedQuantity: number;
+  isExpected: boolean;
+};
+
+/**
+ * The toast for a recount once the server has answered. A recount is never
+ * reported as saved before that: a finished audit or a removed scan keeps the
+ * stored count, and the auditor must see that, not a success.
+ *
+ * @param pending - what the auditor confirmed
+ * @param storedCount - the count the server stored (`storedCountFor`);
+ *   undefined when a newer count for the asset will answer instead
+ * @returns the toast, or null when this answer settles nothing
+ */
+export function recountAnswerToast(
+  pending: PendingRecount,
+  storedCount: number | null | undefined
+): { type: "found" | "error"; title: string; subtitle: string } | null {
+  if (storedCount === undefined) return null;
+  const title = pending.assetTitle;
+  if (storedCount === pending.entered) {
+    return {
+      type: "found",
+      title,
+      subtitle:
+        countExpectation(pending) === "expected"
+          ? `Count updated · ${storedCount} of ${pending.expectedQuantity}`
+          : `Count updated · ${storedCount}`,
+    };
+  }
+  return {
+    type: "error",
+    title,
+    subtitle:
+      storedCount === null
+        ? "Count not saved: the scan is no longer in this audit"
+        : `Count not saved: the audit kept ${storedCount}`,
+  };
+}

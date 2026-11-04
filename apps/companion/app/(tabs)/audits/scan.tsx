@@ -58,10 +58,12 @@ import {
 } from "@/components/audit/segmented-control";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import type { PendingRecount } from "@/lib/audit-scan-queue";
 import {
   auditScanDecision,
   countExpectation,
   countSheetDefault,
+  recountAnswerToast,
   recountQueueEntry,
   MAX_AUDIT_COUNT,
 } from "@/lib/audit-scan-queue";
@@ -189,11 +191,15 @@ function AuditScannerContent() {
     React.SetStateAction<ScannedItem | null>
   > | null>(null);
 
+  // Recounts confirmed on this device and not answered yet, by asset. The
+  // result toast waits for the server: a finished audit keeps its count.
+  const pendingRecountsRef = useRef(new Map<string, PendingRecount>());
+
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
     (
       assetId: string,
-      auditAssetId: string,
+      auditAssetId: string | null,
       storedCount?: number | null,
       countRefused?: boolean
     ) => {
@@ -204,7 +210,7 @@ function AuditScannerContent() {
           item.assetId === assetId
             ? {
                 ...item,
-                auditAssetId,
+                ...(auditAssetId ? { auditAssetId } : {}),
                 syncFailed: false,
                 ...(storedCount !== undefined
                   ? { foundQuantity: storedCount }
@@ -215,8 +221,25 @@ function AuditScannerContent() {
       );
       // Also update selectedItem if evidence modal is open for this asset
       setSelectedItemRef.current?.((prev) =>
-        prev?.assetId === assetId ? { ...prev, auditAssetId } : prev
+        prev?.assetId === assetId && auditAssetId
+          ? { ...prev, auditAssetId }
+          : prev
       );
+      // A recount from this device: report what the server stored.
+      const pending = pendingRecountsRef.current.get(assetId);
+      const recountToast = pending
+        ? recountAnswerToast(pending, storedCount)
+        : null;
+      if (pending && recountToast) {
+        pendingRecountsRef.current.delete(assetId);
+        Haptics.notificationAsync(
+          recountToast.type === "found"
+            ? Haptics.NotificationFeedbackType.Success
+            : Haptics.NotificationFeedbackType.Error
+        );
+        showToast(recountToast.type, recountToast.title, recountToast.subtitle);
+        return;
+      }
       // The count the auditor entered did not stick: say so, since the row
       // has just changed back under them.
       if (countRefused) {
@@ -817,14 +840,15 @@ function AuditScannerContent() {
           foundQuantity,
         })
       );
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast(
-        "found",
-        request.assetTitle,
-        countExpectation(request) === "expected"
-          ? `Count updated · ${foundQuantity} of ${request.expectedQuantity}`
-          : `Count updated · ${foundQuantity}`
-      );
+      // The result toast waits for the server's answer (handleScanSynced).
+      pendingRecountsRef.current.set(request.assetId, {
+        assetTitle: request.assetTitle,
+        entered: foundQuantity,
+        expectedQuantity: request.expectedQuantity,
+        isExpected: request.isExpected,
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      showToast("duplicate", request.assetTitle, "Saving count…");
       finalizeScan();
     },
     [

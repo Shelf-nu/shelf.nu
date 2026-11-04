@@ -20,6 +20,7 @@ import {
   dropSupersededCounts,
   entriesToResync,
   isSupersededCount,
+  recountAnswerToast,
   recountQueueEntry,
   storedCountFor,
   type CountedQueueEntry,
@@ -404,5 +405,49 @@ describe("recountQueueEntry", () => {
     assert.deepEqual(entriesToResync([queued], [], new Set(["pool-1"])), [
       queued,
     ]);
+  });
+});
+
+describe("recountAnswerToast", () => {
+  const pending = {
+    assetTitle: "Sandbag",
+    entered: 12,
+    expectedQuantity: 14,
+    isExpected: true,
+  };
+
+  it("reports a saved recount only once the server stored it", () => {
+    assert.deepEqual(recountAnswerToast(pending, 12), {
+      type: "found",
+      title: "Sandbag",
+      subtitle: "Count updated · 12 of 14",
+    });
+  });
+
+  it("reports a recount the finished audit refused, with the kept count", () => {
+    // The audit was completed on the web; the server answers 200 with 11.
+    assert.deepEqual(recountAnswerToast(pending, 11), {
+      type: "error",
+      title: "Sandbag",
+      subtitle: "Count not saved: the audit kept 11",
+    });
+  });
+
+  it("reports a recount of a scan removed in the meantime", () => {
+    assert.equal(
+      recountAnswerToast(pending, null)?.subtitle,
+      "Count not saved: the scan is no longer in this audit"
+    );
+  });
+
+  it("waits when a newer count will answer instead", () => {
+    assert.equal(recountAnswerToast(pending, undefined), null);
+  });
+
+  it("leaves out the target for an unlisted pool", () => {
+    assert.equal(
+      recountAnswerToast({ ...pending, isExpected: false }, 12)?.subtitle,
+      "Count updated · 12"
+    );
   });
 });
