@@ -28,12 +28,12 @@ import { action } from "~/routes/api+/audits.start";
 const {
   createAuditSession,
   resolveAssetIdsForAudit,
-  resolveAuditScopeLocationIds,
+  resolveAuditUnitScope,
   resolveUserFormatPrefsById,
 } = vi.hoisted(() => ({
   createAuditSession: vi.fn(),
   resolveAssetIdsForAudit: vi.fn(),
-  resolveAuditScopeLocationIds: vi.fn(),
+  resolveAuditUnitScope: vi.fn(),
   resolveUserFormatPrefsById: vi.fn(),
 }));
 
@@ -64,7 +64,7 @@ vi.mock("~/utils/date-format.server", () => ({
 vi.mock("~/modules/audit/context-helpers.server", () => ({
   // why: the scope resolver reads locations from the database; each case sets
   // the scope it needs.
-  resolveAuditScopeLocationIds,
+  resolveAuditUnitScope,
   resolveAssetIdsForAudit,
   resolveAssetIdsForKitSelection: vi.fn(),
   resolveAssetIdsForLocationSelection: vi.fn(),
@@ -119,7 +119,7 @@ describe("start-audit action — dueDate timezone round-trip", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolveAssetIdsForAudit.mockResolvedValue(["asset-1"]);
-    resolveAuditScopeLocationIds.mockResolvedValue(null);
+    resolveAuditUnitScope.mockResolvedValue(null);
     createAuditSession.mockResolvedValue({
       session: { id: "session-1", dueDate: null },
     });
@@ -175,11 +175,11 @@ describe("start-audit action, location scope", () => {
   }
 
   it("hands the audited locations to the new audit", async () => {
-    resolveAuditScopeLocationIds.mockResolvedValue(["loc-1"]);
+    resolveAuditUnitScope.mockResolvedValue({ locationIds: ["loc-1"] });
 
     await action(locationPageArgs());
 
-    expect(resolveAuditScopeLocationIds).toHaveBeenCalledWith(
+    expect(resolveAuditUnitScope).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: "org-1",
         contextType: "location",
@@ -192,7 +192,7 @@ describe("start-audit action, location scope", () => {
   });
 
   it("starts an audit without a location scope as unscoped", async () => {
-    resolveAuditScopeLocationIds.mockResolvedValue(null);
+    resolveAuditUnitScope.mockResolvedValue(null);
 
     await action(buildArgs("2099-07-20T15:48"));
 

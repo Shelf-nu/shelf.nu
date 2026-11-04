@@ -42,18 +42,59 @@ export function expectedQuantityFor(asset: {
 }
 
 /**
- * The locations an audit was scoped to, read from its `scopeMeta`. An audit
- * started from one or more locations stores them there (with their child
- * locations when those were included); any other audit has none.
- *
- * @returns the location ids, or null when the audit is not location-scoped
+ * Where an audit counts the units of a quantity-tracked asset: the units
+ * placed at some locations, held in some kits, or held by one person. An
+ * audit of a selection of assets or of the index has no such scope and counts
+ * the whole pool.
  */
-export function scopedLocationIds(scopeMeta: unknown): string[] | null {
+export type AuditUnitScope =
+  | { kind: "locations"; locationIds: string[] }
+  | { kind: "kits"; kitIds: string[] }
+  | { kind: "custodian"; custodianUserId: string };
+
+/** The non-empty string ids of a stored list, or null. */
+function storedIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.filter((id): id is string => typeof id === "string");
+  return ids.length > 0 ? ids : null;
+}
+
+/**
+ * The unit scope an audit stored in its `scopeMeta` when it started:
+ * `locationIds` for an audit of locations (child locations included when
+ * chosen), `kitIds` for an audit of kits, `custodianUserId` for an audit of a
+ * person's custody.
+ *
+ * @returns the scope, or null when the audit counts whole pools
+ */
+export function auditUnitScope(scopeMeta: unknown): AuditUnitScope | null {
   if (!scopeMeta || typeof scopeMeta !== "object") return null;
-  const ids = (scopeMeta as { locationIds?: unknown }).locationIds;
-  if (!Array.isArray(ids)) return null;
-  const strings = ids.filter((id): id is string => typeof id === "string");
-  return strings.length > 0 ? strings : null;
+  const meta = scopeMeta as {
+    locationIds?: unknown;
+    kitIds?: unknown;
+    custodianUserId?: unknown;
+  };
+  const locationIds = storedIds(meta.locationIds);
+  if (locationIds) return { kind: "locations", locationIds };
+  const kitIds = storedIds(meta.kitIds);
+  if (kitIds) return { kind: "kits", kitIds };
+  if (typeof meta.custodianUserId === "string" && meta.custodianUserId) {
+    return { kind: "custodian", custodianUserId: meta.custodianUserId };
+  }
+  return null;
+}
+
+/**
+ * The expected units of a pool in a scoped audit: the units in scope, never
+ * more than the pool, or the whole pool when none are in scope (a pool added
+ * by hand, or scanned without being on the list, is expected in full rather
+ * than at 0).
+ *
+ * @param scopedUnits - units of the pool inside the audit's scope
+ * @param pool - `Asset.quantity`
+ */
+export function scopedExpectedUnits(scopedUnits: number, pool: number): number {
+  return scopedUnits > 0 ? Math.min(scopedUnits, pool) : pool;
 }
 
 /** The count fields a surface needs to describe one audit row. */

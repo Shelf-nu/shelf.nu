@@ -19,7 +19,7 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   resolveAssetIdsForKitSelection,
   resolveAssetIdsForLocationSelection,
-  resolveAuditScopeLocationIds,
+  resolveAuditUnitScope,
 } from "./context-helpers.server";
 
 // why: the resolvers (and the org guards they call) hit the global Prisma
@@ -279,18 +279,10 @@ describe("resolveAssetIdsForKitSelection", () => {
   });
 });
 
-describe("resolveAuditScopeLocationIds", () => {
-  it("has no location scope for kit, user or selection audits", async () => {
+describe("resolveAuditUnitScope", () => {
+  it("has no unit scope for an audit of selected assets", async () => {
     expect(
-      await resolveAuditScopeLocationIds({
-        organizationId: ORG,
-        contextType: "kit",
-        contextId: "kit-1",
-        includeChildLocations: false,
-      })
-    ).toBeNull();
-    expect(
-      await resolveAuditScopeLocationIds({
+      await resolveAuditUnitScope({
         organizationId: ORG,
         includeChildLocations: false,
       })
@@ -299,48 +291,94 @@ describe("resolveAuditScopeLocationIds", () => {
 
   it("scopes a location page audit to that location", async () => {
     expect(
-      await resolveAuditScopeLocationIds({
+      await resolveAuditUnitScope({
         organizationId: ORG,
         contextType: "location",
         contextId: "studio",
         includeChildLocations: false,
       })
-    ).toEqual(["studio"]);
+    ).toEqual({ locationIds: ["studio"] });
   });
 
   it("adds the child locations when the auditor included them", async () => {
     expect(
-      await resolveAuditScopeLocationIds({
+      await resolveAuditUnitScope({
         organizationId: ORG,
         contextType: "location",
         contextId: "studio",
         includeChildLocations: true,
       })
-    ).toEqual(["studio", "shelf-1"]);
+    ).toEqual({ locationIds: ["studio", "shelf-1"] });
   });
 
   it("keeps the selected locations of a multi-select, once each", async () => {
     expect(
-      await resolveAuditScopeLocationIds({
+      await resolveAuditUnitScope({
         organizationId: ORG,
         contextType: "location",
         locationIds: ["a", "b", "a"],
         includeChildLocations: false,
       })
-    ).toEqual(["a", "b"]);
+    ).toEqual({ locationIds: ["a", "b"] });
   });
 
-  it("resolves select-all to the locations matching the list filter", async () => {
+  it("resolves location select-all to the locations matching the list filter", async () => {
     locationFindMany.mockResolvedValue([{ id: "a" }, { id: "c" }]);
 
     expect(
-      await resolveAuditScopeLocationIds({
+      await resolveAuditUnitScope({
         organizationId: ORG,
         contextType: "location",
         locationIds: [ALL_SELECTED_KEY],
         includeChildLocations: false,
         currentSearchParams: "s=studio",
       })
-    ).toEqual(["a", "c"]);
+    ).toEqual({ locationIds: ["a", "c"] });
+  });
+
+  it("scopes a kit page audit to that kit", async () => {
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        contextId: "kit-1",
+        includeChildLocations: false,
+      })
+    ).toEqual({ kitIds: ["kit-1"] });
+  });
+
+  it("keeps the selected kits of a multi-select, once each", async () => {
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        kitIds: ["k1", "k2", "k1"],
+        includeChildLocations: false,
+      })
+    ).toEqual({ kitIds: ["k1", "k2"] });
+  });
+
+  it("resolves kit select-all to the kits matching the list filter", async () => {
+    kitFindMany.mockResolvedValueOnce([{ id: "k1" }, { id: "k3" }]);
+
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        kitIds: [ALL_SELECTED_KEY],
+        includeChildLocations: false,
+      })
+    ).toEqual({ kitIds: ["k1", "k3"] });
+  });
+
+  it("scopes a custody audit to that person", async () => {
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "user",
+        contextId: "user-7",
+        includeChildLocations: false,
+      })
+    ).toEqual({ custodianUserId: "user-7" });
   });
 });

@@ -5,6 +5,7 @@ import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import {
   dropSupersededCounts,
   isSupersededCount,
+  countWasRefused,
   storedCountFor,
 } from "@/lib/audit-scan-queue";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
@@ -28,7 +29,13 @@ type UseScanQueueParams = {
   onScanSynced?: (
     assetId: string,
     auditAssetId: string,
-    storedCount?: number | null
+    storedCount?: number | null,
+    /**
+     * True when the server kept another count than the one sent: the audit
+     * was finished or the scan removed first, or another device's first scan
+     * claimed the row. The row then shows the stored count.
+     */
+    countRefused?: boolean
   ) => void;
   /**
    * Called when a scan exhausts its retries. The scan is moved to `failedQueueRef`
@@ -107,7 +114,12 @@ export function useScanQueue({
             };
           }
           // Notify caller to update React state for re-render
-          onScanSynced?.(entry.assetId, data.auditAssetId, storedCount);
+          onScanSynced?.(
+            entry.assetId,
+            data.auditAssetId,
+            storedCount,
+            countWasRefused(entry.foundQuantity, storedCount)
+          );
         }
 
         saveAuditScanState(

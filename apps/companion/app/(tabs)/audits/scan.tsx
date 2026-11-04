@@ -189,7 +189,12 @@ function AuditScannerContent() {
 
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
-    (assetId: string, auditAssetId: string, storedCount?: number | null) => {
+    (
+      assetId: string,
+      auditAssetId: string,
+      storedCount?: number | null,
+      countRefused?: boolean
+    ) => {
       // Update the scanned items list (clear any prior sync-failed marker).
       // The count the server stored, when given, replaces the local one.
       setScannedItemsRef.current?.((prev) =>
@@ -210,8 +215,23 @@ function AuditScannerContent() {
       setSelectedItemRef.current?.((prev) =>
         prev?.assetId === assetId ? { ...prev, auditAssetId } : prev
       );
+      // The count the auditor entered did not stick: say so, since the row
+      // has just changed back under them.
+      if (countRefused) {
+        const name =
+          stableScannedItemsRef.current
+            .find((item) => item.assetId === assetId)
+            ?.name?.trim() || "Count not saved";
+        showToast(
+          "error",
+          name,
+          storedCount === null || storedCount === undefined
+            ? "Count not saved: the scan is no longer in this audit"
+            : `Count not saved: the audit kept ${storedCount}`
+        );
+      }
     },
-    []
+    [showToast]
   );
 
   // Callback for when a scan exhausts its retries — surface it in the list so

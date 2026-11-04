@@ -107,6 +107,7 @@ function AuditDrawerFooter({
   auditName,
   portalContainer,
   stats,
+  units,
   expanded,
 }: {
   disabled: boolean;
@@ -118,6 +119,8 @@ function AuditDrawerFooter({
     missingCount: number;
     unexpectedCount: number;
   };
+  /** Unit totals for the summary; null when the audit has no quantity rows. */
+  units: AuditUnitTotals | null;
   expanded: boolean;
 }) {
   return (
@@ -137,6 +140,7 @@ function AuditDrawerFooter({
         auditName={auditName}
         portalContainer={portalContainer}
         stats={stats}
+        units={units}
       />
     </div>
   );
@@ -702,6 +706,7 @@ export default function AuditDrawer({
             missingCount: stats.missingCount,
             unexpectedCount: stats.unexpectedCount,
           }}
+          units={units}
           expanded={expanded}
         />
       )}

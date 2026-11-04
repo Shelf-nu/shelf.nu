@@ -68,10 +68,12 @@ import {
   createAssetScanRemovedNote,
   createAuditCountUpdatedNote,
 } from "./helpers.server";
+import type { AuditUnitScope } from "./quantity";
 import {
+  auditUnitScope,
   expectedQuantityFor,
   MAX_AUDIT_FOUND_QUANTITY,
-  scopedLocationIds,
+  scopedExpectedUnits,
 } from "./quantity";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -240,9 +242,13 @@ export type AuditScopeMeta = {
   /**
    * The locations a location audit covers (child locations included when the
    * auditor chose them). A quantity-tracked asset then expects only the units
-   * placed there. Absent for audits of kits, selections or the index.
+   * placed there. See `auditUnitScope` in `./quantity.ts`.
    */
   locationIds?: string[] | null;
+  /** The kits a kit audit covers: a pool expects the units in these kits. */
+  kitIds?: string[] | null;
+  /** The person a custody audit covers: a pool expects the units they hold. */
+  custodianUserId?: string | null;
 };
 
 export type CreateAuditSessionInput = {
@@ -429,21 +435,22 @@ export type AuditScanData = {
  * yet, through the given client (the open transaction when there is one).
  */
 type SnapshotForRow = (
-  client: Pick<typeof db, "assetLocation">
+  client: Pick<typeof db, "assetLocation" | "assetKit" | "custody">
 ) => Promise<number | null>;
 
 /**
  * The expected-units snapshot for new audit rows, keyed by asset id.
  *
- * A location audit expects only what is placed at its locations: the sum of
- * the asset's placements there, 0 when none, and never more than the pool.
- * Manual and kit-driven placements are separate views of the same units, each
- * bounded by `Asset.quantity` on its own, so their sum can exceed the pool
- * when both put units at the same location. Any other audit expects the whole
- * pool. Individual assets get null.
+ * A scoped audit expects the units in its scope: placed at its locations
+ * (`AssetLocation.quantity`), held in its kits (`AssetKit.quantity`) or held
+ * by its person (`Custody.quantity`). Never more than the pool: manual and
+ * kit-driven placements are separate views of the same units, each bounded by
+ * `Asset.quantity` on its own, so their sum can exceed it. A pool with no units
+ * in scope, and every pool of an unscoped audit, expects the whole pool (see
+ * `scopedExpectedUnits`). Individual assets get null.
  *
  * @param assets - the assets getting rows, with their type and stock
- * @param locationIds - the audit's scoped locations, or null
+ * @param scope - the audit's unit scope, or null
  * @param client - the database client or open transaction
  */
 async function snapshotExpectedQuantities(
@@ -452,8 +459,8 @@ async function snapshotExpectedQuantities(
     type: AssetType | null;
     quantity: number | null;
   }>,
-  locationIds: string[] | null,
-  client: Pick<typeof db, "assetLocation">
+  scope: AuditUnitScope | null,
+  client: Pick<typeof db, "assetLocation" | "assetKit" | "custody">
 ): Promise<Map<string, number | null>> {
   const snapshots = new Map<string, number | null>(
     assets.map((asset) => [asset.id, expectedQuantityFor(asset)])
@@ -461,23 +468,37 @@ async function snapshotExpectedQuantities(
   const pools = assets.filter(
     (asset) => asset.type === AssetType.QUANTITY_TRACKED
   );
-  if (!locationIds || pools.length === 0) return snapshots;
+  if (!scope || pools.length === 0) return snapshots;
 
-  const placed = await client.assetLocation.groupBy({
-    by: ["assetId"],
-    where: {
-      assetId: { in: pools.map((asset) => asset.id) },
-      locationId: { in: locationIds },
-    },
-    _sum: { quantity: true },
-  });
-  const placedById = new Map(
-    placed.map((row) => [row.assetId, row._sum.quantity ?? 0])
+  const poolIds = { in: pools.map((asset) => asset.id) };
+  const sums =
+    scope.kind === "locations"
+      ? await client.assetLocation.groupBy({
+          by: ["assetId"],
+          where: { assetId: poolIds, locationId: { in: scope.locationIds } },
+          _sum: { quantity: true },
+        })
+      : scope.kind === "kits"
+      ? await client.assetKit.groupBy({
+          by: ["assetId"],
+          where: { assetId: poolIds, kitId: { in: scope.kitIds } },
+          _sum: { quantity: true },
+        })
+      : await client.custody.groupBy({
+          by: ["assetId"],
+          where: {
+            assetId: poolIds,
+            custodian: { userId: scope.custodianUserId },
+          },
+          _sum: { quantity: true },
+        });
+  const scopedById = new Map(
+    sums.map((row) => [row.assetId, row._sum.quantity ?? 0])
   );
   for (const pool of pools) {
     snapshots.set(
       pool.id,
-      Math.min(placedById.get(pool.id) ?? 0, pool.quantity ?? 0)
+      scopedExpectedUnits(scopedById.get(pool.id) ?? 0, pool.quantity ?? 0)
     );
   }
   return snapshots;
@@ -537,7 +558,7 @@ export async function createAuditSession(
 
   const expectedQuantities = await snapshotExpectedQuantities(
     assets,
-    scopedLocationIds(scopeMeta),
+    auditUnitScope(scopeMeta),
     db
   );
 
@@ -1643,7 +1664,7 @@ export async function recordAuditScan(
       isQuantityAsset
         ? snapshotExpectedQuantities(
             [scannedAsset],
-            scopedLocationIds(session.scopeMeta),
+            auditUnitScope(session.scopeMeta),
             client
           ).then((snapshots) => snapshots.get(scannedAsset.id) ?? null)
         : Promise.resolve(null);
@@ -1936,6 +1957,10 @@ export async function recordAuditScan(
         const countData = isQuantityAsset
           ? { expectedQuantity, foundQuantity: count }
           : {};
+        // What the row holds once this scan is written. A concurrent first
+        // scan that claimed the row first keeps its count (see below).
+        let storedCount = count;
+        let storedExpected = expectedQuantity;
 
         if (insertedUnexpectedRow) {
           // We created the row, already UNEXPECTED and stamped with this scan.
@@ -1971,6 +1996,16 @@ export async function recordAuditScan(
           if (foundClaim.count === 1) {
             foundDelta = 1;
             missingDelta = -1;
+          } else if (isQuantityAsset) {
+            // Another scanner's first scan claimed the row first, with its own
+            // count. That count stays (a recount replaces it, not a racing
+            // first scan), so this scan reports and records what is stored.
+            const stored = await tx.auditAsset.findUnique({
+              where: { auditSessionId_assetId: { auditSessionId, assetId } },
+              select: { expectedQuantity: true, foundQuantity: true },
+            });
+            storedCount = stored?.foundQuantity ?? null;
+            storedExpected = stored?.expectedQuantity ?? expectedQuantity;
           }
         } else {
           // An unexpected row already exists for this asset — its scan was
@@ -2036,11 +2071,11 @@ export async function recordAuditScan(
           userId,
           isExpected,
           count:
-            count === null
+            storedCount === null
               ? null
               : {
-                  found: count,
-                  expected: isExpected ? expectedQuantity : null,
+                  found: storedCount,
+                  expected: isExpected ? storedExpected : null,
                 },
           tx,
           prefetchedUser: scannerUser,
@@ -2058,7 +2093,11 @@ export async function recordAuditScan(
             auditAssetId,
             assetId,
             meta: isQuantityAsset
-              ? { isExpected, expectedQuantity, foundQuantity: count }
+              ? {
+                  isExpected,
+                  expectedQuantity: storedExpected,
+                  foundQuantity: storedCount,
+                }
               : { isExpected },
           },
           tx
@@ -2070,8 +2109,8 @@ export async function recordAuditScan(
           auditAssetId,
           foundAssetCount: updatedSession.foundAssetCount,
           unexpectedAssetCount: updatedSession.unexpectedAssetCount,
-          expectedQuantity: isQuantityAsset ? expectedQuantity : null,
-          foundQuantity: count,
+          expectedQuantity: isQuantityAsset ? storedExpected : null,
+          foundQuantity: storedCount,
         };
       },
       { timeout: 15000 }
@@ -2161,8 +2200,10 @@ function parseFoundQuantity(
  * Nothing changes, and the stored count is returned, when the audit is no
  * longer live or the scan was removed in the meantime. That answer is final on
  * purpose: both clients retry a refused scan, and a finished audit would refuse
- * it forever. Both checks run inside the transaction so a recount racing
- * "Complete audit" or a scan removal cannot slip in after it.
+ * it forever. The write itself carries both conditions (row still FOUND or
+ * UNEXPECTED, audit still PENDING or ACTIVE), so a completion or a scan
+ * removal that commits between the read and the write makes it match no row,
+ * and the recount is refused instead of landing on a finished record.
  */
 async function updateAuditScanCount({
   session,
@@ -2239,11 +2280,35 @@ async function updateAuditScanCount({
 
     const expectedQuantity = row.expectedQuantity ?? (await snapshotForRow(tx));
 
-    if (row.foundQuantity !== count || row.expectedQuantity === null) {
-      await tx.auditAsset.update({
-        where: { id: row.id },
-        data: { foundQuantity: count, expectedQuantity },
+    if (row.foundQuantity === count && row.expectedQuantity !== null) {
+      return { ...unchanged, auditAssetId: row.id };
+    }
+
+    const written = await tx.auditAsset.updateMany({
+      where: {
+        id: row.id,
+        status: {
+          in: [AuditAssetStatus.FOUND, AuditAssetStatus.UNEXPECTED],
+        },
+        auditSession: {
+          status: { in: [AuditStatus.PENDING, AuditStatus.ACTIVE] },
+        },
+      },
+      data: { foundQuantity: count, expectedQuantity },
+    });
+
+    if (written.count === 0) {
+      // Completed or removed since the read: answer with what is stored now.
+      const stored = await tx.auditAsset.findFirst({
+        where: { id: row.id, auditSessionId: session.id },
+        select: { expectedQuantity: true, foundQuantity: true },
       });
+      return {
+        ...unchanged,
+        auditAssetId: row.id,
+        expectedQuantity: stored?.expectedQuantity ?? null,
+        foundQuantity: stored?.foundQuantity ?? null,
+      };
     }
 
     if (row.foundQuantity !== count) {
@@ -3674,7 +3739,7 @@ export async function addAssetsToAudit({
         });
         const expectedQuantityById = await snapshotExpectedQuantities(
           newAssets,
-          scopedLocationIds(audit.scopeMeta),
+          auditUnitScope(audit.scopeMeta),
           tx
         );
 

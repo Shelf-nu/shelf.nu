@@ -407,25 +407,29 @@ export async function resolveAssetIdsForKitSelection({
 }
 
 /**
- * The locations a new audit covers, for its `scopeMeta.locationIds`.
+ * The unit scope a new audit keeps in its `scopeMeta`, so a quantity-tracked
+ * asset expects only the units inside it (see `auditUnitScope` in
+ * `./quantity.ts`). An audit of a selection of assets or of the index has none.
  *
- * A quantity-tracked asset in a location audit expects only the units placed
- * at these locations, so they are kept with the audit. Audits of a kit, a
- * user's custody or a selection of assets have no location scope.
+ * - Locations: from one location page, that location plus its descendants when
+ *   the auditor included child locations; from the Locations index, the
+ *   selected locations, or for "select all" every location matching the list.
+ * - Kits: from one kit page, that kit; from the Kits index, the selected kits,
+ *   or for "select all" every kit matching the list.
+ * - Custody: from a person's page, that person.
  *
- * - From one location page: that location, plus its descendants when the
- *   auditor included child locations.
- * - From a multi-select on the Locations index: the selected locations, or
- *   for "select all" every location matching the list filter.
+ * Every id comes from the request but is only ever used to sum units of the
+ * caller's own assets, which are org-scoped where they are read.
  *
- * @returns the location ids, or null when the audit is not location-scoped
+ * @returns the scope fields for `scopeMeta`, or null for an unscoped audit
  */
-export async function resolveAuditScopeLocationIds({
+export async function resolveAuditUnitScope({
   organizationId,
   contextType,
   contextId,
   includeChildLocations,
   locationIds,
+  kitIds,
   currentSearchParams,
 }: {
   organizationId: string;
@@ -433,25 +437,58 @@ export async function resolveAuditScopeLocationIds({
   contextId?: string;
   includeChildLocations: boolean;
   locationIds?: string[];
+  kitIds?: string[];
   currentSearchParams?: string | null;
-}): Promise<string[] | null> {
-  if (contextType !== "location") return null;
-
-  if (locationIds && locationIds.length > 0) {
-    if (!locationIds.includes(ALL_SELECTED_KEY)) {
-      return [...new Set(locationIds)];
+}): Promise<
+  | { locationIds: string[] }
+  | { kitIds: string[] }
+  | { custodianUserId: string }
+  | null
+> {
+  if (contextType === "location") {
+    if (locationIds && locationIds.length > 0) {
+      if (!locationIds.includes(ALL_SELECTED_KEY)) {
+        return { locationIds: [...new Set(locationIds)] };
+      }
+      const matching = await db.location.findMany({
+        where: getLocationsWhereInput({ organizationId, currentSearchParams }),
+        select: { id: true },
+      });
+      return { locationIds: matching.map((location) => location.id) };
     }
-    const matching = await db.location.findMany({
-      where: getLocationsWhereInput({ organizationId, currentSearchParams }),
-      select: { id: true },
-    });
-    return matching.map((location) => location.id);
+    if (!contextId) return null;
+    return {
+      locationIds: await locationPageScope({
+        organizationId,
+        locationId: contextId,
+        includeChildLocations,
+      }),
+    };
   }
 
-  if (!contextId) return null;
-  return locationPageScope({
-    organizationId,
-    locationId: contextId,
-    includeChildLocations,
-  });
+  if (contextType === "kit") {
+    if (kitIds && kitIds.length > 0) {
+      if (!kitIds.includes(ALL_SELECTED_KEY)) {
+        return { kitIds: [...new Set(kitIds)] };
+      }
+      const matching = await db.kit.findMany({
+        where: getKitsWhereInput({
+          organizationId,
+          currentSearchParams,
+          // Same audience as `resolveAssetIdsForKitSelection`, its sibling on
+          // the `audit: create` start route.
+          allowedTeamMemberIds: "all",
+        }),
+        select: { id: true },
+      });
+      return { kitIds: matching.map((kit) => kit.id) };
+    }
+    return contextId ? { kitIds: [contextId] } : null;
+  }
+
+  if (contextType === "user" && contextId) {
+    return { custodianUserId: contextId };
+  }
+
+  return null;
 }

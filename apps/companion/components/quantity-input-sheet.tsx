@@ -67,8 +67,9 @@ type Props = {
    */
   target?: number;
   /**
-   * Placeholder for an empty field when neither `target` nor a range names
-   * one, e.g. "Units found" for a count with no upper bound worth showing.
+   * Placeholder for an empty field when `target` does not name one, e.g.
+   * "Units found" for a count whose ceiling is only a validation bound. With
+   * it and no `target`, the echo and accessible label leave the ceiling out.
    */
   placeholder?: string;
   /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
@@ -398,7 +399,7 @@ export function QuantityInputSheet({
                   : placeholder !== undefined
                   ? placeholder
                   : min > 1
-                  ? `${min}-${max}`
+                  ? `${min}–${max}`
                   : `Max: ${max}`
               }
               placeholderTextColor={colors.placeholderText}
@@ -408,6 +409,8 @@ export function QuantityInputSheet({
               accessibilityLabel={
                 targetLabel
                   ? `Quantity counted, ${targetLabel} expected`
+                  : placeholder !== undefined
+                  ? "Quantity counted"
                   : min > 1
                   ? `Quantity, between ${minLabel} and ${maxLabel}`
                   : `Quantity, maximum ${maxLabel}`
@@ -443,6 +446,8 @@ export function QuantityInputSheet({
                       surplus > 0 ? ` (+${surplus})` : ""
                     }`
                   : `${targetLabel} expected`
+                : placeholder !== undefined
+                ? echo ?? ""
                 : echo
                 ? `${echo} of ${maxLabel}`
                 : `Up to ${maxLabel}`}

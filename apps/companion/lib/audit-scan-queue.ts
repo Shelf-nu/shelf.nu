@@ -204,3 +204,21 @@ export function countExpectation(request: {
   if (!request.isExpected) return "unlisted";
   return request.expectedQuantity > 0 ? "expected" : "none-expected";
 }
+
+/**
+ * Whether the server kept another count than the scan sent, so the auditor
+ * must be told the count they entered did not stick.
+ *
+ * @param sentCount - the entry's `foundQuantity`
+ * @param storedCount - from {@link storedCountFor}
+ */
+export function countWasRefused(
+  sentCount: number | undefined,
+  storedCount: number | null | undefined
+): boolean {
+  return (
+    sentCount !== undefined &&
+    storedCount !== undefined &&
+    storedCount !== sentCount
+  );
+}

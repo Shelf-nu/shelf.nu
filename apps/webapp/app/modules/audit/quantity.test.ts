@@ -8,7 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   describeAuditUnits,
   expectedQuantityFor,
-  scopedLocationIds,
+  auditUnitScope,
+  scopedExpectedUnits,
   totalAuditUnits,
 } from "./quantity";
 
@@ -167,14 +168,45 @@ describe("describeAuditUnits", () => {
   });
 });
 
-describe("scopedLocationIds", () => {
+describe("auditUnitScope", () => {
   it("reads the locations of a location audit", () => {
-    expect(scopedLocationIds({ locationIds: ["a", "b"] })).toEqual(["a", "b"]);
+    expect(auditUnitScope({ locationIds: ["a", "b"] })).toEqual({
+      kind: "locations",
+      locationIds: ["a", "b"],
+    });
   });
 
-  it("returns null for an audit without locations", () => {
-    expect(scopedLocationIds(null)).toBeNull();
-    expect(scopedLocationIds({ contextType: "KIT" })).toBeNull();
-    expect(scopedLocationIds({ locationIds: [] })).toBeNull();
+  it("reads the kits of a kit audit", () => {
+    expect(auditUnitScope({ kitIds: ["k1"] })).toEqual({
+      kind: "kits",
+      kitIds: ["k1"],
+    });
+  });
+
+  it("reads the person of a custody audit", () => {
+    expect(auditUnitScope({ custodianUserId: "user-7" })).toEqual({
+      kind: "custodian",
+      custodianUserId: "user-7",
+    });
+  });
+
+  it("returns null for an audit that counts whole pools", () => {
+    expect(auditUnitScope(null)).toBeNull();
+    expect(auditUnitScope({ contextType: "KIT" })).toBeNull();
+    expect(auditUnitScope({ locationIds: [] })).toBeNull();
+  });
+});
+
+describe("scopedExpectedUnits", () => {
+  it("expects the units in scope", () => {
+    expect(scopedExpectedUnits(4, 14)).toBe(4);
+  });
+
+  it("never expects more than the pool", () => {
+    expect(scopedExpectedUnits(18, 14)).toBe(14);
+  });
+
+  it("expects the whole pool when none are in scope", () => {
+    expect(scopedExpectedUnits(0, 14)).toBe(14);
   });
 });

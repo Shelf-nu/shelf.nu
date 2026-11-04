@@ -11,6 +11,7 @@ import { describe, it } from "node:test";
 
 import {
   countExpectation,
+  countWasRefused,
   countFieldsFromScan,
   countTargetFor,
   dropSupersededCounts,
@@ -226,5 +227,18 @@ describe("countExpectation", () => {
       countExpectation({ isExpected: false, expectedQuantity: 50 }),
       "unlisted"
     );
+  });
+});
+
+describe("countWasRefused", () => {
+  it("is true when the server kept another count", () => {
+    assert.equal(countWasRefused(9, 6), true);
+    assert.equal(countWasRefused(9, null), true);
+  });
+
+  it("is false when the count stuck or no count is known", () => {
+    assert.equal(countWasRefused(9, 9), false);
+    assert.equal(countWasRefused(9, undefined), false);
+    assert.equal(countWasRefused(undefined, 6), false);
   });
 });
