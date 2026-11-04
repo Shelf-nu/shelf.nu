@@ -119,6 +119,39 @@ export async function revokeAllSessions(accessToken: string): Promise<void> {
 }
 
 /**
+ * Ends every session of a user by id, on every device: web browsers and the
+ * companion app alike.
+ *
+ * Deleting the `auth.sessions` rows cascades to their refresh tokens
+ * (`refresh_tokens_session_id_fkey`). The web auth boundary is the
+ * refresh-token row (`validateSession`), so the user's next web request lands
+ * on the login page. Supabase Auth refuses an access token whose session no
+ * longer exists, so the companion app is signed out on its next call as well.
+ *
+ * Unlike `revokeAllSessions`, this needs no access token of the user, and it
+ * throws: the caller is an admin who must learn whether the logout happened.
+ *
+ * @param userId - The user (Shelf and auth user share the id) to sign out
+ * @returns The number of sessions that were ended
+ * @throws {ShelfError} If the sessions could not be deleted
+ */
+export async function endAllSessionsForUser(userId: string): Promise<number> {
+  try {
+    return await db.$executeRaw`
+      DELETE FROM auth.sessions
+      WHERE user_id = ${userId}::uuid
+    `;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while logging out the user.",
+      additionalData: { userId },
+      label,
+    });
+  }
+}
+
+/**
  * Asks the legacy sign-in decision for an address that has just authenticated,
  * and ends the session it opened when the address must use SSO.
  *
