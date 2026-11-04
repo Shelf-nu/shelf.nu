@@ -1,9 +1,8 @@
 /**
  * The part of `react-test-renderer` the companion's hook tests use.
  *
- * Declared here rather than installed from `@types/react-test-renderer`: that
- * package depends on the newest `@types/react`, and a second copy of the React
- * types next to the monorepo's breaks the webapp typecheck.
+ * Declared here so the tests do not depend on `@types/react-test-renderer`,
+ * which the companion does not declare and only gets through a dependency.
  *
  * @see {@link file://./../hooks/use-discard-guard.test.ts}
  */

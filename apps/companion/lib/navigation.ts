@@ -56,9 +56,9 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
  *
  * Navigating synchronously inside an `Alert` button's `onPress` wedges the
  * navigation transition into an endless render-commit loop (the JS thread
- * stays busy and network callbacks starve). The push therefore waits for the
- * next frame, after the alert has dismissed. It goes through `pushIntoTab`,
- * so "back" returns to the bookings list.
+ * stays busy and network callbacks starve). The push therefore runs on the
+ * next frame, outside the button handler. It goes through `pushIntoTab`, so
+ * "back" returns to the bookings list.
  *
  * @param bookingId - the booking to open
  */

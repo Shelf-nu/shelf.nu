@@ -13,8 +13,11 @@ const { withDangerousMod } = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
+/** Marks the inserted block, so the plugin can tell it already ran. */
+const MARKER = "# [swift-concurrency-fix plugin]";
+
 const PATCH = `
-    # [swift-concurrency-fix plugin] Xcode 16.4+ turns on Swift 6 strict
+    ${MARKER} Xcode 16.4+ turns on Swift 6 strict
     # concurrency by default, and some pods do not compile under it.
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
@@ -33,15 +36,15 @@ const POST_INSTALL_CALL =
 
 /**
  * Returns the Podfile with the Swift settings inserted right after the
- * react_native_post_install(...) call. A Podfile that already sets
- * SWIFT_STRICT_CONCURRENCY comes back unchanged, so running it twice is safe.
+ * react_native_post_install(...) call. A Podfile that already holds the
+ * plugin's block comes back unchanged, so running it twice is safe.
  *
  * @param {string} podfile - Podfile contents
  * @returns {string} the patched Podfile
  * @throws {Error} when the Podfile has no react_native_post_install(...) call
  */
 function addSwiftConcurrencySettings(podfile) {
-  if (podfile.includes("SWIFT_STRICT_CONCURRENCY")) return podfile;
+  if (podfile.includes(MARKER)) return podfile;
   if (!POST_INSTALL_CALL.test(podfile)) {
     throw new Error(
       "[swift-concurrency-fix] react_native_post_install(...) not found in the Podfile"

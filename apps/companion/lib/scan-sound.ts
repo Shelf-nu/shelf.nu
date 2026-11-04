@@ -97,11 +97,13 @@ export async function playScanSound(): Promise<void> {
 async function playAudio(): Promise<void> {
   try {
     await ensureLoaded();
-    if (soundObject) {
+    // Held locally: an unload while the seek is pending clears soundObject.
+    const player = soundObject;
+    if (player) {
       // A seek on a player that is still loading can reject; play anyway, the
       // player starts once the sound is ready.
-      await soundObject.seekTo(0).catch(() => {});
-      soundObject.play();
+      await player.seekTo(0).catch(() => {});
+      player.play();
     }
   } catch {
     // Silent degradation

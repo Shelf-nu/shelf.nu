@@ -49,6 +49,12 @@ describe("addSwiftConcurrencySettings", () => {
     );
   });
 
+  it("patches a Podfile that mentions the setting for another reason", () => {
+    const other = `# SWIFT_STRICT_CONCURRENCY is set below\n${SDK_58_POST_INSTALL}`;
+    const patched = addSwiftConcurrencySettings(other);
+    assert.ok(patched.includes("bc.build_settings['SWIFT_VERSION'] = '5.0'"));
+  });
+
   it("changes nothing on a second run", () => {
     const once = addSwiftConcurrencySettings(SDK_58_POST_INSTALL);
     assert.equal(addSwiftConcurrencySettings(once), once);

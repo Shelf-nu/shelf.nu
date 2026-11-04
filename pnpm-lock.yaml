@@ -61,7 +61,7 @@ patchedDependencies:
     hash: ycebkup2uus24na34d2ij7zx4q
     path: patches/expo-in-app-updates@0.12.0.patch
   expo-quick-actions@6.0.1:
-    hash: v5ovalgdr2362fwhazpcceub7e
+    hash: i2ppmmzkikbubmzpykkpelapz4
     path: patches/expo-quick-actions@6.0.1.patch
 
 importers:
@@ -181,7 +181,7 @@ importers:
         version: 58.1.7(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
       expo-quick-actions:
         specifier: ^6.0.1
-        version: 6.0.1(patch_hash=v5ovalgdr2362fwhazpcceub7e)(expo@58.0.22)
+        version: 6.0.1(patch_hash=i2ppmmzkikbubmzpykkpelapz4)(expo@58.0.22)
       expo-router:
         specifier: ~58.0.29
         version: 58.0.29(qem6mdlfv7vqwvnfliftwfq24a)
@@ -17407,7 +17407,7 @@ snapshots:
       - supports-color
       - typescript
 
-  expo-quick-actions@6.0.1(patch_hash=v5ovalgdr2362fwhazpcceub7e)(expo@58.0.22):
+  expo-quick-actions@6.0.1(patch_hash=i2ppmmzkikbubmzpykkpelapz4)(expo@58.0.22):
     dependencies:
       '@expo/image-utils': 0.8.12
       expo: 58.0.22(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.16)(expo-router@58.0.29)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native-worklets@0.13.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)

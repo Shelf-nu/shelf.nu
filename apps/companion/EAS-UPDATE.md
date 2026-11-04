@@ -98,6 +98,15 @@ not have, and crashes them on launch. Before publishing, compare `expo` in
 version: if they differ, publish from the release tag, or bump the runtime at a
 store cut first.
 
+Companion releases carry no git tag of their own. The base for a live version
+is the parent of the commit that moved `runtimeVersion` past it. For the 1.7.0
+builds, for example:
+
+```bash
+BUMP=$(git log --format=%H -S'"runtimeVersion": "1.8.0"' -- apps/companion/app.json | tail -1)
+git switch --detach "$BUMP^"
+```
+
 Three steps, in this order. JS-only fix already merged to main and checked out:
 
 ```bash

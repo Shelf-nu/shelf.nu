@@ -23,6 +23,8 @@ type FakePlayer = {
 const players: FakePlayer[] = [];
 /** Makes the next players' `seekTo` reject, as on a player still loading. */
 let seekRejects = false;
+/** The audio mode the module last asked for. */
+let audioMode: Record<string, unknown> | null = null;
 /** Releases a pending `setAudioModeAsync`; null when it resolves at once. */
 let releaseAudioMode: (() => void) | null = null;
 let holdAudioMode = false;
@@ -31,12 +33,14 @@ let holdAudioMode = false;
 // can count them and see whether `play` ran.
 mock.module("expo-audio", {
   namedExports: {
-    setAudioModeAsync: () =>
-      holdAudioMode
+    setAudioModeAsync: (mode: Record<string, unknown>) => {
+      audioMode = mode;
+      return holdAudioMode
         ? new Promise<void>((resolve) => {
             releaseAudioMode = resolve;
           })
-        : Promise.resolve(),
+        : Promise.resolve();
+    },
     createAudioPlayer: () => {
       const player: FakePlayer = {
         volume: 1,
@@ -93,6 +97,7 @@ beforeEach(async () => {
   seekRejects = false;
   holdAudioMode = false;
   releaseAudioMode = null;
+  audioMode = null;
 });
 
 describe("scan sound", () => {
@@ -105,6 +110,15 @@ describe("scan sound", () => {
 
     assert.equal(players.length, 1);
     assert.equal(players[0].plays, 3);
+  });
+
+  it("plays with the ringer silenced and mixes with other audio", async () => {
+    await scanSound.playScanSound();
+
+    assert.deepEqual(audioMode, {
+      playsInSilentMode: true,
+      interruptionMode: "mixWithOthers",
+    });
   });
 
   it("still plays when rewinding the player fails", async () => {
