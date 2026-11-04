@@ -95,12 +95,19 @@ const location = (
     meta,
   });
 
-/** Runs one page of the report over `events` and returns what each row says. */
-async function readableRows(events: ReturnType<typeof event>[]) {
+/**
+ * Runs the report over `events` and returns what each row says. Export mode by
+ * default, since only export rows carry the From and To values.
+ */
+async function readableRows(
+  events: ReturnType<typeof event>[],
+  { allRows = true }: { allRows?: boolean } = {}
+) {
   vi.mocked(db.activityEvent.findMany).mockResolvedValue(events as never);
   const { rows } = await assetActivityReport({
     organizationId: ORG,
     timeframe: TIMEFRAME,
+    allRows,
   });
   return rows.map(({ description, changedFrom, changedTo }) => ({
     description,
@@ -355,9 +362,39 @@ describe("assetActivityReport descriptions", () => {
   });
 
   it("re-signs thumbnails for the page", async () => {
-    await readableRows([event("ASSET_CREATED")]);
+    await readableRows([event("ASSET_CREATED")], { allRows: false });
 
     expect(refreshExpiredAssetImages).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the sentence on the page and leaves the From and To values to the file", async () => {
+    const [pageRow] = await readableRows([location("loc-leeds", "loc-hull")], {
+      allRows: false,
+    });
+
+    expect(pageRow).toEqual({
+      description: "Location changed: Leeds unit → Hull depot",
+      changedFrom: null,
+      changedTo: null,
+    });
+  });
+
+  it("keeps numbers bare in From and To and grouped in the sentence", async () => {
+    expect(
+      await readableRows([
+        event("ASSET_VALUATION_CHANGED", {
+          field: "valuation",
+          fromValue: 1234.5,
+          toValue: 2000,
+        }),
+      ])
+    ).toEqual([
+      {
+        description: "Valuation changed: 1,234.5 → 2,000",
+        changedFrom: "1234.5",
+        changedTo: "2000",
+      },
+    ]);
   });
 });
 
@@ -441,19 +478,23 @@ describe("assetActivityReport export mode (allRows)", () => {
         ],
       },
     });
+    // A file needs only the total: one count, no per-action or per-asset
+    // grouping, and no "most active" lookup.
     expect(db.activityEvent.count).toHaveBeenCalledTimes(1);
-    expect(db.activityEvent.groupBy).toHaveBeenCalledTimes(2);
+    expect(db.activityEvent.groupBy).not.toHaveBeenCalled();
+    expect(db.asset.findFirst).not.toHaveBeenCalled();
+    // Names already read for batch 1 are not read again for batch 2.
+    expect(db.location.findMany).toHaveBeenCalledTimes(1);
     expect(refreshExpiredAssetImages).not.toHaveBeenCalled();
   });
 
   it("keeps the filter bar's asset filter on every batch", async () => {
-    // Batch 1: the page ids, then the two summary counts. Batch 2: page ids.
+    // Batch 1: the page ids, then the total. Batch 2: page ids.
     vi.mocked(db.$queryRaw)
       .mockResolvedValueOnce(
         Array.from({ length: 5000 }, (_, i) => ({ id: `e${i}` })) as never
       )
-      .mockResolvedValueOnce([] as never)
-      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ count: 5001 }] as never)
       .mockResolvedValueOnce([{ id: "last" }] as never);
     vi.mocked(db.activityEvent.findMany)
       .mockResolvedValueOnce(batchOf(5000) as never)
@@ -472,12 +513,12 @@ describe("assetActivityReport export mode (allRows)", () => {
       .mock.calls.map(([query]) => query as unknown as Prisma.Sql)
       .filter((query) => query.sql.includes("OFFSET"));
     expect(pageQueries).toHaveLength(2);
-    // The KPI counts (two GROUP BY queries) run for the first batch only.
-    const summaryQueries = vi
+    // The total is counted once, for batch 1, and nothing is grouped.
+    const sqlTexts = vi
       .mocked(db.$queryRaw)
-      .mock.calls.map(([query]) => query as unknown as Prisma.Sql)
-      .filter((query) => query.sql.includes("GROUP BY"));
-    expect(summaryQueries).toHaveLength(2);
+      .mock.calls.map(([query]) => (query as unknown as Prisma.Sql).sql);
+    expect(sqlTexts.filter((sql) => sql.includes("COUNT(*)"))).toHaveLength(1);
+    expect(sqlTexts.filter((sql) => sql.includes("GROUP BY"))).toEqual([]);
     for (const query of pageQueries) {
       expect(query.sql).toContain('FROM "Asset"');
       expect(query.values).toContain("cat-food");
@@ -514,7 +555,7 @@ describe("assetActivityReport export mode (allRows)", () => {
   });
 
   it("reads images for the page", async () => {
-    await readableRows([event("ASSET_CREATED")]);
+    await readableRows([event("ASSET_CREATED")], { allRows: false });
 
     const [args] = vi.mocked(db.asset.findMany).mock.calls[0];
     expect(args?.select).toMatchObject({

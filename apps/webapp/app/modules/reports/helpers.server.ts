@@ -4551,13 +4551,13 @@ export async function assetActivityReport(
       : timeframe;
 
     /**
-     * Reads one page of events, with the KPI counts when `withSummary`.
+     * Reads one page of events, with as much of the summary as `summary` asks.
      * Export batches pass `after`, the last event already read.
      */
     const readEvents = (
       pageNumber: number,
       size: number,
-      withSummary: boolean,
+      summary: SummaryNeed,
       after?: ActivityEventCursor
     ) => {
       const query = {
@@ -4567,7 +4567,7 @@ export async function assetActivityReport(
         assetId,
         page: pageNumber,
         pageSize: size,
-        withSummary,
+        summary,
         after,
       };
       return assetFilter && !assetFilter.isEmpty
@@ -4629,6 +4629,9 @@ export async function assetActivityReport(
       }));
     };
 
+    /** Names loaded by earlier export batches, so each is read only once. */
+    let knownNames: ReferenceNames | undefined;
+
     /** Turns a batch of events into rows. */
     const toRows = async (
       events: ActivityEventRecord[]
@@ -4638,9 +4641,10 @@ export async function assetActivityReport(
       ] as string[];
       const [assets, referenceNames] = await Promise.all([
         allRows ? readExportAssets(assetIds) : readPageAssets(assetIds),
-        loadReferenceNames(organizationId, events),
+        loadReferenceNames(organizationId, events, knownNames),
       ]);
       const assetMap = new Map(assets.map((a) => [a.id, a]));
+      knownNames = referenceNames;
 
       return events.map((event) => {
         const asset = event.assetId ? assetMap.get(event.assetId) : null;
@@ -4659,8 +4663,9 @@ export async function assetActivityReport(
           assetModel: asset?.assetModel ?? null,
           activityType: mapActionToActivityType(event.action),
           description,
-          changedFrom,
-          changedTo,
+          // Only a file shows the two sides; the page shows the sentence.
+          changedFrom: allRows ? changedFrom : null,
+          changedTo: allRows ? changedTo : null,
           occurredAt: event.occurredAt,
           performedBy: actorSnapshot
             ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
@@ -4671,7 +4676,13 @@ export async function assetActivityReport(
     };
 
     const batchSize = allRows ? ACTIVITY_EXPORT_BATCH_SIZE : pageSize;
-    const first = await readEvents(allRows ? 1 : page, batchSize, true);
+    // A file needs only the total, for its row-count note; the page needs
+    // everything its KPIs show.
+    const first = await readEvents(
+      allRows ? 1 : page,
+      batchSize,
+      allRows ? "count" : "full"
+    );
     const { totalCount, actionCounts, mostActive } =
       first.summary ?? NO_ACTIVITY_SUMMARY;
     const rows = await toRows(first.events);
@@ -4688,7 +4699,7 @@ export async function assetActivityReport(
     ) {
       const last = batch[batch.length - 1];
       batch = (
-        await readEvents(1, ACTIVITY_EXPORT_BATCH_SIZE, false, {
+        await readEvents(1, ACTIVITY_EXPORT_BATCH_SIZE, "none", {
           occurredAt: last.occurredAt,
           id: last.id,
         })
@@ -4804,8 +4815,11 @@ interface ActivityEventQueryArgs {
   assetId: string | undefined;
   page: number;
   pageSize: number;
-  /** Also count events across every page, for the KPIs. */
-  withSummary: boolean;
+  /**
+   * What to count across every page: nothing, the total only (an export), or
+   * everything the KPIs read (the page).
+   */
+  summary: SummaryNeed;
   /** Read the page that follows this event in report order; ignores `page`. */
   after?: ActivityEventCursor;
 }
@@ -4826,6 +4840,9 @@ interface ActivitySummary {
   /** The asset with the most events, or `null` when there are none. */
   mostActive: { assetId: string; count: number } | null;
 }
+
+/** How much of the timeframe's summary a read needs. */
+type SummaryNeed = "none" | "count" | "full";
 
 /** One page of Asset Activity events, with the summary when asked for. */
 interface ActivityEventPage {
@@ -4850,7 +4867,7 @@ async function fetchActivityEvents({
   assetId,
   page,
   pageSize,
-  withSummary,
+  summary: summaryNeed,
   after,
 }: ActivityEventQueryArgs): Promise<ActivityEventPage> {
   const where: Prisma.ActivityEventWhereInput = {
@@ -4861,6 +4878,12 @@ async function fetchActivityEvents({
   };
 
   const readSummary = async (): Promise<ActivitySummary> => {
+    if (summaryNeed === "count") {
+      return {
+        ...NO_ACTIVITY_SUMMARY,
+        totalCount: await db.activityEvent.count({ where }),
+      };
+    }
     const [totalCount, byAction, byAsset] = await Promise.all([
       db.activityEvent.count({ where }),
       db.activityEvent.groupBy({
@@ -4910,7 +4933,7 @@ async function fetchActivityEvents({
       skip: after ? 0 : (page - 1) * pageSize,
       take: pageSize,
     }),
-    withSummary ? readSummary() : null,
+    summaryNeed === "none" ? null : readSummary(),
   ]);
 
   return { events, summary };
@@ -4932,7 +4955,7 @@ async function fetchFilteredActivityEvents({
   assetFilter,
   page,
   pageSize,
-  withSummary,
+  summary: summaryNeed,
   after,
 }: ActivityEventQueryArgs & {
   assetFilter: ReportAssetFilter;
@@ -4953,6 +4976,14 @@ async function fetchFilteredActivityEvents({
   `;
 
   const readSummary = async (): Promise<ActivitySummary> => {
+    if (summaryNeed === "count") {
+      const [row] = await db.$queryRaw<{ count: number }[]>(Prisma.sql`
+        SELECT COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+      `);
+      return { ...NO_ACTIVITY_SUMMARY, totalCount: row?.count ?? 0 };
+    }
     const [byAction, byAsset] = await Promise.all([
       db.$queryRaw<{ action: ActivityAction; count: number }[]>(Prisma.sql`
         SELECT e.action::text AS action, COUNT(*)::int AS count
@@ -4992,7 +5023,7 @@ async function fetchFilteredActivityEvents({
       ORDER BY e."occurredAt" DESC, e.id ASC
       LIMIT ${pageSize} OFFSET ${after ? 0 : (page - 1) * pageSize}
     `),
-    withSummary ? readSummary() : null,
+    summaryNeed === "none" ? null : readSummary(),
   ]);
 
   const events =

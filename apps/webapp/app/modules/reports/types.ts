@@ -754,9 +754,9 @@ export interface AssetActivityRow {
   activityType: AssetActivityType;
   /** Human-readable description, with names instead of record ids */
   description: string;
-  /** Readable value before the change, for change events */
+  /** Readable value before the change; filled for export rows only */
   changedFrom: string | null;
-  /** Readable value after the change, for change events */
+  /** Readable value after the change; filled for export rows only */
   changedTo: string | null;
   /** When the activity occurred */
   occurredAt: Date;

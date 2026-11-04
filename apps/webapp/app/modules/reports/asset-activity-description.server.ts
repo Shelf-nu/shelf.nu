@@ -92,11 +92,14 @@ function idsIn(value: unknown): string[] {
  *
  * @param organizationId - Workspace the events belong to
  * @param events - The events about to be described
+ * @param known - Names already loaded for earlier batches; their ids are not
+ *   read again, and the result includes them
  * @returns Names keyed by field, then id; ids with no row are absent
  */
 export async function loadReferenceNames(
   organizationId: string,
-  events: DescribableEvent[]
+  events: DescribableEvent[],
+  known?: ReferenceNames
 ): Promise<ReferenceNames> {
   const ids: Record<ReferenceField, Set<string>> = {
     locationId: new Set(),
@@ -108,7 +111,7 @@ export async function loadReferenceNames(
     const reference = REFERENCE_ACTIONS[event.action];
     if (!reference) continue;
     for (const id of [...idsIn(event.fromValue), ...idsIn(event.toValue)]) {
-      ids[reference].add(id);
+      if (!known?.[reference].has(id)) ids[reference].add(id);
     }
   }
 
@@ -126,13 +129,16 @@ export async function loadReferenceNames(
     ids.tags.size > 0 ? db.tag.findMany(scoped(ids.tags)) : [],
   ]);
 
-  const byId = (rows: { id: string; name: string }[]) =>
-    new Map(rows.map((row) => [row.id, row.name]));
+  const byId = (field: ReferenceField, rows: { id: string; name: string }[]) =>
+    new Map([
+      ...(known?.[field] ?? []),
+      ...rows.map((row) => [row.id, row.name] as const),
+    ]);
   return {
-    locationId: byId(locations),
-    categoryId: byId(categories),
-    assetModelId: byId(assetModels),
-    tags: byId(tags),
+    locationId: byId("locationId", locations),
+    categoryId: byId("categoryId", categories),
+    assetModelId: byId("assetModelId", assetModels),
+    tags: byId("tags", tags),
   };
 }
 
@@ -261,7 +267,14 @@ export function describeChange(
   const reference = REFERENCE_ACTIONS[event.action];
   const changedFrom = readableValue(reference, event.fromValue, names);
   const changedTo = readableValue(reference, event.toValue, names);
-  const sides = { changedFrom, changedTo };
+  // The From and To cells keep numbers bare ("1234.5"), so a spreadsheet can
+  // sum and filter them; the sentence uses the grouped form ("1,234.5").
+  const bare = (value: unknown, readable: string | null) =>
+    typeof value === "number" ? String(value) : readable;
+  const sides = {
+    changedFrom: bare(event.fromValue, changedFrom),
+    changedTo: bare(event.toValue, changedTo),
+  };
 
   if (event.action === "ASSET_TAGS_CHANGED") {
     return { description: describeTagChange(event, names) ?? label, ...sides };
