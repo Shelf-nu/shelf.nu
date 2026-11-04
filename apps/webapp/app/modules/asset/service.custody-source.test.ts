@@ -1270,6 +1270,13 @@ describe("stock ledger", () => {
     expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
       liveStock()
     );
+    // The location's activity log gets its own "placed N at L" line.
+    expect(createSystemLocationNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationId: CAMERA_ROOM,
+        content: expect.stringContaining("placed 3 pcs of"),
+      })
+    );
   });
 
   it("records a placement rewrite as moves between the places that changed", async () => {

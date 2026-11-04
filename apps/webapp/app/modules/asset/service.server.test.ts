@@ -3301,6 +3301,102 @@ describe("updateAsset location activity", () => {
     ]);
   });
 
+  /** A quantity-tracked "Pens" pool of 10 with these manual placements. */
+  function pensPlacedAt(rows: Array<[string, string, number]>) {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "QUANTITY_TRACKED",
+            quantity: 10,
+            assetKits: [],
+          });
+        if (q?.select?.type)
+          return Promise.resolve({ type: "QUANTITY_TRACKED" });
+        return Promise.resolve(null);
+      }
+    );
+    const pens = {
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+    };
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...pens,
+      assetLocations: rows.map(([id, name, quantity], index) => ({
+        id: `al-${index}`,
+        locationId: id,
+        assetKitId: null,
+        quantity,
+        createdAt: new Date(2026, 0, index + 1),
+        location: { id, name },
+      })),
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...pens, assetLocations: [] });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+    });
+  }
+  const penLink = '{% link to="/assets/asset-1" text="Pens" /%}';
+
+  it("names every location a move empties, not only the current one", async () => {
+    pensPlacedAt([
+      ["loc-old", "Old Office", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 10,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const van = '{% link to="/locations/loc-van" text="Van" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added 10 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}, ${van}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed 6 pcs of ${penLink} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+      [
+        "loc-van",
+        `${john} removed 4 pcs of ${penLink} from ${van}. Moved to ${newLoc}.`,
+      ],
+    ]);
+  });
+
+  it("logs a new quantity at the same location, as the phone route does", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 4]]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-old",
+      newLocationQuantity: 6,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    expect(locationLog()).toEqual([
+      ["loc-old", `${john} added 2 pcs of ${penLink} to ${oldLoc}.`],
+    ]);
+  });
+
   it("counts a quantity move the same way the phone route does", async () => {
     // 10 pens at Old Office; 4 placed at New Office, 6 left unplaced.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(

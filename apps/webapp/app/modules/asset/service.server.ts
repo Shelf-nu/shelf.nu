@@ -2819,6 +2819,33 @@ export async function updateAsset({
         }),
         actor: { ...user, id: userId },
       });
+    } else if (shouldUpdatePlacement && newLocationId) {
+      /**
+       * A new quantity at the same location still rewrites every manual
+       * placement, so the location's log records what changed there (and at
+       * any placement the rewrite dropped), the same way the mobile route
+       * does for the same edit.
+       */
+      const user = await loadUserForNotes();
+      const location = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+        select: { id: true, name: true },
+      });
+      if (location) {
+        await createAssetLocationMoveNotes({
+          moves: placementChangeMoves({
+            asset: {
+              id: asset.id,
+              title: asset.title,
+              type: asset.type,
+              unitOfMeasure: asset.unitOfMeasure,
+            },
+            before: manualPlacementsBefore,
+            after: [{ location, quantity: locationChangeQuantity ?? 1 }],
+          }),
+          actor: { ...user, id: userId },
+        });
+      }
     }
 
     if (assetBeforeUpdate && trackedFieldUpdates) {

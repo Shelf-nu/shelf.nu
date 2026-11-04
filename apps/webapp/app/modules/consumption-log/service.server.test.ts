@@ -485,6 +485,26 @@ describe("adjustQuantity: location activity", () => {
     ]);
   });
 
+  it("leaves a pool at two locations to its restock line, with no second line", async () => {
+    setup();
+    placedAt([
+      ["loc-wh", 6],
+      ["loc-store", 4],
+    ]);
+
+    await adjustQuantity({
+      assetId: ASSET_ID,
+      quantity: 20,
+      category: ConsumptionCategory.RESTOCK,
+      direction: "add",
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      locationId: "loc-van",
+    });
+
+    expect(locationLog()).toEqual([]);
+  });
+
   it("writes no move line when the placement only grows", async () => {
     setup();
     placedAt([["loc-wh", 10]]);
