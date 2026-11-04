@@ -15,9 +15,8 @@
  * @see {@link file://./../../modules/audit/findings.server.ts} The page read
  * @see {@link file://./../../routes/api+/audits.$auditId.findings.ts} Next pages
  */
-import { useCallback, useEffect, useId, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Maximize2 } from "lucide-react";
-import { useFetcher } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
@@ -38,19 +37,24 @@ import type {
   AuditWideFindings,
   FindingImage,
   FindingNote,
+  FindingsCursor,
 } from "~/modules/audit/findings.server";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
-import type { FindingsListState } from "./audit-findings-helpers";
+import type {
+  FindingsListState,
+  SerializedFindingsPage,
+} from "./audit-findings-helpers";
 import {
   findingSummary,
   findingsListReducer,
   initFindingsList,
+  reviveFindingsPage,
 } from "./audit-findings-helpers";
 
-/** What the findings endpoint answers: a page, or an error. */
+/** What the findings endpoint answers as JSON: a page, or an error. */
 type FindingsPageResponse =
-  | (AuditFindingsPage & { error: null })
+  | (SerializedFindingsPage & { error: null })
   | { error: { message: string } };
 
 /** `compact` sits in the overview card; `expanded` fills the side sheet. */
@@ -142,9 +146,15 @@ export function AuditFindings({
 /**
  * Holds the loaded pages and requests the next one.
  *
- * The fetcher key is unique to this mount, so a remount (the page loader
- * revalidated and sent a new first page) never reads a response that belongs
- * to the list it replaced.
+ * Requests go through a plain `fetch` the hook owns, not a router fetcher: a
+ * fetcher whose request throws is handed to the route's error boundary,
+ * which would replace the whole overview instead of showing the retry
+ * footer. Every outcome (a network failure, a non-2xx response, an error
+ * payload) ends in the list's own `failed` state.
+ *
+ * The request in flight is aborted when the list unmounts (the loader sent a
+ * new first page) or a newer request replaces it, so a late answer never
+ * lands on a list it no longer belongs to.
  */
 function useFindingsPaging(
   auditId: string,
@@ -155,33 +165,60 @@ function useFindingsPaging(
     firstPage,
     initFindingsList
   );
-  const fetcher = useFetcher<FindingsPageResponse>({
-    key: `audit-findings-${useId()}`,
-  });
-  const response = fetcher.data;
-  const isLoading = fetcher.state !== "idle";
-  const failed = !isLoading && response?.error != null;
+  const inFlight = useRef<AbortController | null>(null);
 
-  // The reducer only takes a page that answers its current cursor, so
-  // running this again for a response it already has is harmless.
-  useEffect(() => {
-    if (response && response.error == null) {
-      dispatch({ type: "page_loaded", page: response });
-    }
-  }, [response]);
+  useEffect(() => () => inFlight.current?.abort(), []);
 
-  const { nextCursor } = state;
-  const { load } = fetcher;
+  const { nextCursor, isLoading } = state;
   const loadMore = useCallback(() => {
     if (isLoading || !nextCursor) return;
-    const search = new URLSearchParams({
-      afterTitle: nextCursor.title,
-      afterId: nextCursor.id,
-    });
-    void load(`/api/audits/${auditId}/findings?${search.toString()}`);
-  }, [auditId, isLoading, nextCursor, load]);
 
-  return { state, isLoading, failed, loadMore };
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+    dispatch({ type: "request_started" });
+
+    fetchFindingsPage(auditId, nextCursor, controller.signal)
+      .then((page) => {
+        if (!controller.signal.aborted) dispatch({ type: "page_loaded", page });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) dispatch({ type: "request_failed" });
+      });
+  }, [auditId, isLoading, nextCursor]);
+
+  return { state, isLoading, failed: state.failed, loadMore };
+}
+
+/**
+ * Reads the page of findings after `after` from the findings endpoint.
+ *
+ * @param auditId - The audit whose findings to read
+ * @param after - The cursor of the last row the list holds
+ * @param signal - Aborts the request
+ * @returns The page, with note dates revived
+ * @throws When the request fails, answers non-2xx or carries an error
+ */
+async function fetchFindingsPage(
+  auditId: string,
+  after: FindingsCursor,
+  signal: AbortSignal
+): Promise<AuditFindingsPage> {
+  const search = new URLSearchParams({
+    afterTitle: after.title,
+    afterId: after.id,
+  });
+  const response = await fetch(
+    `/api/audits/${auditId}/findings?${search.toString()}`,
+    { signal, headers: { Accept: "application/json" } }
+  );
+  const body = (await response.json()) as FindingsPageResponse;
+  if (!response.ok || body.error != null) {
+    throw new Error(
+      body.error?.message ?? `Findings request failed (${response.status})`
+    );
+  }
+  return reviveFindingsPage(body);
 }
 
 /**

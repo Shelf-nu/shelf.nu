@@ -81,19 +81,47 @@ describe("findingsListReducer", () => {
   });
 });
 
+describe("findingsListReducer request state", () => {
+  const start = initFindingsList(page(null, ["a"]));
+
+  it("starts with nothing loading and nothing failed", () => {
+    expect(start).toMatchObject({ isLoading: false, failed: false });
+  });
+
+  it("marks a request in flight and clears an earlier failure", () => {
+    const failed = findingsListReducer(start, { type: "request_failed" });
+    const started = findingsListReducer(failed, { type: "request_started" });
+
+    expect(failed).toMatchObject({ isLoading: false, failed: true });
+    expect(started).toMatchObject({ isLoading: true, failed: false });
+  });
+
+  it("ends the request when the page arrives", () => {
+    const started = findingsListReducer(start, { type: "request_started" });
+    const loaded = findingsListReducer(started, {
+      type: "page_loaded",
+      page: page(cursorAt("a"), ["b"]),
+    });
+
+    expect(loaded).toMatchObject({ isLoading: false, failed: false });
+    expect(ids(loaded)).toEqual(["a", "b"]);
+  });
+});
+
 describe("findingsListKey", () => {
   /** A first page with one asset carrying one note and one photo. */
   function firstPage({
     noteContent = "Scratched",
     description = null as string | null,
     totalFindings = 1,
+    assetName = "Camera",
   } = {}): AuditFindingsPage {
     return {
       ...page(null, ["a"], { totalFindings }),
       findings: [
         {
           assetId: "a",
-          assetName: "Camera",
+          assetName,
           notes: [
             {
               id: "n1",
@@ -114,12 +142,13 @@ describe("findingsListKey", () => {
     expect(findingsListKey(firstPage())).toBe(findingsListKey(firstPage()));
   });
 
-  it("changes when a note, a photo or the total changes", () => {
+  it("changes when a note, a photo, an asset name or the total changes", () => {
     const key = findingsListKey(firstPage());
 
     expect(findingsListKey(firstPage({ noteContent: "Dented" }))).not.toBe(key);
     expect(findingsListKey(firstPage({ description: "Front" }))).not.toBe(key);
     expect(findingsListKey(firstPage({ totalFindings: 2 }))).not.toBe(key);
+    expect(findingsListKey(firstPage({ assetName: "Camera 2" }))).not.toBe(key);
   });
 });
 

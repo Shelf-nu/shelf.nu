@@ -44,11 +44,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     });
 
     // Both halves of the cursor are required: this endpoint only serves the
-    // pages after the first, which the overview loader sends.
+    // pages after the first, which the overview loader sends. `afterTitle`
+    // has no length cap because asset titles have none, and the cursor
+    // echoes the title of the last row the list holds.
     const { afterTitle, afterId } = parseData(
       getCurrentSearchParams(request),
       z.object({
-        afterTitle: z.string().max(1000),
+        afterTitle: z.string(),
         afterId: z.string().min(1),
       }),
       { additionalData: { userId, auditId } }

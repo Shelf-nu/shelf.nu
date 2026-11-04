@@ -11,6 +11,7 @@
 import type {
   AssetFinding,
   AuditFindingsPage,
+  FindingNote,
   FindingsCursor,
 } from "~/modules/audit/findings.server";
 
@@ -21,13 +22,17 @@ export type FindingsListState = {
   nextCursor: FindingsCursor | null;
   hasMore: boolean;
   totalFindings: number;
+  /** A request for the next page is in flight. */
+  isLoading: boolean;
+  /** The last request failed; loading resumes only on an explicit retry. */
+  failed: boolean;
 };
 
-/** A page arrived from the server. */
-export type FindingsListAction = {
-  type: "page_loaded";
-  page: AuditFindingsPage;
-};
+/** What happens to the list: a request starts, answers or fails. */
+export type FindingsListAction =
+  | { type: "request_started" }
+  | { type: "page_loaded"; page: AuditFindingsPage }
+  | { type: "request_failed" };
 
 /**
  * The list state for the first page, which the overview loader sends.
@@ -42,25 +47,31 @@ export function initFindingsList(
     nextCursor: firstPage.nextCursor,
     hasMore: firstPage.hasMore,
     totalFindings: firstPage.totalFindings,
+    isLoading: false,
+    failed: false,
   };
 }
 
 /**
- * Appends a fetched page to the list.
+ * Moves the list through a request for its next page.
  *
- * Only a page read after the list's current cursor is taken, so a repeated
- * or out-of-order response cannot duplicate or skip rows. Assets already
- * listed are dropped as a safety net.
+ * A page is appended only when it was read after the list's current cursor,
+ * so a repeated or out-of-order response cannot duplicate or skip rows.
+ * Assets already listed are dropped as a safety net.
  *
  * @param state - The list so far
- * @param action - The page that arrived
- * @returns The list with the page appended
+ * @param action - A request starting, answering or failing
+ * @returns The next list state
  */
 export function findingsListReducer(
   state: FindingsListState,
   action: FindingsListAction
 ): FindingsListState {
   switch (action.type) {
+    case "request_started":
+      return { ...state, isLoading: true, failed: false };
+    case "request_failed":
+      return { ...state, isLoading: false, failed: true };
     case "page_loaded": {
       const { page } = action;
       if (!sameCursor(page.after, state.nextCursor)) return state;
@@ -74,6 +85,8 @@ export function findingsListReducer(
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
         totalFindings: page.totalFindings,
+        isLoading: false,
+        failed: false,
       };
     }
   }
@@ -88,9 +101,10 @@ function sameCursor(a: FindingsCursor | null, b: FindingsCursor | null) {
  * Identifies the contents of the first page, so the list remounts with fresh
  * data when they change and keeps the pages it has loaded when they do not.
  *
- * Covers every note and photo on the page (ids, note text and photo
- * descriptions), so a finding added, edited or removed on a listed asset
- * changes it, and the total, so a finding on a later asset does too.
+ * Covers every asset name and every note and photo on the page (ids, note
+ * text and photo descriptions), so renaming a listed asset or adding,
+ * editing or removing one of its findings changes it, and the total, so a
+ * finding on a later asset does too.
  *
  * @param page - The first page of asset findings
  * @returns A short stable hash of those contents
@@ -100,6 +114,7 @@ export function findingsListKey(page: AuditFindingsPage) {
     page.totalFindings,
     page.findings.map((f) => [
       f.assetId,
+      f.assetName,
       f.notes.map((n) => [n.id, n.content]),
       f.images.map((i) => [i.id, i.description]),
     ]),
@@ -133,4 +148,35 @@ export function findingSummary(photoCount: number, noteCount: number) {
     parts.push(`${noteCount} ${noteCount === 1 ? "note" : "notes"}`);
   }
   return parts.join(" · ");
+}
+
+/**
+ * A page of findings as JSON carries it: note dates arrive as ISO strings.
+ */
+export type SerializedFindingsPage = Omit<AuditFindingsPage, "findings"> & {
+  findings: (Omit<AssetFinding, "notes"> & {
+    notes: (Omit<FindingNote, "createdAt"> & { createdAt: string })[];
+  })[];
+};
+
+/**
+ * Turns a page read from the findings endpoint back into the shape the
+ * loader sends, so every row renders from the same types.
+ *
+ * @param page - The JSON page
+ * @returns The page with note dates as `Date`s
+ */
+export function reviveFindingsPage(
+  page: SerializedFindingsPage
+): AuditFindingsPage {
+  return {
+    ...page,
+    findings: page.findings.map((finding) => ({
+      ...finding,
+      notes: finding.notes.map((note) => ({
+        ...note,
+        createdAt: new Date(note.createdAt),
+      })),
+    })),
+  };
 }

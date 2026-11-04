@@ -99,6 +99,22 @@ describe("GET /api/audits/:auditId/findings", () => {
     });
   });
 
+  it("pages after an asset whose title is longer than any fixed cap", async () => {
+    // Asset titles have no maximum, and the cursor echoes the last row's title.
+    const longTitle = "x".repeat(1500);
+    const query = `?${new URLSearchParams({
+      afterTitle: longTitle,
+      afterId: "aa-7",
+    }).toString()}`;
+
+    const response = (await loader(args(query))) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    expect(mockGetPage).toHaveBeenCalledWith(
+      expect.objectContaining({ after: { title: longTitle, id: "aa-7" } })
+    );
+  });
+
   it("checks the assignment for a member limited to assigned audits", async () => {
     await loader(args(NEXT_PAGE));
 
