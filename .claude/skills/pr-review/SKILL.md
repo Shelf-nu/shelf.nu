@@ -320,8 +320,9 @@ Rules:
 - **Next** lists only options that apply, with real numbers: "fix <range>"
   only when there are findings, "prove <n>" only for a must-fix or should-fix
   a test could pin, "restore D<n>" only when Dismissed is not empty, "post this
-  as a request-changes review" only for an open PR with at least one finding
-  the PR caused ("Spotted along the way" does not count). List "post"
+  as a request-changes review" only for an open PR the current `gh` user did
+  not author, with at least one finding the PR caused ("Spotted along the way"
+  does not count). List "post"
   before "fix" and say it is one or the other: "post these as a request-changes
   review, or fix <range> here". With no findings at all, write "Next: nothing
   to fix.", followed by "restore D<range>" when Dismissed is not empty. For a
