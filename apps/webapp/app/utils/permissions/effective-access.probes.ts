@@ -89,12 +89,17 @@ export const ROLE_SETS: string[][] = [
   ["UNKNOWN_ROLE"],
 ];
 
-/** The four workspace visibility toggles, all 16 combinations. */
+/**
+ * The four workspace visibility toggles, all 16 combinations. The permission
+ * switches stay off here: they widen the matrix, never reach, and
+ * `workspaceGrants` below records what they add.
+ */
 export const TOGGLE_COMBOS = Array.from({ length: 16 }, (_, i) => ({
   selfServiceCanSeeBookings: Boolean(i & 1),
   baseUserCanSeeBookings: Boolean(i & 2),
   selfServiceCanSeeCustody: Boolean(i & 4),
   baseUserCanSeeCustody: Boolean(i & 8),
+  managersCanEditAssets: false,
 }));
 
 /** Caller vs booking relationships, each isolated from the other. */
@@ -347,6 +352,37 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       ),
     ])
   );
+
+  // Workspace switches: per role set, the entity actions each switch adds to
+  // the matrix above when it is on. The matrix above is the switches-off answer.
+  snapshot.workspaceGrants = {
+    managersCanEditAssets: Object.fromEntries(
+      ROLE_SETS.map((roles) => [
+        key(roles),
+        Object.fromEntries(
+          Object.values(PermissionEntity)
+            .map((entity) => [
+              entity,
+              Object.values(PermissionAction).filter(
+                (action) =>
+                  userHasPermission({
+                    roles: roles as OrganizationRoles[],
+                    workspace: { managersCanEditAssets: true },
+                    entity,
+                    action,
+                  }) &&
+                  !userHasPermission({
+                    roles: roles as OrganizationRoles[],
+                    entity,
+                    action,
+                  })
+              ),
+            ])
+            .filter(([, added]) => added.length > 0)
+        ),
+      ])
+    ),
+  };
 
   // D-01: effective role, web server and mobile/client resolvers.
   snapshot["D-01"] = Object.fromEntries(

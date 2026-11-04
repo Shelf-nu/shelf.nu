@@ -55,6 +55,7 @@ function args(roles: OrganizationRoles[]) {
     userId: "user-1",
     organizationId: "org-1",
     roles,
+    workspace: null,
   };
 }
 

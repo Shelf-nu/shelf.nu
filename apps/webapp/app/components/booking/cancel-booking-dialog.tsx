@@ -1,4 +1,16 @@
-import { useActionData } from "react-router";
+/**
+ * Cancel, as an action that works from any page: a confirmation dialog whose
+ * form posts `intent=cancel` and the optional reason to the booking's own
+ * overview action through a fetcher keyed on the booking. The server sends the
+ * success toast; the dialog closes when the response is accepted and shows a
+ * refusal (including a `cancellationReason` validation error) inline.
+ *
+ * @see {@link file://./booking-action-trigger.tsx}
+ * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
+ */
+import { useEffect, useState } from "react";
+import { XCircleIcon } from "lucide-react";
+import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { Button } from "~/components/shared/button";
 import {
@@ -12,38 +24,60 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
-import { Form } from "../custom-form";
+import { BookingActionTrigger } from "./booking-action-trigger";
+import type { BookingActionTriggerVariant } from "./booking-action-trigger";
 import { CancelBookingSchema } from "./forms/forms-schema";
 import { AlertIcon } from "../icons/library";
 
+/** Props for {@link CancelBookingDialog}. */
 type CancelBookingDialogProps = {
-  bookingName: string;
+  /** The booking to cancel; `name` titles the dialog. */
+  booking: { id: string; name: string };
+  /** Defaults to `"menu-item"`. */
+  trigger?: BookingActionTriggerVariant;
 };
 
-export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
-  const disabled = useDisabled();
+/**
+ * Renders the cancel trigger and its confirmation dialog.
+ *
+ * @param props.booking - The booking to cancel
+ * @param props.trigger - Menu row or icon button
+ */
+export function CancelBookingDialog({
+  booking,
+  trigger = "menu-item",
+}: CancelBookingDialogProps) {
+  const [open, setOpen] = useState(false);
+  const fetcher = useFetcher<DataOrErrorResponse>({
+    key: `cancel-booking-${booking.id}`,
+  });
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
+  const disabled = useDisabled(fetcher);
   const zo = useZorm("CancelBooking", CancelBookingSchema);
-  const actionData = useActionData<DataOrErrorResponse>();
 
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<typeof CancelBookingSchema>(
-    actionData?.error
+    // Only this opening's refusal: the keyed fetcher keeps its last response
+    // after the dialog closes, which must not reappear on the next opening.
+    outcome.status === "rejected" ? fetcher.data?.error : undefined
   );
 
+  useEffect(() => {
+    if (outcome.status === "accepted") setOpen(false);
+  }, [outcome.status]);
+
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="link"
-          className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
-          width="full"
-        >
-          Cancel
-        </Button>
+        <BookingActionTrigger
+          variant={trigger}
+          label="Cancel"
+          icon={<XCircleIcon className="size-4" />}
+        />
       </AlertDialogTrigger>
 
       <AlertDialogContent>
@@ -53,13 +87,17 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
               <AlertIcon />
             </span>
           </div>
-          <AlertDialogTitle>Cancel {bookingName}</AlertDialogTitle>
+          <AlertDialogTitle>Cancel {booking.name}</AlertDialogTitle>
           <AlertDialogDescription>
             Are you sure you want to cancel this booking? This action cannot be
             undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <Form method="post" ref={zo.ref}>
+        <fetcher.Form
+          method="post"
+          action={`/bookings/${booking.id}/overview`}
+          ref={zo.ref}
+        >
           <input type="hidden" name="intent" value="cancel" />
           <div className="mb-4">
             <label
@@ -86,6 +124,13 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
                   zo.errors.cancellationReason()?.message}
               </p>
             )}
+            {/* A refusal that is not a field error, e.g. a status or permission refusal. */}
+            {outcome.status === "rejected" &&
+              !validationErrors?.cancellationReason && (
+                <p className="text-sm text-error-500" role="alert">
+                  {outcome.message}
+                </p>
+              )}
             <p
               id="cancellationReason-description"
               className="-mt-1 text-text-sm text-gray-500"
@@ -112,7 +157,7 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
               </Button>
             </div>
           </AlertDialogFooter>
-        </Form>
+        </fetcher.Form>
       </AlertDialogContent>
     </AlertDialog>
   );

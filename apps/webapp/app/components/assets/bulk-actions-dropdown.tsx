@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { lazy, useState } from "react";
+import type { ReactNode } from "react";
 import { KIT_MEMBERS_CUSTODY_BLOCKED_REASON } from "@shelf/labels";
 import { useAtomValue } from "jotai";
+import { DownloadIcon } from "lucide-react";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
@@ -21,6 +23,9 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { Dialog, DialogPortal } from "../layout/dialog";
+import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
+import { Spinner } from "../shared/spinner";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
@@ -32,7 +37,6 @@ import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkCustomFieldUpdateDialog from "./bulk-custom-field-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
-import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
@@ -52,6 +56,42 @@ import {
 } from "../shared/dropdown";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
+
+/* Lazy: the dialog renders every selected asset's QR label for the download,
+ * and the label lives in the code preview module with its barcode scanner.
+ * It loads the first time someone opens it. */
+const BulkDownloadQrDialog = lazy(() => import("./bulk-download-qr-dialog"));
+
+/**
+ * The download dialog's frame, shown while its chunk loads or if it failed
+ * to, so picking the action always opens something.
+ */
+function BulkDownloadQrPlaceholder({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <DialogPortal>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        ariaLabel="Download QR codes"
+        title={
+          <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
+            <DownloadIcon />
+          </div>
+        }
+      >
+        <div className="flex flex-col items-center px-6 py-8">{children}</div>
+      </Dialog>
+    </DialogPortal>
+  );
+}
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -79,6 +119,10 @@ function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
   const [isBulkDownloadQrOpen, setIsBulkDownloadQrOpen] = useState(false);
+  /* Mounted from the first opening on: the dialog stays mounted between
+   * openings so it can drop a download that resolves after it closed. */
+  const [hasOpenedBulkDownloadQr, setHasOpenedBulkDownloadQr] = useState(false);
+  const closeBulkDownloadQr = () => setIsBulkDownloadQrOpen(false);
 
   const {
     ref: dropdownRef,
@@ -133,6 +177,28 @@ function ConditionalDropdown() {
 
   const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
+
+  /** Bulk location, the one bulk edit a workspace switch can open. */
+  const canBulkUpdateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+  /**
+   * Every other bulk edit answers from the matrix alone, as its route does
+   * (`matrixOnly: true`), so a switched-on Manager never sees it.
+   */
+  const canBulkEdit = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+    matrixOnly: true,
+  });
+  const canBulkDelete = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.delete,
+  });
   const user = useUserData();
 
   /**
@@ -194,14 +260,10 @@ function ConditionalDropdown() {
           )}
         />
       )}
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.update,
-        })}
-      >
+      <When truthy={canBulkUpdateLocation}>
         <BulkLocationUpdateDialog />
+      </When>
+      <When truthy={canBulkEdit}>
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
         <BulkCategoryUpdateDialog />
@@ -209,11 +271,13 @@ function ConditionalDropdown() {
         <BulkSetReorderPointDialog />
         <BulkAssetModelUpdateDialog />
         <BulkAssetModelRemoveDialog />
-        <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
+      </When>
+      <When truthy={canBulkDelete}>
+        <BulkDeleteDialog />
       </When>
       {/* Archive and Reinstate share their own grant, `asset: archive`. */}
       <When truthy={canArchiveAssets}>
@@ -242,12 +306,37 @@ function ConditionalDropdown() {
         <BulkAddToAuditDialog />
       </When>
 
-      <BulkDownloadQrDialog
-        isDialogOpen={isBulkDownloadQrOpen}
-        onClose={() => {
-          setIsBulkDownloadQrOpen(false);
-        }}
-      />
+      {hasOpenedBulkDownloadQr ? (
+        <LazyLoadBoundary
+          loading={
+            <BulkDownloadQrPlaceholder
+              open={isBulkDownloadQrOpen}
+              onClose={closeBulkDownloadQr}
+            >
+              <div role="status" className="flex flex-col items-center gap-2">
+                <Spinner />
+                <span className="sr-only">Loading the QR code download</span>
+              </div>
+            </BulkDownloadQrPlaceholder>
+          }
+          failed={
+            <BulkDownloadQrPlaceholder
+              open={isBulkDownloadQrOpen}
+              onClose={closeBulkDownloadQr}
+            >
+              <p className="text-center text-error-500">
+                The QR code download could not be loaded. Reload the page and
+                try again.
+              </p>
+            </BulkDownloadQrPlaceholder>
+          }
+        >
+          <BulkDownloadQrDialog
+            isDialogOpen={isBulkDownloadQrOpen}
+            onClose={closeBulkDownloadQr}
+          />
+        </LazyLoadBoundary>
+      ) : null}
 
       <When
         truthy={userHasPermission({
@@ -312,6 +401,7 @@ function ConditionalDropdown() {
             <DropdownMenuItem
               onClick={() => {
                 closeMenu();
+                setHasOpenedBulkDownloadQr(true);
                 setIsBulkDownloadQrOpen(true);
               }}
               className="border-b py-1 lg:p-0"
@@ -412,13 +502,7 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
             </When>
 
-            <When
-              truthy={userHasPermission({
-                roles,
-                entity: PermissionEntity.asset,
-                action: PermissionAction.update,
-              })}
-            >
+            <When truthy={canBulkEdit}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="tag-add"
@@ -435,6 +519,8 @@ function ConditionalDropdown() {
                   label="Remove tags"
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkUpdateLocation}>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="location"
@@ -442,6 +528,8 @@ function ConditionalDropdown() {
                   disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkEdit}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
@@ -555,7 +643,8 @@ function ConditionalDropdown() {
                   />
                 </DropdownMenuItem>
               </When>
-
+            </When>
+            <When truthy={canBulkDelete}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="trash"
@@ -573,19 +662,19 @@ function ConditionalDropdown() {
                   }
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem className="border-t md:hidden lg:p-0">
-                <Button
-                  type="button"
-                  role="button"
-                  variant="secondary"
-                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                  width="full"
-                  onClick={() => setOpen(false)}
-                >
-                  Close
-                </Button>
-              </DropdownMenuItem>
             </When>
+            <DropdownMenuItem className="border-t md:hidden lg:p-0">
+              <Button
+                type="button"
+                role="button"
+                variant="secondary"
+                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                width="full"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </Button>
+            </DropdownMenuItem>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

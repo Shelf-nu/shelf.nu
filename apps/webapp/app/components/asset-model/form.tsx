@@ -12,7 +12,7 @@
  * @see {@link file://./../../routes/_layout+/settings.asset-models.$assetModelId_.edit.tsx}
  */
 import { useEffect } from "react";
-import type { AssetModel } from "@prisma/client";
+import type { AssetModel, Currency } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -24,12 +24,15 @@ import {
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import type { ICustomFieldValueJson } from "~/modules/asset/types";
+import type { ModelDefaultFieldOption } from "~/modules/asset-model/defaults.server";
 import type { action } from "~/routes/_layout+/settings.asset-models.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { optionalNumberFromString } from "~/utils/zod-numeric";
+import { AssetModelCustomFieldDefaults } from "./custom-field-defaults";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
@@ -275,10 +278,14 @@ function FullPageForm({
   // Replaces `autoFocus` on the Name input — focuses on mount (full-page
   // mode, no `open` gate needed).
   const nameInputRef = useAutoFocus<HTMLInputElement>();
-  const { currency } = useLoaderData<{
-    currency: string;
+  const { currency, modelDefaultFields, modelDefaultValues } = useLoaderData<{
+    currency: Currency;
     categories: unknown[];
     totalCategories: number;
+    /** Custom fields the model can hold a default for. */
+    modelDefaultFields: ModelDefaultFieldOption[];
+    /** The model's saved defaults, keyed by custom field id (edit only). */
+    modelDefaultValues?: Record<string, ICustomFieldValueJson>;
   }>();
 
   /** Server-side validation errors from the page action. */
@@ -296,6 +303,15 @@ function FullPageForm({
    * schema), so its errors arrive either as the client-side file guard's
    * message or as the server's `field: "image"` ShelfError.
    */
+  /** Server messages for the `cf-<id>` default inputs. */
+  const customFieldErrors = Object.fromEntries(
+    Object.entries(
+      (validationErrors ?? {}) as Record<string, { message?: string }>
+    )
+      .filter(([key]) => key.startsWith("cf-"))
+      .map(([key, value]) => [key, value?.message])
+  );
+
   const imageError =
     (actionData?.error?.additionalData?.field === "image"
       ? actionData?.error?.message
@@ -366,7 +382,7 @@ function FullPageForm({
         {/* -- Default Category -- */}
         <FormRow
           rowLabel="Default category"
-          subHeading="Assets created from this model will inherit this category."
+          subHeading="Fills an asset's empty category when it joins this model."
           className="border-b-0 pb-[10px]"
         >
           <DynamicSelect
@@ -389,7 +405,7 @@ function FullPageForm({
         {/* -- Default Valuation -- */}
         <FormRow
           rowLabel="Default valuation"
-          subHeading="Assets created from this model will inherit this value."
+          subHeading="Fills an asset's empty value when it joins this model."
           className="border-b-0 py-[10px]"
         >
           <div className="relative w-full">
@@ -461,6 +477,15 @@ function FullPageForm({
             disabled={disabled}
           />
         </FormRow>
+
+        {/* -- Default custom field values -- */}
+        <AssetModelCustomFieldDefaults
+          fields={modelDefaultFields ?? []}
+          values={modelDefaultValues ?? {}}
+          currency={currency}
+          errors={customFieldErrors}
+          disabled={disabled}
+        />
 
         {/* -- Bottom action bar -- */}
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">

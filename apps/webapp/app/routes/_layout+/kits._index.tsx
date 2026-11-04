@@ -12,7 +12,7 @@ import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
-import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
+import { LazyAvailabilityCalendar } from "~/components/availability-calendar/availability-calendar.lazy";
 import { ResourceTitleLink } from "~/components/availability-calendar/resource-title-link";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -414,7 +414,7 @@ export default function KitsIndexPage() {
         </Filters>
         {isAvailabilityView && shouldShowAvailabilityView ? (
           <>
-            <AvailabilityCalendar
+            <LazyAvailabilityCalendar
               resources={resources}
               events={events}
               resourceLabelContent={({ resource }) => (

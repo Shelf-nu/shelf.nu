@@ -22,6 +22,7 @@
  *
  * @see {@link file://./form.tsx} consumer
  */
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -35,9 +36,8 @@ export type AssetModelFormRowProps = {
   assetModelId?: string | null;
   /**
    * Fired when the user picks (or clears) a model. The parent uses
-   * this to apply the model's `defaultCategoryId` to the form's
-   * category param so the Category selector re-renders with the new
-   * default — see `handleAssetModelChange` in `form.tsx`.
+   * this to show the model's `defaultCategoryId` in an empty Category
+   * selector. See `handleAssetModelChange` in `form.tsx`.
    */
   onChange: (modelId: string | undefined) => void;
   /**
@@ -55,21 +55,27 @@ export function AssetModelFormRow({
   onChange,
   error,
 }: AssetModelFormRowProps) {
+  /** "Create" shortcuts show only to members who may create asset models. */
+  const canCreateAssetModel = useInlineCreatePermissions().assetModel;
+
   return (
     <FormRow
       rowLabel="Asset Model"
       required={required}
       subHeading={
         <p>
-          Assign a model to group similar assets together.{" "}
-          <Button
-            to="/settings/asset-models/new"
-            variant="link-gray"
-            className="text-gray-600 underline"
-            target="_blank"
-          >
-            Create asset models
-          </Button>
+          Assign a model to group similar assets together. When an asset joins a
+          model, the model's defaults fill its empty fields.{" "}
+          {canCreateAssetModel ? (
+            <Button
+              to="/settings/asset-models/new"
+              variant="link-gray"
+              className="text-gray-600 underline"
+              target="_blank"
+            >
+              Create asset models
+            </Button>
+          ) : null}
         </p>
       }
       className="border-b-0 pb-[10px]"

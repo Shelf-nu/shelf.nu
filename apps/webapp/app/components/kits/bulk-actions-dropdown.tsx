@@ -118,10 +118,18 @@ function ConditionalDropdown() {
         truthy={userHasPermission({
           roles,
           entity: PermissionEntity.kit,
-          action: PermissionAction.update,
+          action: PermissionAction.delete,
         })}
       >
         <BulkDeleteDialog />
+      </When>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.update,
+        })}
+      >
         <KitBulkLocationUpdateDialog />
       </When>
 
@@ -261,7 +269,15 @@ function ConditionalDropdown() {
                   disabled={isLoading}
                 />
               </DropdownMenuItem>
+            </When>
 
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.kit,
+                action: PermissionAction.delete,
+              })}
+            >
               <DropdownMenuItem
                 className="px-4 py-1 md:p-0"
                 onSelect={(e) => {

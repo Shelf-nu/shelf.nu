@@ -21,6 +21,10 @@ import {
   EditWorkspaceSSOSettingsFormSchema,
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
+import {
+  MANAGERS_CAN_EDIT_ASSETS_INTENT,
+  ManagersCanEditAssetsSchema,
+} from "~/components/workspace/managers-can-edit-assets-form";
 import { PdfDocumentsSettings } from "~/components/workspace/pdf-documents-settings";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
@@ -28,6 +32,7 @@ import {
   getOrganizationAdmins,
   transferOwnership,
   updateOrganization,
+  updateOrganizationManagersCanEditAssets,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
 import {
@@ -56,7 +61,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import {
+  assertIsOrganizationOwner,
+  requirePermission,
+} from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
@@ -242,13 +250,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, access, organizations } =
-      await requirePermission({
-        userId: authSession.userId,
-        request,
-        entity: PermissionEntity.generalSettings,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      currentOrganization,
+      access,
+      organizations,
+      userOrganizations,
+    } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.generalSettings,
+      action: PermissionAction.update,
+    });
 
     const [tierLimit, user] = await Promise.all([
       getOrganizationTierLimit({
@@ -279,6 +292,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         intent: z.enum([
           "general",
           "permissions",
+          MANAGERS_CAN_EDIT_ASSETS_INTENT,
           "sso",
           "transfer-ownership",
           "generateScimToken",
@@ -444,6 +458,50 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return redirect("/settings/general");
+      }
+      case MANAGERS_CAN_EDIT_ASSETS_INTENT: {
+        // Owner-only: the switch widens what a role may change, so an
+        // Administrator cannot grant it. It has its own intent; the
+        // "permissions" intent above never reads or writes the column.
+        assertIsOrganizationOwner({
+          userOrganizations,
+          organizationId,
+          action: "change what Managers can do",
+        });
+
+        // The Permissions card only renders on a team workspace; a personal
+        // workspace has no Managers to grant anything to.
+        if (currentOrganization.type !== OrganizationType.TEAM) {
+          throw new ShelfError({
+            cause: null,
+            message: "Manager permissions exist only on team workspaces.",
+            label: "Organization",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
+        const { managersCanEditAssets } = parseData(
+          formData,
+          ManagersCanEditAssetsSchema,
+          { additionalData: { userId, organizationId, intent } }
+        );
+
+        await updateOrganizationManagersCanEditAssets({
+          id: organizationId,
+          managersCanEditAssets,
+        });
+
+        sendNotification({
+          title: "Workspace updated",
+          message: managersCanEditAssets
+            ? "Managers can now add and edit assets and kits."
+            : "Managers can no longer add or edit assets and kits.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
       }
       case "sso": {
         if (!access.ownsWorkspace) {
@@ -739,6 +797,7 @@ export default function GeneralPage() {
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
         scimEnabled={scimEnabled}
         scimTokens={scimTokens}
+        showManagersSwitch
         afterGeneral={
           showPdfDocuments ? (
             <PdfDocumentsSettings

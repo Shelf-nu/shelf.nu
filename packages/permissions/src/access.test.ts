@@ -24,6 +24,7 @@ const OFF = {
   baseUserCanSeeBookings: false,
   selfServiceCanSeeCustody: false,
   baseUserCanSeeCustody: false,
+  managersCanEditAssets: false,
 };
 const access = (roles: string[], workspace = OFF) =>
   resolveRoleAccess({ roles, workspace });
@@ -73,6 +74,24 @@ describe("resolveRoleAccess", () => {
     assert.equal(isWorkspaceOwner(["SELF_SERVICE", "OWNER"]), true);
     assert.equal(isWorkspaceOwner(["ADMIN"]), false);
     assert.equal(isWorkspaceOwner(undefined), false);
+  });
+});
+
+describe("resolveRoleAccess workspace grants", () => {
+  test("carries the permission switches and nothing else from the row", () => {
+    const row = {
+      ...OFF,
+      managersCanEditAssets: true,
+      name: "Workspace",
+      barcodesEnabled: true,
+    };
+    assert.deepEqual(
+      resolveRoleAccess({ roles: ["MANAGER"], workspace: row }).workspaceGrants,
+      { managersCanEditAssets: true }
+    );
+    assert.deepEqual(access(["MANAGER"]).workspaceGrants, {
+      managersCanEditAssets: false,
+    });
   });
 });
 

@@ -13,8 +13,9 @@ import { makeShelfError } from "~/utils/error";
  *
  * Each organization in the response carries the four workspace visibility
  * toggles (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
- * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`), so the companion can
- * resolve the same access the server resolves for that workspace.
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
+ * switch `managersCanEditAssets`, so the companion can resolve the same access
+ * and the same matrix answers the server resolves for that workspace.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
