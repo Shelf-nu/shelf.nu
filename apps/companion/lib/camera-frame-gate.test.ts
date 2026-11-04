@@ -99,4 +99,14 @@ test("every camera keeps one stable onBarcodeScanned", () => {
       `${use.file} passes onBarcodeScanned={${use.value}}`
     );
   }
+  // One literal handler per CameraView, so none can slip in through a spread.
+  for (const [file, source] of appScreens()) {
+    const cameras = (source.match(/<CameraView\b/g) ?? []).length;
+    const handlers = uses.filter((u) => u.file === file).length;
+    assert.equal(
+      handlers,
+      cameras,
+      `${file} has ${cameras} CameraView and ${handlers} onBarcodeScanned`
+    );
+  }
 });

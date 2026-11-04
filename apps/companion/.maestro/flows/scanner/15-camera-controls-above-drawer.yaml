@@ -2,7 +2,9 @@
 #
 # Pause, torch and "Enter code" sit in one row under the mode pills. The batch
 # drawer is capped below that row, so five scanned items never cover them, and
-# the torch stays on across every scan. Collapsing the drawer hides the list;
+# the torch control stays on across every scan. The steps read the torch
+# label, which follows the app's torch state; whether the light itself stays
+# on needs a real device (the simulator has no torch). Collapsing the drawer hides the list;
 # a scan while collapsed is named in the header for a moment.
 #
 # Fixture: SAM-0001..SAM-0005 exist in GRANULAR WORKSPACE and can be assigned.
@@ -131,6 +133,20 @@ appId: com.shelf.companion.carlos
 - tapOn:
     text: "Resume camera"
     optional: true
+# Where the row sits, not only that it exists: under the pills, above the
+# drawer's title.
+- assertVisible:
+    id: "camera-torch"
+    below:
+      text: "Scanner action: Assign.*"
+- assertVisible:
+    id: "camera-torch"
+    above:
+      text: "4 items scanned"
+- assertVisible:
+    id: "dev-scan-toggle"
+    above:
+      text: "4 items scanned"
 - takeScreenshot: controls-4-items
 # assertVisible passes even for a covered view, so press the torch with the
 # drawer at its tallest: its label only flips if the tap reaches it.

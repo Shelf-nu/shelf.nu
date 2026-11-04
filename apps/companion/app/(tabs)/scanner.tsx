@@ -13,6 +13,7 @@ import {
   Platform,
   Alert,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -371,6 +372,7 @@ function ScannerContent() {
    * a tall result card can never cover the controls.
    */
   const [controlsBottom, setControlsBottom] = useState(0);
+  const insets = useSafeAreaInsets();
 
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -3217,7 +3219,10 @@ function ScannerContent() {
         {/* Top - Action picker or Booking header */}
         <View style={styles.overlaySection} pointerEvents="box-none">
           <View
-            style={styles.actionPickerContainer}
+            // Bounded by the safe area on top, so on the shortest phones a
+            // tall booking header shrinks (see bookingModeHeader) instead of
+            // sliding under the status bar.
+            style={[styles.actionPickerContainer, { top: insets.top }]}
             pointerEvents="box-none"
             onLayout={(e) => {
               const { y, height } = e.nativeEvent.layout;
@@ -3747,15 +3752,27 @@ const useStyles = createStyles((colors) => ({
     bottom: spacing.lg,
     left: 0,
     right: 0,
+    // Content sits on the bottom edge, just above the frame.
+    justifyContent: "flex-end",
   },
   bookingModeHeader: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
+    // When the strip above the frame is shorter than header plus controls
+    // (568pt phones with a two-line reservation hint), the header gives up
+    // height and the controls row keeps its 44pt targets.
+    flexShrink: 1,
+    overflow: "hidden",
   },
   bookingModeInfo: {
     flex: 1,
+    alignSelf: "stretch",
+    // Bottom-aligned, so a squeezed header loses its small mode label first
+    // and keeps the booking name and the reservation hint.
+    justifyContent: "flex-end",
+    overflow: "hidden",
   },
   bookingModeLabel: {
     fontSize: fontSize.xs,
