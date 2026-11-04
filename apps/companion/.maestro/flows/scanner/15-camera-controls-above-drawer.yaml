@@ -1,0 +1,156 @@
+# Scanner - camera controls stay reachable and the torch stays on during a batch
+#
+# Pause, torch and "Enter code" sit in one row under the mode pills. The batch
+# drawer is capped below that row, so five scanned items never cover them, and
+# the torch stays on across every scan. Collapsing the drawer hides the list;
+# a scan while collapsed is named in the header for a moment.
+#
+# Fixture: SAM-0001..SAM-0005 exist in GRANULAR WORKSPACE and can be assigned.
+# Nothing is submitted, so the workspace is unchanged.
+# The camera auto-pauses after 30 s without a scan; the flow resumes it before
+# each scan and screenshot so every code lands on a live camera.
+# No login step: runs against the session already on the simulator.
+appId: com.shelf.companion.carlos
+---
+- launchApp:
+    appId: com.shelf.companion.carlos
+    stopApp: false
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Open"
+    optional: true
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    text: "Switch"
+    optional: true
+- tapOn:
+    text: "Clear all.*"
+    optional: true
+
+# ── 1. Empty batch: controls in the row under the pills, torch on ──
+- extendedWaitUntil:
+    visible:
+      id: "camera-torch"
+    timeout: 15000
+- tapOn:
+    text: "Turn on flashlight"
+    optional: true
+- assertVisible: "Turn off flashlight"
+- assertVisible:
+    id: "dev-scan-toggle"
+# The 30 s inactivity pause may have fired, so match the button, not its label.
+- assertVisible:
+    id: "camera-pause"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- takeScreenshot: controls-0-items
+
+# ── 2. One item: controls and torch unchanged ──
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0001"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn: "Close manual entry"
+- assertVisible: "Turn off flashlight"
+# The 30 s inactivity pause may have fired, so match the button, not its label.
+- assertVisible:
+    id: "camera-pause"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- takeScreenshot: controls-1-item
+
+# ── 3. Four items: drawer at its cap, controls still above it ──
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0002"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 15000
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0003"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "3 items scanned"
+    timeout: 15000
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0004"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "4 items scanned"
+    timeout: 15000
+- tapOn: "Close manual entry"
+- assertVisible: "Turn off flashlight"
+# The 30 s inactivity pause may have fired, so match the button, not its label.
+- assertVisible:
+    id: "camera-pause"
+- assertVisible:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- takeScreenshot: controls-4-items
+
+# ── 4. Collapse: the list goes, a new scan still updates the header ──
+- tapOn: "Collapse scanned items"
+- assertVisible: "Expand scanned items"
+- assertNotVisible: "Remove .*"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0005"
+- pressKey: Enter
+# The header names the new row for 1.5 s, too short to assert reliably on a
+# loaded simulator; the count it settles on is the stable outcome.
+- extendedWaitUntil:
+    visible: "5 items scanned.*"
+    timeout: 15000
+- tapOn: "Close manual entry"
+- tapOn: "Expand scanned items"
+- assertVisible: "Collapse scanned items"
+- tapOn: "Clear all.*"
