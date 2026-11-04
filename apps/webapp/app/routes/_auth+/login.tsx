@@ -60,7 +60,19 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/");
   }
 
-  return data(payload({ title, subHeading, disableSignup, disableSSO }));
+  return data(
+    payload({
+      title,
+      subHeading,
+      disableSignup,
+      disableSSO,
+      /**
+       * Why the member was sent here, flashed by the auth middleware when it
+       * ends a session (logged out by an admin, expired or revoked).
+       */
+      signedOutReason: context.errorMessage,
+    })
+  );
 }
 
 const LoginFormSchema = z.object({
@@ -195,7 +207,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
+  const { disableSignup, disableSSO, signedOutReason } =
+    useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -234,6 +247,12 @@ export default function IndexLoginForm() {
         <div role="alert" className="mb-8 text-center text-error-600">
           This email address signs in with single sign-on. Please use Login with
           SSO.
+        </div>
+      ) : null}
+
+      {signedOutReason && !ssoRequired ? (
+        <div role="status" className="mb-8 text-center text-warning-700">
+          {signedOutReason}
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
