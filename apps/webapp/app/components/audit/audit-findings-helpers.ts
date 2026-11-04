@@ -15,6 +15,13 @@ import type {
   FindingsCursor,
 } from "~/modules/audit/findings.server";
 
+/**
+ * How long a request for the next page may take before the list gives up on
+ * it and offers "Try again". Without a limit a stalled request would keep
+ * the spinner up, and the retry hidden, for as long as the browser waits.
+ */
+export const FINDINGS_REQUEST_TIMEOUT_MS = 20_000;
+
 /** The findings loaded so far, and where the next page starts. */
 export type FindingsListState = {
   findings: AssetFinding[];
@@ -102,9 +109,10 @@ function sameCursor(a: FindingsCursor | null, b: FindingsCursor | null) {
  * data when they change and keeps the pages it has loaded when they do not.
  *
  * Covers every asset name and every note and photo on the page (ids, note
- * text and photo descriptions), so renaming a listed asset or adding,
- * editing or removing one of its findings changes it, and the total, so a
- * finding on a later asset does too.
+ * text, the names its author is shown by and photo descriptions), so
+ * renaming a listed asset or a note's author, or adding, editing or removing
+ * a finding, changes it, and the total, so a finding on a later asset does
+ * too.
  *
  * @param page - The first page of asset findings
  * @returns A short stable hash of those contents
@@ -115,7 +123,13 @@ export function findingsListKey(page: AuditFindingsPage) {
     page.findings.map((f) => [
       f.assetId,
       f.assetName,
-      f.notes.map((n) => [n.id, n.content]),
+      f.notes.map((n) => [
+        n.id,
+        n.content,
+        n.user?.displayName,
+        n.user?.firstName,
+        n.user?.lastName,
+      ]),
       f.images.map((i) => [i.id, i.description]),
     ]),
   ]);

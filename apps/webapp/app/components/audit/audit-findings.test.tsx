@@ -1,8 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuditFindingsPage } from "~/modules/audit/findings.server";
 import { AuditFindings } from "./audit-findings";
+import { FINDINGS_REQUEST_TIMEOUT_MS } from "./audit-findings-helpers";
 
 // why: DateS reads the user's date preferences from the root route's loader,
 // and no router is running here. When a note was written is not under test.
@@ -70,7 +77,20 @@ const loadMoreButton = () => screen.getByRole("button", { name: /load more/i });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
+
+/** A fetch that never answers, and rejects like a real one when aborted. */
+function stalledFetch() {
+  return vi.fn(
+    (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError"))
+        );
+      })
+  );
+}
 
 describe("AuditFindings next page", () => {
   it("requests the page after the last row and appends it", async () => {
@@ -124,4 +144,60 @@ describe("AuditFindings next page", () => {
       expect(screen.getByText("Camera")).toBeInTheDocument();
     }
   );
+
+  it("gives up on a stalled request and offers a retry", async () => {
+    vi.useFakeTimers();
+    // why: the next page comes from the network; the request is the boundary.
+    vi.stubGlobal("fetch", stalledFetch());
+    renderFindings();
+
+    fireEvent.click(loadMoreButton());
+    expect(screen.getByText("Loading more findings")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FINDINGS_REQUEST_TIMEOUT_MS);
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not load more findings."
+    );
+    expect(
+      screen.getByRole("button", { name: "Try again" })
+    ).toBeInTheDocument();
+  });
+
+  it("loads the next page when the end of the list scrolls into view", async () => {
+    let reportVisibility: IntersectionObserverCallback = () => {};
+    // why: happy-dom has no layout, so nothing ever scrolls into view; the
+    // stub hands the test the observer's callback to report it by hand.
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          reportVisibility = callback;
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    // why: the next page comes from the network; the request is the boundary.
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(SECOND_PAGE_JSON), { status: 200 })
+        )
+    );
+    renderFindings();
+
+    act(() => {
+      reportVisibility(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    });
+
+    expect(await screen.findByText("Tripod")).toBeInTheDocument();
+  });
 });

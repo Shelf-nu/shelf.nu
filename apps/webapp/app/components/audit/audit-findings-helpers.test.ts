@@ -115,6 +115,7 @@ describe("findingsListKey", () => {
     description = null as string | null,
     totalFindings = 1,
     assetName = "Camera",
+    authorName = "Sam Lee",
   } = {}): AuditFindingsPage {
     return {
       ...page(null, ["a"], { totalFindings }),
@@ -127,7 +128,11 @@ describe("findingsListKey", () => {
               id: "n1",
               content: noteContent,
               createdAt: new Date("2026-11-01"),
-              user: null,
+              user: {
+                displayName: authorName,
+                firstName: "Sam",
+                lastName: "Lee",
+              },
             },
           ],
           images: [
@@ -142,13 +147,14 @@ describe("findingsListKey", () => {
     expect(findingsListKey(firstPage())).toBe(findingsListKey(firstPage()));
   });
 
-  it("changes when a note, a photo, an asset name or the total changes", () => {
+  it("changes when a note, its author's name, a photo, an asset name or the total changes", () => {
     const key = findingsListKey(firstPage());
 
     expect(findingsListKey(firstPage({ noteContent: "Dented" }))).not.toBe(key);
     expect(findingsListKey(firstPage({ description: "Front" }))).not.toBe(key);
     expect(findingsListKey(firstPage({ totalFindings: 2 }))).not.toBe(key);
     expect(findingsListKey(firstPage({ assetName: "Camera 2" }))).not.toBe(key);
+    expect(findingsListKey(firstPage({ authorName: "Sam L." }))).not.toBe(key);
   });
 });
 

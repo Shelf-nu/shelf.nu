@@ -46,6 +46,7 @@ import type {
   SerializedFindingsPage,
 } from "./audit-findings-helpers";
 import {
+  FINDINGS_REQUEST_TIMEOUT_MS,
   findingSummary,
   findingsListReducer,
   initFindingsList,
@@ -154,7 +155,8 @@ export function AuditFindings({
  *
  * The request in flight is aborted when the list unmounts (the loader sent a
  * new first page) or a newer request replaces it, so a late answer never
- * lands on a list it no longer belongs to.
+ * lands on a list it no longer belongs to. A request still unanswered after
+ * `FINDINGS_REQUEST_TIMEOUT_MS` is aborted and reported as failed.
  */
 function useFindingsPaging(
   auditId: string,
@@ -178,13 +180,26 @@ function useFindingsPaging(
     inFlight.current = controller;
     dispatch({ type: "request_started" });
 
+    // A request that outlives the deadline is abandoned as a failure. Only a
+    // request that still owns the list counts: one already superseded or
+    // aborted by unmount must not report anything.
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      if (inFlight.current !== controller || controller.signal.aborted) return;
+      timedOut = true;
+      controller.abort();
+    }, FINDINGS_REQUEST_TIMEOUT_MS);
+
     fetchFindingsPage(auditId, nextCursor, controller.signal)
       .then((page) => {
         if (!controller.signal.aborted) dispatch({ type: "page_loaded", page });
       })
       .catch(() => {
-        if (!controller.signal.aborted) dispatch({ type: "request_failed" });
-      });
+        if (timedOut || !controller.signal.aborted) {
+          dispatch({ type: "request_failed" });
+        }
+      })
+      .finally(() => clearTimeout(deadline));
   }, [auditId, isLoading, nextCursor]);
 
   return { state, isLoading, failed: state.failed, loadMore };
