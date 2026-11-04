@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: First review of the PR linked to the current branch (or a PR number). Checks what the PR claims against what it does, bugs, tests, project conventions and reuse, security, consumers, performance and deploy safety, verifies every finding, and prints a plain-language verdict with numbered findings. Read-only until the user picks findings to fix or a "prove N" throwaway test after the report; never posts unasked. Use when the user says "review this PR", "review PR 3191", or invokes /pr-review.
+description: First review of the PR linked to the current branch (or a PR number). Checks what the PR claims against what it does, bugs, tests, project conventions and reuse, security, consumers, performance and deploy safety, verifies every finding, and prints a plain-language verdict with numbered findings. Read-only until the user picks, after the report, either to fix findings here or to post a request-changes review for the author (never both), or a "prove N" throwaway test; never posts unasked. Use when the user says "review this PR", "review PR 3191", or invokes /pr-review.
 ---
 
 # PR Review
@@ -8,8 +8,9 @@ description: First review of the PR linked to the current branch (or a PR number
 Give the first review of a PR: fast, verified, in plain language. The user
 reads the report and decides what to fix. **Read-only during the review**:
 never edit, commit, push, or post to GitHub while reviewing. After the report,
-edits happen only for what the user picks: the findings they choose to fix,
-and a "prove N" throwaway test (see "After the report").
+the user picks one path: fix the chosen findings here, or post them as a
+request-changes review for the author to fix. Posting never edits code. A
+"prove N" throwaway test is the only other edit (see "After the report").
 
 **Announce:** "Using pr-review on PR #N (tier X)." once Stage 1 is done.
 
@@ -316,7 +317,9 @@ Rules:
 - **Next** lists only options that apply, with real numbers: "fix <range>"
   only when there are findings, "prove <n>" only for a must-fix or should-fix
   a test could pin, "restore D<n>" only when Dismissed is not empty, "post this
-  as a request-changes review" only for an open PR with findings. With no
+  as a request-changes review" only for an open PR with findings. List "post"
+  before "fix" and say it is one or the other: "post these as a request-changes
+  review, or fix <range> here". With no
   findings at all, write "Next: nothing to fix." For a merged PR, say fixes go
   in a follow-up PR instead of offering to post.
 - **Found by N passes.** Agreement between independent passes is a confidence
@@ -332,38 +335,53 @@ Rules:
 
 ## After the report
 
-Do not fix anything until the user picks it. Right after printing the report,
-ask with the `AskUserQuestion` tool, built from the same options the Next line
-offers. With "Next: nothing to fix.", skip the question and stop.
+Do nothing until the user picks. Right after printing the report, ask with the
+`AskUserQuestion` tool, built from the same options the Next line offers. With
+"Next: nothing to fix.", skip the question and stop.
 
-- **Question 1, header "Fix"** (multi select, so the user can tick several),
-  only when there are findings:
+**Posting and fixing are two separate paths, and one run takes only one.**
+"Post a request-changes review" means the PR author makes the changes: after
+posting, edit nothing, commit nothing, and do not offer to fix. "Fix here"
+means you make the changes and post nothing. Never recommend fixing over
+posting, or the reverse: neither option gets " (Recommended)".
+
+Ask these in one `AskUserQuestion` call:
+
+- **Question 1, header "Next"** (single select), only when there are findings.
+  Options, in this order, leaving out what does not apply:
+  - "Post a request-changes review": only for an open PR. Description: "The
+    author fixes the findings. Nothing is edited here."
+  - "Fix here": description "Edit the code in this checkout. Nothing is
+    posted." For a merged PR, label it "Fix in a follow-up PR".
+  - "Nothing for now".
+- **Question 2, header "Findings"** (multi select), only when there are
+  findings. Which findings go into the review, or get fixed, depending on
+  Question 1:
   - With 4 or fewer findings in total: one option per finding, labelled
     "<n>. <short title>", with its section as the description.
   - Otherwise: one option per non-empty section, "Must fix (<range>)",
     "Should fix (<range>)", "Nits (<range>)", "Spotted along the way (<range>)",
     in that order. Add " (Recommended)" to the must-fix option, or to the
     should-fix option when there is no must-fix.
-  - When that leaves only one option, add "Nothing for now".
+  - When that leaves only one option, add "None".
     Fill in real numbers. The tool adds "Other", where the user can type a
-    custom range such as "1-4, 7". For a merged PR, add "in a follow-up PR" to
-    each option's description. Never more than 4 options. Ticked options add up:
-    "Must fix" plus "Nits" means fix both sections, nothing else.
-- **Question 2, header "Also"** (multi select), only when at least one of these
-  applies: "Prove <n>" (one option per candidate, at most the 2 most severe),
-  "Restore D<range>" and "Post a request-changes review", each with a one-line
-  description of what it does. Add "Nothing else" when exactly one applies, so
-  the question has the 2 options the tool requires. Keep it to 4 options;
-  leave out lower-value prove options first.
+    custom range such as "1-4, 7". Never more than 4 options. Ticked options
+    add up: "Must fix" plus "Nits" means both sections, nothing else.
+- **Question 3, header "Also"** (multi select), only when at least one of these
+  applies: "Prove <n>" (one option per candidate, at most the 2 most severe)
+  and "Restore D<range>", each with a one-line description of what it does.
+  Add "Nothing else" when exactly one applies, so the question has the 2
+  options the tool requires. Keep it to 4 options; leave out lower-value prove
+  options first.
 
-Then run what was picked in this order: restore, prove, post (show the body
-and confirm as below), fix. A ticked section means that section after any
-restore, so a restored finding is fixed with its section; a per-finding tick
-or a typed range stays exactly as picked. Selecting a fix option is the user
-asking; a
-"Nothing for now" tick, or no fix tick at all, means fix nothing. If
-`AskUserQuestion` is unavailable, or the user dismisses it, stop and wait for
-a typed reply to the Next line.
+Then run what was picked in this order: restore, prove, then the Question 1
+path (post or fix) on the findings ticked in Question 2. A ticked section
+means that section after any restore, so a restored finding goes with its
+section; a per-finding tick or a typed range stays exactly as picked.
+"Nothing for now", "None", or no finding ticked means post nothing and fix
+nothing. If `AskUserQuestion` is unavailable, or the user dismisses it, stop
+and wait for a typed reply to the Next line. A typed "post" or "fix 1-4" picks
+the same paths, with the same rule: one or the other, never both.
 
 **"restore D<n>":** bring that dismissed entry back as a normal finding with
 the next free number, at its original severity, with its saved impact, trigger
@@ -386,6 +404,60 @@ fail, error, timeout), then run `git status --short` to confirm nothing is
 left. Never commit it and never run the full suite. For non-webapp code use the
 closest equivalent (`node --test` for scripts) with the same rules.
 
-If they ask to post: a
-request-changes review uses `gh pr review <n> --request-changes --body-file <file>`,
-a comment uses `gh pr comment`. Show the body first and post only after they confirm.
+**Posting a request-changes review.** Write the body to a file in the
+scratchpad, show it, and post only after the user confirms, with
+`gh pr review <n> --request-changes --body-file <file>`. After posting, print
+the review URL and stop. Do not start fixing, and do not ask whether to fix.
+Fixing then needs a new request from the user.
+
+The author usually hands the review to an AI agent, so write for one: plain,
+direct and complete. Each finding must make sense on its own, because the
+agent may handle them one at a time.
+
+- No greeting, thanks, praise, apology or sign-off. No emoji. No em dashes.
+- No hedging ("maybe", "consider", "you might want to"). State what is wrong
+  and what to change, in the imperative.
+- None of this skill's internal terms: tier, passes, validators, found by N
+  passes, dismissed, safe because, ELI5.
+- Keep the report's numbers, so replies like "1: fixed in <sha>" line up.
+- Include only the findings ticked in Question 2. An intent-check claim marked
+  ❌ that is not already a finding goes in as a must-fix: "The PR description
+  says <claim>; the code does not do it."
+- "Spotted along the way" findings, when ticked, go under their own heading
+  that says not to fix them in this PR.
+
+Body shape (leave out empty sections):
+
+```
+Changes requested: <k> must-fix, <m> should-fix, <j> nits.
+
+## Must fix
+
+### 1. <title>
+File: `<file>:<line>`
+Problem: <what is wrong and what breaks, one or two sentences>
+When: <the input or state that triggers it>
+Change: <what to do, imperative>
+Done when: <the test or check that proves it is fixed>
+
+## Should fix
+### <n>. ...
+
+## Nits
+### <n>. <title>
+File: `<file>:<line>`
+Change: <what to do>
+
+## Not caused by this PR (do not fix here)
+### <n>. <title>
+File: `<file>:<line>`
+Problem: <one sentence>
+
+## Before re-requesting review
+- Fix every item above, or reply to this review with why an item is wrong, by number.
+- CI green, CodeRabbit has reviewed the new commits, its threads resolved.
+- Click "Re-request review".
+```
+
+A plain comment instead of a review, when the user asks for one, uses the same
+body and `gh pr comment <n> --body-file <file>`.
