@@ -311,6 +311,35 @@ describe("POST /api/mobile/audits/record-scan", () => {
     });
   });
 
+  it("forwards a count above the expectation (a surplus)", async () => {
+    (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-1",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+      expectedQuantity: 14,
+      foundQuantity: 16,
+    });
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+          foundQuantity: 16,
+        }),
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 16 })
+    );
+    const body = await (result as unknown as Response).json();
+    expect(body).toMatchObject({ expectedQuantity: 14, foundQuantity: 16 });
+  });
+
   it("refuses a negative count before reaching the service", async () => {
     (makeShelfError as any).mockImplementation((cause: any) => ({
       message: cause?.message ?? "Invalid",

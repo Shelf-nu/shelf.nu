@@ -160,7 +160,7 @@ export async function createAuditCountUpdatedNote({
   userId: string;
   from: number | null;
   count: AuditScanNoteCount;
-  tx: any; // Prisma transaction client
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   prefetchedUser?: (UserNameFields & { id: string }) | null;
 }) {
   const [asset, scanner] = await Promise.all([

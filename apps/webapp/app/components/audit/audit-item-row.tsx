@@ -27,6 +27,7 @@
  */
 
 import { type ReactNode } from "react";
+import { auditCountLabel } from "@shelf/labels";
 import {
   type AuditAssetMeta,
   type AuditScannedItem,
@@ -48,7 +49,6 @@ import {
   Tr,
 } from "~/components/scanner/drawer/generic-item-row";
 import { Button } from "~/components/shared/button";
-import { formatAuditQuantity } from "~/modules/audit/quantity";
 import { resolveScannedExpectedness } from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 import { AUDIT_KIT_REJECTED_MESSAGE } from "./audit-blockers";
@@ -241,6 +241,7 @@ export function AuditItemRow({
                 {isAsset && data?.id && auditCounts[data.id] ? (
                   <AuditRowCount
                     count={auditCounts[data.id]}
+                    isExpected={isExpected}
                     onEdit={() => onEditCount(qrId)}
                   />
                 ) : null}
@@ -337,11 +338,13 @@ export function AuditPendingRow({
                 />
                 {typeof asset.expectedQuantity === "number" ? (
                   <span className="text-xs text-gray-600">
-                    {asset.expectedQuantity}
-                    {asset.unitOfMeasure && asset.unitOfMeasure !== "units"
-                      ? ` ${asset.unitOfMeasure}`
-                      : ""}{" "}
-                    expected
+                    {auditCountLabel(
+                      {
+                        status: "PENDING",
+                        expectedQuantity: asset.expectedQuantity,
+                      },
+                      asset.unitOfMeasure
+                    )}
                   </span>
                 ) : null}
                 {/* Action buttons for notes and images on pending assets */}
@@ -498,13 +501,20 @@ export function renderAuditPendingRows({
  */
 function AuditRowCount({
   count,
+  isExpected,
   onEdit,
 }: {
   count: AuditCount;
+  /** Whether the audit expected this asset; words the count accordingly. */
+  isExpected: boolean;
   onEdit: () => void;
 }) {
-  const label = formatAuditQuantity(count, count.unitOfMeasure);
+  const label = auditCountLabel(
+    { status: isExpected ? "FOUND" : "UNEXPECTED", ...count },
+    count.unitOfMeasure
+  );
   const isShort =
+    isExpected &&
     count.foundQuantity !== null &&
     count.foundQuantity < count.expectedQuantity;
 

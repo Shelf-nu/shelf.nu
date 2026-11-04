@@ -390,6 +390,9 @@ function AuditDetailContent({ id }: { id: string }) {
   // so coming back refetches even inside the 60s window: otherwise the row
   // would show the details from before the fix the auditor just made.
   const returningFromAsset = useRef(false);
+  // Scanning changes found counts and unit counts, so coming back from the
+  // scanner always reloads, like coming back from an asset.
+  const returningFromScanner = useRef(false);
   // Each fetch takes the next number, and only the newest one may write
   // state. A pull-to-refresh can still be in flight when a row opens its
   // asset; its answer must not overwrite the reload made on the way back.
@@ -450,10 +453,12 @@ function AuditDetailContent({ id }: { id: string }) {
       if (
         hasFetched.current &&
         !returningFromAsset.current &&
+        !returningFromScanner.current &&
         Date.now() - lastFetchedAt.current < 60_000
       )
         return;
       returningFromAsset.current = false;
+      returningFromScanner.current = false;
       if (!hasFetched.current) {
         setIsLoading(true);
       }
@@ -483,6 +488,7 @@ function AuditDetailContent({ id }: { id: string }) {
   const handleStartScanning = () => {
     if (!id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    returningFromScanner.current = true;
     router.push({
       pathname: "/(tabs)/audits/scan",
       params: { auditId: id },

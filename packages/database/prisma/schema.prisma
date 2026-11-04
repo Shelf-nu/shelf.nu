@@ -2874,6 +2874,9 @@ model AuditAsset {
   /// counted, and always null for INDIVIDUAL assets. A FOUND row with a count
   /// below `expectedQuantity` is a shortfall: the status stays FOUND (the pool
   /// was located), the gap is this number.
+  ///
+  /// Both columns are non-negative, enforced by CHECK constraints in raw SQL
+  /// (migration `20261104120000_add_audit_asset_quantities`).
   foundQuantity    Int?
 
   createdAt DateTime @default(now())

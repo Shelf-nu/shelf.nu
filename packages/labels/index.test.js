@@ -679,3 +679,13 @@ test("auditCountLabel: the default unit literal is no unit, zero is a count", ()
     "0 of 14"
   );
 });
+
+test("auditCountLabel: a surplus says how many more than expected", () => {
+  assert.equal(
+    auditCountLabel(
+      { status: "FOUND", expectedQuantity: 14, foundQuantity: 16 },
+      "pcs"
+    ),
+    "16 of 14 pcs (+2)"
+  );
+});

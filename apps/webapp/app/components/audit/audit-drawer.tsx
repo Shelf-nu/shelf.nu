@@ -578,7 +578,11 @@ export default function AuditDrawer({
         const count = auditCounts[scannedItem.data.id];
         if (count) {
           mergeAuditCounts({
-            [scannedItem.data.id]: { ...count, foundQuantity: null },
+            [scannedItem.data.id]: {
+              ...count,
+              foundQuantity: null,
+              unsaved: false,
+            },
           });
         }
       }
@@ -643,10 +647,16 @@ export default function AuditDrawer({
     );
   };
 
-  // Completing with nothing scanned is legal — it marks every expected asset
+  // Completing with nothing scanned is legal: it marks every expected asset
   // missing. The CompleteAuditDialog this drawer submits through states that
   // outcome before anything is committed, so the button itself stays enabled.
-  const shouldDisableSubmit = hasBlockers || !auditSession;
+  //
+  // A count the auditor entered but the server has not saved yet also holds
+  // completion: completing first would print the previous count.
+  const hasUnsavedCounts = Object.values(auditCounts).some(
+    (count) => count.unsaved
+  );
+  const shouldDisableSubmit = hasBlockers || !auditSession || hasUnsavedCounts;
 
   return (
     <ConfigurableDrawer

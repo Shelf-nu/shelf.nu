@@ -139,20 +139,34 @@ export function ScannedItemsList({
                   row entirely, so name the state instead. */}
               {item.name?.trim() ? item.name : "Untitled asset"}
             </Text>
-            {countLabel ? (
-              <Text
-                style={
-                  isShort ? styles.scannedItemShort : styles.scannedItemCount
-                }
-                numberOfLines={1}
-              >
-                {countLabel}
-              </Text>
-            ) : null}
             {/* The second line is the row's new job: WHERE, not "was it
                 scanned". Unexpected assets say so here, because for them that
-                IS the useful fact; expected ones show their location. */}
-            {item.isExpected ? (
+                IS the useful fact; expected ones show their location. A
+                quantity row leads it with its count rather than adding a third
+                line: the row has a fixed height (SCANNED_ITEM_HEIGHT). */}
+            {countLabel ? (
+              <View style={styles.scannedItemMetaRow}>
+                <Text
+                  style={
+                    isShort ? styles.scannedItemShort : styles.scannedItemCount
+                  }
+                  numberOfLines={1}
+                >
+                  {countLabel}
+                </Text>
+                {item.isExpected ? (
+                  item.locationName ? (
+                    <Text style={styles.scannedItemMeta} numberOfLines={1}>
+                      {`\u00b7 ${item.locationName}`}
+                    </Text>
+                  ) : null
+                ) : (
+                  <Text style={styles.scannedItemUnexpected} numberOfLines={1}>
+                    {"\u00b7 Not on this audit"}
+                  </Text>
+                )}
+              </View>
+            ) : item.isExpected ? (
               item.locationName ? (
                 <View style={styles.scannedItemMetaRow}>
                   <Ionicons
@@ -325,12 +339,14 @@ const useStyles = createStyles((colors) => ({
     color: colors.muted,
   },
   scannedItemCount: {
+    flexShrink: 0,
     fontSize: fontSize.xs,
     fontWeight: "600",
     color: colors.foreground,
   },
   // A count below the expectation: the pool was found, units are short.
   scannedItemShort: {
+    flexShrink: 0,
     fontSize: fontSize.xs,
     fontWeight: "600",
     color: colors.warningText,

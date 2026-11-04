@@ -2,8 +2,10 @@
  * Unit counts on audit rows.
  *
  * An audit row (`AuditAsset`) of a QUANTITY_TRACKED asset carries two numbers:
- * `expectedQuantity`, snapshotted from `Asset.quantity` when the row is
- * created, and `foundQuantity`, what the auditor counted. Both are null on
+ * `expectedQuantity`, snapshotted when the row is created, and
+ * `foundQuantity`, what the auditor counted. The snapshot is the units placed
+ * at the audited locations for a location audit, and the whole pool
+ * (`Asset.quantity`) otherwise. Both are null on
  * INDIVIDUAL assets, which count as one.
  *
  * The row status keeps answering "was the pool located?" (FOUND / MISSING /
@@ -17,8 +19,12 @@
 
 import { AssetType } from "@prisma/client";
 
-/** Largest count an auditor can enter for one row. */
-export const MAX_AUDIT_FOUND_QUANTITY = 1_000_000;
+/**
+ * Largest count the server stores for one row: the Postgres INTEGER ceiling.
+ * `Asset.quantity` has no lower cap, so a smaller bound would refuse a full
+ * count of a large pool.
+ */
+export const MAX_AUDIT_FOUND_QUANTITY = 2_147_483_647;
 
 /**
  * The expected-units snapshot for a new audit row.
@@ -33,6 +39,21 @@ export function expectedQuantityFor(asset: {
 }): number | null {
   if (asset.type !== AssetType.QUANTITY_TRACKED) return null;
   return asset.quantity ?? 0;
+}
+
+/**
+ * The locations an audit was scoped to, read from its `scopeMeta`. An audit
+ * started from one or more locations stores them there (with their child
+ * locations when those were included); any other audit has none.
+ *
+ * @returns the location ids, or null when the audit is not location-scoped
+ */
+export function scopedLocationIds(scopeMeta: unknown): string[] | null {
+  if (!scopeMeta || typeof scopeMeta !== "object") return null;
+  const ids = (scopeMeta as { locationIds?: unknown }).locationIds;
+  if (!Array.isArray(ids)) return null;
+  const strings = ids.filter((id): id is string => typeof id === "string");
+  return strings.length > 0 ? strings : null;
 }
 
 /** The count fields a surface needs to describe one audit row. */
@@ -51,50 +72,32 @@ export function isQuantityAuditRow(row: AuditRowQuantity): boolean {
   return row.expectedQuantity !== null && row.expectedQuantity !== undefined;
 }
 
-/**
- * One-line count for a quantity row, e.g. "8 of 14 pcs".
- *
- * @param row - the row's count fields
- * @param unit - `Asset.unitOfMeasure`; omitted when null or the default
- *   "units" literal, which reads as noise
- * @returns the label, "Not counted" for a quantity row without a count yet,
- *   or null for an individual row (callers render nothing extra)
- */
-export function formatAuditQuantity(
-  row: AuditRowQuantity,
-  unit?: string | null
-): string | null {
-  if (!isQuantityAuditRow(row)) return null;
-  const suffix = unit && unit !== "units" ? ` ${unit}` : "";
-  if (row.foundQuantity === null || row.foundQuantity === undefined) {
-    return `Not counted (${row.expectedQuantity}${suffix} expected)`;
-  }
-  return `${row.foundQuantity} of ${row.expectedQuantity}${suffix}`;
-}
-
 /** Unit totals across an audit's quantity rows. */
 export type AuditUnitTotals = {
   /** Rows of quantity-tracked assets, expected or not. */
   quantityRows: number;
   /** Sum of `expectedQuantity` over expected rows. */
   expectedUnits: number;
-  /** Sum of `foundQuantity` over expected rows that were counted. */
+  /** Sum of counted units over expected rows; a MISSING row adds 0. */
   foundUnits: number;
-  /** Expected quantity rows with no count yet. */
+  /** Expected quantity rows still without a count (not scanned yet, or scanned by a build that did not ask). */
   uncountedRows: number;
 };
 
 /**
  * Totals the unit counts of an audit's rows. Unexpected rows add to
  * `quantityRows` only: units the audit never expected are not part of the
- * expected-versus-found comparison.
+ * expected-versus-found comparison. A MISSING row (the audit completed without
+ * it) counts as zero found, not as uncounted.
  *
- * @param rows - every row of the audit, with its `expected` flag
+ * @param rows - every row of the audit, with its `expected` flag and status
  * @returns the totals, or null when the audit holds no quantity rows (surfaces
  *   then show nothing extra)
  */
 export function totalAuditUnits(
-  rows: ReadonlyArray<AuditRowQuantity & { expected: boolean }>
+  rows: ReadonlyArray<
+    AuditRowQuantity & { expected: boolean; status?: string | null }
+  >
 ): AuditUnitTotals | null {
   const totals: AuditUnitTotals = {
     quantityRows: 0,
@@ -108,12 +111,24 @@ export function totalAuditUnits(
     totals.quantityRows += 1;
     if (!row.expected) continue;
     totals.expectedUnits += row.expectedQuantity ?? 0;
-    if (row.foundQuantity === null || row.foundQuantity === undefined) {
-      totals.uncountedRows += 1;
-    } else {
+    if (row.foundQuantity !== null && row.foundQuantity !== undefined) {
       totals.foundUnits += row.foundQuantity;
+    } else if (row.status !== "MISSING") {
+      totals.uncountedRows += 1;
     }
   }
 
   return totals.quantityRows > 0 ? totals : null;
+}
+
+/**
+ * The units line under an audit's statistics, e.g. "Units counted: 8 of 14
+ * across 1 quantity-tracked asset, 1 not counted yet." One wording for the
+ * overview and the receipt.
+ */
+export function describeAuditUnits(totals: AuditUnitTotals): string {
+  const assets = totals.quantityRows === 1 ? "asset" : "assets";
+  const uncounted =
+    totals.uncountedRows > 0 ? `, ${totals.uncountedRows} not counted yet` : "";
+  return `Units counted: ${totals.foundUnits} of ${totals.expectedUnits} across ${totals.quantityRows} quantity-tracked ${assets}${uncounted}.`;
 }

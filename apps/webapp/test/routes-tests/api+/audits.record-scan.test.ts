@@ -169,7 +169,52 @@ describe("POST /api/audits/record-scan", () => {
       organizationId: "org-1",
       userAgent: null,
       foundQuantity: undefined,
+      // No countAware marker: a page loaded before audits counted units.
+      acceptUncounted: true,
     });
+  });
+
+  it("forwards a count above the expectation (a surplus)", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-abc",
+        assetId: "pool-1",
+        countAware: "1",
+        foundQuantity: "16",
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 16 })
+    );
+  });
+
+  it("asks for a count only from scanners that send the countAware marker", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-abc",
+        assetId: "pool-1",
+        countAware: "1",
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ acceptUncounted: false })
+    );
   });
 
   it("forwards a typed count, and keeps zero as a count", async () => {

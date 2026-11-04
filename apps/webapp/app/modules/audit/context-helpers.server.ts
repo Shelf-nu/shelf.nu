@@ -387,3 +387,55 @@ export async function resolveAssetIdsForKitSelection({
 
   return assets.map((asset) => asset.id);
 }
+
+/**
+ * The locations a new audit covers, for its `scopeMeta.locationIds`.
+ *
+ * A quantity-tracked asset in a location audit expects only the units placed
+ * at these locations, so they are kept with the audit. Audits of a kit, a
+ * user's custody or a selection of assets have no location scope.
+ *
+ * - From one location page: that location, plus its descendants when the
+ *   auditor included child locations.
+ * - From a multi-select on the Locations index: the selected locations, or
+ *   for "select all" every location matching the list filter.
+ *
+ * @returns the location ids, or null when the audit is not location-scoped
+ */
+export async function resolveAuditScopeLocationIds({
+  organizationId,
+  contextType,
+  contextId,
+  includeChildLocations,
+  locationIds,
+  currentSearchParams,
+}: {
+  organizationId: string;
+  contextType?: AuditContextType;
+  contextId?: string;
+  includeChildLocations: boolean;
+  locationIds?: string[];
+  currentSearchParams?: string | null;
+}): Promise<string[] | null> {
+  if (contextType !== "location") return null;
+
+  if (locationIds && locationIds.length > 0) {
+    if (!locationIds.includes(ALL_SELECTED_KEY)) {
+      return [...new Set(locationIds)];
+    }
+    const matching = await db.location.findMany({
+      where: getLocationsWhereInput({ organizationId, currentSearchParams }),
+      select: { id: true },
+    });
+    return matching.map((location) => location.id);
+  }
+
+  if (!contextId) return null;
+  return includeChildLocations
+    ? getLocationDescendantIds({
+        organizationId,
+        locationId: contextId,
+        includeSelf: true,
+      })
+    : [contextId];
+}

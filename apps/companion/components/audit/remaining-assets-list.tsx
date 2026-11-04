@@ -82,19 +82,30 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
             <Text style={styles.remainingItemName} numberOfLines={1}>
               {item.name}
             </Text>
-            {typeof item.expectedQuantity === "number" ? (
-              <Text style={styles.remainingMeta} numberOfLines={1}>
-                {auditCountLabel(
-                  {
-                    status: "PENDING",
-                    expectedQuantity: item.expectedQuantity,
-                  },
-                  item.unitOfMeasure
-                )}
-              </Text>
-            ) : null}
-            {(item.locationName || item.categoryName) && (
+            {/* The expected units join the meta line rather than adding a
+                third line: the row has a fixed height (REMAINING_ITEM_HEIGHT). */}
+            {(item.locationName ||
+              item.categoryName ||
+              typeof item.expectedQuantity === "number") && (
               <View style={styles.remainingMetaRow}>
+                {typeof item.expectedQuantity === "number" ? (
+                  <View style={styles.remainingMetaPart}>
+                    <Ionicons
+                      name="layers-outline"
+                      size={12}
+                      color={colors.mutedLight}
+                    />
+                    <Text style={styles.remainingMeta} numberOfLines={1}>
+                      {auditCountLabel(
+                        {
+                          status: "PENDING",
+                          expectedQuantity: item.expectedQuantity,
+                        },
+                        item.unitOfMeasure
+                      )}
+                    </Text>
+                  </View>
+                ) : null}
                 {item.locationName ? (
                   <View style={styles.remainingMetaPart}>
                     <Ionicons

@@ -24,6 +24,10 @@ type ScanQueueEntry = {
   isExpected: boolean;
   /** Units counted, for a quantity-tracked asset. */
   foundQuantity?: number;
+  /** When the entry was queued (ms). */
+  queuedAt?: number;
+  /** True for a recount of a scan already recorded. */
+  recount?: boolean;
 };
 
 export type PersistedScanState = {

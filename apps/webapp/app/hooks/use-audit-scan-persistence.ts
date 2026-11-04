@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { AssetType } from "@prisma/client";
 import { type FetcherWithComponents } from "react-router";
 import type {
@@ -50,6 +50,13 @@ type UseAuditScanPersistenceProps = {
   auditCounts: Record<string, AuditCount>;
   /** Called when the server refuses a scan because it needs a count. */
   onCountRequired: (request: AuditScanCountRequired) => void;
+  /**
+   * Called when a quantity-tracked scan is saved, with the count the server
+   * stored. That is the count sent, unless the server kept another (the audit
+   * finished, or the scan was removed, before a recount landed). The caller
+   * adopts it so the drawer shows what is stored.
+   */
+  onCountSaved: (assetId: string, foundQuantity: number | null) => void;
 };
 
 /**
@@ -82,7 +89,13 @@ export function useAuditScanPersistence({
   isRestoringRef,
   auditCounts,
   onCountRequired,
+  onCountSaved,
 }: UseAuditScanPersistenceProps) {
+  // The count each in-flight scan carried, keyed by assetId. A recount saved
+  // while that request is in flight differs from it, and the scan is sent again.
+  const sentCountsRef = useRef(new Map<string, number | null>());
+  const latestCountsRef = useRef(auditCounts);
+  latestCountsRef.current = auditCounts;
   // Bumped after we mutate `persistedItemsRef` so the consuming component
   // re-renders and any derived value (e.g. pendingScanCount that reads
   // `persistedItemsRef.current.has(...)` during render) reflects the new
@@ -152,9 +165,13 @@ export function useAuditScanPersistence({
       formData.append("qrId", qrId);
       formData.append("assetId", assetId);
       formData.append("isExpected", String(isExpected));
+      // Marks a client that asks for counts. A request without it comes from a
+      // page loaded before audits counted units, and is recorded uncounted.
+      formData.append("countAware", "1");
       if (isQuantity && foundQuantity !== null) {
         formData.append("foundQuantity", String(foundQuantity));
       }
+      sentCountsRef.current.set(assetId, isQuantity ? foundQuantity : null);
 
       // Submit only one item per effect run — next render will handle the rest
       void scanPersistFetcher.submit(formData, {
@@ -181,21 +198,46 @@ export function useAuditScanPersistence({
   useEffect(() => {
     if (scanPersistFetcher.state === "idle" && scanPersistFetcher.data) {
       const data = scanPersistFetcher.data as
-        | { success?: boolean; data?: { scanId?: string } }
+        | {
+            success?: boolean;
+            data?: { scanId?: string };
+            foundQuantity?: number | null;
+          }
         | (AuditScanCountRequired & { success: false })
         | { error?: string };
 
       if ("status" in data && data.status === "count-required") {
         // Nothing was saved; the scan goes back to waiting for a count.
         pendingPersistsRef.current.clear();
+        sentCountsRef.current.clear();
         bumpPersistedVersion();
         onCountRequired(data);
       } else if ("success" in data && data.success) {
-        // Mark all pending as persisted
+        const storedCount =
+          "foundQuantity" in data ? data.foundQuantity : undefined;
         pendingPersistsRef.current.forEach((_qrId, assetId) => {
+          const sent = sentCountsRef.current.get(assetId);
+          const current = latestCountsRef.current[assetId]?.foundQuantity;
+          const isCount = sent !== undefined && sent !== null;
+          // The server kept another count than the one sent.
+          const keptOther =
+            isCount && storedCount !== undefined && storedCount !== sent;
+          if (
+            !keptOther &&
+            sent !== undefined &&
+            current !== undefined &&
+            current !== sent
+          ) {
+            // Recounted while this request was in flight: send it again.
+            return;
+          }
           persistedItemsRef.current.add(assetId);
+          if (isCount) {
+            onCountSaved(assetId, keptOther ? storedCount ?? null : sent);
+          }
         });
         pendingPersistsRef.current.clear();
+        sentCountsRef.current.clear();
         // Force a re-render so consumers reading `persistedItemsRef.current`
         // during render (e.g. pendingScanCount) recompute.
         bumpPersistedVersion();
@@ -204,6 +246,7 @@ export function useAuditScanPersistence({
         console.error("Failed to persist scan:", data.error);
         // Clear pending so it can be retried
         pendingPersistsRef.current.clear();
+        sentCountsRef.current.clear();
         bumpPersistedVersion();
       }
     }
@@ -213,5 +256,6 @@ export function useAuditScanPersistence({
     persistedItemsRef,
     pendingPersistsRef,
     onCountRequired,
+    onCountSaved,
   ]);
 }

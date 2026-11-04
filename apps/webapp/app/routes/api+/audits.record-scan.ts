@@ -28,6 +28,10 @@ const RecordScanSchema = z.object({
   foundQuantity: optionalNumberFromString({ blank: undefined }).pipe(
     z.number().int().nonnegative("The count cannot be negative").optional()
   ),
+  // Sent by scanners that ask for counts. A page loaded before audits counted
+  // units does not send it, and its quantity scans are recorded uncounted
+  // rather than refused, which that page could not handle.
+  countAware: z.string().optional(),
 });
 
 /**
@@ -51,11 +55,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { auditSessionId, qrId, assetId, foundQuantity } = parseData(
-      await request.formData(),
-      RecordScanSchema,
-      { additionalData: { userId } }
-    );
+    const { auditSessionId, qrId, assetId, foundQuantity, countAware } =
+      parseData(await request.formData(), RecordScanSchema, {
+        additionalData: { userId },
+      });
 
     // Scanning writes audit data, so it is gated exactly like note, photo and
     // complete: callers who see every audit act on any audit, everyone else
@@ -79,6 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       userAgent: request.headers.get("user-agent"),
       foundQuantity,
+      acceptUncounted: countAware !== "1",
     });
 
     return data(payload({ success: result.status === "recorded", ...result }));

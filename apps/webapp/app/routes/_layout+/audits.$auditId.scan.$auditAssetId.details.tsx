@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { auditCountLabel } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import { MessageSquare, ImageIcon } from "lucide-react";
 import type {
@@ -40,7 +41,6 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
-import { formatAuditQuantity } from "~/modules/audit/quantity";
 import {
   assertAuditAcceptsComments,
   assertAuditAcceptsCommentsOnLockedRow,
@@ -184,15 +184,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    // Quantity rows lead with their count, e.g. "Counted: 8 of 14 pcs".
-    const countLabel = formatAuditQuantity(
+    // Quantity rows lead with their count, e.g. "Counted: 8 of 14 pcs", or
+    // with "Not counted" / "14 pcs expected" when there is no count.
+    const countLabel = auditCountLabel(
       auditAsset,
       auditAsset.asset.unitOfMeasure
     );
     const header = {
       title: auditAsset.asset.title,
       subHeading: countLabel
-        ? `Counted: ${countLabel} • Notes and images`
+        ? `${
+            auditAsset.foundQuantity !== null ? "Counted: " : ""
+          }${countLabel} • Notes and images`
         : "Notes and images",
     };
 

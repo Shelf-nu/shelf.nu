@@ -19,6 +19,7 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   resolveAssetIdsForKitSelection,
   resolveAssetIdsForLocationSelection,
+  resolveAuditScopeLocationIds,
 } from "./context-helpers.server";
 
 // why: the resolvers (and the org guards they call) hit the global Prisma
@@ -37,6 +38,14 @@ vitest.mock("~/database/db.server", () => ({
     kit: { findMany: kitFindMany },
     asset: { findMany: assetFindMany },
   },
+}));
+
+// why: descendant lookup walks the location tree in the database; a fixed tree
+// is enough for the scope resolver's child-location case.
+vitest.mock("~/modules/location/descendants.server", () => ({
+  getLocationDescendantIds: vitest.fn(() =>
+    Promise.resolve(["studio", "shelf-1"])
+  ),
 }));
 
 const ORG = "org-1";
@@ -267,5 +276,71 @@ describe("resolveAssetIdsForKitSelection", () => {
     expect(err).toBeInstanceOf(ShelfError);
     expect(err.status).toBe(400);
     expect(err.message).toMatch(/contain assets/i);
+  });
+});
+
+describe("resolveAuditScopeLocationIds", () => {
+  it("has no location scope for kit, user or selection audits", async () => {
+    expect(
+      await resolveAuditScopeLocationIds({
+        organizationId: ORG,
+        contextType: "kit",
+        contextId: "kit-1",
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+    expect(
+      await resolveAuditScopeLocationIds({
+        organizationId: ORG,
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+  });
+
+  it("scopes a location page audit to that location", async () => {
+    expect(
+      await resolveAuditScopeLocationIds({
+        organizationId: ORG,
+        contextType: "location",
+        contextId: "studio",
+        includeChildLocations: false,
+      })
+    ).toEqual(["studio"]);
+  });
+
+  it("adds the child locations when the auditor included them", async () => {
+    expect(
+      await resolveAuditScopeLocationIds({
+        organizationId: ORG,
+        contextType: "location",
+        contextId: "studio",
+        includeChildLocations: true,
+      })
+    ).toEqual(["studio", "shelf-1"]);
+  });
+
+  it("keeps the selected locations of a multi-select, once each", async () => {
+    expect(
+      await resolveAuditScopeLocationIds({
+        organizationId: ORG,
+        contextType: "location",
+        locationIds: ["a", "b", "a"],
+        includeChildLocations: false,
+      })
+    ).toEqual(["a", "b"]);
+  });
+
+  it("resolves select-all to the locations matching the list filter", async () => {
+    locationFindMany.mockResolvedValue([{ id: "a" }, { id: "c" }]);
+
+    expect(
+      await resolveAuditScopeLocationIds({
+        organizationId: ORG,
+        contextType: "location",
+        locationIds: [ALL_SELECTED_KEY],
+        includeChildLocations: false,
+        currentSearchParams: "s=studio",
+      })
+    ).toEqual(["a", "c"]);
   });
 });

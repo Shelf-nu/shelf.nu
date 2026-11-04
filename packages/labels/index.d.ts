@@ -491,6 +491,7 @@ export declare const DELETE_CONSEQUENCE_LABELS: {
 
 /**
  * The unit count of one audit row of a quantity-tracked asset ("8 of 14 pcs",
+ * "16 of 14 pcs (+2)",
  * "Not counted", "0 of 14 pcs", "14 pcs expected"). Null for an individual
  * asset (no `expectedQuantity`).
  */

@@ -14,6 +14,7 @@ import {
   resolveAssetIdsForAudit,
   resolveAssetIdsForKitSelection,
   resolveAssetIdsForLocationSelection,
+  resolveAuditScopeLocationIds,
 } from "~/modules/audit/context-helpers.server";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
 import {
@@ -241,6 +242,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
+    // A location audit keeps its locations: quantity-tracked assets then
+    // expect only the units placed there.
+    const scopeLocationIds = await resolveAuditScopeLocationIds({
+      organizationId,
+      contextType,
+      contextId,
+      includeChildLocations,
+      locationIds,
+      currentSearchParams,
+    });
+
     const { session } = await createAuditSession({
       name,
       description: sanitizedDescription,
@@ -249,6 +261,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       createdById: userId,
       assignee,
       dueDate: dueDateUTC,
+      scopeMeta: scopeLocationIds ? { locationIds: scopeLocationIds } : null,
     });
 
     // Send email notification if audit is assigned to someone other than the creator

@@ -34,7 +34,7 @@ import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import { getAuditImages } from "~/modules/audit/image.service.server";
-import { totalAuditUnits } from "~/modules/audit/quantity";
+import { describeAuditUnits, totalAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
@@ -177,7 +177,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const unitTotals = totalAuditUnits(
       await db.auditAsset.findMany({
         where: { auditSessionId: auditId, expectedQuantity: { not: null } },
-        select: { expected: true, expectedQuantity: true, foundQuantity: true },
+        select: {
+          expected: true,
+          status: true,
+          expectedQuantity: true,
+          foundQuantity: true,
+        },
       })
     );
 
@@ -482,16 +487,7 @@ export default function AuditOverview() {
           </div>
           {unitTotals ? (
             <p className="mt-3 text-sm text-gray-600">
-              Units counted:{" "}
-              <span className="font-medium text-gray-900">
-                {unitTotals.foundUnits} of {unitTotals.expectedUnits}
-              </span>{" "}
-              across {unitTotals.quantityRows} quantity-tracked{" "}
-              {unitTotals.quantityRows === 1 ? "asset" : "assets"}
-              {unitTotals.uncountedRows > 0
-                ? `, ${unitTotals.uncountedRows} not counted yet`
-                : ""}
-              .
+              {describeAuditUnits(unitTotals)}
             </p>
           ) : null}
         </div>

@@ -228,7 +228,7 @@ export function auditAssetStatusLabel(status, isAuditCompleted) {
  * when the row is created) and `foundQuantity` (what the auditor counted).
  * Individual assets have neither, and get no label.
  *
- * - FOUND, counted: "8 of 14 pcs"
+ * - FOUND, counted: "8 of 14 pcs", or "16 of 14 pcs (+2)" for a surplus
  * - UNEXPECTED, counted: "8 pcs counted"
  * - FOUND or UNEXPECTED with no count (an app build without the count
  *   prompt): "Not counted"
@@ -251,10 +251,14 @@ export function auditCountLabel(row, unit) {
   const counted = row.foundQuantity !== null && row.foundQuantity !== undefined;
 
   switch (row.status) {
-    case "FOUND":
-      return counted
-        ? `${row.foundQuantity} of ${expected}${suffix}`
-        : "Not counted";
+    case "FOUND": {
+      if (!counted) return "Not counted";
+      // A surplus is a finding too: say how many more than the record.
+      const surplus = row.foundQuantity - expected;
+      return `${row.foundQuantity} of ${expected}${suffix}${
+        surplus > 0 ? ` (+${surplus})` : ""
+      }`;
+    }
     case "UNEXPECTED":
       return counted
         ? `${row.foundQuantity} ${unitWord} counted`

@@ -20,6 +20,7 @@ import {
   mergeAuditCountsAtom,
   removeScannedItemAtom,
   type AuditScannedItem,
+  type DuplicateScanInfo,
 } from "~/atoms/qr-scanner";
 import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import { AuditCountDialog } from "~/components/audit/audit-count-dialog";
@@ -317,7 +318,18 @@ export default function AuditSessionRoute() {
     }
   }, [existingScans.length]);
 
-  // Persist scans to database as they are resolved
+  /** A count was saved: show the stored count and stop preferring ours. */
+  const handleCountSaved = useCallback(
+    (assetId: string, foundQuantity: number | null) => {
+      const count = store.get(auditCountsAtom)[assetId];
+      if (!count) return;
+      mergeAuditCounts({
+        [assetId]: { ...count, foundQuantity, unsaved: false },
+      });
+    },
+    [store, mergeAuditCounts]
+  );
+
   /** The server refused a scan for want of a count: ask for one. */
   const handleCountRequired = useCallback(
     (request: {
@@ -351,6 +363,7 @@ export default function AuditSessionRoute() {
     [store, mergeAuditCounts, setCountPrompt]
   );
 
+  // Persist scans to database as they are resolved
   useAuditScanPersistence({
     auditSession,
     scannedItems,
@@ -361,6 +374,7 @@ export default function AuditSessionRoute() {
     isRestoringRef,
     auditCounts,
     onCountRequired: handleCountRequired,
+    onCountSaved: handleCountSaved,
   });
 
   /**
@@ -401,6 +415,7 @@ export default function AuditSessionRoute() {
           expectedQuantity: prompt.expectedQuantity,
           foundQuantity,
           unitOfMeasure: prompt.unitOfMeasure,
+          unsaved: true,
         },
       });
       // A saved scan sent again with a count replaces its count.
@@ -464,44 +479,67 @@ export default function AuditSessionRoute() {
   }: OnCodeDetectionSuccessProps) {
     addItem(qrId, error, type);
 
-    // After adding, inspect the duplicate-scan atom directly. If the most recent
-    // duplicate event is new (timestamp not yet handled), surface a toast. Handled
-    // here instead of in a useEffect so the side effect is triggered by user input.
-    const duplicate = store.get(lastDuplicateScanAtom);
-    if (
-      duplicate &&
-      duplicate.timestamp !== lastHandledDuplicateTimestampRef.current
-    ) {
-      lastHandledDuplicateTimestampRef.current = duplicate.timestamp;
-
-      // Scanning a quantity-tracked asset again opens its count.
-      const duplicateAssetId =
-        store.get(scannedItemsAtom)[duplicate.qrId]?.data?.id;
-      const count = duplicateAssetId
-        ? store.get(auditCountsAtom)[duplicateAssetId]
-        : undefined;
-      if (duplicateAssetId && count && !store.get(auditCountPromptAtom)) {
-        setCountPrompt({
-          assetId: duplicateAssetId,
-          qrId: duplicate.qrId,
-          assetTitle: duplicate.assetTitle,
-          expectedQuantity: count.expectedQuantity,
-          foundQuantity: count.foundQuantity,
-          unitOfMeasure: count.unitOfMeasure,
-          // Recount: closing it keeps the scan, whatever its count.
-          mode: "recount",
-        });
-        return;
-      }
-
-      showNotification({
-        title: "Already scanned",
-        message: `Asset "${duplicate.assetTitle}" has already been scanned`,
-        icon: { name: "scan", variant: "gray" },
-        senderId: null,
-      });
-    }
+    // After adding, inspect the duplicate-scan atom directly, so the side
+    // effect is triggered by user input.
+    handleDuplicateScan(store.get(lastDuplicateScanAtom));
   }
+
+  /**
+   * Answers a duplicate scan once per event: a counted quantity-tracked asset
+   * opens its count to correct it, anything else gets an "Already scanned"
+   * toast. Same-code duplicates arrive from `handleCodeDetectionSuccess`; a
+   * second code of an asset already listed (a barcode after its QR) is only
+   * known once it resolves, and arrives through the effect below.
+   */
+  function handleDuplicateScan(duplicate: DuplicateScanInfo | null) {
+    if (
+      !duplicate ||
+      duplicate.timestamp === lastHandledDuplicateTimestampRef.current
+    ) {
+      return;
+    }
+    lastHandledDuplicateTimestampRef.current = duplicate.timestamp;
+
+    const duplicateAssetId =
+      store.get(scannedItemsAtom)[duplicate.qrId]?.data?.id;
+    const count = duplicateAssetId
+      ? store.get(auditCountsAtom)[duplicateAssetId]
+      : undefined;
+    if (duplicateAssetId && count && !store.get(auditCountPromptAtom)) {
+      setCountPrompt({
+        assetId: duplicateAssetId,
+        qrId: duplicate.qrId,
+        assetTitle: duplicate.assetTitle,
+        expectedQuantity: count.expectedQuantity,
+        foundQuantity: count.foundQuantity,
+        unitOfMeasure: count.unitOfMeasure,
+        // Recount: closing it keeps the scan, whatever its count.
+        mode: "recount",
+      });
+      return;
+    }
+
+    showNotification({
+      title: "Already scanned",
+      message: `Asset "${duplicate.assetTitle}" has already been scanned`,
+      icon: { name: "scan", variant: "gray" },
+      senderId: null,
+    });
+  }
+
+  // A second code of an asset already listed is detected only after it
+  // resolves, so it is answered here rather than in the scan handler.
+  // The atom outlives this page, so an event from before it opened is ignored.
+  const latestDuplicate = useAtomValue(lastDuplicateScanAtom);
+  const openedAtRef = useRef(Date.now());
+  const handleDuplicateRef = useRef(handleDuplicateScan);
+  handleDuplicateRef.current = handleDuplicateScan;
+  useEffect(() => {
+    if (latestDuplicate && latestDuplicate.timestamp < openedAtRef.current) {
+      return;
+    }
+    handleDuplicateRef.current(latestDuplicate);
+  }, [latestDuplicate]);
 
   return (
     <>

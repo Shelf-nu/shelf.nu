@@ -11,7 +11,7 @@ import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
-import { totalAuditUnits } from "~/modules/audit/quantity";
+import { describeAuditUnits, totalAuditUnits } from "~/modules/audit/quantity";
 import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
@@ -39,6 +39,22 @@ import When from "../when/when";
  * refuses a barcode picture wider than that cell.
  */
 const ASSET_TABLE_COLUMNS = [
+  { name: "number", percent: 5 },
+  { name: "image", percent: 9 },
+  { name: "name", percent: 15 },
+  { name: "category", percent: 16 },
+  { name: "location", percent: 14 },
+  { name: "status", percent: 14 },
+  { name: "code", percent: PDF_CODE_COLUMN_PERCENT },
+] as const;
+
+/**
+ * The same table with a Quantity column, used only when the audit holds a
+ * quantity-tracked asset, so a receipt of individual assets keeps its layout.
+ * The share comes from Name, Location and Status, whose text wraps on word
+ * boundaries; Category keeps its share so "Uncategorized" fits on one line.
+ */
+const ASSET_TABLE_COLUMNS_WITH_QUANTITY = [
   { name: "number", percent: 5 },
   { name: "image", percent: 9 },
   { name: "name", percent: 12 },
@@ -224,10 +240,16 @@ export const AuditPDFContent = ({
   const unitTotals = totalAuditUnits(
     assets.map((asset) => ({
       expected: asset.auditData.expected,
+      status: asset.auditData.auditStatus,
       expectedQuantity: asset.auditData.expectedQuantity,
       foundQuantity: asset.auditData.foundQuantity,
     }))
   );
+  // The Quantity column appears only when there is a count to print.
+  const showQuantity = unitTotals !== null;
+  const tableColumns = showQuantity
+    ? ASSET_TABLE_COLUMNS_WITH_QUANTITY
+    : ASSET_TABLE_COLUMNS;
 
   // Format creator name from user data or fallback to email
   const creatorName =
@@ -440,18 +462,11 @@ export const AuditPDFContent = ({
             </div>
           </div>
         </div>
-        <When truthy={!!unitTotals}>
+        {unitTotals ? (
           <p className="mt-2 text-sm text-gray-700">
-            Units counted: {unitTotals?.foundUnits} of{" "}
-            {unitTotals?.expectedUnits} across {unitTotals?.quantityRows}{" "}
-            quantity-tracked{" "}
-            {unitTotals?.quantityRows === 1 ? "asset" : "assets"}
-            {unitTotals && unitTotals.uncountedRows > 0
-              ? `, ${unitTotals.uncountedRows} not counted`
-              : ""}
-            .
+            {describeAuditUnits(unitTotals)}
           </p>
-        </When>
+        ) : null}
       </section>
 
       {/*
@@ -566,7 +581,7 @@ export const AuditPDFContent = ({
         <section className="mb-5">
           <h2 className="mb-2 text-lg font-medium">Assets</h2>
           <table className="audit-assets-table w-full table-fixed border border-gray-300">
-            <PrintColGroup columns={ASSET_TABLE_COLUMNS} />
+            <PrintColGroup columns={tableColumns} />
             <thead>
               <tr>
                 <th className="border border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
@@ -589,9 +604,11 @@ export const AuditPDFContent = ({
                 </th>
                 {/* Units of quantity-tracked assets; empty for individual
                     assets, which count as one. */}
-                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
-                  Quantity
-                </th>
+                {showQuantity ? (
+                  <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
+                    Quantity
+                  </th>
+                ) : null}
                 {/* Wide enough for an 11-character Code 128 picture at 0.25mm
                     per bar, with the code text under it. */}
                 <th className="border border-gray-300 p-2.5 text-left text-xs font-medium">
@@ -656,16 +673,18 @@ export const AuditPDFContent = ({
                         )}
                       />
                     </td>
-                    <td className="break-words border border-gray-300 px-1.5 py-2.5 align-top text-xs">
-                      {auditCountLabel(
-                        {
-                          status: asset.auditData.auditStatus ?? "PENDING",
-                          expectedQuantity: asset.auditData.expectedQuantity,
-                          foundQuantity: asset.auditData.foundQuantity,
-                        },
-                        asset.unitOfMeasure
-                      )}
-                    </td>
+                    {showQuantity ? (
+                      <td className="break-words border border-gray-300 px-1.5 py-2.5 align-top text-xs">
+                        {auditCountLabel(
+                          {
+                            status: asset.auditData.auditStatus ?? "PENDING",
+                            expectedQuantity: asset.auditData.expectedQuantity,
+                            foundQuantity: asset.auditData.foundQuantity,
+                          },
+                          asset.unitOfMeasure
+                        )}
+                      </td>
+                    ) : null}
                     <td className="border border-gray-300 p-2.5 align-top">
                       <div className="flex flex-col items-start gap-1">
                         <When truthy={!printsCodeOnLine}>
@@ -687,7 +706,7 @@ export const AuditPDFContent = ({
                   <When truthy={printsCodeOnLine}>
                     <tr>
                       <td
-                        colSpan={ASSET_TABLE_COLUMNS.length}
+                        colSpan={tableColumns.length}
                         className="border border-gray-300 p-2.5 text-left align-top"
                       >
                         <AssetCodePrintImage

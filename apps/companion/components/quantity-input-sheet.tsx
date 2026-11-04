@@ -59,6 +59,13 @@ type Props = {
    * reservation cannot drop below the units already assigned to the booking.
    */
   min?: number;
+  /**
+   * A reference amount for a count that may go past it, such as an audit's
+   * expected units. When set, the echo reads "16 pcs of 14 pcs (+2)" and the
+   * placeholder and accessible label name the target, while `max` stays only
+   * the validation ceiling. Callers that move units leave it unset.
+   */
+  target?: number;
   /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
@@ -138,6 +145,7 @@ export function QuantityInputSheet({
   subtitle,
   max,
   min = 1,
+  target,
   defaultValue,
   unitOfMeasure,
   secondary,
@@ -246,6 +254,12 @@ export function QuantityInputSheet({
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
   const minLabel = formatQuantity(min, unitOfMeasure) ?? String(min);
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
+  const targetLabel =
+    target === undefined
+      ? null
+      : formatQuantity(target, unitOfMeasure) ?? String(target);
+  const surplus =
+    target !== undefined && hasValue && parsed > target ? parsed - target : 0;
 
   /**
    * Every dismissal path goes through here. A request in flight decides
@@ -372,13 +386,21 @@ export function QuantityInputSheet({
                 const next = cleaned ? parseInt(cleaned, 10) : NaN;
                 if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
-              placeholder={min > 1 ? `${min}–${max}` : `Max: ${max}`}
+              placeholder={
+                target !== undefined
+                  ? `Expected: ${target}`
+                  : min > 1
+                  ? `${min}–${max}`
+                  : `Max: ${max}`
+              }
               placeholderTextColor={colors.placeholderText}
               editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
               accessibilityLabel={
-                min > 1
+                targetLabel
+                  ? `Quantity counted, ${targetLabel} expected`
+                  : min > 1
                   ? `Quantity, between ${minLabel} and ${maxLabel}`
                   : `Quantity, maximum ${maxLabel}`
               }
@@ -407,7 +429,15 @@ export function QuantityInputSheet({
             <Text style={styles.errorHint}>At least {minLabel}.</Text>
           ) : (
             <Text style={styles.echoHint}>
-              {echo ? `${echo} of ${maxLabel}` : `Up to ${maxLabel}`}
+              {targetLabel
+                ? echo
+                  ? `${echo} of ${targetLabel}${
+                      surplus > 0 ? ` (+${surplus})` : ""
+                    }`
+                  : `${targetLabel} expected`
+                : echo
+                ? `${echo} of ${maxLabel}`
+                : `Up to ${maxLabel}`}
             </Text>
           )}
 

@@ -7,9 +7,9 @@
  *
  * The field starts at the count already recorded, or at the expected units for
  * a first count, so a full pool is one confirm away. "All here" records the
- * expected units directly. A count runs from 0 to the expected units, the same
- * bounds as the phone's count sheet. Zero is a real answer (the pool was
- * located, empty); a blank field is not, and keeps Save disabled.
+ * expected units directly. A count may go past the expectation: a surplus is
+ * a finding the audit must record. Zero is a real answer (the pool was located,
+ * empty); a blank field is not, and keeps Save disabled.
  *
  * State lives in `auditCountPromptAtom`; the scan route owns what happens on
  * save and cancel, because it owns the persistence refs.
@@ -33,6 +33,7 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { MAX_AUDIT_FOUND_QUANTITY } from "~/modules/audit/quantity";
 
 /** Props for {@link AuditCountDialog}. */
 type AuditCountDialogProps = {
@@ -93,7 +94,7 @@ function AuditCountDialogContent({
     parsed !== null &&
     Number.isInteger(parsed) &&
     parsed >= 0 &&
-    parsed <= expectedQuantity;
+    parsed <= MAX_AUDIT_FOUND_QUANTITY;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,14 +131,14 @@ function AuditCountDialogContent({
               type="number"
               inputMode="numeric"
               min={0}
-              max={expectedQuantity}
+              max={MAX_AUDIT_FOUND_QUANTITY}
               step={1}
               value={value}
               onChange={(event) => setValue(event.currentTarget.value)}
               className="w-40"
               error={
                 value.trim() !== "" && !isValid
-                  ? `Enter a whole number from 0 to ${expectedQuantity}.`
+                  ? "Enter a whole number, 0 or more."
                   : undefined
               }
             />

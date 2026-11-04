@@ -238,6 +238,15 @@ export const updateScannedItemAtom = atom(
           ...currentItems,
           [qrId]: duplicateItem,
         });
+        // Signal it like a same-code duplicate, pointing at the listed row:
+        // the audit scanner reopens a counted asset's count from it.
+        if (item.type === "asset") {
+          set(lastDuplicateScanAtom, {
+            qrId: existingDuplicateKey[0],
+            assetTitle: (item.data as AssetFromQr).title || "Unknown",
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
     }
@@ -349,6 +358,12 @@ export type AuditCount = {
   /** Null until the auditor counts it. */
   foundQuantity: number | null;
   unitOfMeasure: string | null;
+  /**
+   * True from the moment the auditor enters a count until the server has
+   * saved it. Only an unsaved count outranks the loader's; once saved, the
+   * loader's value wins, so a count another auditor stored is not hidden.
+   */
+  unsaved?: boolean;
 };
 
 /**
@@ -476,15 +491,13 @@ export const setAuditExpectedAssetsAtom = atom(
   null,
   (get, set, assets: AuditScannedItem[]) => {
     set(auditExpectedAssetsAtom, assets);
-    // Loader counts fill in; a count entered here and not yet reloaded wins.
+    // The loader's counts win, except a count entered here that the server
+    // has not saved yet.
     const current = get(auditCountsAtom);
     const fromLoader = auditCountsFromItems(assets);
     const merged: Record<string, AuditCount> = { ...current };
     for (const [assetId, entry] of Object.entries(fromLoader)) {
-      merged[assetId] = {
-        ...entry,
-        foundQuantity: current[assetId]?.foundQuantity ?? entry.foundQuantity,
-      };
+      merged[assetId] = current[assetId]?.unsaved ? current[assetId] : entry;
     }
     set(auditCountsAtom, merged);
     // Seed meta counts from loader data so UI starts with server values.

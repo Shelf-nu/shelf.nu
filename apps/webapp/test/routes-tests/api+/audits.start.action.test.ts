@@ -60,6 +60,8 @@ vi.mock("~/utils/date-format.server", () => ({
 
 // why: asset resolution is orthogonal to the date parse under test.
 vi.mock("~/modules/audit/context-helpers.server", () => ({
+  // why: a location audit stores its locations; none in these cases.
+  resolveAuditScopeLocationIds: vi.fn(async () => null),
   resolveAssetIdsForAudit,
   resolveAssetIdsForKitSelection: vi.fn(),
   resolveAssetIdsForLocationSelection: vi.fn(),

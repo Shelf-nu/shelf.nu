@@ -468,9 +468,53 @@ describe("audit receipt PDF: unit counts", () => {
     ).toBeInTheDocument();
   });
 
-  it("leaves the statistics as they were for an audit of individual assets", () => {
+  it("leaves the statistics and the table as they were for an audit of individual assets", () => {
     renderReceipt({ displayCode: SAM_CODE });
 
     expect(screen.queryByText(/Units counted/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Quantity" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("still fills the page width when the Quantity column is added", () => {
+    const { container } = receiptWithPool();
+
+    const table = container.querySelector("table.audit-assets-table")!;
+    const widths = [...table.querySelectorAll("col")].map((col) =>
+      parseFloat((col as HTMLElement).style.width)
+    );
+
+    expect(widths).toHaveLength(table.querySelectorAll("thead th").length);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
+  });
+
+  it("prints 0 of the expected units for a pool never found", () => {
+    const pdfMeta = pdfMetaWith({ displayCode: SAM_CODE });
+    pdfMeta.assets = [
+      {
+        ...pdfMeta.assets[0],
+        id: "pool-1",
+        title: "Sandbag",
+        unitOfMeasure: "pcs",
+        auditData: {
+          expected: true,
+          auditStatus: "MISSING",
+          expectedQuantity: 14,
+          foundQuantity: null,
+        },
+      },
+    ];
+    render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+
+    expect(quantityCell("Sandbag")).toBe("0 of 14 pcs");
+    // A missing pool is counted as zero found, not as "not counted".
+    expect(
+      screen.getByText(
+        /Units counted: 0 of 14 across 1 quantity-tracked asset\.$/
+      )
+    ).toBeInTheDocument();
   });
 });

@@ -6,8 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  describeAuditUnits,
   expectedQuantityFor,
-  formatAuditQuantity,
+  scopedLocationIds,
   totalAuditUnits,
 } from "./quantity";
 
@@ -28,26 +29,6 @@ describe("expectedQuantityFor", () => {
     expect(expectedQuantityFor({ type: "INDIVIDUAL", quantity: null })).toBe(
       null
     );
-  });
-});
-
-describe("formatAuditQuantity", () => {
-  it("reads found of expected, with the unit", () => {
-    expect(
-      formatAuditQuantity({ expectedQuantity: 14, foundQuantity: 8 }, "pcs")
-    ).toBe("8 of 14 pcs");
-  });
-
-  it("says a quantity row is not counted yet", () => {
-    expect(
-      formatAuditQuantity({ expectedQuantity: 14, foundQuantity: null })
-    ).toBe("Not counted (14 expected)");
-  });
-
-  it("returns null for an individual row", () => {
-    expect(
-      formatAuditQuantity({ expectedQuantity: null, foundQuantity: null })
-    ).toBeNull();
   });
 });
 
@@ -87,5 +68,67 @@ describe("totalAuditUnits", () => {
       foundUnits: 14,
       uncountedRows: 0,
     });
+  });
+
+  it("counts a MISSING row as zero found, not as uncounted", () => {
+    expect(
+      totalAuditUnits([
+        {
+          expected: true,
+          status: "MISSING",
+          expectedQuantity: 14,
+          foundQuantity: null,
+        },
+        {
+          expected: true,
+          status: "FOUND",
+          expectedQuantity: 14,
+          foundQuantity: 8,
+        },
+      ])
+    ).toEqual({
+      quantityRows: 2,
+      expectedUnits: 28,
+      foundUnits: 8,
+      uncountedRows: 0,
+    });
+  });
+});
+
+describe("describeAuditUnits", () => {
+  it("words the totals, naming rows not counted yet", () => {
+    expect(
+      describeAuditUnits({
+        quantityRows: 2,
+        expectedUnits: 20,
+        foundUnits: 8,
+        uncountedRows: 1,
+      })
+    ).toBe(
+      "Units counted: 8 of 20 across 2 quantity-tracked assets, 1 not counted yet."
+    );
+  });
+
+  it("uses the singular for one asset", () => {
+    expect(
+      describeAuditUnits({
+        quantityRows: 1,
+        expectedUnits: 14,
+        foundUnits: 8,
+        uncountedRows: 0,
+      })
+    ).toBe("Units counted: 8 of 14 across 1 quantity-tracked asset.");
+  });
+});
+
+describe("scopedLocationIds", () => {
+  it("reads the locations of a location audit", () => {
+    expect(scopedLocationIds({ locationIds: ["a", "b"] })).toEqual(["a", "b"]);
+  });
+
+  it("returns null for an audit without locations", () => {
+    expect(scopedLocationIds(null)).toBeNull();
+    expect(scopedLocationIds({ contextType: "KIT" })).toBeNull();
+    expect(scopedLocationIds({ locationIds: [] })).toBeNull();
   });
 });

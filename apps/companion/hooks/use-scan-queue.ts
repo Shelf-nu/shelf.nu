@@ -2,6 +2,10 @@ import { useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
+import {
+  dropSupersededCounts,
+  isSupersededCount,
+} from "@/lib/audit-scan-queue";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
 // ── Constants ────────────────────────────────────────────
@@ -14,8 +18,16 @@ const RETRY_DELAYS = [2_000, 5_000, 15_000];
 type UseScanQueueParams = {
   orgId: string | undefined;
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
-  /** Called when a scan is confirmed and auditAssetId is received from server */
-  onScanSynced?: (assetId: string, auditAssetId: string) => void;
+  /**
+   * Called when a scan is confirmed and auditAssetId is received from server.
+   * `foundQuantity` is the count the server stored, when it kept another one
+   * than the entry carried (the audit finished before a recount landed).
+   */
+  onScanSynced?: (
+    assetId: string,
+    auditAssetId: string,
+    storedCount?: number | null
+  ) => void;
   /**
    * Called when a scan exhausts its retries. The scan is moved to `failedQueueRef`
    * (never silently dropped) so the UI can surface it and completion can be blocked.
@@ -62,8 +74,16 @@ export function useScanQueue({
         if (error || !data) {
           throw new Error(error ?? "Failed to sync audit scan");
         }
-        // Success — remove from queue and persist immediately
+        // Success: remove from queue and persist immediately
         scanQueueRef.current.shift();
+
+        // The server kept another count than this entry carried.
+        const storedCount =
+          entry.foundQuantity !== undefined &&
+          data.foundQuantity !== undefined &&
+          data.foundQuantity !== entry.foundQuantity
+            ? data.foundQuantity
+            : undefined;
 
         // Capture auditAssetId from response so notes/photos can be attached
         if (data?.auditAssetId) {
@@ -76,10 +96,13 @@ export function useScanQueue({
               auditAssetId: data.auditAssetId,
               // A successful (re)sync clears any prior failed marker.
               syncFailed: false,
+              ...(storedCount !== undefined
+                ? { foundQuantity: storedCount }
+                : {}),
             };
           }
           // Notify caller to update React state for re-render
-          onScanSynced?.(entry.assetId, data.auditAssetId);
+          onScanSynced?.(entry.assetId, data.auditAssetId, storedCount);
         }
 
         saveAuditScanState(
@@ -89,7 +112,24 @@ export function useScanQueue({
           failedQueueRef.current
         );
       } catch {
-        // Network error — retry with backoff
+        // A newer count for this asset is queued: this one must not land
+        // after it, so it is dropped rather than retried.
+        if (
+          isSupersededCount(entry, [
+            ...scanQueueRef.current.slice(1),
+            ...failedQueueRef.current,
+          ])
+        ) {
+          scanQueueRef.current.shift();
+          saveAuditScanState(
+            entry.auditSessionId,
+            scannedItemsRef.current,
+            scanQueueRef.current,
+            failedQueueRef.current
+          );
+          continue;
+        }
+        // Network error: retry with backoff
         const retries = (entry.retryCount ?? 0) + 1;
         if (retries >= MAX_QUEUE_RETRIES) {
           // Max retries reached. CRITICAL: never silently drop the scan, or an
@@ -164,7 +204,26 @@ export function useScanQueue({
   }, [orgId, scannedItemsRef, onScanSynced, onScanFailed]);
 
   const enqueueScan = useCallback(
-    (entry: ScanQueueEntry) => {
+    (incoming: ScanQueueEntry) => {
+      const entry = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
+      // A new count replaces any older count for the same asset still
+      // waiting. The request in flight (queue head while processing) stays:
+      // the queue removes it by position when it settles.
+      const keptQueue = dropSupersededCounts(
+        scanQueueRef.current,
+        entry,
+        isProcessingQueueRef.current
+      );
+      const keptFailed = dropSupersededCounts(
+        failedQueueRef.current,
+        entry,
+        false
+      );
+      // Mutate in place: a pending debounced save holds these array references.
+      scanQueueRef.current.length = 0;
+      scanQueueRef.current.push(...keptQueue);
+      failedQueueRef.current.length = 0;
+      failedQueueRef.current.push(...keptFailed);
       scanQueueRef.current.push(entry);
       // Persist immediately (eager, not via the debounced saver): the scan must
       // hit disk the instant it is queued, so an app kill before the first

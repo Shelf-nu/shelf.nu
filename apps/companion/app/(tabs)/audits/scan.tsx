@@ -58,6 +58,7 @@ import {
 } from "@/components/audit/segmented-control";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { countTargetFor, MAX_AUDIT_COUNT } from "@/lib/audit-scan-queue";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
 import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
@@ -180,12 +181,20 @@ function AuditScannerContent() {
 
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
-    (assetId: string, auditAssetId: string) => {
-      // Update the scanned items list (clear any prior sync-failed marker)
+    (assetId: string, auditAssetId: string, storedCount?: number | null) => {
+      // Update the scanned items list (clear any prior sync-failed marker).
+      // A count the server kept instead of ours replaces the local one.
       setScannedItemsRef.current?.((prev) =>
         prev.map((item) =>
           item.assetId === assetId
-            ? { ...item, auditAssetId, syncFailed: false }
+            ? {
+                ...item,
+                auditAssetId,
+                syncFailed: false,
+                ...(storedCount !== undefined
+                  ? { foundQuantity: storedCount }
+                  : {}),
+              }
             : item
         )
       );
@@ -775,6 +784,7 @@ function AuditScannerContent() {
         assetId: request.assetId,
         isExpected: request.isExpected,
         foundQuantity,
+        recount: true,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       showToast(
@@ -941,12 +951,7 @@ function AuditScannerContent() {
           quantity?: number | null;
           unitOfMeasure?: string | null;
         };
-        const expectedQuantity =
-          typeof expectedRecord?.expectedQuantity === "number"
-            ? expectedRecord.expectedQuantity
-            : lookedUp.type === "QUANTITY_TRACKED"
-            ? lookedUp.quantity ?? 0
-            : null;
+        const expectedQuantity = countTargetFor(expectedRecord, lookedUp);
         const unitOfMeasure =
           expectedRecord?.unitOfMeasure ?? lookedUp.unitOfMeasure ?? null;
 
@@ -1187,6 +1192,11 @@ function AuditScannerContent() {
     // succeed), so we must NOT trap the audit. Offer to retry or to complete
     // anyway (acknowledging those assets will be marked missing).
     const failedCount = failedQueueRef.current.length;
+    // A failed recount only loses the correction: the scan itself is saved and
+    // keeps its last saved count. Say so instead of "marked as missing".
+    const failedRecounts = failedQueueRef.current.filter(
+      (entry) => entry.recount
+    ).length;
     if (failedCount > 0) {
       // Highest-signal case: the worker is completing an audit that has scans
       // which exhausted retries — those assets will be marked MISSING unless
@@ -1198,11 +1208,20 @@ function AuditScannerContent() {
       );
       Alert.alert(
         "Some scans didn't sync",
-        `${failedCount} scan${
-          failedCount === 1 ? "" : "s"
-        } couldn't be saved ` +
-          `to the server after several tries. Retry, or complete anyway ` +
-          `(${failedCount === 1 ? "it" : "they"} will be marked as missing).`,
+        failedRecounts === failedCount
+          ? `${failedCount} count correction${
+              failedCount === 1 ? "" : "s"
+            } couldn't be saved to the server after several tries. Retry, ` +
+              `or complete anyway (the last saved count${
+                failedCount === 1 ? " is" : "s are"
+              } kept).`
+          : `${failedCount} scan${
+              failedCount === 1 ? "" : "s"
+            } couldn't be saved ` +
+              `to the server after several tries. Retry, or complete anyway ` +
+              `(${
+                failedCount === 1 ? "it" : "they"
+              } will be marked as missing).`,
         [
           { text: "Cancel", style: "cancel" },
           { text: "Retry sync", onPress: retryFailedScans },
@@ -1709,7 +1728,10 @@ function AuditScannerContent() {
             : undefined
         }
         min={0}
-        max={countRequest?.expectedQuantity ?? 0}
+        // A count may go past the expectation (a surplus), so the sheet's
+        // ceiling is the server's and the expectation is only its target.
+        max={MAX_AUDIT_COUNT}
+        target={countRequest?.expectedQuantity}
         defaultValue={
           countRequest?.foundQuantity ?? countRequest?.expectedQuantity ?? 0
         }
