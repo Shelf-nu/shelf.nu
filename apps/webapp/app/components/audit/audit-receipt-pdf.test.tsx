@@ -420,3 +420,57 @@ describe("audit receipt PDF: layout", () => {
     expect(lensGroup).not.toBe(cameraGroup);
   });
 });
+
+describe("audit receipt PDF: unit counts", () => {
+  /** The receipt with one quantity-tracked row (a 14-unit pool, 8 counted). */
+  function receiptWithPool() {
+    const pdfMeta = pdfMetaWith({ displayCode: SAM_CODE });
+    pdfMeta.assets = [
+      pdfMeta.assets[0],
+      {
+        ...pdfMeta.assets[0],
+        id: "pool-1",
+        title: "Sandbag",
+        unitOfMeasure: "pcs",
+        auditData: {
+          expected: true,
+          auditStatus: "FOUND",
+          expectedQuantity: 14,
+          foundQuantity: 8,
+        },
+      },
+    ];
+    return render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+  }
+
+  /** The text of a row's Quantity cell, found through the header's position. */
+  function quantityCell(title: string) {
+    const header = screen.getByRole("columnheader", { name: "Quantity" });
+    const index = [...header.parentElement!.children].indexOf(header);
+    const row = screen.getByText(title).closest("tr")!;
+    return row.children[index].textContent;
+  }
+
+  it("prints the count of a quantity-tracked row and nothing for an individual one", () => {
+    receiptWithPool();
+
+    expect(quantityCell("Sandbag")).toBe("8 of 14 pcs");
+    expect(quantityCell("Camera")).toBe("");
+  });
+
+  it("adds a units line to the statistics when a quantity-tracked asset is audited", () => {
+    receiptWithPool();
+
+    expect(
+      screen.getByText(/Units counted: 8 of 14 across 1 quantity-tracked asset/)
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the statistics as they were for an audit of individual assets", () => {
+    renderReceipt({ displayCode: SAM_CODE });
+
+    expect(screen.queryByText(/Units counted/)).not.toBeInTheDocument();
+  });
+});

@@ -10,6 +10,9 @@
  * but this hook defends independently: it must never submit an item
  * whose `type` isn't `"asset"`, regardless of how it entered the map.
  *
+ * Also covers quantity-tracked scans: one is held back until the count dialog
+ * has given it a count, then sent with `foundQuantity`.
+ *
  * @see {@link file://./use-audit-scan-persistence.ts}
  * @see {@link file://../components/scanner/drawer/generic-item-row.tsx}
  */
@@ -53,6 +56,8 @@ function makeRefs() {
     persistedItemsRef: { current: new Set<string>() },
     pendingPersistsRef: { current: new Map<string, string>() },
     isRestoringRef: { current: false },
+    auditCounts: {},
+    onCountRequired: vi.fn(),
   };
 }
 
@@ -134,5 +139,128 @@ describe("useAuditScanPersistence", () => {
     const [formData] = (fetcher.submit as ReturnType<typeof vi.fn>).mock
       .calls[0] as [FormData, unknown];
     expect(formData.get("assetId")).toBe("asset-1");
+  });
+
+  it("holds a quantity-tracked scan back until it has a count", () => {
+    const fetcher = makeFetcher();
+    const refs = makeRefs();
+    const scannedItems: ScanListItems = {
+      "qr-pool": {
+        data: {
+          id: "pool-1",
+          title: "Sandbag",
+          type: "QUANTITY_TRACKED",
+          quantity: 14,
+        } as unknown as AssetFromQr,
+        type: "asset",
+      },
+    };
+
+    renderHook(() =>
+      useAuditScanPersistence({
+        auditSession,
+        scannedItems,
+        expectedAssets: [],
+        scanPersistFetcher: fetcher,
+        ...refs,
+      })
+    );
+
+    expect(fetcher.submit).not.toHaveBeenCalled();
+  });
+
+  it("sends the count with a counted quantity-tracked scan", () => {
+    const fetcher = makeFetcher();
+    const refs = makeRefs();
+    // A restored row carries no asset type; its count entry marks it.
+    const scannedItems: ScanListItems = {
+      "qr-pool": {
+        data: { id: "pool-1", title: "Sandbag" } as unknown as AssetFromQr,
+        type: "asset",
+      },
+    };
+
+    renderHook(() =>
+      useAuditScanPersistence({
+        auditSession,
+        scannedItems,
+        expectedAssets: [],
+        scanPersistFetcher: fetcher,
+        ...refs,
+        auditCounts: {
+          "pool-1": {
+            expectedQuantity: 14,
+            foundQuantity: 0,
+            unitOfMeasure: "pcs",
+          },
+        },
+      })
+    );
+
+    expect(fetcher.submit).toHaveBeenCalledTimes(1);
+    const [formData] = (fetcher.submit as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [FormData, unknown];
+    // Zero is a count, not a missing one.
+    expect(formData.get("foundQuantity")).toBe("0");
+  });
+
+  it("does not send a count for an individual asset", () => {
+    const fetcher = makeFetcher();
+    const refs = makeRefs();
+    const scannedItems: ScanListItems = {
+      "qr-asset": {
+        data: {
+          id: "asset-1",
+          title: "Camera",
+          type: "INDIVIDUAL",
+        } as unknown as AssetFromQr,
+        type: "asset",
+      },
+    };
+
+    renderHook(() =>
+      useAuditScanPersistence({
+        auditSession,
+        scannedItems,
+        expectedAssets: [],
+        scanPersistFetcher: fetcher,
+        ...refs,
+      })
+    );
+
+    const [formData] = (fetcher.submit as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [FormData, unknown];
+    expect(formData.has("foundQuantity")).toBe(false);
+  });
+
+  it("hands a count-required answer to the caller and frees the scan to retry", () => {
+    const onCountRequired = vi.fn();
+    const refs = makeRefs();
+    refs.pendingPersistsRef.current.set("pool-1", "qr-pool");
+    const answer = {
+      success: false,
+      status: "count-required",
+      assetId: "pool-1",
+      assetTitle: "Sandbag",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    };
+    const fetcher = makeFetcher({ data: answer });
+
+    renderHook(() =>
+      useAuditScanPersistence({
+        auditSession,
+        scannedItems: {},
+        expectedAssets: [],
+        scanPersistFetcher: fetcher,
+        ...refs,
+        onCountRequired,
+      })
+    );
+
+    expect(onCountRequired).toHaveBeenCalledWith(answer);
+    expect(refs.pendingPersistsRef.current.size).toBe(0);
+    expect(refs.persistedItemsRef.current.has("pool-1")).toBe(false);
   });
 });

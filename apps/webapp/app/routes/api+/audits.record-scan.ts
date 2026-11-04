@@ -13,6 +13,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { optionalNumberFromString } from "~/utils/zod-numeric";
 
 const RecordScanSchema = z.object({
   auditSessionId: z.string(),
@@ -22,12 +23,22 @@ const RecordScanSchema = z.object({
   // forwarded: `recordAuditScan` derives expectedness from the audit's own
   // AuditAsset row, because a client's cached expected list goes stale.
   isExpected: z.string().optional(),
+  // Units counted, for a quantity-tracked asset. Blank means "no count"; the
+  // service then answers `count-required` instead of recording.
+  foundQuantity: optionalNumberFromString({ blank: undefined }).pipe(
+    z.number().int().nonnegative("The count cannot be negative").optional()
+  ),
 });
 
 /**
  * API endpoint to persist an audit scan to the database.
  * This is called after an asset is scanned and resolved,
  * allowing audits to be resumed across sessions.
+ *
+ * A quantity-tracked asset needs a `foundQuantity`. Without one nothing is
+ * written and the response is `{ success: false, status: "count-required",
+ * expectedQuantity, foundQuantity, ... }`, so the scanner can ask for a count.
+ * Sending a count for an asset that is already scanned replaces its count.
  */
 export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -40,7 +51,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { auditSessionId, qrId, assetId } = parseData(
+    const { auditSessionId, qrId, assetId, foundQuantity } = parseData(
       await request.formData(),
       RecordScanSchema,
       { additionalData: { userId } }
@@ -67,9 +78,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       userAgent: request.headers.get("user-agent"),
+      foundQuantity,
     });
 
-    return data(payload({ success: true, ...result }));
+    return data(payload({ success: result.status === "recorded", ...result }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(error(reason), { status: reason.status });

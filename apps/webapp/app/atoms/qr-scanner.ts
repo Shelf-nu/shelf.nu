@@ -333,7 +333,82 @@ export type AuditScannedItem = {
   auditImagesCount?: number;
   mainImage?: string | null;
   thumbnailImage?: string | null;
+  /** Units expected on this row; null for an individual asset. */
+  expectedQuantity?: number | null;
+  /** Units counted so far; null until counted. */
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
+
+/**
+ * The unit count of one quantity-tracked asset in the running audit, keyed by
+ * assetId in {@link auditCountsAtom}. Individual assets have no entry.
+ */
+export type AuditCount = {
+  expectedQuantity: number;
+  /** Null until the auditor counts it. */
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+};
+
+/**
+ * Counts of the audit's quantity-tracked assets, keyed by assetId. Seeded from
+ * the loader (expected rows and restored scans) and updated by the count
+ * dialog. The scan persistence hook sends `foundQuantity` from here, and does
+ * not send a quantity-tracked scan until it has one.
+ */
+export const auditCountsAtom = atom<Record<string, AuditCount>>({});
+
+/** Merges count entries into {@link auditCountsAtom}. */
+export const mergeAuditCountsAtom = atom(
+  null,
+  (get, set, entries: Record<string, AuditCount>) => {
+    set(auditCountsAtom, { ...get(auditCountsAtom), ...entries });
+  }
+);
+
+/**
+ * The count the dialog is asking for: a quantity-tracked asset just scanned
+ * (`mode: "first"`) or scanned again to correct its count (`"recount"`).
+ * Null while the dialog is closed.
+ */
+export type AuditCountPrompt = {
+  assetId: string;
+  /** Scanned-list key of the row, so cancelling a first count can drop it. */
+  qrId: string;
+  assetTitle: string;
+  expectedQuantity: number;
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+  mode: "first" | "recount";
+};
+export const auditCountPromptAtom = atom<AuditCountPrompt | null>(null);
+
+/**
+ * Count entries for the quantity rows of a list of audit items; rows without
+ * an `expectedQuantity` are individual assets and are skipped.
+ */
+export function auditCountsFromItems(
+  items: ReadonlyArray<{
+    id: string;
+    expectedQuantity?: number | null;
+    foundQuantity?: number | null;
+    unitOfMeasure?: string | null;
+  }>
+): Record<string, AuditCount> {
+  const counts: Record<string, AuditCount> = {};
+  for (const item of items) {
+    if (item.expectedQuantity === null || item.expectedQuantity === undefined) {
+      continue;
+    }
+    counts[item.id] = {
+      expectedQuantity: item.expectedQuantity,
+      foundQuantity: item.foundQuantity ?? null,
+      unitOfMeasure: item.unitOfMeasure ?? null,
+    };
+  }
+  return counts;
+}
 
 export type AuditAssetMeta = {
   notesCount?: number;
@@ -399,8 +474,19 @@ export const auditResultsAtom = atom((get) => {
 // Action atom to set expected assets for audit
 export const setAuditExpectedAssetsAtom = atom(
   null,
-  (_get, set, assets: AuditScannedItem[]) => {
+  (get, set, assets: AuditScannedItem[]) => {
     set(auditExpectedAssetsAtom, assets);
+    // Loader counts fill in; a count entered here and not yet reloaded wins.
+    const current = get(auditCountsAtom);
+    const fromLoader = auditCountsFromItems(assets);
+    const merged: Record<string, AuditCount> = { ...current };
+    for (const [assetId, entry] of Object.entries(fromLoader)) {
+      merged[assetId] = {
+        ...entry,
+        foundQuantity: current[assetId]?.foundQuantity ?? entry.foundQuantity,
+      };
+    }
+    set(auditCountsAtom, merged);
     // Seed meta counts from loader data so UI starts with server values.
     set(
       auditAssetMetaAtom,
@@ -455,6 +541,8 @@ export const startAuditSessionAtom = atom(
     // Clear any existing scanned items when starting a new audit
     set(scannedItemsAtom, {});
     set(auditAssetMetaAtom, {});
+    set(auditCountsAtom, {});
+    set(auditCountPromptAtom, null);
   }
 );
 
@@ -464,6 +552,8 @@ export const endAuditSessionAtom = atom(null, (_get, set) => {
   set(auditExpectedAssetsAtom, []);
   set(scannedItemsAtom, {});
   set(auditAssetMetaAtom, {});
+  set(auditCountsAtom, {});
+  set(auditCountPromptAtom, null);
 });
 
 /*******************************/

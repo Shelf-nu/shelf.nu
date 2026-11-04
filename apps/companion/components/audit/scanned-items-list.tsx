@@ -24,6 +24,7 @@
 import React, { useCallback } from "react";
 import { View, Text, FlatList, TouchableOpacity, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { auditCountLabel } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -72,6 +73,19 @@ export function ScannedItemsList({
         .filter(Boolean)
         .join(", ");
       const syncFailed = item.syncFailed === true;
+      // Units on a quantity-tracked row ("8 of 14 pcs"); null otherwise.
+      const countLabel = auditCountLabel(
+        {
+          status: item.isExpected ? "FOUND" : "UNEXPECTED",
+          expectedQuantity: item.expectedQuantity,
+          foundQuantity: item.foundQuantity,
+        },
+        item.unitOfMeasure
+      );
+      const isShort =
+        typeof item.foundQuantity === "number" &&
+        typeof item.expectedQuantity === "number" &&
+        item.foundQuantity < item.expectedQuantity;
 
       // A scan whose asset was deleted has nothing left to attach evidence to:
       // the AuditAsset row went with the asset, so the evidence sheet has no
@@ -100,11 +114,11 @@ export function ScannedItemsList({
           // in the spoken label along with the location.
           accessibilityLabel={`${item.name?.trim() || "Untitled asset"}, ${
             item.isExpected ? "found" : "unexpected, not on this audit"
-          }${item.locationName ? `, at ${item.locationName}` : ""}${
-            hasEvidence ? `, ${evidenceLabel}` : ""
-          }${syncFailed ? ", not synced" : ""}${
-            isDeleted ? "." : ". Tap to add notes or photos."
-          }`}
+          }${countLabel ? `, ${countLabel}` : ""}${
+            item.locationName ? `, at ${item.locationName}` : ""
+          }${hasEvidence ? `, ${evidenceLabel}` : ""}${
+            syncFailed ? ", not synced" : ""
+          }${isDeleted ? "." : ". Tap to add notes or photos."}`}
         >
           <Ionicons
             name={item.isExpected ? "checkmark-circle" : "alert-circle"}
@@ -125,6 +139,16 @@ export function ScannedItemsList({
                   row entirely, so name the state instead. */}
               {item.name?.trim() ? item.name : "Untitled asset"}
             </Text>
+            {countLabel ? (
+              <Text
+                style={
+                  isShort ? styles.scannedItemShort : styles.scannedItemCount
+                }
+                numberOfLines={1}
+              >
+                {countLabel}
+              </Text>
+            ) : null}
             {/* The second line is the row's new job: WHERE, not "was it
                 scanned". Unexpected assets say so here, because for them that
                 IS the useful fact; expected ones show their location. */}
@@ -299,6 +323,17 @@ const useStyles = createStyles((colors) => ({
     // dark) — it misses 4.5:1 at this 12px size. `muted` keeps the second
     // line quieter than the name and still clears the bar in both themes.
     color: colors.muted,
+  },
+  scannedItemCount: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  // A count below the expectation: the pool was found, units are short.
+  scannedItemShort: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.warningText,
   },
   scannedItemUnexpected: {
     fontSize: fontSize.xs,

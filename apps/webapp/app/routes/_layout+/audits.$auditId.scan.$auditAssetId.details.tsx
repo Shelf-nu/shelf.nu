@@ -40,6 +40,7 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { formatAuditQuantity } from "~/modules/audit/quantity";
 import {
   assertAuditAcceptsComments,
   assertAuditAcceptsCommentsOnLockedRow,
@@ -100,6 +101,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           select: {
             id: true,
             title: true,
+            unitOfMeasure: true,
           },
         },
         auditSession: {
@@ -182,9 +184,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
+    // Quantity rows lead with their count, e.g. "Counted: 8 of 14 pcs".
+    const countLabel = formatAuditQuantity(
+      auditAsset,
+      auditAsset.asset.unitOfMeasure
+    );
     const header = {
       title: auditAsset.asset.title,
-      subHeading: "Notes and images",
+      subHeading: countLabel
+        ? `Counted: ${countLabel} • Notes and images`
+        : "Notes and images",
     };
 
     return payload({

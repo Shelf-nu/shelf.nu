@@ -9,6 +9,8 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import { createSignedUrl } from "~/utils/storage.server";
 import { sendAuditCancelledEmails } from "./email-helpers";
 import {
+  createAssetScanNote,
+  createAuditCountUpdatedNote,
   createAuditResumedNote,
   createAuditStartedNote,
 } from "./helpers.server";
@@ -51,6 +53,7 @@ vi.mock("./helpers.server", () => ({
   createAssetsAddedToAuditNote: vi.fn(),
   createAssetRemovedFromAuditNote: vi.fn(),
   createAssetsRemovedFromAuditNote: vi.fn(),
+  createAuditCountUpdatedNote: vi.fn(),
 }));
 
 // why: deterministic note content for assertions; real impl returns markdoc syntax
@@ -133,6 +136,8 @@ vi.mock("~/database/db.server", () => {
       // skipDuplicates, then a re-read — so both are on the scan hot path.
       findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
+      // why: a recount reads the row it corrects inside the transaction.
+      findFirstOrThrow: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -203,6 +208,7 @@ const mockDb = db as unknown as {
     createMany: ReturnType<typeof vi.fn>;
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
+    findFirstOrThrow: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
@@ -236,6 +242,16 @@ const mockDb = db as unknown as {
   $transaction: ReturnType<typeof vi.fn>;
   $queryRaw: ReturnType<typeof vi.fn>;
 };
+
+/** Narrows a scan result to a recorded scan, failing the test otherwise. */
+function expectRecorded(
+  result: Awaited<ReturnType<typeof recordAuditScan>>
+): Extract<typeof result, { status: "recorded" }> {
+  if (result.status !== "recorded") {
+    throw new Error(`expected a recorded scan, got ${result.status}`);
+  }
+  return result;
+}
 
 describe("audit service", () => {
   const defaultInput = {
@@ -337,7 +353,13 @@ describe("audit service", () => {
         id: { in: ["asset-1", "asset-2"] },
         organizationId: "org-1",
       },
-      select: { id: true, title: true },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        quantity: true,
+        unitOfMeasure: true,
+      },
     });
 
     expect(mockDb.auditSession.create).toHaveBeenCalledWith({
@@ -354,8 +376,18 @@ describe("audit service", () => {
 
     expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
       data: [
-        { auditSessionId: "audit-1", assetId: "asset-1", expected: true },
-        { auditSessionId: "audit-1", assetId: "asset-2", expected: true },
+        {
+          auditSessionId: "audit-1",
+          assetId: "asset-1",
+          expected: true,
+          expectedQuantity: null,
+        },
+        {
+          auditSessionId: "audit-1",
+          assetId: "asset-2",
+          expected: true,
+          expectedQuantity: null,
+        },
       ],
     });
 
@@ -364,8 +396,20 @@ describe("audit service", () => {
     });
 
     expect(result.expectedAssets).toEqual([
-      { id: "asset-1", name: "Camera A", auditAssetId: "audit-asset-1" },
-      { id: "asset-2", name: "Camera B", auditAssetId: "audit-asset-2" },
+      {
+        id: "asset-1",
+        name: "Camera A",
+        auditAssetId: "audit-asset-1",
+        expectedQuantity: null,
+        foundQuantity: null,
+      },
+      {
+        id: "asset-2",
+        name: "Camera B",
+        auditAssetId: "audit-asset-2",
+        expectedQuantity: null,
+        foundQuantity: null,
+      },
     ]);
     expect(result.session.assignments).toHaveLength(1);
   });
@@ -414,11 +458,24 @@ describe("audit service", () => {
         id: { in: ["asset-1"] },
         organizationId: "org-1",
       },
-      select: { id: true, title: true },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        quantity: true,
+        unitOfMeasure: true,
+      },
     });
 
     expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
-      data: [{ auditSessionId: "audit-1", assetId: "asset-1", expected: true }],
+      data: [
+        {
+          auditSessionId: "audit-1",
+          assetId: "asset-1",
+          expected: true,
+          expectedQuantity: null,
+        },
+      ],
     });
 
     expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
@@ -524,12 +581,14 @@ describe("audit service", () => {
             assetId: "asset-1",
             expected: true,
             status: "PENDING",
+            expectedQuantity: null,
           },
           {
             auditSessionId: "audit-1",
             assetId: "asset-2",
             expected: true,
             status: "PENDING",
+            expectedQuantity: null,
           },
         ],
       });
@@ -574,12 +633,14 @@ describe("audit service", () => {
             assetId: "asset-2",
             expected: true,
             status: "PENDING",
+            expectedQuantity: null,
           },
           {
             auditSessionId: "audit-1",
             assetId: "asset-3",
             expected: true,
             status: "PENDING",
+            expectedQuantity: null,
           },
         ],
       });
@@ -2487,7 +2548,7 @@ describe("audit service", () => {
       mockPendingSession({ first: 1 });
 
       // Not caught: a rejection here must fail the test.
-      const result = await recordAuditScan(scanInput);
+      const result = expectRecorded(await recordAuditScan(scanInput));
 
       expect(result.scanId).toBe("scan-1");
       const claim = firstStartClaim();
@@ -2513,7 +2574,7 @@ describe("audit service", () => {
         startedAt: new Date("2026-06-15T09:19:00.000Z"),
       });
 
-      const result = await recordAuditScan(scanInput);
+      const result = expectRecorded(await recordAuditScan(scanInput));
 
       expect(result.scanId).toBe("scan-1");
       // It is still re-activated, but without a timestamp...
@@ -2698,7 +2759,7 @@ describe("audit service", () => {
         status: "UNEXPECTED",
       });
 
-      const result = await recordAuditScan(scanInput);
+      const result = expectRecorded(await recordAuditScan(scanInput));
 
       // It becomes a real unexpected row, so notes and photos can attach.
       expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith(
@@ -2732,7 +2793,7 @@ describe("audit service", () => {
         status: "UNEXPECTED",
       });
 
-      const result = await recordAuditScan(scanInput);
+      const result = expectRecorded(await recordAuditScan(scanInput));
 
       // The loser's scan still lands, attached to the winner's row...
       expect(result.scanId).toBe("scan-1");
@@ -2852,7 +2913,7 @@ describe("audit service", () => {
         status: "PENDING",
       });
 
-      const result = await recordAuditScan(scanInput);
+      const result = expectRecorded(await recordAuditScan(scanInput));
 
       expect(mockDb.auditAsset.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -3331,5 +3392,342 @@ describe("updateAuditSession", () => {
       select: { id: true },
     });
     expect(mockDb.auditAssignment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("audit unit counts on quantity-tracked assets", () => {
+  /** Runs the callback straight against the mock db, as $transaction would. */
+  type TransactionCallback = (tx: typeof mockDb) => unknown;
+
+  const scanInput = {
+    auditSessionId: "audit-1",
+    qrId: "qr-1",
+    assetId: "pool-1",
+    userId: "user-1",
+    organizationId: "org-1",
+  };
+
+  /** A 14-unit sandbag pool, the shape `recordAuditScan` reads. */
+  const pool = {
+    id: "pool-1",
+    title: "Sandbag",
+    organizationId: "org-1",
+    sequentialId: "SAM-0001",
+    type: "QUANTITY_TRACKED",
+    quantity: 14,
+    unitOfMeasure: "pcs",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDb.$transaction.mockImplementation((cb: TransactionCallback) =>
+      cb(mockDb)
+    );
+    mockDb.auditSession.findFirst.mockResolvedValue({
+      id: "audit-1",
+      organizationId: "org-1",
+      status: AuditStatus.ACTIVE,
+      startedAt: new Date("2026-11-04T09:00:00.000Z"),
+      expectedAssetCount: 2,
+      foundAssetCount: 0,
+      missingAssetCount: 2,
+      unexpectedAssetCount: 0,
+    });
+    mockDb.user.findUnique.mockResolvedValue({
+      id: "user-1",
+      firstName: "Scan",
+      lastName: "User",
+      displayName: "Scan User",
+    });
+    mockDb.asset.findUnique.mockResolvedValue(pool);
+    mockDb.auditScan.findFirst.mockResolvedValue(null);
+    mockDb.auditScan.create.mockResolvedValue({ id: "scan-1" });
+    mockDb.auditSession.update.mockResolvedValue({
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+    });
+    mockDb.auditAsset.findUnique.mockResolvedValue({
+      id: "audit-asset-pool",
+      expected: true,
+      status: "PENDING",
+      expectedQuantity: 14,
+      foundQuantity: null,
+    });
+    mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("snapshots the stock of a quantity-tracked asset when the audit is created", async () => {
+    // why: with no user the asset-note helper returns early; notes are not
+    // under test here.
+    mockDb.user.findUnique.mockResolvedValue(null);
+    // why Once: the asset-note helper reads assets again afterwards; it is
+    // not under test here and gets none.
+    mockDb.asset.findMany
+      .mockResolvedValueOnce([
+        {
+          id: "pool-1",
+          title: "Sandbag",
+          type: "QUANTITY_TRACKED",
+          quantity: 14,
+        },
+        { id: "camera-1", title: "Camera", type: "INDIVIDUAL", quantity: null },
+      ])
+      .mockResolvedValue([]);
+    mockDb.auditSession.create.mockResolvedValue({ id: "audit-1" });
+    mockDb.auditSession.findFirst.mockResolvedValue({
+      id: "audit-1",
+      assignments: [],
+    });
+    mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
+    mockDb.auditAsset.findMany.mockResolvedValue([]);
+
+    await createAuditSession({
+      name: "Sandbag check",
+      assetIds: ["pool-1", "camera-1"],
+      organizationId: "org-1",
+      createdById: "user-1",
+    });
+
+    expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ assetId: "pool-1", expectedQuantity: 14 }),
+        expect.objectContaining({
+          assetId: "camera-1",
+          expectedQuantity: null,
+        }),
+      ],
+    });
+  });
+
+  it("snapshots the stock of quantity-tracked assets added to a pending audit", async () => {
+    // why: with no user the asset-note helper returns early.
+    mockDb.user.findUnique.mockResolvedValue(null);
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      id: "audit-1",
+      name: "Sandbag check",
+      status: "PENDING",
+    });
+    mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
+    mockDb.auditAsset.findMany.mockResolvedValue([]);
+    // First read: the org guard. Second: the unit snapshot. The asset-note
+    // helper after them is not under test and gets none.
+    mockDb.asset.findMany
+      .mockResolvedValueOnce([{ id: "pool-1" }, { id: "camera-1" }])
+      .mockResolvedValueOnce([
+        { id: "pool-1", type: "QUANTITY_TRACKED", quantity: 14 },
+        { id: "camera-1", type: "INDIVIDUAL", quantity: null },
+      ])
+      .mockResolvedValue([]);
+
+    await addAssetsToAudit({
+      auditId: "audit-1",
+      assetIds: ["pool-1", "camera-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ assetId: "pool-1", expectedQuantity: 14 }),
+        expect.objectContaining({
+          assetId: "camera-1",
+          expectedQuantity: null,
+        }),
+      ],
+    });
+  });
+
+  it("asks for a count instead of marking a quantity-tracked asset found", async () => {
+    const result = await recordAuditScan(scanInput);
+
+    expect(result).toEqual({
+      status: "count-required",
+      assetId: "pool-1",
+      assetTitle: "Sandbag",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    });
+    // Nothing is written: no scan, no status change, no counter move.
+    expect(mockDb.auditScan.create).not.toHaveBeenCalled();
+    expect(mockDb.auditAsset.updateMany).not.toHaveBeenCalled();
+    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+  });
+
+  it("records the count with the scan and leaves the asset counters as they were", async () => {
+    const result = expectRecorded(
+      await recordAuditScan({ ...scanInput, foundQuantity: 8 })
+    );
+
+    expect(mockDb.auditAsset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FOUND",
+          expectedQuantity: 14,
+          foundQuantity: 8,
+        }),
+      })
+    );
+    // A short pool is still one found asset: the gap is in the numbers.
+    expect(mockDb.auditSession.update.mock.calls[0][0].data).toEqual({
+      foundAssetCount: { increment: 1 },
+      missingAssetCount: { increment: -1 },
+      unexpectedAssetCount: { increment: 0 },
+    });
+    expect(createAssetScanNote).toHaveBeenCalledWith(
+      expect.objectContaining({ count: { found: 8, expected: 14 } })
+    );
+    expect(result).toMatchObject({ expectedQuantity: 14, foundQuantity: 8 });
+  });
+
+  it("records a scan from an app build without the count prompt as not counted", async () => {
+    const result = expectRecorded(
+      await recordAuditScan({ ...scanInput, acceptUncounted: true })
+    );
+
+    expect(mockDb.auditAsset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FOUND", foundQuantity: null }),
+      })
+    );
+    expect(result.foundQuantity).toBeNull();
+  });
+
+  it("replaces the count when the asset is scanned again", async () => {
+    mockDb.auditScan.findFirst.mockResolvedValue({
+      id: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      auditAsset: { expectedQuantity: 14, foundQuantity: 6 },
+    });
+    mockDb.auditAsset.findFirstOrThrow.mockResolvedValue({
+      expected: true,
+      expectedQuantity: 14,
+      foundQuantity: 6,
+    });
+
+    const result = expectRecorded(
+      await recordAuditScan({ ...scanInput, foundQuantity: 8 })
+    );
+
+    expect(mockDb.auditAsset.update).toHaveBeenCalledWith({
+      where: { id: "audit-asset-pool" },
+      data: { foundQuantity: 8, expectedQuantity: 14 },
+    });
+    // A recount is not a second scan.
+    expect(mockDb.auditScan.create).not.toHaveBeenCalled();
+    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+    expect(createAuditCountUpdatedNote).toHaveBeenCalledWith(
+      expect.objectContaining({ from: 6, count: { found: 8, expected: 14 } })
+    );
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "AUDIT_UPDATED",
+        field: "foundQuantity",
+        fromValue: 6,
+        toValue: 8,
+      }),
+      mockDb
+    );
+    expect(result.foundQuantity).toBe(8);
+  });
+
+  it("writes nothing when a recount repeats the count already recorded", async () => {
+    mockDb.auditScan.findFirst.mockResolvedValue({
+      id: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      auditAsset: { expectedQuantity: 14, foundQuantity: 8 },
+    });
+    mockDb.auditAsset.findFirstOrThrow.mockResolvedValue({
+      expected: true,
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+
+    await recordAuditScan({ ...scanInput, foundQuantity: 8 });
+
+    expect(mockDb.auditAsset.update).not.toHaveBeenCalled();
+    expect(createAuditCountUpdatedNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses to change the count of a finished audit", async () => {
+    mockDb.auditSession.findFirst.mockResolvedValue({
+      id: "audit-1",
+      organizationId: "org-1",
+      status: AuditStatus.COMPLETED,
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+    });
+    mockDb.auditScan.findFirst.mockResolvedValue({
+      id: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      auditAsset: { expectedQuantity: 14, foundQuantity: 6 },
+    });
+
+    await expect(
+      recordAuditScan({ ...scanInput, foundQuantity: 8 })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mockDb.auditAsset.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a count that is not a whole number from zero up", async () => {
+    await expect(
+      recordAuditScan({ ...scanInput, foundQuantity: -1 })
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      recordAuditScan({ ...scanInput, foundQuantity: 2.5 })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mockDb.auditScan.create).not.toHaveBeenCalled();
+  });
+
+  it("ignores a count sent for an individual asset", async () => {
+    mockDb.asset.findUnique.mockResolvedValue({
+      ...pool,
+      type: "INDIVIDUAL",
+      quantity: null,
+    });
+    mockDb.auditAsset.findUnique.mockResolvedValue({
+      id: "audit-asset-camera",
+      expected: true,
+      status: "PENDING",
+      expectedQuantity: null,
+    });
+
+    const result = expectRecorded(
+      await recordAuditScan({ ...scanInput, foundQuantity: 3 })
+    );
+
+    const claimData = mockDb.auditAsset.updateMany.mock.calls[0][0].data;
+    expect(claimData).not.toHaveProperty("foundQuantity");
+    expect(claimData).not.toHaveProperty("expectedQuantity");
+    expect(result).toMatchObject({
+      expectedQuantity: null,
+      foundQuantity: null,
+    });
+  });
+
+  it("gives an unexpected quantity-tracked asset its stock as the snapshot", async () => {
+    mockDb.auditAsset.findUnique.mockResolvedValue(null);
+    mockDb.auditAsset.createMany.mockResolvedValue({ count: 1 });
+    mockDb.auditAsset.findUniqueOrThrow.mockResolvedValue({
+      id: "audit-asset-new",
+      expected: false,
+      status: "UNEXPECTED",
+      expectedQuantity: 14,
+    });
+
+    await recordAuditScan({ ...scanInput, foundQuantity: 5 });
+
+    expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            expected: false,
+            expectedQuantity: 14,
+            foundQuantity: 5,
+          }),
+        ],
+      })
+    );
   });
 });

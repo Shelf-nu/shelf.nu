@@ -33,6 +33,7 @@ import { useDateFormatter } from "@/lib/use-date-formatter";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
 import {
+  auditCountLabel,
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_UNASSIGNED_LABELS,
@@ -151,6 +152,8 @@ type DisplayAsset = {
    * badge and says "Archived" on its meta line.
    */
   archived: boolean;
+  /** Units on a quantity-tracked row ("8 of 14 pcs"); null otherwise. */
+  countLabel: string | null;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -581,6 +584,14 @@ function AuditDetailContent({ id }: { id: string }) {
         notesCount: asset.auditNotesCount ?? scan?.auditNotesCount ?? 0,
         imagesCount: asset.auditImagesCount ?? scan?.auditImagesCount ?? 0,
         archived: isArchivedAsset(asset),
+        countLabel: auditCountLabel(
+          {
+            status: scan ? "FOUND" : notFoundStatus,
+            expectedQuantity: asset.expectedQuantity,
+            foundQuantity: asset.foundQuantity,
+          },
+          asset.unitOfMeasure
+        ),
       });
     }
 
@@ -636,6 +647,14 @@ function AuditDetailContent({ id }: { id: string }) {
           notesCount: scan.auditNotesCount,
           imagesCount: scan.auditImagesCount,
           archived: isArchivedAsset(scan),
+          countLabel: auditCountLabel(
+            {
+              status: scan.isExpected ? "FOUND" : "UNEXPECTED",
+              expectedQuantity: scan.expectedQuantity,
+              foundQuantity: scan.foundQuantity,
+            },
+            scan.unitOfMeasure
+          ),
         });
       }
     }
@@ -689,6 +708,9 @@ function AuditDetailContent({ id }: { id: string }) {
       // leads the meta line, so it is read before where it should be.
       if (item.archived) {
         metaParts.push({ icon: "archive-outline", text: "Archived" });
+      }
+      if (item.countLabel) {
+        metaParts.push({ icon: "layers-outline", text: item.countLabel });
       }
       if (item.locationName) {
         metaParts.push({ icon: "location-outline", text: item.locationName });

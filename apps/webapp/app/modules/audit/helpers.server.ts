@@ -62,15 +62,21 @@ export async function createAssetScanNote({
   organizationId,
   userId,
   isExpected,
+  count,
   tx,
   prefetchedUser,
 }: {
   auditSessionId: string;
   assetId: string;
-  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  /** Caller's organization. Scopes the asset lookup to prevent cross-org IDOR. */
   organizationId: string;
   userId: string;
   isExpected: boolean;
+  /**
+   * Units counted on this scan, for a quantity-tracked asset. The note then
+   * says "counted 8 of 14". Omit for individual assets and uncounted scans.
+   */
+  count?: AuditScanNoteCount | null;
   tx: any; // Prisma transaction client
   prefetchedUser?: (UserNameFields & { id: string }) | null;
 }) {
@@ -110,7 +116,86 @@ export async function createAssetScanNote({
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
         ...scanner,
-      })} scanned ${assetStatus} asset ${assetLink}.`,
+      })} scanned ${assetStatus} asset ${assetLink}${
+        count ? ` and counted ${describeNoteCount(count)}` : ""
+      }.`,
+    },
+  });
+}
+
+/** Units counted on one audit row, as an audit note words them. */
+export type AuditScanNoteCount = {
+  found: number;
+  /** The row's expected-units snapshot, or null when the asset was not expected. */
+  expected: number | null;
+};
+
+/** "8 of 14" when there is an expectation, "8 units" when there is not. */
+function describeNoteCount({ found, expected }: AuditScanNoteCount): string {
+  if (expected === null) return `${found} ${found === 1 ? "unit" : "units"}`;
+  return `${found} of ${expected}`;
+}
+
+/**
+ * Creates an automatic note when the count on a quantity-tracked audit row is
+ * changed by scanning the asset again.
+ *
+ * @param args.from - the count before this change, null when it had none
+ * @param args.count - the new count and the row's expectation
+ */
+export async function createAuditCountUpdatedNote({
+  auditSessionId,
+  assetId,
+  organizationId,
+  userId,
+  from,
+  count,
+  tx,
+  prefetchedUser,
+}: {
+  auditSessionId: string;
+  assetId: string;
+  /** Caller's organization. Scopes the asset lookup to prevent cross-org IDOR. */
+  organizationId: string;
+  userId: string;
+  from: number | null;
+  count: AuditScanNoteCount;
+  tx: any; // Prisma transaction client
+  prefetchedUser?: (UserNameFields & { id: string }) | null;
+}) {
+  const [asset, scanner] = await Promise.all([
+    tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
+      where: { id: assetId, organizationId },
+      select: { id: true, title: true },
+    }),
+    prefetchedUser ??
+      tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
+      }),
+  ]);
+
+  if (!asset || !scanner) {
+    return;
+  }
+
+  const assetLink = wrapAssetsWithDataForNote(asset, "counted");
+  const previous = from === null ? "" : ` (was ${from})`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: scanner.id,
+      type: "UPDATE",
+      content: `${wrapUserLinkForNote({
+        ...scanner,
+      })} recounted ${assetLink}: ${describeNoteCount(count)}${previous}.`,
     },
   });
 }

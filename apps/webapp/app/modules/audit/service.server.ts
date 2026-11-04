@@ -1,4 +1,4 @@
-import { AuditAssetStatus } from "@prisma/client";
+import { AssetType, AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type {
@@ -66,7 +66,9 @@ import {
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
   createAssetScanRemovedNote,
+  createAuditCountUpdatedNote,
 } from "./helpers.server";
+import { expectedQuantityFor, MAX_AUDIT_FOUND_QUANTITY } from "./quantity";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetImage } from "../asset/image-resolution";
@@ -248,6 +250,14 @@ export type AuditExpectedAsset = {
   id: string;
   name: string;
   auditAssetId: string;
+  /**
+   * Units expected and counted on this row (see `./quantity.ts`). Both null
+   * for an individual asset; `foundQuantity` null until it is counted.
+   */
+  expectedQuantity: number | null;
+  foundQuantity: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure: string | null;
   auditNotesCount?: number;
   auditImagesCount?: number;
   mainImage?: string | null;
@@ -310,6 +320,37 @@ export type RecordAuditScanInput = {
   organizationId: string;
   /** The scanning device's User-Agent, stored on the asset's scan record */
   userAgent?: string | null;
+  /**
+   * Units the auditor counted, for a quantity-tracked asset. Ignored for
+   * individual assets. On a quantity-tracked asset a scan without a count is
+   * not recorded (the result asks for one, see {@link AuditScanCountRequired})
+   * unless `acceptUncounted` is set. Scanning an already-scanned
+   * quantity-tracked asset again with a count replaces the count.
+   */
+  foundQuantity?: number | null;
+  /**
+   * Records a quantity-tracked scan that carries no count as Found with no
+   * count, instead of asking for one. Reserved for clients that cannot ask:
+   * app builds without the audit count prompt, whose queued scans would
+   * otherwise fail for good.
+   */
+  acceptUncounted?: boolean;
+};
+
+/**
+ * Returned instead of recording, when a quantity-tracked asset is scanned
+ * without a count. Nothing was written; the caller asks the auditor for a
+ * count and scans again with `foundQuantity`.
+ */
+export type AuditScanCountRequired = {
+  status: "count-required";
+  assetId: string;
+  assetTitle: string;
+  /** The row's expected-units snapshot (the asset's stock when there is no row yet). */
+  expectedQuantity: number;
+  /** The count already on the row, null when it has none. */
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
 };
 
 /**
@@ -317,6 +358,7 @@ export type RecordAuditScanInput = {
  * Contains the scan ID and updated audit statistics.
  */
 export type RecordAuditScanResult = {
+  status: "recorded";
   /** The ID of the newly created scan record */
   scanId: string;
   /** The ID of the associated audit asset record, if one exists */
@@ -325,6 +367,10 @@ export type RecordAuditScanResult = {
   foundAssetCount: number;
   /** Updated count of unexpected assets in the audit */
   unexpectedAssetCount: number;
+  /** The row's expected-units snapshot. Null for individual assets. */
+  expectedQuantity: number | null;
+  /** The row's count after this scan. Null for individual assets and uncounted scans. */
+  foundQuantity: number | null;
 };
 
 /**
@@ -356,6 +402,14 @@ export type AuditScanData = {
   assetLocationName: string | null;
   /** True when the scanned asset has since been deleted. */
   assetDeleted: boolean;
+  /**
+   * Units expected and counted on this row (see `./quantity.ts`). Both null
+   * for an individual asset; `foundQuantity` null until it is counted.
+   */
+  expectedQuantity: number | null;
+  foundQuantity: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure: string | null;
 };
 
 export async function createAuditSession(
@@ -393,6 +447,9 @@ export async function createAuditSession(
     select: {
       id: true,
       title: true,
+      type: true,
+      quantity: true,
+      unitOfMeasure: true,
     },
   });
 
@@ -437,6 +494,7 @@ export async function createAuditSession(
           auditSessionId: session.id,
           assetId: asset.id,
           expected: true,
+          expectedQuantity: expectedQuantityFor(asset),
         })),
       });
     }
@@ -513,6 +571,9 @@ export async function createAuditSession(
         id: asset.id,
         name: asset.title,
         auditAssetId: auditAssetMap.get(asset.id) ?? "",
+        expectedQuantity: expectedQuantityFor(asset),
+        foundQuantity: null,
+        unitOfMeasure: asset.unitOfMeasure,
       })),
     } satisfies CreateAuditSessionResult;
   });
@@ -804,6 +865,7 @@ export async function getAuditSessionDetails({
               select: {
                 id: true,
                 title: true,
+                unitOfMeasure: true,
                 mainImage: true,
                 thumbnailImage: true,
                 // Lets the re-sign below tell a lapsed photo URL.
@@ -962,6 +1024,9 @@ export async function getAuditSessionDetails({
           id: auditAsset.assetId,
           name: auditAsset.asset?.title ?? "",
           auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
+          expectedQuantity: auditAsset.expectedQuantity,
+          foundQuantity: auditAsset.foundQuantity,
+          unitOfMeasure: auditAsset.asset?.unitOfMeasure ?? null,
           auditNotesCount: auditAsset._count?.notes ?? 0,
           auditImagesCount: auditAsset._count?.images ?? 0,
           mainImage: hasImage ? image.fullUrl : null,
@@ -1156,6 +1221,8 @@ export async function getAssetsForAuditSession({
         assetId: true,
         expected: true,
         status: true,
+        expectedQuantity: true,
+        foundQuantity: true,
         // why: so the overview row can SAY it holds evidence. The notes and
         // photos were always reachable — via the Activity feed, or by opening
         // a row on the off-chance — but nothing in the assets table indicated
@@ -1184,6 +1251,8 @@ export async function getAssetsForAuditSession({
           auditAssetId: aa.id,
           expected: aa.expected,
           auditStatus: aa.status,
+          expectedQuantity: aa.expectedQuantity,
+          foundQuantity: aa.foundQuantity,
           auditNotesCount: aa._count.notes,
           auditImagesCount: aa._count.images,
         },
@@ -1248,6 +1317,7 @@ export async function getAssetsForAuditSession({
       select: {
         id: true,
         title: true,
+        unitOfMeasure: true,
         // Surfaced so the audit row can flag an archived asset with the
         // "Archived" badge (issue #382).
         archivedAt: true,
@@ -1388,9 +1458,16 @@ function isAuditAssetFkViolation(cause: unknown): boolean {
  */
 export async function recordAuditScan(
   input: RecordAuditScanInput
-): Promise<RecordAuditScanResult> {
-  const { auditSessionId, qrId, assetId, userId, organizationId, userAgent } =
-    input;
+): Promise<RecordAuditScanResult | AuditScanCountRequired> {
+  const {
+    auditSessionId,
+    qrId,
+    assetId,
+    userId,
+    organizationId,
+    userAgent,
+    acceptUncounted = false,
+  } = input;
 
   try {
     // Verify the audit session exists and belongs to the organization
@@ -1435,6 +1512,9 @@ export async function recordAuditScan(
           title: true,
           organizationId: true,
           sequentialId: true,
+          type: true,
+          quantity: true,
+          unitOfMeasure: true,
         },
       }),
     ]);
@@ -1471,6 +1551,31 @@ export async function recordAuditScan(
       });
     }
 
+    const isQuantityAsset = scannedAsset.type === AssetType.QUANTITY_TRACKED;
+    // Individual assets count as one: a count sent for one is ignored.
+    const count = isQuantityAsset
+      ? parseFoundQuantity(input.foundQuantity, { auditSessionId, assetId })
+      : null;
+    // The snapshot a row gets when it has none yet: a new unexpected row, or
+    // an expected row created before audits counted units.
+    const stockSnapshot = expectedQuantityFor(scannedAsset);
+
+    if (isQuantityAsset && count === null && !acceptUncounted) {
+      const row = await db.auditAsset.findUnique({
+        where: { auditSessionId_assetId: { auditSessionId, assetId } },
+        select: { expectedQuantity: true, foundQuantity: true },
+      });
+
+      return {
+        status: "count-required",
+        assetId,
+        assetTitle: scannedAsset.title,
+        expectedQuantity: row?.expectedQuantity ?? stockSnapshot ?? 0,
+        foundQuantity: row?.foundQuantity ?? null,
+        unitOfMeasure: scannedAsset.unitOfMeasure,
+      };
+    }
+
     // Check if this asset was already scanned in this audit
     const existingScan = await db.auditScan.findFirst({
       where: {
@@ -1480,16 +1585,37 @@ export async function recordAuditScan(
       select: {
         id: true,
         auditAssetId: true,
+        auditAsset: {
+          select: { expectedQuantity: true, foundQuantity: true },
+        },
       },
     });
 
     if (existingScan) {
+      // A second scan of a quantity-tracked asset carries a recount.
+      if (isQuantityAsset && count !== null && existingScan.auditAssetId) {
+        return await updateAuditScanCount({
+          session,
+          auditAssetId: existingScan.auditAssetId,
+          scanId: existingScan.id,
+          assetId,
+          organizationId,
+          userId,
+          count,
+          stockSnapshot,
+          prefetchedUser: scannerUser,
+        });
+      }
+
       // Already scanned, just return current counts
       return {
+        status: "recorded",
         scanId: existingScan.id,
         auditAssetId: existingScan.auditAssetId,
         foundAssetCount: session.foundAssetCount,
         unexpectedAssetCount: session.unexpectedAssetCount,
+        expectedQuantity: existingScan.auditAsset?.expectedQuantity ?? null,
+        foundQuantity: existingScan.auditAsset?.foundQuantity ?? null,
       };
     }
 
@@ -1644,7 +1770,12 @@ export async function recordAuditScan(
         // the authority on whether this asset belongs to the audit.
         let auditAssetRow = await tx.auditAsset.findUnique({
           where: { auditSessionId_assetId: { auditSessionId, assetId } },
-          select: { id: true, expected: true, status: true },
+          select: {
+            id: true,
+            expected: true,
+            status: true,
+            expectedQuantity: true,
+          },
         });
 
         // Session-count movements for this scan, applied as relative
@@ -1683,6 +1814,8 @@ export async function recordAuditScan(
                 status: AuditAssetStatus.UNEXPECTED,
                 scannedAt: new Date(),
                 scannedById: userId,
+                expectedQuantity: stockSnapshot,
+                foundQuantity: count,
               },
             ],
             skipDuplicates: true,
@@ -1695,12 +1828,23 @@ export async function recordAuditScan(
           // now that row is committed and visible to this statement.
           auditAssetRow = await tx.auditAsset.findUniqueOrThrow({
             where: { auditSessionId_assetId: { auditSessionId, assetId } },
-            select: { id: true, expected: true, status: true },
+            select: {
+              id: true,
+              expected: true,
+              status: true,
+              expectedQuantity: true,
+            },
           });
         }
 
         const isExpected = auditAssetRow.expected;
         const auditAssetId = auditAssetRow.id;
+        const expectedQuantity =
+          auditAssetRow.expectedQuantity ?? stockSnapshot;
+        // Count columns written with the scan. Individual rows keep both null.
+        const countData = isQuantityAsset
+          ? { expectedQuantity, foundQuantity: count }
+          : {};
 
         if (insertedUnexpectedRow) {
           // We created the row, already UNEXPECTED and stamped with this scan.
@@ -1729,6 +1873,7 @@ export async function recordAuditScan(
               status: AuditAssetStatus.FOUND,
               scannedAt: new Date(),
               scannedById: userId,
+              ...countData,
             },
           });
 
@@ -1747,6 +1892,7 @@ export async function recordAuditScan(
               status: AuditAssetStatus.UNEXPECTED,
               scannedAt: new Date(),
               scannedById: userId,
+              ...countData,
             },
           });
 
@@ -1798,11 +1944,18 @@ export async function recordAuditScan(
           organizationId,
           userId,
           isExpected,
+          count:
+            count === null
+              ? null
+              : {
+                  found: count,
+                  expected: isExpected ? expectedQuantity : null,
+                },
           tx,
           prefetchedUser: scannerUser,
         });
 
-        // Activity event — AUDIT_ASSET_SCANNED.
+        // Activity event: AUDIT_ASSET_SCANNED.
         await recordEvent(
           {
             organizationId,
@@ -1813,16 +1966,21 @@ export async function recordAuditScan(
             auditSessionId,
             auditAssetId,
             assetId,
-            meta: { isExpected },
+            meta: isQuantityAsset
+              ? { isExpected, expectedQuantity, foundQuantity: count }
+              : { isExpected },
           },
           tx
         );
 
         return {
+          status: "recorded" as const,
           scanId: scan.id,
           auditAssetId,
           foundAssetCount: updatedSession.foundAssetCount,
           unexpectedAssetCount: updatedSession.unexpectedAssetCount,
+          expectedQuantity: isQuantityAsset ? expectedQuantity : null,
+          foundQuantity: count,
         };
       },
       { timeout: 15000 }
@@ -1872,6 +2030,144 @@ export async function recordAuditScan(
       label,
     });
   }
+}
+
+/**
+ * Reads the count sent with a scan.
+ *
+ * @returns the count, or null when none was sent
+ * @throws {ShelfError} 400 when it is not a whole number from 0 to
+ *   {@link MAX_AUDIT_FOUND_QUANTITY}
+ */
+function parseFoundQuantity(
+  value: number | null | undefined,
+  additionalData: { auditSessionId: string; assetId: string }
+): number | null {
+  if (value === null || value === undefined) return null;
+  if (
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > MAX_AUDIT_FOUND_QUANTITY
+  ) {
+    throw new ShelfError({
+      cause: null,
+      message: `The count must be a whole number from 0 to ${MAX_AUDIT_FOUND_QUANTITY}.`,
+      additionalData: { ...additionalData, foundQuantity: value },
+      status: 400,
+      shouldBeCaptured: false,
+      label,
+    });
+  }
+  return value;
+}
+
+/**
+ * Replaces the count on an already-scanned quantity-tracked audit row: the
+ * auditor scanned the asset again to correct it. The row's status and the
+ * session's asset counters do not move; only `foundQuantity` changes, with a
+ * note and an AUDIT_UPDATED event for the field.
+ *
+ * @throws {ShelfError} 400 when the audit is no longer live
+ */
+async function updateAuditScanCount({
+  session,
+  auditAssetId,
+  scanId,
+  assetId,
+  organizationId,
+  userId,
+  count,
+  stockSnapshot,
+  prefetchedUser,
+}: {
+  session: {
+    id: string;
+    status: AuditStatus;
+    foundAssetCount: number;
+    unexpectedAssetCount: number;
+  };
+  auditAssetId: string;
+  scanId: string;
+  assetId: string;
+  organizationId: string;
+  userId: string;
+  count: number;
+  /** Snapshot for a row that has none yet. */
+  stockSnapshot: number | null;
+  prefetchedUser: (UserNameFields & { id: string }) | null;
+}): Promise<RecordAuditScanResult> {
+  // A finished audit is a reported record; its counts stay as they were.
+  if (
+    session.status !== AuditStatus.PENDING &&
+    session.status !== AuditStatus.ACTIVE
+  ) {
+    throw new ShelfError({
+      cause: null,
+      message: "This audit is no longer live, so its counts cannot be changed.",
+      additionalData: { auditSessionId: session.id, status: session.status },
+      status: 400,
+      shouldBeCaptured: false,
+      label,
+    });
+  }
+
+  return db.$transaction(async (tx) => {
+    const row = await tx.auditAsset.findFirstOrThrow({
+      where: { id: auditAssetId, auditSessionId: session.id },
+      select: { expected: true, expectedQuantity: true, foundQuantity: true },
+    });
+    const expectedQuantity = row.expectedQuantity ?? stockSnapshot;
+
+    if (row.foundQuantity !== count || row.expectedQuantity === null) {
+      await tx.auditAsset.update({
+        where: { id: auditAssetId },
+        data: { foundQuantity: count, expectedQuantity },
+      });
+    }
+
+    if (row.foundQuantity !== count) {
+      await createAuditCountUpdatedNote({
+        auditSessionId: session.id,
+        assetId,
+        organizationId,
+        userId,
+        from: row.foundQuantity,
+        count: {
+          found: count,
+          expected: row.expected ? expectedQuantity : null,
+        },
+        tx,
+        prefetchedUser,
+      });
+
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "AUDIT_UPDATED",
+          entityType: "AUDIT",
+          entityId: session.id,
+          auditSessionId: session.id,
+          auditAssetId,
+          assetId,
+          field: "foundQuantity",
+          fromValue: row.foundQuantity,
+          toValue: count,
+        },
+        tx
+      );
+    }
+
+    return {
+      status: "recorded" as const,
+      scanId,
+      auditAssetId,
+      foundAssetCount: session.foundAssetCount,
+      unexpectedAssetCount: session.unexpectedAssetCount,
+      expectedQuantity,
+      foundQuantity: count,
+    };
+  });
 }
 
 /** Arguments for {@link removeAuditScan}. */
@@ -1978,7 +2274,12 @@ export async function removeAuditScan(
         await Promise.all([
           tx.auditAsset.update({
             where: { id: existingScan.auditAsset.id },
-            data: { status: "MISSING", scannedAt: null, scannedById: null },
+            data: {
+              status: "MISSING",
+              scannedAt: null,
+              scannedById: null,
+              foundQuantity: null,
+            },
           }),
           tx.auditScan.delete({ where: { id: existingScan.id } }),
         ]);
@@ -2107,6 +2408,7 @@ export async function getAuditScans({
           select: {
             id: true,
             title: true,
+            unitOfMeasure: true,
             assetLocations: {
               select: {
                 location: {
@@ -2122,6 +2424,8 @@ export async function getAuditScans({
           select: {
             id: true,
             expected: true,
+            expectedQuantity: true,
+            foundQuantity: true,
             _count: {
               select: {
                 notes: {
@@ -2147,6 +2451,8 @@ export async function getAuditScans({
       {
         id: string;
         expected: boolean;
+        expectedQuantity: number | null;
+        foundQuantity: number | null;
         _count: { notes: number; images: number };
       }
     >();
@@ -2161,6 +2467,8 @@ export async function getAuditScans({
           id: true,
           assetId: true,
           expected: true,
+          expectedQuantity: true,
+          foundQuantity: true,
           _count: {
             select: {
               notes: {
@@ -2177,6 +2485,8 @@ export async function getAuditScans({
           auditAssetsByAssetId.set(aa.assetId, {
             id: aa.id,
             expected: aa.expected,
+            expectedQuantity: aa.expectedQuantity,
+            foundQuantity: aa.foundQuantity,
             _count: aa._count,
           });
         }
@@ -2226,6 +2536,9 @@ export async function getAuditScans({
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
         assetLocationName: getPrimaryLocation(scan.asset)?.name ?? null,
+        expectedQuantity: auditAsset?.expectedQuantity ?? null,
+        foundQuantity: auditAsset?.foundQuantity ?? null,
+        unitOfMeasure: scan.asset?.unitOfMeasure ?? null,
       };
     });
   } catch (cause) {
@@ -3235,12 +3548,22 @@ export async function addAssetsToAudit({
           tx
         );
 
+        const newAssets = await tx.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: reads the unit snapshot of assets already proven to be in the org; an archived asset added to an audit is counted like any other
+          where: { id: { in: newAssetIds }, organizationId },
+          select: { id: true, type: true, quantity: true },
+        });
+        const expectedQuantityById = new Map(
+          newAssets.map((asset) => [asset.id, expectedQuantityFor(asset)])
+        );
+
         await tx.auditAsset.createMany({
           data: newAssetIds.map((assetId) => ({
             auditSessionId: auditId,
             assetId,
             expected: true,
             status: AuditAssetStatus.PENDING,
+            expectedQuantity: expectedQuantityById.get(assetId) ?? null,
           })),
         });
 

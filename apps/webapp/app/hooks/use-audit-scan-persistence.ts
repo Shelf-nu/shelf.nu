@@ -1,10 +1,29 @@
 import { useEffect, useReducer } from "react";
+import { AssetType } from "@prisma/client";
 import { type FetcherWithComponents } from "react-router";
 import type {
+  AuditCount,
   AuditSessionInfo,
   AuditScannedItem,
   ScanListItems,
 } from "~/atoms/qr-scanner";
+import type { AuditScanCountRequired } from "~/modules/audit/service.server";
+import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+
+/**
+ * Whether a scanned item is a quantity-tracked asset, and so needs a count
+ * before it is saved. Restored rows carry no asset type, so a count entry
+ * (seeded from the audit's rows) also marks one.
+ */
+export function isQuantityScan(
+  data: Pick<AssetFromQr, "id"> & { type?: unknown },
+  auditCounts: Record<string, AuditCount>
+): boolean {
+  return (
+    auditCounts[data.id] !== undefined ||
+    data.type === AssetType.QUANTITY_TRACKED
+  );
+}
 
 /**
  * Props for the audit scan persistence hook.
@@ -24,6 +43,13 @@ type UseAuditScanPersistenceProps = {
   pendingPersistsRef: { current: Map<string, string> };
   /** Ref to prevent persistence during initial restoration */
   isRestoringRef: { current: boolean };
+  /**
+   * Unit counts keyed by assetId. A quantity-tracked scan is held back until
+   * its entry has a `foundQuantity`, then sent with it.
+   */
+  auditCounts: Record<string, AuditCount>;
+  /** Called when the server refuses a scan because it needs a count. */
+  onCountRequired: (request: AuditScanCountRequired) => void;
 };
 
 /**
@@ -54,6 +80,8 @@ export function useAuditScanPersistence({
   persistedItemsRef,
   pendingPersistsRef,
   isRestoringRef,
+  auditCounts,
+  onCountRequired,
 }: UseAuditScanPersistenceProps) {
   // Bumped after we mutate `persistedItemsRef` so the consuming component
   // re-renders and any derived value (e.g. pendingScanCount that reads
@@ -107,6 +135,13 @@ export function useAuditScanPersistence({
         continue;
       }
 
+      // A quantity-tracked scan waits for the count dialog.
+      const isQuantity = isQuantityScan(item.data, auditCounts);
+      const foundQuantity = auditCounts[assetId]?.foundQuantity ?? null;
+      if (isQuantity && foundQuantity === null) {
+        continue;
+      }
+
       // Mark as pending
       pendingPersistsRef.current.set(assetId, qrId);
 
@@ -117,6 +152,9 @@ export function useAuditScanPersistence({
       formData.append("qrId", qrId);
       formData.append("assetId", assetId);
       formData.append("isExpected", String(isExpected));
+      if (isQuantity && foundQuantity !== null) {
+        formData.append("foundQuantity", String(foundQuantity));
+      }
 
       // Submit only one item per effect run — next render will handle the rest
       void scanPersistFetcher.submit(formData, {
@@ -133,6 +171,7 @@ export function useAuditScanPersistence({
     persistedItemsRef,
     pendingPersistsRef,
     isRestoringRef,
+    auditCounts,
   ]);
 
   /**
@@ -143,9 +182,15 @@ export function useAuditScanPersistence({
     if (scanPersistFetcher.state === "idle" && scanPersistFetcher.data) {
       const data = scanPersistFetcher.data as
         | { success?: boolean; data?: { scanId?: string } }
+        | (AuditScanCountRequired & { success: false })
         | { error?: string };
 
-      if ("success" in data && data.success) {
+      if ("status" in data && data.status === "count-required") {
+        // Nothing was saved; the scan goes back to waiting for a count.
+        pendingPersistsRef.current.clear();
+        bumpPersistedVersion();
+        onCountRequired(data);
+      } else if ("success" in data && data.success) {
         // Mark all pending as persisted
         pendingPersistsRef.current.forEach((_qrId, assetId) => {
           persistedItemsRef.current.add(assetId);
@@ -167,5 +212,6 @@ export function useAuditScanPersistence({
     scanPersistFetcher.data,
     persistedItemsRef,
     pendingPersistsRef,
+    onCountRequired,
   ]);
 }

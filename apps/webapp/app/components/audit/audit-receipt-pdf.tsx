@@ -4,12 +4,14 @@ import type { AuditStatus, AuditAssetStatus } from "@prisma/client";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   auditAssetStatusLabel,
+  auditCountLabel,
   isAuditCompleted,
 } from "@shelf/labels";
 import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
+import { totalAuditUnits } from "~/modules/audit/quantity";
 import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
@@ -39,10 +41,11 @@ import When from "../when/when";
 const ASSET_TABLE_COLUMNS = [
   { name: "number", percent: 5 },
   { name: "image", percent: 9 },
-  { name: "name", percent: 15 },
+  { name: "name", percent: 12 },
   { name: "category", percent: 16 },
-  { name: "location", percent: 14 },
-  { name: "status", percent: 14 },
+  { name: "location", percent: 10 },
+  { name: "status", percent: 11 },
+  { name: "quantity", percent: 10 },
   { name: "code", percent: PDF_CODE_COLUMN_PERCENT },
 ] as const;
 
@@ -215,6 +218,16 @@ export const AuditPDFContent = ({
   // once the audit is complete.
   const auditIsCompleted = isAuditCompleted(session);
   const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
+
+  // Units across the quantity-tracked rows; null (no units line) when the
+  // audit holds none.
+  const unitTotals = totalAuditUnits(
+    assets.map((asset) => ({
+      expected: asset.auditData.expected,
+      expectedQuantity: asset.auditData.expectedQuantity,
+      foundQuantity: asset.auditData.foundQuantity,
+    }))
+  );
 
   // Format creator name from user data or fallback to email
   const creatorName =
@@ -427,6 +440,18 @@ export const AuditPDFContent = ({
             </div>
           </div>
         </div>
+        <When truthy={!!unitTotals}>
+          <p className="mt-2 text-sm text-gray-700">
+            Units counted: {unitTotals?.foundUnits} of{" "}
+            {unitTotals?.expectedUnits} across {unitTotals?.quantityRows}{" "}
+            quantity-tracked{" "}
+            {unitTotals?.quantityRows === 1 ? "asset" : "assets"}
+            {unitTotals && unitTotals.uncountedRows > 0
+              ? `, ${unitTotals.uncountedRows} not counted`
+              : ""}
+            .
+          </p>
+        </When>
       </section>
 
       {/*
@@ -562,6 +587,11 @@ export const AuditPDFContent = ({
                 <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Status
                 </th>
+                {/* Units of quantity-tracked assets; empty for individual
+                    assets, which count as one. */}
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
+                  Quantity
+                </th>
                 {/* Wide enough for an 11-character Code 128 picture at 0.25mm
                     per bar, with the code text under it. */}
                 <th className="border border-gray-300 p-2.5 text-left text-xs font-medium">
@@ -625,6 +655,16 @@ export const AuditPDFContent = ({
                           auditIsCompleted
                         )}
                       />
+                    </td>
+                    <td className="break-words border border-gray-300 px-1.5 py-2.5 align-top text-xs">
+                      {auditCountLabel(
+                        {
+                          status: asset.auditData.auditStatus ?? "PENDING",
+                          expectedQuantity: asset.auditData.expectedQuantity,
+                          foundQuantity: asset.auditData.foundQuantity,
+                        },
+                        asset.unitOfMeasure
+                      )}
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
                       <div className="flex flex-col items-start gap-1">

@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  auditCountLabel,
   ASSET_BOOKING_PSEUDO_STATUS_LABELS,
   ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
@@ -632,4 +633,49 @@ test("a withheld custodian is a name, never the empty answer", () => {
   // must stay a non-empty string a row can carry in the name slot.
   assert.equal(typeof WITHHELD_CUSTODIAN_NAME, "string");
   assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
+});
+
+test("auditCountLabel: individual assets get no label", () => {
+  assert.equal(
+    auditCountLabel({ status: "FOUND", expectedQuantity: null }),
+    null
+  );
+});
+
+test("auditCountLabel: words each state of a quantity row", () => {
+  const row = { expectedQuantity: 14, foundQuantity: 8 };
+  assert.equal(
+    auditCountLabel({ ...row, status: "FOUND" }, "pcs"),
+    "8 of 14 pcs"
+  );
+  assert.equal(
+    auditCountLabel({ ...row, status: "UNEXPECTED" }, "pcs"),
+    "8 pcs counted"
+  );
+  assert.equal(
+    auditCountLabel({
+      status: "FOUND",
+      expectedQuantity: 14,
+      foundQuantity: null,
+    }),
+    "Not counted"
+  );
+  assert.equal(
+    auditCountLabel({ status: "MISSING", expectedQuantity: 14 }, "pcs"),
+    "0 of 14 pcs"
+  );
+  assert.equal(
+    auditCountLabel({ status: "PENDING", expectedQuantity: 14 }),
+    "14 units expected"
+  );
+});
+
+test("auditCountLabel: the default unit literal is no unit, zero is a count", () => {
+  assert.equal(
+    auditCountLabel(
+      { status: "FOUND", expectedQuantity: 14, foundQuantity: 0 },
+      "units"
+    ),
+    "0 of 14"
+  );
 });

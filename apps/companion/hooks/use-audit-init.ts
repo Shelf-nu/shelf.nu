@@ -56,6 +56,14 @@ export type ScannedItem = {
    * moving between tabs should not have to switch modes. Null when absent.
    */
   thumbnailImage?: string | null;
+  /**
+   * Units expected and counted, for a quantity-tracked asset. Both absent for
+   * an individual asset. `foundQuantity` is null on a scan made by a build
+   * that did not ask for a count.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
 
 export type ScanQueueEntry = {
@@ -63,6 +71,8 @@ export type ScanQueueEntry = {
   qrId: string;
   assetId: string;
   isExpected: boolean;
+  /** Units counted, for a quantity-tracked asset. */
+  foundQuantity?: number;
   retryCount?: number;
 };
 
@@ -185,6 +195,9 @@ export function useAuditInit({
             scan.assetLocationName ?? expected?.locationName ?? null,
           thumbnailImage:
             expected?.thumbnailImage ?? expected?.mainImage ?? null,
+          expectedQuantity: scan.expectedQuantity ?? null,
+          foundQuantity: scan.foundQuantity ?? null,
+          unitOfMeasure: scan.unitOfMeasure ?? null,
         });
       }
       scannedAssetIdsRef.current = scannedIds;
@@ -226,8 +239,12 @@ export function useAuditInit({
         // Exclude anything the server already has: a crash after recordAuditScan
         // succeeded but before the queue-removal snapshot persisted could leave a
         // stale entry on disk; re-submitting it would double-record the scan.
+        // A queued count is kept even when the server has the scan: it is
+        // a recount, and sending the same count again changes nothing.
         const queuedForSync = [...pendingQueue, ...failedQueue].filter(
-          (entry) => !serverScannedIds.has(entry.assetId)
+          (entry) =>
+            !serverScannedIds.has(entry.assetId) ||
+            entry.foundQuantity !== undefined
         );
 
         if (recoveredItems.length > 0 || queuedForSync.length > 0) {
@@ -273,8 +290,14 @@ export function useAuditInit({
                   const recoveredIds = new Set(
                     recoveredItems.map((i) => i.assetId)
                   );
+                  // A recount of a scan the server already has keeps its
+                  // restored row; it needs no second one.
                   const queuedOnlyItems: ScannedItem[] = queuedForSync
-                    .filter((e) => !recoveredIds.has(e.assetId))
+                    .filter(
+                      (e) =>
+                        !recoveredIds.has(e.assetId) &&
+                        !serverScannedIds.has(e.assetId)
+                    )
                     .map((e) => ({
                       assetId: e.assetId,
                       name:

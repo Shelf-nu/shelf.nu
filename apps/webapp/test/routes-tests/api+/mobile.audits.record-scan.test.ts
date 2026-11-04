@@ -112,6 +112,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
 
   it("should record a scan and return scan data with counts", async () => {
     (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      expectedQuantity: null,
+      foundQuantity: null,
       scanId: "scan-1",
       auditAssetId: "audit-asset-1",
       foundAssetCount: 5,
@@ -145,6 +148,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
       userId: "user-1",
       organizationId: "org-1",
       userAgent: null,
+      foundQuantity: undefined,
+      // A body without a count comes from a build with no count prompt.
+      acceptUncounted: true,
     });
 
     // why: an ADMIN is not limited to assigned audits, so admins can scan
@@ -246,6 +252,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
       mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
     );
     (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      expectedQuantity: null,
+      foundQuantity: null,
       scanId: "scan-1",
       auditAssetId: "audit-asset-1",
       foundAssetCount: 1,
@@ -265,5 +274,61 @@ describe("POST /api/mobile/audits/record-scan", () => {
     expect(requireAuditAssignee).toHaveBeenCalledWith(
       expect.objectContaining({ assignedOnly: false })
     );
+  });
+
+  it("forwards a count and returns the row's counts", async () => {
+    (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-1",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+          isExpected: true,
+          foundQuantity: 8,
+        }),
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 8, acceptUncounted: false })
+    );
+    const body = await (result as unknown as Response).json();
+    expect(body).toMatchObject({
+      success: true,
+      scanId: "scan-1",
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+  });
+
+  it("refuses a negative count before reaching the service", async () => {
+    (makeShelfError as any).mockImplementation((cause: any) => ({
+      message: cause?.message ?? "Invalid",
+      status: cause?.status ?? 400,
+    }));
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+          foundQuantity: -2,
+        }),
+      })
+    );
+
+    expect(recordAuditScan).not.toHaveBeenCalled();
+    expect((result as unknown as Response).status).toBeGreaterThanOrEqual(400);
   });
 });

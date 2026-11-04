@@ -10,9 +10,12 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useFetcher } from "react-router";
 import { z } from "zod";
 import {
+  auditCountPromptAtom,
+  auditCountsAtom,
   auditSessionAtom,
   clearScannedItemsAtom,
   auditAssetMetaAtom,
+  mergeAuditCountsAtom,
   lastDuplicateScanAtom,
   removeMultipleScannedItemsAtom,
   removeScannedItemAtom,
@@ -37,6 +40,8 @@ import { ScanItemGroup } from "~/components/scanner/drawer/scan-item-group";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
+import type { AuditUnitTotals } from "~/modules/audit/quantity";
+import { totalAuditUnits } from "~/modules/audit/quantity";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import {
   countDeletedExpectedScans,
@@ -145,6 +150,8 @@ type AuditDrawerTitleProps = {
   unexpectedCount: number;
   /** Count of resolved scans still being persisted to the database. */
   pendingScanCount: number;
+  /** Unit totals of the expected quantity-tracked assets, null when there are none. */
+  units: AuditUnitTotals | null;
 };
 
 /**
@@ -161,6 +168,7 @@ function AuditDrawerTitle({
   totalExpected,
   unexpectedCount,
   pendingScanCount,
+  units,
 }: AuditDrawerTitleProps) {
   return (
     <div className="text-right">
@@ -168,6 +176,12 @@ function AuditDrawerTitle({
         Audit: {contextName} • {foundCount}/{totalExpected} found
         {unexpectedCount > 0 && ` • ${unexpectedCount} unexpected`}
       </span>
+      {units ? (
+        <span className="block text-xs text-gray-500">
+          Units counted: {units.foundUnits}/{units.expectedUnits}
+          {units.uncountedRows > 0 && ` • ${units.uncountedRows} not counted`}
+        </span>
+      ) : null}
       {pendingScanCount > 0 ? (
         <span className="flex items-center gap-1.5 text-xs text-gray-500">
           Saving scans: {pendingScanCount} remaining
@@ -338,6 +352,9 @@ export default function AuditDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duplicateScan]);
   const auditAssetMeta = useAtomValue(auditAssetMetaAtom);
+  const auditCounts = useAtomValue(auditCountsAtom);
+  const mergeAuditCounts = useSetAtom(mergeAuditCountsAtom);
+  const setCountPrompt = useSetAtom(auditCountPromptAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
@@ -428,6 +445,42 @@ export default function AuditDrawer({
     ]
   );
 
+  // Units across the expected quantity-tracked assets. A row counts as found
+  // only once scanned here, so a count left from a removed scan is ignored.
+  const units = useMemo(
+    () =>
+      totalAuditUnits(
+        expectedAssets.map((asset) => ({
+          expected: true,
+          expectedQuantity: auditCounts[asset.id]?.expectedQuantity ?? null,
+          foundQuantity: scannedAssetIds.has(asset.id)
+            ? auditCounts[asset.id]?.foundQuantity ?? null
+            : null,
+        }))
+      ),
+    [expectedAssets, auditCounts, scannedAssetIds]
+  );
+
+  /** Opens the count dialog to correct a scanned quantity-tracked row. */
+  const handleEditCount = useCallback(
+    (qrId: string) => {
+      const assetId = items[qrId]?.data?.id;
+      const count = assetId ? auditCounts[assetId] : undefined;
+      if (!assetId || !count) return;
+      const data = items[qrId]?.data;
+      setCountPrompt({
+        assetId,
+        qrId,
+        assetTitle: data && "title" in data ? data.title : "Asset",
+        expectedQuantity: count.expectedQuantity,
+        foundQuantity: count.foundQuantity,
+        unitOfMeasure: count.unitOfMeasure,
+        mode: "recount",
+      });
+    },
+    [items, auditCounts, setCountPrompt]
+  );
+
   const formData = useMemo(() => {
     if (!auditSession) return {};
     return {
@@ -450,6 +503,7 @@ export default function AuditDrawer({
         totalExpected={stats.totalExpected}
         unexpectedCount={stats.unexpectedCount}
         pendingScanCount={pendingScanCount}
+        units={units}
       />
     );
   }, [
@@ -457,6 +511,7 @@ export default function AuditDrawer({
     contextName,
     auditSession,
     pendingScanCount,
+    units,
     stats.foundCount,
     stats.totalExpected,
     stats.unexpectedCount,
@@ -518,11 +573,27 @@ export default function AuditDrawer({
         });
 
         onScanRemoved?.(scannedItem.data.id);
+
+        // The server clears the row's count with the scan.
+        const count = auditCounts[scannedItem.data.id];
+        if (count) {
+          mergeAuditCounts({
+            [scannedItem.data.id]: { ...count, foundQuantity: null },
+          });
+        }
       }
 
       removeItem(qrId);
     },
-    [auditSession, items, onScanRemoved, removeItem, removeScanFetcher]
+    [
+      auditSession,
+      auditCounts,
+      items,
+      mergeAuditCounts,
+      onScanRemoved,
+      removeItem,
+      removeScanFetcher,
+    ]
   );
 
   /**
@@ -542,6 +613,8 @@ export default function AuditDrawer({
       expectedAssetIds,
       auditAssetMeta,
       showLocation,
+      auditCounts,
+      onEditCount: handleEditCount,
     };
     const scannedCount = Object.keys(items).length;
     const pendingCount = getPendingAuditAssets({

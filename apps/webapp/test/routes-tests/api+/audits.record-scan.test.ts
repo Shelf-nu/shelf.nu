@@ -78,6 +78,9 @@ describe("POST /api/audits/record-scan", () => {
     vi.clearAllMocks();
     requireAuditAssignee.mockResolvedValue(undefined);
     recordAuditScan.mockResolvedValue({
+      status: "recorded",
+      expectedQuantity: null,
+      foundQuantity: null,
       scanId: "scan-1",
       auditAssetId: "audit-asset-1",
       foundAssetCount: 5,
@@ -165,6 +168,49 @@ describe("POST /api/audits/record-scan", () => {
       userId: expect.any(String),
       organizationId: "org-1",
       userAgent: null,
+      foundQuantity: undefined,
     });
+  });
+
+  it("forwards a typed count, and keeps zero as a count", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-abc",
+        assetId: "pool-1",
+        foundQuantity: "0",
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 0 })
+    );
+  });
+
+  it("answers count-required without success so the scanner asks for a count", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+    recordAuditScan.mockResolvedValue({
+      status: "count-required",
+      assetId: "pool-1",
+      assetTitle: "Sandbag",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    });
+
+    const response = await callAction();
+
+    expect(JSON.stringify(response)).toContain('"success":false');
+    expect(JSON.stringify(response)).toContain('"status":"count-required"');
   });
 });

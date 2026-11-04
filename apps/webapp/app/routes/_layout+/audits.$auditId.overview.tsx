@@ -34,6 +34,7 @@ import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import { getAuditImages } from "~/modules/audit/image.service.server";
+import { totalAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
@@ -171,6 +172,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title: `${session.name} · Overview` };
 
+    // Unit totals across the audit's quantity-tracked rows; null when it has
+    // none, and the statistics then show asset counts only.
+    const unitTotals = totalAuditUnits(
+      await db.auditAsset.findMany({
+        where: { auditSessionId: auditId, expectedQuantity: { not: null } },
+        select: { expected: true, expectedQuantity: true, foundQuantity: true },
+      })
+    );
+
     // Only the creator or a caller who manages others' audits can remove
     // assets, and only from PENDING audits
     const isCreator = session.createdById === userId;
@@ -187,6 +197,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         generalImages,
         assetImages,
         conditionNotes,
+        unitTotals,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -349,6 +360,7 @@ export default function AuditOverview() {
     assetImages,
     conditionNotes,
     canRemoveAssets,
+    unitTotals,
   } = useLoaderData<typeof loader>();
 
   /**
@@ -468,6 +480,20 @@ export default function AuditOverview() {
               isActive={currentFilter === "UNEXPECTED"}
             />
           </div>
+          {unitTotals ? (
+            <p className="mt-3 text-sm text-gray-600">
+              Units counted:{" "}
+              <span className="font-medium text-gray-900">
+                {unitTotals.foundUnits} of {unitTotals.expectedUnits}
+              </span>{" "}
+              across {unitTotals.quantityRows} quantity-tracked{" "}
+              {unitTotals.quantityRows === 1 ? "asset" : "assets"}
+              {unitTotals.uncountedRows > 0
+                ? `, ${unitTotals.uncountedRows} not counted yet`
+                : ""}
+              .
+            </p>
+          ) : null}
         </div>
 
         {/* Right Column: Audit Information */}

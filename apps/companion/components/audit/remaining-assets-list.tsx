@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import { auditCountLabel } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -24,6 +25,9 @@ export type RemainingAsset = {
   mainImage: string | null;
   locationName: string | null;
   categoryName: string | null;
+  /** Units expected, for a quantity-tracked asset; null otherwise. */
+  expectedQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
 
 type RemainingAssetsListProps = {
@@ -78,6 +82,17 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
             <Text style={styles.remainingItemName} numberOfLines={1}>
               {item.name}
             </Text>
+            {typeof item.expectedQuantity === "number" ? (
+              <Text style={styles.remainingMeta} numberOfLines={1}>
+                {auditCountLabel(
+                  {
+                    status: "PENDING",
+                    expectedQuantity: item.expectedQuantity,
+                  },
+                  item.unitOfMeasure
+                )}
+              </Text>
+            ) : null}
             {(item.locationName || item.categoryName) && (
               <View style={styles.remainingMetaRow}>
                 {item.locationName ? (

@@ -11,7 +11,7 @@ import {
   recordAuditScan,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -31,8 +31,18 @@ import {
  *   - auditSessionId: string — the audit session being scanned
  *   - qrId: string — the QR code or barcode value that was scanned
  *   - assetId: string — the resolved asset ID
- *   - isExpected: boolean (optional, ignored) — accepted so shipped builds keep
+ *   - isExpected: boolean (optional, ignored): accepted so shipped builds keep
  *     working; the server derives expectedness from the audit's own rows
+ *   - foundQuantity: integer (optional): units counted, for a quantity-tracked
+ *     asset. A second scan of the same asset with a count replaces the count.
+ *
+ * A quantity-tracked scan sent WITHOUT `foundQuantity` comes from a build that
+ * has no count prompt. It is recorded as Found and not counted, because such a
+ * build queues scans offline and a refused scan would block its audit from
+ * completing. Builds with the prompt always send the count.
+ *
+ * Response: `{ success, scanId, auditAssetId, foundAssetCount,
+ * unexpectedAssetCount, expectedQuantity, foundQuantity }`.
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -61,20 +71,23 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { auditSessionId, qrId, assetId } = await parseMobileBody(
-      z.object({
-        auditSessionId: z.string().min(1),
-        qrId: z.string().min(1),
-        assetId: z.string().min(1),
-        // Accepted for wire compatibility with shipped app builds, but never
-        // forwarded: `recordAuditScan` derives expectedness from the audit's
-        // own AuditAsset row. A device queues scans offline, so its cached
-        // expected list can be hours out of date by the time they land.
-        isExpected: z.boolean().optional(),
-      }),
-      request,
-      "Audit"
-    );
+    const { auditSessionId, qrId, assetId, foundQuantity } =
+      await parseMobileBody(
+        z.object({
+          auditSessionId: z.string().min(1),
+          qrId: z.string().min(1),
+          assetId: z.string().min(1),
+          // Accepted for wire compatibility with shipped app builds, but never
+          // forwarded: `recordAuditScan` derives expectedness from the audit's
+          // own AuditAsset row. A device queues scans offline, so its cached
+          // expected list can be hours out of date by the time they land.
+          isExpected: z.boolean().optional(),
+          // Bounds are re-checked by the service; zero is a real count.
+          foundQuantity: z.number().int().nonnegative().optional(),
+        }),
+        request,
+        "Audit"
+      );
 
     // Scanning writes audit data, so it is gated exactly like note, photo and
     // complete: callers who see every audit act on any audit, everyone else
@@ -87,22 +100,38 @@ export async function action({ request }: ActionFunctionArgs) {
       assignedOnly: !access.audits.seeAll,
     });
 
-    const { scanId, auditAssetId, foundAssetCount, unexpectedAssetCount } =
-      await recordAuditScan({
-        auditSessionId,
-        qrId,
-        assetId,
-        userId: user.id,
-        organizationId,
-        userAgent: request.headers.get("user-agent"),
+    const result = await recordAuditScan({
+      auditSessionId,
+      qrId,
+      assetId,
+      userId: user.id,
+      organizationId,
+      userAgent: request.headers.get("user-agent"),
+      foundQuantity,
+      acceptUncounted: foundQuantity === undefined,
+    });
+
+    // `acceptUncounted` is set whenever no count is sent, so the service
+    // always records here.
+    if (result.status !== "recorded") {
+      throw new ShelfError({
+        cause: null,
+        message: "This scan needs a count.",
+        additionalData: { auditSessionId, assetId },
+        status: 400,
+        shouldBeCaptured: false,
+        label: "Audit",
       });
+    }
 
     return data({
       success: true,
-      scanId,
-      auditAssetId,
-      foundAssetCount,
-      unexpectedAssetCount,
+      scanId: result.scanId,
+      auditAssetId: result.auditAssetId,
+      foundAssetCount: result.foundAssetCount,
+      unexpectedAssetCount: result.unexpectedAssetCount,
+      expectedQuantity: result.expectedQuantity,
+      foundQuantity: result.foundQuantity,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

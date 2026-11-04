@@ -2864,6 +2864,18 @@ model AuditAsset {
   scannedAt DateTime?
   metadata  Json?
 
+  /// Units the audit expects to find, snapshotted from `Asset.quantity` when
+  /// the row is created. Null for INDIVIDUAL assets, which count as one.
+  ///
+  /// A snapshot, not a live read: stock that moves during the audit must not
+  /// move the target the auditor is counting against.
+  expectedQuantity Int?
+  /// Units the auditor counted. Null until a quantity-tracked asset is
+  /// counted, and always null for INDIVIDUAL assets. A FOUND row with a count
+  /// below `expectedQuantity` is a shortfall: the status stays FOUND (the pool
+  /// was located), the gap is this number.
+  foundQuantity    Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

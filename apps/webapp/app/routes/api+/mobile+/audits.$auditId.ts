@@ -144,6 +144,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         id: a.id,
         name: a.name,
         auditAssetId: a.auditAssetId,
+        // Units expected and counted. Both null for an individual asset; the
+        // app asks for a count when it scans a row whose expectedQuantity is
+        // set.
+        expectedQuantity: a.expectedQuantity,
+        foundQuantity: a.foundQuantity,
+        unitOfMeasure: a.unitOfMeasure,
         // Evidence can exist WITHOUT a scan: an auditor photographs an empty
         // shelf from the web scan screen, which attaches the note or photo to
         // the expected `AuditAsset` directly. Serving these only on the scan
@@ -179,6 +185,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         archivedAt: s.assetId ? archivedAtById.get(s.assetId) ?? null : null,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
+        expectedQuantity: s.expectedQuantity,
+        foundQuantity: s.foundQuantity,
+        unitOfMeasure: s.unitOfMeasure,
       })),
       // why: same eligibility as record-scan's server-side gate, so the app
       // never offers a scanner whose submissions are guaranteed to 403

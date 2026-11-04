@@ -11,6 +11,10 @@ type ScannedItem = {
   scannedAt: string;
   /** True when this scan exhausted its sync retries and is awaiting re-sync. */
   syncFailed?: boolean;
+  /** Units expected and counted, for a quantity-tracked asset. */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
 
 type ScanQueueEntry = {
@@ -18,6 +22,8 @@ type ScanQueueEntry = {
   qrId: string;
   assetId: string;
   isExpected: boolean;
+  /** Units counted, for a quantity-tracked asset. */
+  foundQuantity?: number;
 };
 
 export type PersistedScanState = {
