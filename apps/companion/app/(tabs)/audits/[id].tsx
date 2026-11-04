@@ -33,6 +33,7 @@ import { useDateFormatter } from "@/lib/use-date-formatter";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
 import {
+  auditCountLabel,
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_UNASSIGNED_LABELS,
@@ -151,6 +152,8 @@ type DisplayAsset = {
    * badge and says "Archived" on its meta line.
    */
   archived: boolean;
+  /** Units on a quantity-tracked row ("8 of 14 pcs"); null otherwise. */
+  countLabel: string | null;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -387,6 +390,9 @@ function AuditDetailContent({ id }: { id: string }) {
   // so coming back refetches even inside the 60s window: otherwise the row
   // would show the details from before the fix the auditor just made.
   const returningFromAsset = useRef(false);
+  // Scanning changes found counts and unit counts, so coming back from the
+  // scanner always reloads, like coming back from an asset.
+  const returningFromScanner = useRef(false);
   // Each fetch takes the next number, and only the newest one may write
   // state. A pull-to-refresh can still be in flight when a row opens its
   // asset; its answer must not overwrite the reload made on the way back.
@@ -447,10 +453,12 @@ function AuditDetailContent({ id }: { id: string }) {
       if (
         hasFetched.current &&
         !returningFromAsset.current &&
+        !returningFromScanner.current &&
         Date.now() - lastFetchedAt.current < 60_000
       )
         return;
       returningFromAsset.current = false;
+      returningFromScanner.current = false;
       if (!hasFetched.current) {
         setIsLoading(true);
       }
@@ -480,6 +488,7 @@ function AuditDetailContent({ id }: { id: string }) {
   const handleStartScanning = () => {
     if (!id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    returningFromScanner.current = true;
     router.push({
       pathname: "/(tabs)/audits/scan",
       params: { auditId: id },
@@ -581,6 +590,14 @@ function AuditDetailContent({ id }: { id: string }) {
         notesCount: asset.auditNotesCount ?? scan?.auditNotesCount ?? 0,
         imagesCount: asset.auditImagesCount ?? scan?.auditImagesCount ?? 0,
         archived: isArchivedAsset(asset),
+        countLabel: auditCountLabel(
+          {
+            status: scan ? "FOUND" : notFoundStatus,
+            expectedQuantity: asset.expectedQuantity,
+            foundQuantity: asset.foundQuantity,
+          },
+          asset.unitOfMeasure
+        ),
       });
     }
 
@@ -636,6 +653,14 @@ function AuditDetailContent({ id }: { id: string }) {
           notesCount: scan.auditNotesCount,
           imagesCount: scan.auditImagesCount,
           archived: isArchivedAsset(scan),
+          countLabel: auditCountLabel(
+            {
+              status: scan.isExpected ? "FOUND" : "UNEXPECTED",
+              expectedQuantity: scan.expectedQuantity,
+              foundQuantity: scan.foundQuantity,
+            },
+            scan.unitOfMeasure
+          ),
         });
       }
     }
@@ -689,6 +714,9 @@ function AuditDetailContent({ id }: { id: string }) {
       // leads the meta line, so it is read before where it should be.
       if (item.archived) {
         metaParts.push({ icon: "archive-outline", text: "Archived" });
+      }
+      if (item.countLabel) {
+        metaParts.push({ icon: "layers-outline", text: item.countLabel });
       }
       if (item.locationName) {
         metaParts.push({ icon: "location-outline", text: item.locationName });

@@ -59,8 +59,24 @@ type Props = {
    * reservation cannot drop below the units already assigned to the booking.
    */
   min?: number;
-  /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
-  defaultValue?: number;
+  /**
+   * A reference amount for a count that may go past it, such as an audit's
+   * expected units. When set, the echo reads "16 pcs of 14 pcs (+2)" and the
+   * placeholder and accessible label name the target, while `max` stays only
+   * the validation ceiling. Callers that move units leave it unset.
+   */
+  target?: number;
+  /**
+   * Placeholder for an empty field when `target` does not name one, e.g.
+   * "Units found" for a count whose ceiling is only a validation bound. With
+   * it and no `target`, the echo and accessible label leave the ceiling out.
+   */
+  placeholder?: string;
+  /**
+   * Initial value when the sheet opens (clamped to [min, max]). Defaults to
+   * `min`; `null` opens the field blank, so the operator must type a number.
+   */
+  defaultValue?: number | null;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
   /**
@@ -138,6 +154,8 @@ export function QuantityInputSheet({
   subtitle,
   max,
   min = 1,
+  target,
+  placeholder,
   defaultValue,
   unitOfMeasure,
   secondary,
@@ -175,7 +193,7 @@ export function QuantityInputSheet({
         Math.max(defaultValue ?? min, min),
         Math.max(max, min)
       );
-      setValue(String(seed));
+      setValue(defaultValue === null ? "" : String(seed));
       if (hasSecondaryField) {
         // The secondary seed is clamped to the primary seed: the two fields
         // move together and the secondary never exceeds the units released.
@@ -246,6 +264,12 @@ export function QuantityInputSheet({
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
   const minLabel = formatQuantity(min, unitOfMeasure) ?? String(min);
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
+  const targetLabel =
+    target === undefined
+      ? null
+      : formatQuantity(target, unitOfMeasure) ?? String(target);
+  const surplus =
+    target !== undefined && hasValue && parsed > target ? parsed - target : 0;
 
   /**
    * Every dismissal path goes through here. A request in flight decides
@@ -372,13 +396,25 @@ export function QuantityInputSheet({
                 const next = cleaned ? parseInt(cleaned, 10) : NaN;
                 if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
-              placeholder={min > 1 ? `${min}–${max}` : `Max: ${max}`}
+              placeholder={
+                target !== undefined
+                  ? `Expected: ${target}`
+                  : placeholder !== undefined
+                  ? placeholder
+                  : min > 1
+                  ? `${min}–${max}`
+                  : `Max: ${max}`
+              }
               placeholderTextColor={colors.placeholderText}
               editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
               accessibilityLabel={
-                min > 1
+                targetLabel
+                  ? `Quantity counted, ${targetLabel} expected`
+                  : placeholder !== undefined
+                  ? "Quantity counted"
+                  : min > 1
                   ? `Quantity, between ${minLabel} and ${maxLabel}`
                   : `Quantity, maximum ${maxLabel}`
               }
@@ -407,7 +443,17 @@ export function QuantityInputSheet({
             <Text style={styles.errorHint}>At least {minLabel}.</Text>
           ) : (
             <Text style={styles.echoHint}>
-              {echo ? `${echo} of ${maxLabel}` : `Up to ${maxLabel}`}
+              {targetLabel
+                ? echo
+                  ? `${echo} of ${targetLabel}${
+                      surplus > 0 ? ` (+${surplus})` : ""
+                    }`
+                  : `${targetLabel} expected`
+                : placeholder !== undefined
+                ? echo ?? ""
+                : echo
+                ? `${echo} of ${maxLabel}`
+                : `Up to ${maxLabel}`}
             </Text>
           )}
 

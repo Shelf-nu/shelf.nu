@@ -14,6 +14,7 @@ import {
   resolveAssetIdsForAudit,
   resolveAssetIdsForKitSelection,
   resolveAssetIdsForLocationSelection,
+  resolveAuditUnitScope,
 } from "~/modules/audit/context-helpers.server";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
 import {
@@ -241,6 +242,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
+    // A location, kit or custody audit keeps its scope: quantity-tracked
+    // assets then expect only the units inside it.
+    const unitScope = await resolveAuditUnitScope({
+      organizationId,
+      contextType,
+      contextId,
+      includeChildLocations,
+      locationIds,
+      kitIds,
+      currentSearchParams,
+    });
+
     const { session } = await createAuditSession({
       name,
       description: sanitizedDescription,
@@ -249,6 +262,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       createdById: userId,
       assignee,
       dueDate: dueDateUTC,
+      scopeMeta: unitScope,
     });
 
     // Send email notification if audit is assigned to someone other than the creator

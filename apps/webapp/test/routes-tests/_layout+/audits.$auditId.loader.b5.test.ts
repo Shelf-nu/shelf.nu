@@ -33,6 +33,9 @@ vi.mock("~/modules/audit/service.server", () => ({
   deleteAuditSession: vi.fn(),
   requireAuditAssignee: vi.fn(),
   getAuditSessionDetails: vi.fn(),
+  // why: the units line of the Complete Audit dialog is a database read; this
+  // audit has no quantity-tracked rows
+  getAuditUnitTotals: vi.fn(async () => null),
 }));
 
 // why: the route imports completeAuditWithImages for an action intent; stub

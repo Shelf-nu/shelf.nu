@@ -34,8 +34,10 @@ import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import { getAuditImages } from "~/modules/audit/image.service.server";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
+  getAuditUnitTotals,
   getAssetsForAuditSession,
   cancelAuditSession,
   requireAuditAssignee,
@@ -145,7 +147,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * COMMENT only: UPDATE rows are the system trail, stored as Markdoc
      * source, and belong to the Activity tab.
      */
-    const conditionNotes = await db.auditNote.findMany({
+    const conditionNotesQuery = db.auditNote.findMany({
       where: { auditSessionId: auditId, type: "COMMENT" },
       select: {
         id: true,
@@ -169,6 +171,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy: { createdAt: "asc" },
     });
 
+    // Unit totals across the audit's quantity-tracked rows; null when it has
+    // none, and the statistics then show asset counts only.
+    const [conditionNotes, unitTotals] = await Promise.all([
+      conditionNotesQuery,
+      getAuditUnitTotals(auditId),
+    ]);
+
     const header = { title: `${session.name} · Overview` };
 
     // Only the creator or a caller who manages others' audits can remove
@@ -187,6 +196,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         generalImages,
         assetImages,
         conditionNotes,
+        unitTotals,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -349,6 +359,7 @@ export default function AuditOverview() {
     assetImages,
     conditionNotes,
     canRemoveAssets,
+    unitTotals,
   } = useLoaderData<typeof loader>();
 
   /**
@@ -468,6 +479,11 @@ export default function AuditOverview() {
               isActive={currentFilter === "UNEXPECTED"}
             />
           </div>
+          {unitTotals ? (
+            <p className="mt-3 text-sm text-gray-600">
+              {describeAuditUnits(unitTotals)}
+            </p>
+          ) : null}
         </div>
 
         {/* Right Column: Audit Information */}

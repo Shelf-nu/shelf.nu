@@ -98,6 +98,33 @@ export async function resolveAssetIdsForAudit({
 }
 
 /**
+ * The locations an audit started from one location page covers: that location,
+ * plus all its descendants when child locations are included. Shared by the
+ * asset selection and the expected-units scope so both cover the same places.
+ *
+ * @param organizationId - The organization ID to scope the descendant lookup
+ * @param locationId - The location the audit was started from
+ * @param includeChildLocations - Whether descendant locations are included
+ * @returns The location IDs, the starting location first
+ */
+async function locationPageScope({
+  organizationId,
+  locationId,
+  includeChildLocations,
+}: {
+  organizationId: string;
+  locationId: string;
+  includeChildLocations: boolean;
+}): Promise<string[]> {
+  if (!includeChildLocations) return [locationId];
+  return getLocationDescendantIds({
+    organizationId,
+    locationId,
+    includeSelf: true,
+  });
+}
+
+/**
  * Fetches all asset IDs for a given location context.
  * Used for starting audits from a location page where all assets
  * at that location (and optionally child locations) should be included.
@@ -116,20 +143,11 @@ export async function getAssetsForLocationContext({
   locationId: string;
   includeChildLocations: boolean;
 }): Promise<string[]> {
-  // Determine which location IDs to query based on includeChildLocations flag
-  let locationIds: string[];
-
-  if (includeChildLocations) {
-    // Get all descendant location IDs (including the parent location itself)
-    locationIds = await getLocationDescendantIds({
-      organizationId,
-      locationId,
-      includeSelf: true,
-    });
-  } else {
-    // Only query the single location
-    locationIds = [locationId];
-  }
+  const locationIds = await locationPageScope({
+    organizationId,
+    locationId,
+    includeChildLocations,
+  });
 
   // Fetch all assets at the specified location(s)
   const assets = await db.asset.findMany({
@@ -386,4 +404,113 @@ export async function resolveAssetIdsForKitSelection({
   }
 
   return assets.map((asset) => asset.id);
+}
+
+/**
+ * The unit scope a new audit keeps in its `scopeMeta`, so a quantity-tracked
+ * asset expects only the units inside it (see `auditUnitScope` in
+ * `./quantity.ts`). An audit of a selection of assets or of the index has none.
+ *
+ * - Locations: from one location page, that location plus its descendants when
+ *   the auditor included child locations; from the Locations index, the
+ *   selected locations, or for "select all" every location matching the list.
+ * - Kits: from one kit page, that kit; from the Kits index, the selected kits,
+ *   or for "select all" every kit matching the list.
+ * - Custody: from a person's page, that person.
+ *
+ * Location and kit ids come from the request, so only those of the caller's
+ * workspace are kept; a scope left empty by that becomes no scope (whole
+ * pools). A person's id is only ever matched against custody of the caller's
+ * own assets.
+ *
+ * @returns the scope fields for `scopeMeta`, or null for an unscoped audit
+ */
+export async function resolveAuditUnitScope({
+  organizationId,
+  contextType,
+  contextId,
+  includeChildLocations,
+  locationIds,
+  kitIds,
+  currentSearchParams,
+}: {
+  organizationId: string;
+  contextType?: AuditContextType;
+  contextId?: string;
+  includeChildLocations: boolean;
+  locationIds?: string[];
+  kitIds?: string[];
+  currentSearchParams?: string | null;
+}): Promise<
+  | { locationIds: string[] }
+  | { kitIds: string[] }
+  | { custodianUserId: string }
+  | null
+> {
+  if (contextType === "location") {
+    if (locationIds && locationIds.length > 0) {
+      if (!locationIds.includes(ALL_SELECTED_KEY)) {
+        const owned = await db.location.findMany({
+          where: { id: { in: [...new Set(locationIds)] }, organizationId },
+          select: { id: true },
+        });
+        return owned.length > 0
+          ? { locationIds: owned.map((location) => location.id) }
+          : null;
+      }
+      const matching = await db.location.findMany({
+        where: getLocationsWhereInput({ organizationId, currentSearchParams }),
+        select: { id: true },
+      });
+      return { locationIds: matching.map((location) => location.id) };
+    }
+    if (!contextId) return null;
+    const page = await db.location.findFirst({
+      where: { id: contextId, organizationId },
+      select: { id: true },
+    });
+    if (!page) return null;
+    return {
+      locationIds: await locationPageScope({
+        organizationId,
+        locationId: contextId,
+        includeChildLocations,
+      }),
+    };
+  }
+
+  if (contextType === "kit") {
+    if (kitIds && kitIds.length > 0) {
+      if (!kitIds.includes(ALL_SELECTED_KEY)) {
+        const owned = await db.kit.findMany({
+          where: { id: { in: [...new Set(kitIds)] }, organizationId },
+          select: { id: true },
+        });
+        return owned.length > 0 ? { kitIds: owned.map((kit) => kit.id) } : null;
+      }
+      const matching = await db.kit.findMany({
+        where: getKitsWhereInput({
+          organizationId,
+          currentSearchParams,
+          // Same audience as `resolveAssetIdsForKitSelection`, its sibling on
+          // the `audit: create` start route.
+          allowedTeamMemberIds: "all",
+        }),
+        select: { id: true },
+      });
+      return { kitIds: matching.map((kit) => kit.id) };
+    }
+    if (!contextId) return null;
+    const kit = await db.kit.findFirst({
+      where: { id: contextId, organizationId },
+      select: { id: true },
+    });
+    return kit ? { kitIds: [kit.id] } : null;
+  }
+
+  if (contextType === "user" && contextId) {
+    return { custodianUserId: contextId };
+  }
+
+  return null;
 }

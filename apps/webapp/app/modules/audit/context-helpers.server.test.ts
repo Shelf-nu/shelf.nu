@@ -19,31 +19,50 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   resolveAssetIdsForKitSelection,
   resolveAssetIdsForLocationSelection,
+  resolveAuditUnitScope,
 } from "./context-helpers.server";
 
 // why: the resolvers (and the org guards they call) hit the global Prisma
 // client; mock it so the suite is DB-free. `vitest.hoisted` makes the spies
 // available inside the (hoisted) mock factory. Each test sets the return values
 // it needs.
-const { locationFindMany, kitFindMany, assetFindMany } = vitest.hoisted(() => ({
+const {
+  locationFindMany,
+  locationFindFirst,
+  kitFindMany,
+  kitFindFirst,
+  assetFindMany,
+} = vitest.hoisted(() => ({
   locationFindMany: vitest.fn(),
+  locationFindFirst: vitest.fn(),
   kitFindMany: vitest.fn(),
+  kitFindFirst: vitest.fn(),
   assetFindMany: vitest.fn(),
 }));
 
 vitest.mock("~/database/db.server", () => ({
   db: {
-    location: { findMany: locationFindMany },
-    kit: { findMany: kitFindMany },
+    location: { findMany: locationFindMany, findFirst: locationFindFirst },
+    kit: { findMany: kitFindMany, findFirst: kitFindFirst },
     asset: { findMany: assetFindMany },
   },
+}));
+
+// why: descendant lookup walks the location tree in the database; a fixed tree
+// is enough for the scope resolver's child-location case.
+vitest.mock("~/modules/location/descendants.server", () => ({
+  getLocationDescendantIds: vitest.fn(() =>
+    Promise.resolve(["studio", "shelf-1"])
+  ),
 }));
 
 const ORG = "org-1";
 
 beforeEach(() => {
   locationFindMany.mockReset();
+  locationFindFirst.mockReset();
   kitFindMany.mockReset();
+  kitFindFirst.mockReset();
   assetFindMany.mockReset();
 });
 
@@ -267,5 +286,140 @@ describe("resolveAssetIdsForKitSelection", () => {
     expect(err).toBeInstanceOf(ShelfError);
     expect(err.status).toBe(400);
     expect(err.message).toMatch(/contain assets/i);
+  });
+});
+
+describe("resolveAuditUnitScope", () => {
+  it("has no unit scope for an audit of selected assets", async () => {
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+  });
+
+  it("scopes a location page audit to that location", async () => {
+    locationFindFirst.mockResolvedValueOnce({ id: "studio" });
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "location",
+        contextId: "studio",
+        includeChildLocations: false,
+      })
+    ).toEqual({ locationIds: ["studio"] });
+  });
+
+  it("adds the child locations when the auditor included them", async () => {
+    locationFindFirst.mockResolvedValueOnce({ id: "studio" });
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "location",
+        contextId: "studio",
+        includeChildLocations: true,
+      })
+    ).toEqual({ locationIds: ["studio", "shelf-1"] });
+  });
+
+  it("keeps the selected locations of a multi-select, once each", async () => {
+    locationFindMany.mockResolvedValueOnce([{ id: "a" }, { id: "b" }]);
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "location",
+        locationIds: ["a", "b", "a"],
+        includeChildLocations: false,
+      })
+    ).toEqual({ locationIds: ["a", "b"] });
+  });
+
+  it("resolves location select-all to the locations matching the list filter", async () => {
+    locationFindMany.mockResolvedValue([{ id: "a" }, { id: "c" }]);
+
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "location",
+        locationIds: [ALL_SELECTED_KEY],
+        includeChildLocations: false,
+        currentSearchParams: "s=studio",
+      })
+    ).toEqual({ locationIds: ["a", "c"] });
+  });
+
+  it("scopes a kit page audit to that kit", async () => {
+    kitFindFirst.mockResolvedValueOnce({ id: "kit-1" });
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        contextId: "kit-1",
+        includeChildLocations: false,
+      })
+    ).toEqual({ kitIds: ["kit-1"] });
+  });
+
+  it("keeps the selected kits of a multi-select, once each", async () => {
+    kitFindMany.mockResolvedValueOnce([{ id: "k1" }, { id: "k2" }]);
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        kitIds: ["k1", "k2", "k1"],
+        includeChildLocations: false,
+      })
+    ).toEqual({ kitIds: ["k1", "k2"] });
+  });
+
+  it("resolves kit select-all to the kits matching the list filter", async () => {
+    kitFindMany.mockResolvedValueOnce([{ id: "k1" }, { id: "k3" }]);
+
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        kitIds: [ALL_SELECTED_KEY],
+        includeChildLocations: false,
+      })
+    ).toEqual({ kitIds: ["k1", "k3"] });
+  });
+
+  it("scopes a custody audit to that person", async () => {
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "user",
+        contextId: "user-7",
+        includeChildLocations: false,
+      })
+    ).toEqual({ custodianUserId: "user-7" });
+  });
+  it("drops ids from another workspace, and the scope with them", async () => {
+    locationFindFirst.mockResolvedValueOnce(null);
+    kitFindMany.mockResolvedValueOnce([]);
+
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "location",
+        contextId: "foreign-location",
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+    expect(
+      await resolveAuditUnitScope({
+        organizationId: ORG,
+        contextType: "kit",
+        kitIds: ["foreign-kit"],
+        includeChildLocations: false,
+      })
+    ).toBeNull();
+    expect(kitFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["foreign-kit"] }, organizationId: ORG },
+      })
+    );
   });
 });
