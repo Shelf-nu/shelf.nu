@@ -117,3 +117,13 @@ test("a port and query on a bare domain survive", () => {
     ],
   ]);
 });
+
+test("a domain run on from a word in another script stays text", () => {
+  assert.deepEqual(links("東京example.com"), []);
+  assert.deepEqual(links("見て。example.com"), [
+    ["example.com", "https://example.com"],
+  ]);
+  assert.deepEqual(links("見て example.com"), [
+    ["example.com", "https://example.com"],
+  ]);
+});

@@ -91,6 +91,25 @@ const BARE_DOMAIN =
  */
 const BLOCKED_BEFORE = /[a-z0-9@._/:\\-]/i;
 
+/**
+ * Non-ASCII characters a domain may follow: spaces and the CJK and
+ * full-width punctuation that ends a sentence or opens a bracket or quote.
+ */
+const OPENS_BEFORE =
+  /[\s\u2018\u201c\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/;
+
+/**
+ * Whether a character right before a match glues it to something else: an
+ * ASCII character in `BLOCKED_BEFORE`, or a non-ASCII character that is not
+ * a space or punctuation, so a domain run on from a word in another script
+ * ("東京example.com") stays unlinked, the mirror of `continuesWord`.
+ */
+function gluedBefore(character: string): boolean {
+  return character.charCodeAt(0) > 0x7f
+    ? !OPENS_BEFORE.test(character)
+    : BLOCKED_BEFORE.test(character);
+}
+
 /** ASCII characters that, right after a match, continue the word. */
 const BLOCKED_AFTER = /[a-z0-9@_-]/i;
 
@@ -131,7 +150,7 @@ function segmentBareDomains(text: string): TextSegment[] {
   for (const match of text.matchAll(BARE_DOMAIN)) {
     const start = match.index;
     const before = start > 0 ? text[start - 1] : "";
-    if (before && BLOCKED_BEFORE.test(before)) continue;
+    if (before && gluedBefore(before)) continue;
     // A capitalised "domain" is a missed space: "damaged.No charger".
     const tld = match[1];
     if (!BARE_DOMAIN_TLDS.has(tld)) continue;

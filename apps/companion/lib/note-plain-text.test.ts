@@ -316,3 +316,28 @@ test("a link tag to a page the app has no screen for reads as its text", () => {
     ]
   );
 });
+
+test("a typed name that spells out chips=true stays text", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      'Renamed to {% name text="chips=true https://evil.example" /%}',
+      format,
+      BASE,
+      SYSTEM
+    ).filter((segment) => segment.type === "link"),
+    []
+  );
+});
+
+test("category and tag badge names stay text", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      'Set {% category_badge name="see acme.com" color="#575757" /%} and ' +
+        '{% tag name="https://evil.example" /%}',
+      format,
+      BASE,
+      SYSTEM
+    ),
+    [{ type: "text", text: "Set see acme.com and https://evil.example" }]
+  );
+});

@@ -101,6 +101,12 @@ export function markdocToPlainText(
 /** A Markdoc `link` tag, with its attributes in group 1. */
 const LINK_TAG = /{%\s*link\s+([^%]*?)\/%}/g;
 
+/**
+ * A Markdoc `category_badge` or `tag` badge, with its attributes in group 1.
+ * Its `name` is a value someone typed, shown as badge text on the web.
+ */
+const BADGE_TAG = /{%\s*(?:category_badge|tag)\s+([^%]*?)\/%}/g;
+
 /** A Markdoc `name` tag, with its attributes in group 1. */
 const NAME_TAG = /{%\s*name\s+([^%]*?)\/%}/g;
 
@@ -167,6 +173,7 @@ export interface NoteLinkOptions {
  *   Shelf server. A page the app has no screen for (a team member) reads as
  *   its text: the in-app browser holds no Shelf session, so it would only
  *   show the web login.
+ * - A `category_badge` or `tag` badge reads as its name, plain text.
  * - A `name` tag (a value someone typed) is plain text, unless the note's
  *   writer marked it `chips=true` (a custom field value), whose http(s)
  *   URLs link as typed, as on the web.
@@ -206,13 +213,21 @@ export function markdocToSegments(
         ? hold({ type: "link", text: cleanRunText(text), url })
         : hold({ type: "text", text: cleanRunText(text) });
     })
+    .replace(BADGE_TAG, (tag, attributes: string) => {
+      const name = tagAttribute(attributes, "name");
+      return name === undefined
+        ? tag
+        : hold({ type: "text", text: cleanRunText(name) });
+    })
     .replace(NAME_TAG, (tag, attributes: string) => {
       const text = tagAttribute(attributes, "text");
       if (text === undefined) return tag;
       // A value marked chips=true (a custom field value) links its http(s)
       // URLs, exactly as the field itself does on the phone and the web;
-      // any other typed value is plain text.
-      return /\bchips=true\b/.test(attributes)
+      // any other typed value is plain text. The flag is read with the
+      // typed text taken out, so a name that spells it out stays text.
+      const flags = attributes.replace(/\btext="[^"]*"/g, "");
+      return /\bchips=true\b/.test(flags)
         ? hold(...segmentText(cleanRunText(text)))
         : hold({ type: "text", text: cleanRunText(text) });
     });
