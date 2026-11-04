@@ -92,7 +92,9 @@ export type AddedFlashInput = {
  *
  * Only a collapsed drawer flashes: an expanded one shows the new row in its
  * list. The keys always move on, so a row added while expanded is not
- * announced later when the drawer is collapsed.
+ * announced later when the drawer is collapsed. A change that adds nothing
+ * returns null, and callers clear any showing flash with it: the row that
+ * flash named may be the one just removed.
  *
  * @returns The keys to keep for the next change, and the flash title or null.
  */

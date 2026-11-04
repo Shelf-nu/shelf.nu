@@ -28,6 +28,10 @@ appId: com.shelf.companion.carlos
 - tapOn:
     text: "Resume camera"
     optional: true
+# A result card left by an earlier flow hides manual entry; dismiss it.
+- tapOn:
+    text: ".*Tap to dismiss.*"
+    optional: true
 - tapOn: "Scanner action: Assign.*"
 - tapOn:
     text: "Switch"

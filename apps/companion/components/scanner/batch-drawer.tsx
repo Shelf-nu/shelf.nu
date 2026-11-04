@@ -27,6 +27,7 @@ import {
   Text,
   TouchableOpacity,
   FlatList,
+  ScrollView,
   ActivityIndicator,
   StyleSheet,
   useWindowDimensions,
@@ -274,13 +275,17 @@ export function BatchDrawer({
         />
       )}
 
-      {/* Blockers — submit stays disabled until the list is clean */}
+      {/* Blockers: submit stays disabled until the list is clean. They scroll
+          when the window cap leaves less room than they need, so every
+          "Remove" and the submit button below stay inside the drawer. */}
       {hasBlockers && onResolveBlocker && onResolveAllBlockers && (
-        <BatchBlockers
-          blockers={blockers}
-          onResolve={onResolveBlocker}
-          onResolveAll={onResolveAllBlockers}
-        />
+        <ScrollView style={styles.blockersScroll} bounces={false}>
+          <BatchBlockers
+            blockers={blockers}
+            onResolve={onResolveBlocker}
+            onResolveAll={onResolveAllBlockers}
+          />
+        </ScrollView>
       )}
 
       {/* Submit button */}
@@ -353,7 +358,9 @@ function useAddedFlash(
       title: now.title,
     });
     previousKeys.current = next.keys;
-    if (next.flash) setFlash(next.flash);
+    // A change that adds nothing ends any flash: the row it named may have
+    // just been removed.
+    setFlash(next.flash);
   }, [keySignature]);
 
   // Each new flash text restarts the clock; unmounting clears it.
@@ -413,6 +420,10 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.error,
     fontWeight: "600",
+  },
+  blockersScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
   drawerList: {
     maxHeight: 140,
