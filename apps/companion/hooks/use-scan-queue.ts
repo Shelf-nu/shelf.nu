@@ -5,6 +5,7 @@ import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import {
   dropSupersededCounts,
   isSupersededCount,
+  storedCountFor,
 } from "@/lib/audit-scan-queue";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
@@ -78,12 +79,7 @@ export function useScanQueue({
         scanQueueRef.current.shift();
 
         // The server kept another count than this entry carried.
-        const storedCount =
-          entry.foundQuantity !== undefined &&
-          data.foundQuantity !== undefined &&
-          data.foundQuantity !== entry.foundQuantity
-            ? data.foundQuantity
-            : undefined;
+        const storedCount = storedCountFor(entry.foundQuantity, data);
 
         // Capture auditAssetId from response so notes/photos can be attached
         if (data?.auditAssetId) {

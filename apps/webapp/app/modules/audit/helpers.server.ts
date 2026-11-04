@@ -152,6 +152,7 @@ export async function createAuditCountUpdatedNote({
   count,
   tx,
   prefetchedUser,
+  prefetchedAsset,
 }: {
   auditSessionId: string;
   assetId: string;
@@ -162,13 +163,16 @@ export async function createAuditCountUpdatedNote({
   count: AuditScanNoteCount;
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   prefetchedUser?: (UserNameFields & { id: string }) | null;
+  /** The asset as the caller already read it, already checked against `organizationId`. */
+  prefetchedAsset?: { id: string; title: string } | null;
 }) {
   const [asset, scanner] = await Promise.all([
-    tx.asset.findFirst({
-      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
-      where: { id: assetId, organizationId },
-      select: { id: true, title: true },
-    }),
+    prefetchedAsset ??
+      tx.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
+        where: { id: assetId, organizationId },
+        select: { id: true, title: true },
+      }),
     prefetchedUser ??
       tx.user.findUnique({
         where: { id: userId },

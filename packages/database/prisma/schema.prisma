@@ -2864,8 +2864,10 @@ model AuditAsset {
   scannedAt DateTime?
   metadata  Json?
 
-  /// Units the audit expects to find, snapshotted from `Asset.quantity` when
-  /// the row is created. Null for INDIVIDUAL assets, which count as one.
+  /// Units the audit expects to find, snapshotted when the row is created: the
+  /// units placed at the audited locations for a location audit (at most
+  /// `Asset.quantity`), otherwise `Asset.quantity`. Null for INDIVIDUAL assets,
+  /// which count as one.
   ///
   /// A snapshot, not a live read: stock that moves during the audit must not
   /// move the target the auditor is counting against.

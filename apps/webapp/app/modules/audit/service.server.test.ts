@@ -136,9 +136,8 @@ vi.mock("~/database/db.server", () => {
       // why: the unexpected-asset insert is idempotent — createMany with
       // skipDuplicates, then a re-read — so both are on the scan hot path.
       findUniqueOrThrow: vi.fn(),
-      findFirst: vi.fn(),
       // why: a recount reads the row it corrects inside the transaction.
-      findFirstOrThrow: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -211,7 +210,6 @@ const mockDb = db as unknown as {
     createMany: ReturnType<typeof vi.fn>;
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
-    findFirstOrThrow: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
@@ -4067,6 +4065,37 @@ describe("audit unit counts: surplus and location scope", () => {
           assetId: "camera-1",
           expectedQuantity: null,
         }),
+      ],
+    });
+  });
+
+  it("never expects more than the pool when placements overlap", async () => {
+    // 14 placed by hand at Studio plus a 4-unit kit slice whose kit is also at
+    // Studio: the two placements describe the same units, so 14, not 18.
+    mockDb.asset.findMany.mockResolvedValue([
+      {
+        id: "pool-1",
+        title: "Sandbag",
+        type: "QUANTITY_TRACKED",
+        quantity: 14,
+      },
+    ]);
+    mockDb.assetLocation.groupBy.mockResolvedValue([
+      { assetId: "pool-1", _sum: { quantity: 18 } },
+    ]);
+    mockCreate();
+
+    await createAuditSession({
+      name: "Studio check",
+      assetIds: ["pool-1"],
+      organizationId: "org-1",
+      createdById: "user-1",
+      scopeMeta: { locationIds: ["studio"] },
+    });
+
+    expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ assetId: "pool-1", expectedQuantity: 14 }),
       ],
     });
   });

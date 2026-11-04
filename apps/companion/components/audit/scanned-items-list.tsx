@@ -82,7 +82,9 @@ export function ScannedItemsList({
         },
         item.unitOfMeasure
       );
+      // Only a listed asset has an expectation to fall short of.
       const isShort =
+        item.isExpected &&
         typeof item.foundQuantity === "number" &&
         typeof item.expectedQuantity === "number" &&
         item.foundQuantity < item.expectedQuantity;

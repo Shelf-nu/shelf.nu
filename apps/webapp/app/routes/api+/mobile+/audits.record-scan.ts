@@ -111,15 +111,16 @@ export async function action({ request }: ActionFunctionArgs) {
       acceptUncounted: foundQuantity === undefined,
     });
 
-    // `acceptUncounted` is set whenever no count is sent, so the service
-    // always records here.
+    // Narrows the result type only. The service answers "count-required"
+    // just for a quantity scan with no count and `acceptUncounted` false, and
+    // this route sets `acceptUncounted` whenever no count is sent, so it is
+    // never reached; reaching it is a server bug, so it is captured.
     if (result.status !== "recorded") {
       throw new ShelfError({
         cause: null,
-        message: "This scan needs a count.",
-        additionalData: { auditSessionId, assetId },
-        status: 400,
-        shouldBeCaptured: false,
+        message: "The scan could not be recorded.",
+        additionalData: { auditSessionId, assetId, status: result.status },
+        status: 500,
         label: "Audit",
       });
     }

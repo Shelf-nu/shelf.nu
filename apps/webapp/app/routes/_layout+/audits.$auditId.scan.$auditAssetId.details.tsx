@@ -185,7 +185,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     // Quantity rows lead with their count, e.g. "Counted: 8 of 14 pcs", or
-    // with "Not counted" / "14 pcs expected" when there is no count.
+    // with "Not counted" / "14 pcs expected" when there is no count. An
+    // unexpected row's label already says "8 pcs counted".
     const countLabel = auditCountLabel(
       auditAsset,
       auditAsset.asset.unitOfMeasure
@@ -194,7 +195,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: auditAsset.asset.title,
       subHeading: countLabel
         ? `${
-            auditAsset.foundQuantity !== null ? "Counted: " : ""
+            auditAsset.foundQuantity !== null &&
+            auditAsset.status !== "UNEXPECTED"
+              ? "Counted: "
+              : ""
           }${countLabel} • Notes and images`
         : "Notes and images",
     };

@@ -1724,16 +1724,23 @@ function AuditScannerContent() {
         }
         subtitle={
           countRequest
-            ? `${countRequest.assetTitle} · ${countRequest.expectedQuantity} expected`
+            ? countRequest.isExpected
+              ? `${countRequest.assetTitle} · ${countRequest.expectedQuantity} expected`
+              : `${countRequest.assetTitle} · not on this audit's list`
             : undefined
         }
         min={0}
         // A count may go past the expectation (a surplus), so the sheet's
-        // ceiling is the server's and the expectation is only its target.
+        // ceiling is the server's and the expectation is only its target. An
+        // asset not on the audit's list has no expectation to count against.
         max={MAX_AUDIT_COUNT}
-        target={countRequest?.expectedQuantity}
+        target={
+          countRequest?.isExpected ? countRequest.expectedQuantity : undefined
+        }
+        placeholder="Units found"
         defaultValue={
-          countRequest?.foundQuantity ?? countRequest?.expectedQuantity ?? 0
+          countRequest?.foundQuantity ??
+          (countRequest?.isExpected ? countRequest.expectedQuantity : 0)
         }
         unitOfMeasure={countRequest?.unitOfMeasure}
         confirmLabel={countRequest?.mode === "recount" ? "Update" : "Record"}

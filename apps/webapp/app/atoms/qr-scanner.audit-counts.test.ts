@@ -16,8 +16,11 @@ import type { AuditScannedItem } from "./qr-scanner";
 import {
   auditCountsAtom,
   auditCountsFromItems,
+  lastDuplicateScanAtom,
   mergeAuditCountsAtom,
+  scannedItemsAtom,
   setAuditExpectedAssetsAtom,
+  updateScannedItemAtom,
 } from "./qr-scanner";
 
 /** An expected audit row as the scan route builds it. */
@@ -97,5 +100,48 @@ describe("setAuditExpectedAssetsAtom", () => {
       foundQuantity: 8,
       unitOfMeasure: "pcs",
     });
+  });
+});
+
+describe("updateScannedItemAtom, second code of a listed asset", () => {
+  /** The listed pool and a store holding it under its QR code. */
+  function storeWithListedPool() {
+    const store = createStore();
+    store.set(scannedItemsAtom, {
+      "qr-1": {
+        type: "asset",
+        codeType: "qr",
+        data: { id: "pool-1", title: "Sandbag" } as never,
+      },
+    });
+    return store;
+  }
+
+  it("signals a duplicate that points at the listed row", () => {
+    const store = storeWithListedPool();
+    store.set(updateScannedItemAtom, {
+      qrId: "bc-1",
+      item: {
+        type: "asset",
+        codeType: "barcode",
+        data: { id: "pool-1", title: "Sandbag" } as never,
+      },
+    });
+    expect(store.get(lastDuplicateScanAtom)).toMatchObject({
+      qrId: "qr-1",
+      assetTitle: "Sandbag",
+    });
+  });
+
+  it("does not signal a duplicate kit", () => {
+    const store = createStore();
+    store.set(scannedItemsAtom, {
+      "qr-kit": { type: "kit", data: { id: "kit-1", name: "Kit" } as never },
+    });
+    store.set(updateScannedItemAtom, {
+      qrId: "bc-kit",
+      item: { type: "kit", data: { id: "kit-1", name: "Kit" } as never },
+    });
+    expect(store.get(lastDuplicateScanAtom)).toBeNull();
   });
 });

@@ -106,9 +106,14 @@ export function entriesToResync<T extends CountedQueueEntry>(
 /**
  * The expected units of a scanned asset, or null when it is not counted.
  *
- * The audit's own row decides for an expected asset (its snapshot). An
- * unexpected asset has no row yet, so the code lookup's asset type decides,
- * with the asset's stock as the expectation.
+ * MIRROR of `expectedQuantityFor` in apps/webapp/app/modules/audit/quantity.ts
+ * for the unexpected case: cosmetic only, the server snapshots the row itself
+ * (for a location audit, the units placed at its locations). The audit's own
+ * row decides for an expected asset (its snapshot). An unexpected asset has no
+ * row yet, so the code lookup's asset type decides, with the asset's stock as
+ * the figure; the scanner shows it to no one, because an asset not on the
+ * audit's list is counted without an expectation. Extraction target:
+ * `@shelf/quantity-control`.
  *
  * @param expectedRow - the audit's row for the asset, when it is expected
  * @param lookedUp - the asset as the code lookup returned it
@@ -129,6 +134,52 @@ export function countTargetFor(
  * ceiling. MIRROR of `MAX_AUDIT_FOUND_QUANTITY` in
  * apps/webapp/app/modules/audit/quantity.ts; the server enforces it, this copy
  * only bounds the count sheet so a count above the expectation (a surplus) can
- * be entered. Extraction target: a pure `packages/*` audit module (none yet).
+ * be entered. Extraction target: `@shelf/quantity-control`.
  */
 export const MAX_AUDIT_COUNT = 2_147_483_647;
+
+/** The count fields of an audit scan as the mobile audit endpoint returns it. */
+export type ScanCountFields = {
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
+};
+
+/**
+ * The count fields of a restored scan row. A server without counts sends none
+ * of them, and every one reads as absent (null).
+ *
+ * @param scan - a scan from `GET /api/mobile/audits/:id` (`existingScans`)
+ */
+export function countFieldsFromScan(scan: ScanCountFields): {
+  expectedQuantity: number | null;
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+} {
+  return {
+    expectedQuantity: scan.expectedQuantity ?? null,
+    foundQuantity: scan.foundQuantity ?? null,
+    unitOfMeasure: scan.unitOfMeasure ?? null,
+  };
+}
+
+/**
+ * The count the server stored, when it kept another one than the entry sent
+ * (the audit was finished, or the scan removed, before a recount landed), so
+ * the row can show it. Undefined when the entry sent no count, the server
+ * answered without one, or it stored what was sent.
+ *
+ * @param sentCount - the entry's `foundQuantity`
+ * @param response - the record-scan response
+ */
+export function storedCountFor(
+  sentCount: number | undefined,
+  response: { foundQuantity?: number | null }
+): number | null | undefined {
+  if (sentCount === undefined || response.foundQuantity === undefined) {
+    return undefined;
+  }
+  return response.foundQuantity === sentCount
+    ? undefined
+    : response.foundQuantity;
+}

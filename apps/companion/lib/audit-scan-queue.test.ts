@@ -10,10 +10,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  countFieldsFromScan,
   countTargetFor,
   dropSupersededCounts,
   entriesToResync,
   isSupersededCount,
+  storedCountFor,
   type CountedQueueEntry,
 } from "./audit-scan-queue";
 
@@ -147,5 +149,51 @@ describe("countTargetFor", () => {
       countTargetFor({ expectedQuantity: null }, { type: "INDIVIDUAL" }),
       null
     );
+  });
+});
+
+describe("countFieldsFromScan", () => {
+  it("reads the counts of a restored scan", () => {
+    // Shaped like an existingScans row of GET /api/mobile/audits/:id.
+    assert.deepEqual(
+      countFieldsFromScan({
+        expectedQuantity: 14,
+        foundQuantity: 8,
+        unitOfMeasure: "pcs",
+      }),
+      { expectedQuantity: 14, foundQuantity: 8, unitOfMeasure: "pcs" }
+    );
+  });
+
+  it("reads a scan from a server without counts as uncounted", () => {
+    assert.deepEqual(countFieldsFromScan({}), {
+      expectedQuantity: null,
+      foundQuantity: null,
+      unitOfMeasure: null,
+    });
+  });
+});
+
+describe("storedCountFor", () => {
+  it("returns the count the server kept when it differs from the one sent", () => {
+    // The audit was finished before this recount landed: the server answers
+    // with the count it kept.
+    assert.equal(storedCountFor(9, { foundQuantity: 5 }), 5);
+  });
+
+  it("returns nothing when the server stored the count sent", () => {
+    assert.equal(storedCountFor(9, { foundQuantity: 9 }), undefined);
+  });
+
+  it("returns nothing for a scan sent without a count", () => {
+    assert.equal(storedCountFor(undefined, { foundQuantity: null }), undefined);
+  });
+
+  it("returns nothing when the server sends no count", () => {
+    assert.equal(storedCountFor(9, {}), undefined);
+  });
+
+  it("returns null when the server kept no count", () => {
+    assert.equal(storedCountFor(9, { foundQuantity: null }), null);
   });
 });

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Alert, Animated } from "react-native";
 import { api, type AuditExpectedAsset } from "@/lib/api";
-import { entriesToResync } from "@/lib/audit-scan-queue";
+import { countFieldsFromScan, entriesToResync } from "@/lib/audit-scan-queue";
 import {
   loadAuditScanState,
   clearAuditScanState,
@@ -204,9 +204,7 @@ export function useAuditInit({
             scan.assetLocationName ?? expected?.locationName ?? null,
           thumbnailImage:
             expected?.thumbnailImage ?? expected?.mainImage ?? null,
-          expectedQuantity: scan.expectedQuantity ?? null,
-          foundQuantity: scan.foundQuantity ?? null,
-          unitOfMeasure: scan.unitOfMeasure ?? null,
+          ...countFieldsFromScan(scan),
         });
       }
       scannedAssetIdsRef.current = scannedIds;

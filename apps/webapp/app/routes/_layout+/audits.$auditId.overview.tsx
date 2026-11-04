@@ -146,7 +146,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * COMMENT only: UPDATE rows are the system trail, stored as Markdoc
      * source, and belong to the Activity tab.
      */
-    const conditionNotes = await db.auditNote.findMany({
+    const conditionNotesQuery = db.auditNote.findMany({
       where: { auditSessionId: auditId, type: "COMMENT" },
       select: {
         id: true,
@@ -170,21 +170,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy: { createdAt: "asc" },
     });
 
+    // The audit's quantity-tracked rows, for the unit totals.
+    const quantityRowsQuery = db.auditAsset.findMany({
+      where: { auditSessionId: auditId, expectedQuantity: { not: null } },
+      select: {
+        expected: true,
+        status: true,
+        expectedQuantity: true,
+        foundQuantity: true,
+      },
+    });
+
+    const [conditionNotes, quantityRows] = await Promise.all([
+      conditionNotesQuery,
+      quantityRowsQuery,
+    ]);
+
     const header = { title: `${session.name} · Overview` };
 
     // Unit totals across the audit's quantity-tracked rows; null when it has
     // none, and the statistics then show asset counts only.
-    const unitTotals = totalAuditUnits(
-      await db.auditAsset.findMany({
-        where: { auditSessionId: auditId, expectedQuantity: { not: null } },
-        select: {
-          expected: true,
-          status: true,
-          expectedQuantity: true,
-          foundQuantity: true,
-        },
-      })
-    );
+    const unitTotals = totalAuditUnits(quantityRows);
 
     // Only the creator or a caller who manages others' audits can remove
     // assets, and only from PENDING audits

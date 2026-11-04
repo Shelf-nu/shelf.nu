@@ -66,6 +66,11 @@ type Props = {
    * the validation ceiling. Callers that move units leave it unset.
    */
   target?: number;
+  /**
+   * Placeholder for an empty field when neither `target` nor a range names
+   * one, e.g. "Units found" for a count with no upper bound worth showing.
+   */
+  placeholder?: string;
   /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
@@ -146,6 +151,7 @@ export function QuantityInputSheet({
   max,
   min = 1,
   target,
+  placeholder,
   defaultValue,
   unitOfMeasure,
   secondary,
@@ -389,8 +395,10 @@ export function QuantityInputSheet({
               placeholder={
                 target !== undefined
                   ? `Expected: ${target}`
+                  : placeholder !== undefined
+                  ? placeholder
                   : min > 1
-                  ? `${min}–${max}`
+                  ? `${min}-${max}`
                   : `Max: ${max}`
               }
               placeholderTextColor={colors.placeholderText}

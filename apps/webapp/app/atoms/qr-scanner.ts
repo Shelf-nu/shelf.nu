@@ -395,8 +395,15 @@ export type AuditCountPrompt = {
   expectedQuantity: number;
   foundQuantity: number | null;
   unitOfMeasure: string | null;
+  /**
+   * Whether the asset is on the audit's list. Only then is `expectedQuantity`
+   * an expectation the auditor can confirm with "All here".
+   */
+  isExpected: boolean;
   mode: "first" | "recount";
 };
+
+/** The open count prompt, or null while the dialog is closed. See {@link AuditCountPrompt}. */
 export const auditCountPromptAtom = atom<AuditCountPrompt | null>(null);
 
 /**

@@ -98,6 +98,33 @@ export async function resolveAssetIdsForAudit({
 }
 
 /**
+ * The locations an audit started from one location page covers: that location,
+ * plus all its descendants when child locations are included. Shared by the
+ * asset selection and the expected-units scope so both cover the same places.
+ *
+ * @param organizationId - The organization ID to scope the descendant lookup
+ * @param locationId - The location the audit was started from
+ * @param includeChildLocations - Whether descendant locations are included
+ * @returns The location IDs, the starting location first
+ */
+async function locationPageScope({
+  organizationId,
+  locationId,
+  includeChildLocations,
+}: {
+  organizationId: string;
+  locationId: string;
+  includeChildLocations: boolean;
+}): Promise<string[]> {
+  if (!includeChildLocations) return [locationId];
+  return getLocationDescendantIds({
+    organizationId,
+    locationId,
+    includeSelf: true,
+  });
+}
+
+/**
  * Fetches all asset IDs for a given location context.
  * Used for starting audits from a location page where all assets
  * at that location (and optionally child locations) should be included.
@@ -116,20 +143,11 @@ export async function getAssetsForLocationContext({
   locationId: string;
   includeChildLocations: boolean;
 }): Promise<string[]> {
-  // Determine which location IDs to query based on includeChildLocations flag
-  let locationIds: string[];
-
-  if (includeChildLocations) {
-    // Get all descendant location IDs (including the parent location itself)
-    locationIds = await getLocationDescendantIds({
-      organizationId,
-      locationId,
-      includeSelf: true,
-    });
-  } else {
-    // Only query the single location
-    locationIds = [locationId];
-  }
+  const locationIds = await locationPageScope({
+    organizationId,
+    locationId,
+    includeChildLocations,
+  });
 
   // Fetch all assets at the specified location(s)
   const assets = await db.asset.findMany({
@@ -431,11 +449,9 @@ export async function resolveAuditScopeLocationIds({
   }
 
   if (!contextId) return null;
-  return includeChildLocations
-    ? getLocationDescendantIds({
-        organizationId,
-        locationId: contextId,
-        includeSelf: true,
-      })
-    : [contextId];
+  return locationPageScope({
+    organizationId,
+    locationId: contextId,
+    includeChildLocations,
+  });
 }

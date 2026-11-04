@@ -5,11 +5,14 @@
  * when such an asset is scanned for the first time, when it is scanned again
  * (to correct the count) and from a scanned row's "Edit count" button.
  *
- * The field starts at the count already recorded, or at the expected units for
- * a first count, so a full pool is one confirm away. "All here" records the
- * expected units directly. A count may go past the expectation: a surplus is
- * a finding the audit must record. Zero is a real answer (the pool was located,
- * empty); a blank field is not, and keeps Save disabled.
+ * For an asset on the audit's list, the field starts at the count already
+ * recorded, or at the expected units for a first count, so a full pool is one
+ * confirm away, and "All here" records the expected units directly. An asset
+ * that is not on the list has no expectation to confirm: the field starts at
+ * its recorded count or blank, and there is no "All here". A count may go past
+ * the expectation: a surplus is a finding the audit must record. Zero is a
+ * real answer (the pool was located, empty); a blank field is not, and keeps
+ * Save disabled.
  *
  * State lives in `auditCountPromptAtom`; the scan route owns what happens on
  * save and cancel, because it owns the persistence refs.
@@ -60,6 +63,7 @@ export function AuditCountDialog({ onSave, onCancel }: AuditCountDialogProps) {
       expectedQuantity={prompt.expectedQuantity}
       foundQuantity={prompt.foundQuantity}
       unitOfMeasure={prompt.unitOfMeasure}
+      isExpected={prompt.isExpected}
       mode={prompt.mode}
       onSave={onSave}
       onCancel={onCancel}
@@ -73,6 +77,7 @@ type AuditCountDialogContentProps = AuditCountDialogProps & {
   expectedQuantity: number;
   foundQuantity: number | null;
   unitOfMeasure: string | null;
+  isExpected: boolean;
   mode: "first" | "recount";
 };
 
@@ -82,11 +87,13 @@ function AuditCountDialogContent({
   expectedQuantity,
   foundQuantity,
   unitOfMeasure,
+  isExpected,
   mode,
   onSave,
   onCancel,
 }: AuditCountDialogContentProps) {
-  const [value, setValue] = useState(String(foundQuantity ?? expectedQuantity));
+  const initial = foundQuantity ?? (isExpected ? expectedQuantity : null);
+  const [value, setValue] = useState(initial === null ? "" : String(initial));
   const inputRef = useAutoFocus<HTMLInputElement>();
   const unit = unitOfMeasure && unitOfMeasure !== "units" ? unitOfMeasure : "";
   const parsed = value.trim() === "" ? null : Number(value);
@@ -114,8 +121,11 @@ function AuditCountDialogContent({
             {mode === "recount" ? "Update count" : "How many did you find?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {assetTitle} is tracked by quantity. {expectedQuantity}
-            {unit ? ` ${unit}` : ""} expected.
+            {isExpected
+              ? `${assetTitle} is tracked by quantity. ${expectedQuantity}${
+                  unit ? ` ${unit}` : ""
+                } expected.`
+              : `${assetTitle} is tracked by quantity and is not on this audit's list. Count the units you found.`}
             {mode === "recount" && foundQuantity !== null
               ? ` Counted so far: ${foundQuantity}.`
               : ""}
@@ -151,13 +161,15 @@ function AuditCountDialogContent({
             <Button type="button" variant="secondary" onClick={onCancel}>
               {mode === "first" ? "Discard scan" : "Cancel"}
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => onSave(expectedQuantity)}
-            >
-              All here ({expectedQuantity})
-            </Button>
+            {isExpected ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => onSave(expectedQuantity)}
+              >
+                All here ({expectedQuantity})
+              </Button>
+            ) : null}
             <Button type="submit" variant="primary" disabled={!isValid}>
               Save count
             </Button>

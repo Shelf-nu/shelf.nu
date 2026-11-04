@@ -341,7 +341,7 @@ describe("POST /api/mobile/audits/record-scan", () => {
   });
 
   it("refuses a negative count before reaching the service", async () => {
-    (makeShelfError as any).mockImplementation((cause: any) => ({
+    (makeShelfError as any).mockImplementationOnce((cause: any) => ({
       message: cause?.message ?? "Invalid",
       status: cause?.status ?? 400,
     }));

@@ -26,6 +26,10 @@ import {
 } from "~/atoms/qr-scanner";
 import { buildAuditBlockers } from "~/components/audit/audit-blockers";
 import {
+  hasUnsavedCounts,
+  recountPromptFor,
+} from "~/components/audit/audit-count-flow";
+import {
   getPendingAuditAssets,
   renderAuditPendingRows,
   renderAuditScannedRows,
@@ -464,21 +468,19 @@ export default function AuditDrawer({
   /** Opens the count dialog to correct a scanned quantity-tracked row. */
   const handleEditCount = useCallback(
     (qrId: string) => {
-      const assetId = items[qrId]?.data?.id;
-      const count = assetId ? auditCounts[assetId] : undefined;
-      if (!assetId || !count) return;
       const data = items[qrId]?.data;
-      setCountPrompt({
+      const assetId = data?.id;
+      if (!assetId) return;
+      const prompt = recountPromptFor({
         assetId,
         qrId,
         assetTitle: data && "title" in data ? data.title : "Asset",
-        expectedQuantity: count.expectedQuantity,
-        foundQuantity: count.foundQuantity,
-        unitOfMeasure: count.unitOfMeasure,
-        mode: "recount",
+        auditCounts,
+        expectedAssetIds,
       });
+      if (prompt) setCountPrompt(prompt);
     },
-    [items, auditCounts, setCountPrompt]
+    [items, auditCounts, expectedAssetIds, setCountPrompt]
   );
 
   const formData = useMemo(() => {
@@ -653,10 +655,8 @@ export default function AuditDrawer({
   //
   // A count the auditor entered but the server has not saved yet also holds
   // completion: completing first would print the previous count.
-  const hasUnsavedCounts = Object.values(auditCounts).some(
-    (count) => count.unsaved
-  );
-  const shouldDisableSubmit = hasBlockers || !auditSession || hasUnsavedCounts;
+  const shouldDisableSubmit =
+    hasBlockers || !auditSession || hasUnsavedCounts(auditCounts);
 
   return (
     <ConfigurableDrawer

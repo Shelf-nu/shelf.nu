@@ -24,6 +24,12 @@ import {
 } from "~/atoms/qr-scanner";
 import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import { AuditCountDialog } from "~/components/audit/audit-count-dialog";
+import {
+  cancelDiscardsScan,
+  countScansToSave,
+  nextFirstCountPrompt,
+  recountPromptFor,
+} from "~/components/audit/audit-count-flow";
 import AuditDrawer from "~/components/audit/audit-drawer";
 import { ErrorContent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -32,10 +38,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { db } from "~/database/db.server";
-import {
-  isQuantityScan,
-  useAuditScanPersistence,
-} from "~/hooks/use-audit-scan-persistence";
+import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
 import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
@@ -46,7 +49,6 @@ import {
   requireAuditAssigneeForScopedViewer,
   removeAuditScan,
 } from "~/modules/audit/service.server";
-import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -274,6 +276,12 @@ export default function AuditSessionRoute() {
   const { ref: scannerContainerRef, height } =
     useFillViewportHeight<HTMLDivElement>();
 
+  // Assets on the audit's list: only they count against an expectation.
+  const expectedAssetIds = useMemo(
+    () => new Set(expectedAssets.map((asset) => asset.id)),
+    [expectedAssets]
+  );
+
   const expectedItems: AuditScannedItem[] = useMemo(
     () =>
       expectedAssets.map(
@@ -357,10 +365,11 @@ export default function AuditSessionRoute() {
         expectedQuantity: request.expectedQuantity,
         foundQuantity: request.foundQuantity,
         unitOfMeasure: request.unitOfMeasure,
+        isExpected: expectedAssetIds.has(request.assetId),
         mode: "first",
       });
     },
-    [store, mergeAuditCounts, setCountPrompt]
+    [store, mergeAuditCounts, setCountPrompt, expectedAssetIds]
   );
 
   // Persist scans to database as they are resolved
@@ -383,27 +392,21 @@ export default function AuditSessionRoute() {
    */
   useEffect(() => {
     if (countPrompt || !auditSession) return;
-    for (const [qrId, item] of Object.entries(scannedItems)) {
-      if (!item?.data || item.error || item.type !== "asset") continue;
-      const data = item.data as AssetFromQr;
-      if (!data.id || persistedItemsRef.current.has(data.id)) continue;
-      if (!isQuantityScan(data, auditCounts)) continue;
-      const count = auditCounts[data.id];
-      if (count?.foundQuantity !== null && count?.foundQuantity !== undefined) {
-        continue;
-      }
-      setCountPrompt({
-        assetId: data.id,
-        qrId,
-        assetTitle: data.title,
-        expectedQuantity: count?.expectedQuantity ?? data.quantity ?? 0,
-        foundQuantity: null,
-        unitOfMeasure: count?.unitOfMeasure ?? data.unitOfMeasure ?? null,
-        mode: "first",
-      });
-      return;
-    }
-  }, [countPrompt, auditSession, scannedItems, auditCounts, setCountPrompt]);
+    const next = nextFirstCountPrompt({
+      scannedItems,
+      auditCounts,
+      savedAssetIds: persistedItemsRef.current,
+      expectedAssetIds,
+    });
+    if (next) setCountPrompt(next);
+  }, [
+    countPrompt,
+    auditSession,
+    scannedItems,
+    auditCounts,
+    expectedAssetIds,
+    setCountPrompt,
+  ]);
 
   /** Saves a count; the persistence hook sends it (again, for a recount). */
   const handleCountSave = useCallback(
@@ -428,23 +431,18 @@ export default function AuditSessionRoute() {
   /** Closing a first count discards the scan; a recount keeps the old count. */
   const handleCountCancel = useCallback(() => {
     const prompt = store.get(auditCountPromptAtom);
-    if (prompt?.mode === "first") {
+    if (prompt && cancelDiscardsScan(prompt)) {
       removeScannedItem(prompt.qrId);
     }
     setCountPrompt(null);
   }, [store, removeScannedItem, setCountPrompt]);
 
   // Resolved scans not saved yet. One waiting for its count is not "saving".
-  const pendingScanCount = Object.values(scannedItems).filter((item) => {
-    if (!item?.data?.id || item.error) return false;
-    if (persistedItemsRef.current.has(item.data.id)) return false;
-    const data = item.data as AssetFromQr;
-    const waitingForCount =
-      item.type === "asset" &&
-      isQuantityScan(data, auditCounts) &&
-      (auditCounts[data.id]?.foundQuantity ?? null) === null;
-    return !waitingForCount;
-  }).length;
+  const pendingScanCount = countScansToSave(
+    scannedItems,
+    auditCounts,
+    persistedItemsRef.current
+  );
 
   const scopeMeta =
     typeof session.scopeMeta === "object" && session.scopeMeta
@@ -502,20 +500,17 @@ export default function AuditSessionRoute() {
 
     const duplicateAssetId =
       store.get(scannedItemsAtom)[duplicate.qrId]?.data?.id;
-    const count = duplicateAssetId
-      ? store.get(auditCountsAtom)[duplicateAssetId]
-      : undefined;
-    if (duplicateAssetId && count && !store.get(auditCountPromptAtom)) {
-      setCountPrompt({
-        assetId: duplicateAssetId,
-        qrId: duplicate.qrId,
-        assetTitle: duplicate.assetTitle,
-        expectedQuantity: count.expectedQuantity,
-        foundQuantity: count.foundQuantity,
-        unitOfMeasure: count.unitOfMeasure,
-        // Recount: closing it keeps the scan, whatever its count.
-        mode: "recount",
-      });
+    const recount = duplicateAssetId
+      ? recountPromptFor({
+          assetId: duplicateAssetId,
+          qrId: duplicate.qrId,
+          assetTitle: duplicate.assetTitle,
+          auditCounts: store.get(auditCountsAtom),
+          expectedAssetIds,
+        })
+      : null;
+    if (recount && !store.get(auditCountPromptAtom)) {
+      setCountPrompt(recount);
       return;
     }
 
