@@ -16,6 +16,9 @@ vi.mock("~/database/db.server", () => ({
     auditAsset: {
       findFirst: vi.fn(),
     },
+    auditSession: {
+      findFirst: vi.fn(),
+    },
     auditImage: {
       count: vi.fn(),
       create: vi.fn(),
@@ -39,8 +42,12 @@ import {
 describe("audit image service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // An audit asset named by a test is in its audit unless the test says not.
+    // The audit and any audit asset a test names are the caller's unless the
+    // test says not.
     vi.mocked(db.auditAsset.findFirst).mockResolvedValue({ id: "aa" } as any);
+    vi.mocked(db.auditSession.findFirst).mockResolvedValue({
+      id: "audit-1",
+    } as any);
   });
 
   describe("uploadAuditImage", () => {
@@ -146,6 +153,26 @@ describe("audit image service", () => {
         select: { id: true },
       });
       // Nothing reaches storage or the database.
+      expect(parseFileFormData).not.toHaveBeenCalled();
+      expect(db.auditImage.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses an audit in another workspace before storing anything", async () => {
+      vi.mocked(db.auditSession.findFirst).mockResolvedValue(null);
+
+      await expect(
+        uploadAuditImage({
+          request: new Request("http://localhost", { method: "POST" }),
+          auditSessionId: "audit-of-another-workspace",
+          organizationId: "org-1",
+          uploadedById: "user-1",
+        })
+      ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+      expect(db.auditSession.findFirst).toHaveBeenCalledWith({
+        where: { id: "audit-of-another-workspace", organizationId: "org-1" },
+        select: { id: true },
+      });
       expect(parseFileFormData).not.toHaveBeenCalled();
       expect(db.auditImage.create).not.toHaveBeenCalled();
     });

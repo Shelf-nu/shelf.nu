@@ -19,6 +19,7 @@ import {
   assertAssetKitsBelongToOrg,
   assertAssetModelBelongsToOrg,
   assertAuditAssetBelongsToAudit,
+  assertAuditSessionBelongsToOrg,
   assertCategoriesBelongToOrg,
   assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
@@ -62,6 +63,7 @@ function txWith(overrides: Record<string, any>) {
     assetKit: { findMany: vitest.fn().mockResolvedValue([]) },
     assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
     auditAsset: { findFirst: vitest.fn().mockResolvedValue(null) },
+    auditSession: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
 }
@@ -867,6 +869,35 @@ describe("assertAuditAssetBelongsToAudit", () => {
     const tx = txWith({});
 
     const err = await assertAuditAssetBelongsToAudit(args, tx).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err).toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+});
+
+describe("assertAuditSessionBelongsToOrg", () => {
+  const args = { auditSessionId: "audit-1", organizationId: ORG };
+
+  it("resolves when the audit is in the caller's workspace", async () => {
+    const tx = txWith({
+      auditSession: {
+        findFirst: vitest.fn().mockResolvedValue({ id: "audit-1" }),
+      },
+    });
+
+    await expect(
+      assertAuditSessionBelongsToOrg(args, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.auditSession.findFirst).toHaveBeenCalledWith({
+      where: { id: "audit-1", organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("throws an uncaptured 400 for an audit in another workspace", async () => {
+    const err = await assertAuditSessionBelongsToOrg(args, txWith({})).catch(
       (e: unknown) => e
     );
 

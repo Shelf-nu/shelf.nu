@@ -150,6 +150,12 @@ export type OrgValidationTxClient = {
       select: { id: true };
     }) => Promise<{ id: string }[]>;
   };
+  auditSession: {
+    findFirst: (args: {
+      where: { id: string; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string } | null>;
+  };
   auditAsset: {
     findFirst: (args: {
       where: {
@@ -983,6 +989,47 @@ export async function assertAuditAssetBelongsToAudit(
       status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, auditSessionId, auditAssetId },
+    });
+  }
+}
+
+/**
+ * Asserts that an audit belongs to `organizationId`.
+ *
+ * An audit id usually arrives in the URL. Checking that the caller may act on
+ * audits is not proof that THIS audit is theirs: a caller who sees every audit
+ * skips the assignment lookup, and nothing else ties the id to the workspace
+ * before a write that carries it.
+ *
+ * @param params.auditSessionId - Audit ID sourced from the URL or request
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if the audit is missing or in another organization
+ */
+export async function assertAuditSessionBelongsToOrg(
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: AuditSession["id"]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  const client = tx ?? db;
+
+  const found = await client.auditSession.findFirst({
+    where: { id: auditSessionId, organizationId },
+    select: { id: true },
+  });
+
+  if (!found) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid audit",
+      message:
+        "This audit could not be found in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId, auditSessionId },
     });
   }
 }
