@@ -25,7 +25,7 @@ import {
   Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingTag } from "@/lib/api";
@@ -142,8 +142,6 @@ function EditBookingContent() {
   }, [id, currentOrg]);
 
   // ── Unsaved-changes guard (only after a REAL edit) ─────
-  const navigation = useNavigation();
-
   // Compare the current form against the loaded snapshot so the discard prompt
   // only appears when something actually changed (and never on load-error).
   const snap = initialRef.current;
@@ -156,22 +154,12 @@ function EditBookingContent() {
       [...selectedTagIds].sort().join(",") !== snap.tagIds
     : false;
 
-  useEffect(() => {
-    if (isLoading || !hasUnsavedChanges) return;
-    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      if (didSubmitRef.current || !hasUnsavedChanges) return;
-      e.preventDefault();
-      Alert.alert("Discard changes?", "Your edits won't be saved.", [
-        { text: "Keep Editing", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => navigation.dispatch(e.data.action),
-        },
-      ]);
-    });
-    return unsubscribe;
-  }, [navigation, isLoading, hasUnsavedChanges]);
+  useDiscardGuard({
+    active: !isLoading && hasUnsavedChanges,
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard changes?",
+    message: "Your edits won't be saved.",
+  });
 
   // ── Date pickers ────────────────────────────────
   const closeFromPicker = useCallback(() => setShowFromPicker(false), []);

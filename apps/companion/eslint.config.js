@@ -24,6 +24,14 @@ module.exports = defineConfig([
       ],
       "local-rules/no-direct-role-checks": "error",
       "local-rules/no-clipped-user-text": "error",
+      // eslint-config-expo turns on eslint-plugin-react-hooks' React Compiler
+      // rules. The app does not build with the React Compiler and uses the
+      // patterns they flag throughout (refs read during render, setState in
+      // effects), so they stay off until the app adopts the compiler.
+      "react-hooks/refs": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/preserve-manual-memoization": "off",
+      "react-hooks/immutability": "off",
     },
   },
 ]);

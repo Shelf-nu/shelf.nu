@@ -4522,6 +4522,8 @@ export async function assetActivityReport(
       "CUSTODY_RELEASED",
       "BOOKING_CHECKED_OUT",
       "BOOKING_CHECKED_IN",
+      "ASSET_ARCHIVED",
+      "ASSET_UNARCHIVED",
     ];
 
     const { events, totalCount, actionCounts, mostActive } =
@@ -4847,6 +4849,10 @@ function mapActionToActivityType(action: ActivityAction): AssetActivityType {
       return "BOOKING_CHECKED_OUT";
     case "BOOKING_CHECKED_IN":
       return "BOOKING_CHECKED_IN";
+    case "ASSET_ARCHIVED":
+      return "ARCHIVED";
+    case "ASSET_UNARCHIVED":
+      return "REINSTATED";
     default:
       return "UPDATED";
   }
@@ -4877,6 +4883,8 @@ function buildActivityDescription(event: {
     CUSTODY_RELEASED: "Custody released",
     BOOKING_CHECKED_OUT: "Checked out",
     BOOKING_CHECKED_IN: "Checked in",
+    ASSET_ARCHIVED: "Archived",
+    ASSET_UNARCHIVED: "Reinstated",
   };
 
   const label =

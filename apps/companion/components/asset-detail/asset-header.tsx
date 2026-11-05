@@ -117,7 +117,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.foreground,
   },
   heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
     alignItems: "center",
