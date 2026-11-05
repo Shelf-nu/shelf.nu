@@ -4575,17 +4575,10 @@ export async function assetActivityReport(
         : fetchActivityEvents(query);
     };
 
-    /**
-     * The asset fields a row reads. SAM ID and the first QR code come in the
-     * order every other surface shows them.
-     */
+    /** The asset fields every row reads, on the page and in a file. */
     const rowAssetSelect = {
       id: true,
       title: true,
-      // The shared code fragment's SAM ID and QR parts, without its barcode
-      // list, which a row never shows.
-      sequentialId: ASSET_CODE_RESOLUTION_SELECT.sequentialId,
-      qrCodes: ASSET_CODE_RESOLUTION_SELECT.qrCodes,
       unitOfMeasure: true,
     } as const satisfies Prisma.AssetSelect;
 
@@ -4594,32 +4587,46 @@ export async function assetActivityReport(
      * `organizationId` and `mainImageExpiration` feed the re-signing.
      */
     const readPageAssets = async (assetIds: string[]) =>
-      refreshExpiredAssetImages(
-        await db.asset.findMany({
-          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
-          where: { id: { in: assetIds }, organizationId },
-          select: {
-            ...rowAssetSelect,
-            organizationId: true,
-            mainImage: true,
-            mainImageExpiration: true,
-            thumbnailImage: true,
-            // Model cover image for assets with no image of their own
-            ...ASSET_MODEL_IMAGE_SELECT,
-          },
-        })
-      );
+      (
+        await refreshExpiredAssetImages(
+          await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
+            where: { id: { in: assetIds }, organizationId },
+            select: {
+              ...rowAssetSelect,
+              organizationId: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              thumbnailImage: true,
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
+            },
+          })
+        )
+      ).map((asset) => ({
+        ...asset,
+        // The page has no SAM ID or QR code column; only a file writes them.
+        sequentialId: null,
+        qrCodes: [] as { id: string }[],
+      }));
 
     /**
-     * Assets for a file: only the fields it writes. Image URLs run to hundreds
-     * of characters each, and an export holds up to
+     * Assets for a file: only the fields it writes, including SAM ID and the
+     * first QR code in the order every other surface shows them. Image URLs
+     * run to hundreds of characters each, and an export holds up to
      * {@link ACTIVITY_EXPORT_MAX_ROWS} rows, so it never reads them.
      */
     const readExportAssets = async (assetIds: string[]) => {
       const assets = await db.asset.findMany({
         // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still name their asset
         where: { id: { in: assetIds }, organizationId },
-        select: rowAssetSelect,
+        select: {
+          ...rowAssetSelect,
+          // The shared code fragment's SAM ID and QR parts, without its
+          // barcode list, which a file never writes.
+          sequentialId: ASSET_CODE_RESOLUTION_SELECT.sequentialId,
+          qrCodes: ASSET_CODE_RESOLUTION_SELECT.qrCodes,
+        },
       });
       return assets.map((asset) => ({
         ...asset,
@@ -4675,7 +4682,9 @@ export async function assetActivityReport(
       });
     };
 
-    const batchSize = allRows ? ACTIVITY_EXPORT_BATCH_SIZE : pageSize;
+    const batchSize = allRows
+      ? Math.min(ACTIVITY_EXPORT_BATCH_SIZE, ACTIVITY_EXPORT_MAX_ROWS)
+      : pageSize;
     // A file needs only the total, for its row-count note; the page needs
     // everything its KPIs show.
     const first = await readEvents(
@@ -4692,14 +4701,21 @@ export async function assetActivityReport(
     // that joins or leaves the filter mid-export cannot repeat or skip rows
     // of other assets.
     let batch = first.events;
+    // Each read asks for at most the rows left under the ceiling, so the file
+    // never passes ACTIVITY_EXPORT_MAX_ROWS whatever the two constants are.
+    let requested = batchSize;
     while (
       allRows &&
-      batch.length === ACTIVITY_EXPORT_BATCH_SIZE &&
+      batch.length === requested &&
       rows.length < ACTIVITY_EXPORT_MAX_ROWS
     ) {
       const last = batch[batch.length - 1];
+      requested = Math.min(
+        ACTIVITY_EXPORT_BATCH_SIZE,
+        ACTIVITY_EXPORT_MAX_ROWS - rows.length
+      );
       batch = (
-        await readEvents(1, ACTIVITY_EXPORT_BATCH_SIZE, "none", {
+        await readEvents(1, requested, "none", {
           occurredAt: last.occurredAt,
           id: last.id,
         })
@@ -4801,10 +4817,13 @@ export async function assetActivityReport(
 const ACTIVITY_EXPORT_BATCH_SIZE = 5000;
 
 /**
- * Most rows one Activity Summary export writes: about six times the busiest
- * workspace's whole history. A file that reaches it says so in its last line.
+ * Most rows one Activity Summary export writes: about three times the busiest
+ * workspace's whole history. The export holds every row and the CSV text in
+ * memory at once (about 220 MB at this ceiling when a tenth of the rows are
+ * long description edits), so raise it only after timing it. A file that
+ * reaches it says so in its last line.
  */
-export const ACTIVITY_EXPORT_MAX_ROWS = 200_000;
+export const ACTIVITY_EXPORT_MAX_ROWS = 100_000;
 
 /** Arguments shared by the two Asset Activity event readers. */
 interface ActivityEventQueryArgs {

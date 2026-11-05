@@ -8,6 +8,7 @@
  * @see {@link file://./asset-activity-content.tsx}
  */
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AssetActivityRow } from "~/modules/reports/types";
@@ -53,6 +54,51 @@ describe("AssetActivityContent", () => {
     const [, dataRow] = screen.getAllByRole("row");
     expect(
       within(dataRow).getByText("Location set to Leeds unit")
-    ).toHaveAttribute("title", "Location set to Leeds unit");
+    ).toBeInTheDocument();
+    // Text that fits needs no button.
+    expect(
+      within(dataRow).queryByRole("button", { name: "Show more" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("lets keyboard and touch users open text cut off at three lines, without opening the row", async () => {
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    // why: happy-dom does no layout, so a clamped cell must report a taller
+    // content box than its visible box itself.
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockReturnValue(120);
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(60);
+    const long = "Description changed: " + "Dry goods ".repeat(60);
+
+    render(
+      <AssetActivityContent
+        rows={[{ ...row, description: long }]}
+        kpis={[]}
+        totalRows={1}
+        onRowClick={onRowClick}
+      />
+    );
+
+    const text = screen.getByText(long.trim());
+    expect(text).toHaveClass("line-clamp-3");
+    const toggle = screen.getByRole("button", { name: "Show more" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    toggle.focus();
+    await user.keyboard("{Enter}");
+
+    expect(text).not.toHaveClass("line-clamp-3");
+    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    expect(onRowClick).not.toHaveBeenCalled();
+
+    scrollHeight.mockRestore();
+    clientHeight.mockRestore();
   });
 });

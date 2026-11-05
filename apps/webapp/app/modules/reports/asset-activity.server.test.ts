@@ -116,6 +116,41 @@ async function readableRows(
   }));
 }
 
+/**
+ * Answers the filtered path's raw queries by their SQL text, so the order the
+ * report sends them in (some run side by side) cannot hand a result to the
+ * wrong query. Unmatched queries get no rows.
+ */
+function answerRawQueriesBySql(answers: {
+  pageIds?: () => { id: string }[];
+  count?: number;
+  byAction?: { action: ActivityAction; count: number }[];
+  byAsset?: { assetId: string; count: number }[];
+}) {
+  vi.mocked(db.$queryRaw).mockImplementation(((query: Prisma.Sql) => {
+    const sql = query.sql;
+    if (sql.includes("OFFSET"))
+      return Promise.resolve(answers.pageIds?.() ?? []);
+    if (sql.includes("COUNT(*)") && !sql.includes("GROUP BY")) {
+      return Promise.resolve([{ count: answers.count ?? 0 }]);
+    }
+    if (sql.includes("GROUP BY e.action")) {
+      return Promise.resolve(answers.byAction ?? []);
+    }
+    if (sql.includes('GROUP BY e."assetId"')) {
+      return Promise.resolve(answers.byAsset ?? []);
+    }
+    return Promise.resolve([]);
+  }) as never);
+}
+
+/** The raw page-id queries the filtered path sent, in order. */
+const filteredPageQueries = () =>
+  vi
+    .mocked(db.$queryRaw)
+    .mock.calls.map(([query]) => query as unknown as Prisma.Sql)
+    .filter((query) => query.sql.includes("OFFSET"));
+
 beforeEach(() => {
   vi.clearAllMocks();
   eventSeq = 0;
@@ -397,6 +432,66 @@ describe("assetActivityReport descriptions", () => {
       },
     ]);
   });
+
+  it("separates several tag names with a semicolon, since a tag name may hold a comma", async () => {
+    vi.mocked(db.tag.findMany).mockResolvedValue([
+      { id: "tag-glass", name: "Fragile, glass" },
+      { id: "tag-cold", name: "Cold" },
+    ] as never);
+
+    const [row] = await readableRows([
+      event("ASSET_TAGS_CHANGED", {
+        field: "tags",
+        fromValue: ["tag-cold"],
+        toValue: ["tag-glass", "tag-cold"],
+      }),
+    ]);
+
+    expect(row.changedFrom).toBe("Cold");
+    expect(row.changedTo).toBe("Fragile, glass; Cold");
+  });
+
+  it("shows the filtered page's KPIs from the per-action and per-asset counts", async () => {
+    answerRawQueriesBySql({
+      pageIds: () => [{ id: "evt-1" }],
+      byAction: [
+        { action: "CUSTODY_ASSIGNED", count: 3 },
+        { action: "CUSTODY_RELEASED", count: 2 },
+        { action: "BOOKING_CHECKED_OUT", count: 4 },
+        { action: "BOOKING_CHECKED_IN", count: 1 },
+        { action: "ASSET_CREATED", count: 6 },
+      ],
+      byAsset: [{ assetId: "asset-1", count: 9 }],
+    });
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([
+      event("ASSET_CREATED"),
+    ] as never);
+    vi.mocked(db.asset.findFirst).mockResolvedValue({
+      title: "Pallet 17",
+    } as never);
+
+    const { kpis, totalRows } = await assetActivityReport({
+      organizationId: ORG,
+      timeframe: TIMEFRAME,
+      assetFilter: buildReportAssetFilter({ categoryIds: ["cat-food"] }),
+      allRows: false,
+    });
+
+    const kpi = (id: string) => kpis.find((k) => k.id === id);
+    expect(totalRows).toBe(16);
+    expect(kpi("total_activities")?.rawValue).toBe(16);
+    expect(kpi("custody_changes")?.rawValue).toBe(5);
+    expect(kpi("booking_activities")?.rawValue).toBe(5);
+    expect(kpi("most_active_asset")).toMatchObject({
+      value: "Pallet 17",
+      rawValue: 9,
+    });
+    expect(db.asset.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "asset-1", organizationId: ORG },
+      })
+    );
+  });
 });
 
 describe("assetActivityReport export mode (allRows)", () => {
@@ -490,18 +585,20 @@ describe("assetActivityReport export mode (allRows)", () => {
   });
 
   it("keeps the filter bar's asset filter on every batch", async () => {
-    // Batch 1: the page ids, then the total. Batch 2: page ids.
-    vi.mocked(db.$queryRaw)
-      .mockResolvedValueOnce(
-        Array.from({ length: 5000 }, (_, i) => ({ id: `e${i}` })) as never
-      )
-      .mockResolvedValueOnce([{ count: 5001 }] as never)
-      .mockResolvedValueOnce([{ id: "last" }] as never);
+    // Batch 1 gets a full batch of ids, batch 2 a short one that ends it.
+    let pageReads = 0;
+    answerRawQueriesBySql({
+      pageIds: () =>
+        (pageReads += 1) === 1
+          ? Array.from({ length: 5000 }, (_, i) => ({ id: `e${i}` }))
+          : [{ id: "last" }],
+      count: 5001,
+    });
     vi.mocked(db.activityEvent.findMany)
       .mockResolvedValueOnce(batchOf(5000) as never)
       .mockResolvedValueOnce([location("loc-hull", "loc-leeds")] as never);
 
-    const { rows } = await assetActivityReport({
+    const { rows, totalRows } = await assetActivityReport({
       organizationId: ORG,
       timeframe: TIMEFRAME,
       assetFilter: buildReportAssetFilter({ categoryIds: ["cat-food"] }),
@@ -509,10 +606,8 @@ describe("assetActivityReport export mode (allRows)", () => {
     });
 
     expect(rows).toHaveLength(5001);
-    const pageQueries = vi
-      .mocked(db.$queryRaw)
-      .mock.calls.map(([query]) => query as unknown as Prisma.Sql)
-      .filter((query) => query.sql.includes("OFFSET"));
+    expect(totalRows).toBe(5001);
+    const pageQueries = filteredPageQueries();
     expect(pageQueries).toHaveLength(2);
     // The total is counted once, for batch 1, and nothing is grouped.
     const sqlTexts = vi
@@ -524,14 +619,24 @@ describe("assetActivityReport export mode (allRows)", () => {
       expect(query.sql).toContain('FROM "Asset"');
       expect(query.values).toContain("cat-food");
     }
-    // Batch 2 starts after the last event read: no offset, and the cursor's
-    // time and id are bound into the query.
-    expect(pageQueries.map((query) => query.values.slice(-2))).toEqual([
-      [5000, 0],
-      [5000, 0],
+    // Batch 1 has no cursor. Batch 2 starts strictly after the last event
+    // read (newest first, ties broken by ascending id), with no offset.
+    const normalised = (query: Prisma.Sql) =>
+      query.text.replace(/\$\d+/g, "$n").replace(/\s+/g, " ");
+    expect(normalised(pageQueries[0])).not.toContain("e.id >");
+    expect(normalised(pageQueries[1])).toContain(
+      'AND e."occurredAt" <= $n AND (e."occurredAt" < $n OR (e."occurredAt" = $n AND e.id > $n)) ORDER BY e."occurredAt" DESC, e.id ASC LIMIT $n OFFSET $n'
+    );
+    const cursorTime = new Date("2026-10-15T10:00:00Z");
+    expect(pageQueries[0].values.slice(-2)).toEqual([5000, 0]);
+    expect(pageQueries[1].values.slice(-6)).toEqual([
+      cursorTime,
+      cursorTime,
+      cursorTime,
+      "evt-5000",
+      5000,
+      0,
     ]);
-    expect(pageQueries[1].sql).toContain("e.id >");
-    expect(pageQueries[1].values).toContain("evt-5000");
   });
 
   it("reads only the asset fields a file writes", async () => {
@@ -555,14 +660,25 @@ describe("assetActivityReport export mode (allRows)", () => {
     ]);
   });
 
-  it("reads images for the page", async () => {
-    await readableRows([event("ASSET_CREATED")], { allRows: false });
+  it("reads images for the page, and no SAM ID or QR code, which it never shows", async () => {
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([
+      event("ASSET_CREATED"),
+    ] as never);
+
+    const { rows } = await assetActivityReport({
+      organizationId: ORG,
+      timeframe: TIMEFRAME,
+      allRows: false,
+    });
 
     const [args] = vi.mocked(db.asset.findMany).mock.calls[0];
     expect(args?.select).toMatchObject({
       mainImage: true,
       thumbnailImage: true,
     });
+    expect(args?.select).not.toHaveProperty("sequentialId");
+    expect(args?.select).not.toHaveProperty("qrCodes");
+    expect(rows[0]).toMatchObject({ samId: null, qrId: null });
   });
 
   it("ends the export's timeframe when the export starts", async () => {
@@ -586,9 +702,11 @@ describe("assetActivityReport export mode (allRows)", () => {
     vi.mocked(db.activityEvent.count).mockResolvedValue(
       ACTIVITY_EXPORT_MAX_ROWS + 1
     );
-    vi.mocked(db.activityEvent.findMany).mockResolvedValue(
-      batchOf(5000) as never
-    );
+    // Every read returns as many events as it asks for, as a busy
+    // workspace's would.
+    vi.mocked(db.activityEvent.findMany).mockImplementation(((args: {
+      take: number;
+    }) => Promise.resolve(batchOf(args.take))) as never);
 
     const { rows, totalRows } = await assetActivityReport({
       organizationId: ORG,
@@ -598,5 +716,13 @@ describe("assetActivityReport export mode (allRows)", () => {
 
     expect(rows).toHaveLength(ACTIVITY_EXPORT_MAX_ROWS);
     expect(totalRows).toBe(ACTIVITY_EXPORT_MAX_ROWS + 1);
+    // No read asks for more than the rows left under the ceiling.
+    const takes = vi
+      .mocked(db.activityEvent.findMany)
+      .mock.calls.map(([args]) => (args as { take: number }).take);
+    expect(takes.reduce((sum, take) => sum + take, 0)).toBe(
+      ACTIVITY_EXPORT_MAX_ROWS
+    );
+    expect(Math.max(...takes)).toBeLessThanOrEqual(5000);
   });
 });

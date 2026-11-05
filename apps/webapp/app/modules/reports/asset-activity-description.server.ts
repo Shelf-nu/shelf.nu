@@ -157,7 +157,7 @@ function readableValue(
   if (reference) {
     const ids = idsIn(value);
     return ids.length > 0
-      ? ids.map((id) => nameOf(reference, id, names)).join(", ")
+      ? ids.map((id) => nameOf(reference, id, names)).join("; ")
       : null;
   }
   if (typeof value === "string") return value;

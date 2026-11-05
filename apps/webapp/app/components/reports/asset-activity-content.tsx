@@ -14,6 +14,7 @@
  * @see {@link file://./report-empty-state.tsx}
  */
 
+import { useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
@@ -24,6 +25,60 @@ import {
 } from "~/components/reports/report-table";
 import type { AssetActivityRow, ReportKpi } from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
+
+/**
+ * One change's description in the Details column.
+ *
+ * Table cells never wrap; this one does, so a long change such as
+ * "Location changed: Main warehouse → Unit 4, Leeds" stays readable. A
+ * rewritten asset description can run to pages, so three lines show, and a
+ * "Show more" button (reachable by keyboard and touch) opens the rest in
+ * place. The button appears only when the text is actually cut off.
+ *
+ * @param props.text - The row's plain-words description
+ */
+function DetailsCell({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+
+  /**
+   * Measures the collapsed text when it mounts or re-renders. A ref callback
+   * rather than an effect: it runs with the laid-out element in hand.
+   */
+  const measure = (element: HTMLSpanElement | null) => {
+    if (!element || expanded) return;
+    const isClamped = element.scrollHeight > element.clientHeight;
+    if (isClamped !== clamped) setClamped(isClamped);
+  };
+
+  return (
+    <div className="flex min-w-48 max-w-xs flex-col items-start gap-1">
+      <span
+        ref={measure}
+        className={tw(
+          "whitespace-normal text-gray-700",
+          !expanded && "line-clamp-3"
+        )}
+      >
+        {text}
+      </span>
+      {clamped || expanded ? (
+        <button
+          type="button"
+          className="text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:underline"
+          aria-expanded={expanded}
+          // The row itself opens the asset; this button only toggles the text.
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((open) => !open);
+          }}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Column definitions for the Asset Activity table. They live at module scope
@@ -85,18 +140,7 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
   {
     accessorKey: "description",
     header: "Details",
-    // Table cells never wrap; this one does, so a long change such as
-    // "Location changed: Main warehouse → Unit 4, Leeds" stays readable. A
-    // rewritten asset description can run to pages, so three lines show and
-    // the rest is in the tooltip and the CSV.
-    cell: ({ row }) => (
-      <span
-        className="line-clamp-3 min-w-48 max-w-xs whitespace-normal text-gray-700"
-        title={row.original.description}
-      >
-        {row.original.description}
-      </span>
-    ),
+    cell: ({ row }) => <DetailsCell text={row.original.description} />,
   },
   {
     accessorKey: "performedBy",
