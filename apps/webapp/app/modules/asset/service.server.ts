@@ -2762,67 +2762,86 @@ export async function updateAsset({
        * Here we actually need to query the locations so we can print their names
        * */
 
-      const user = await loadUserForNotes();
+      /**
+       * The edit is already saved, so a failed lookup or write here is
+       * logged and never turns the saved edit into an error response.
+       */
+      try {
+        const user = await loadUserForNotes();
 
-      // why: cross-org safety for the location IDs is already enforced
-      // *before* the write — `newLocationId` is hard-validated at the
-      // org-scoped findFirst guard above (it throws 404 before connecting),
-      // and `currentLocationId` only drives a `disconnect` (value unused by
-      // Prisma) plus the org-scoped name lookups below (a foreign id resolves
-      // to null, never leaks). A post-write assert here previously threw a
-      // 404 *after* db.asset.update had already committed — removed.
-      const currentLocation = currentLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: currentLocationId,
-              organizationId,
+        // why: cross-org safety for the location IDs is already enforced
+        // *before* the write — `newLocationId` is hard-validated at the
+        // org-scoped findFirst guard above (it throws 404 before connecting),
+        // and `currentLocationId` only drives a `disconnect` (value unused by
+        // Prisma) plus the org-scoped name lookups below (a foreign id resolves
+        // to null, never leaks). A post-write assert here previously threw a
+        // 404 *after* db.asset.update had already committed — removed.
+        const currentLocation = currentLocationId
+          ? await db.location.findFirst({
+              where: {
+                id: currentLocationId,
+                organizationId,
+              },
+            })
+          : null;
+
+        const newLocation = newLocationId
+          ? await db.location.findFirst({
+              where: {
+                id: newLocationId,
+                organizationId,
+              },
+            })
+          : null;
+
+        await createLocationChangeNote({
+          currentLocation,
+          newLocation,
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          displayName: user.displayName,
+          assetId: asset.id,
+          userId,
+          organizationId,
+          isRemoving: newLocationId === null,
+          // Qty-tracked: name the units placed / moved / removed at this
+          // location (sourced from the affected pivot row). INDIVIDUAL keeps
+          // the original phrasing via `formatUnitCount`.
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: locationChangeQuantity,
+        });
+
+        // Activity event for the asset-level location change.
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          locationId: newLocation?.id ?? undefined,
+          field: "locationId",
+          fromValue: currentLocation?.id ?? null,
+          toValue: newLocation?.id ?? null,
+          // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
+          // INDIVIDUAL.
+          meta: assetQtyMeta(asset, locationChangeQuantity),
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to record the location change note and event",
+            additionalData: {
+              assetId: asset.id,
+              newLocationId,
+              currentLocationId,
             },
+            label,
           })
-        : null;
-
-      const newLocation = newLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: newLocationId,
-              organizationId,
-            },
-          })
-        : null;
-
-      await createLocationChangeNote({
-        currentLocation,
-        newLocation,
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        displayName: user.displayName,
-        assetId: asset.id,
-        userId,
-        organizationId,
-        isRemoving: newLocationId === null,
-        // Qty-tracked: name the units placed / moved / removed at this
-        // location (sourced from the affected pivot row). INDIVIDUAL keeps
-        // the original phrasing via `formatUnitCount`.
-        type: asset.type,
-        unitOfMeasure: asset.unitOfMeasure,
-        quantity: locationChangeQuantity,
-      });
-
-      // Activity event for the asset-level location change.
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "ASSET_LOCATION_CHANGED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
-        locationId: newLocation?.id ?? undefined,
-        field: "locationId",
-        fromValue: currentLocation?.id ?? null,
-        toValue: newLocation?.id ?? null,
-        // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
-        // INDIVIDUAL.
-        meta: assetQtyMeta(asset, locationChangeQuantity),
-      });
+        );
+      }
     }
 
     if (shouldUpdatePlacement) {

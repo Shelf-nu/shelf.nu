@@ -3450,6 +3450,30 @@ describe("updateAsset location activity", () => {
     loggerError.mockRestore();
   });
 
+  it("keeps a saved move when the user lookup for its notes fails", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 10]]);
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    (db.user.findFirst as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        currentLocationId: "loc-old",
+        newLocationId: "loc-new",
+        newLocationQuantity: 10,
+      } as unknown as Parameters<typeof updateAsset>[0])
+    ).resolves.toBeDefined();
+
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
   it("counts a quantity move the same way the phone route does", async () => {
     // 10 pens at Old Office; 4 placed at New Office, 6 left unplaced.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
