@@ -131,7 +131,10 @@ import {
 } from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { getPrimaryCustody, hasCustody } from "../custody/utils";
-import { createSystemLocationNote } from "../location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  createSystemLocationNote,
+} from "../location-note/service.server";
 import {
   createBulkKitChangeNotes,
   createKitMoveNote,
@@ -5138,6 +5141,27 @@ export async function getAvailableKitAssetForBooking(
 }
 
 /**
+ * The location a kit member's units leave when the kit moves, for the location
+ * activity log. An INDIVIDUAL member's one placement is replaced, so it leaves
+ * wherever it was. A QUANTITY_TRACKED member only moves the kit's slice, which
+ * sat at the kit's previous location; its own placements stay where they are.
+ *
+ * @param asset - The member, with its placements
+ * @param kitLocation - Where the kit was before the move, or `null`
+ */
+function kitMemberMoveOrigin<TLoc extends { id: string; name: string }>(
+  asset: {
+    type: AssetType;
+    assetLocations?: Array<{ location?: TLoc | null }>;
+  },
+  kitLocation: TLoc | null
+): TLoc | null {
+  return asset.type === AssetType.QUANTITY_TRACKED
+    ? kitLocation
+    : getPrimaryLocation(asset);
+}
+
+/**
  * Moves every member asset of the given kits to `newLocationId`, writing the
  * `AssetLocation` pivot rows that make the kit's placement visible on the
  * assets themselves.
@@ -5298,6 +5322,7 @@ export async function updateKitLocation({
       select: {
         id: true,
         name: true,
+        location: { select: { id: true, name: true } },
         assetKits: {
           select: {
             quantity: true,
@@ -5419,7 +5444,7 @@ export async function updateKitLocation({
       const cascadedAssetsForNotes = assetsWithLocationChange.filter((asset) =>
         cascadedAssetIds.has(asset.id)
       );
-      if (userId && cascadedAssetsForNotes.length > 0) {
+      if (userId && cascadedAssetIds.size > 0) {
         const user = await getUserByID(userId, {
           select: {
             id: true,
@@ -5460,6 +5485,20 @@ export async function updateKitLocation({
             })
           )
         );
+        // Every member the cascade re-placed, judged by its kit slice: a
+        // quantity-tracked slice moves even when the asset's own placement is
+        // already at the target.
+        await createAssetLocationMoveNotes({
+          moves: kit.assets
+            .filter((asset) => cascadedAssetIds.has(asset.id))
+            .map((asset) => ({
+              asset,
+              from: kitMemberMoveOrigin(asset, kit.location ?? null),
+              to: location,
+              quantity: asset.kitQuantity,
+            })),
+          actor: { ...user, id: userId },
+        });
       }
     } else if (!newLocationId && currentLocationId) {
       // Only emit events for assets that actually had this kit's location.
@@ -5588,6 +5627,18 @@ export async function updateKitLocation({
             })
           )
         );
+        // The rows dropped above are this kit's slices, which sat at the
+        // kit's stored location (the caller's `currentLocationId` is form
+        // input and can be stale).
+        await createAssetLocationMoveNotes({
+          moves: unplacedAssetsForNotes.map((asset) => ({
+            asset,
+            from: kit.location ?? currentLocation,
+            to: null,
+            quantity: asset.kitQuantity,
+          })),
+          actor: { ...user, id: userId },
+        });
       }
     }
 
@@ -5766,7 +5817,7 @@ export async function bulkUpdateKitLocation({
       const cascadedAssetsForNotes = assetsWithLocationChange.filter((asset) =>
         cascadedAssetIds.has(asset.id)
       );
-      if (cascadedAssetsForNotes.length > 0) {
+      if (cascadedAssetIds.size > 0) {
         const user = await getUserByID(userId, {
           select: {
             id: true,
@@ -5806,6 +5857,21 @@ export async function bulkUpdateKitLocation({
             })
           )
         );
+        // One move per kit slice, read per kit: a quantity-tracked asset can
+        // sit in several of the selected kits, each at its own location.
+        await createAssetLocationMoveNotes({
+          moves: kitsWithAssets.flatMap((kit) =>
+            kit.assets
+              .filter((asset) => cascadedAssetIds.has(asset.id))
+              .map((asset) => ({
+                asset,
+                from: kitMemberMoveOrigin(asset, kit.location),
+                to: location,
+                quantity: asset.kitQuantity,
+              }))
+          ),
+          actor: { ...user, id: userId },
+        });
       }
     } else {
       // Only assets that currently have a location actually change.
@@ -5912,6 +5978,20 @@ export async function bulkUpdateKitLocation({
             })
           )
         );
+        // Each dropped row was a kit's slice at that kit's old location.
+        await createAssetLocationMoveNotes({
+          moves: kitsWithAssets.flatMap((kit) =>
+            kit.assets
+              .filter((asset) => unplacedAssetIds.has(asset.id))
+              .map((asset) => ({
+                asset,
+                from: kit.location,
+                to: null,
+                quantity: asset.kitQuantity,
+              }))
+          ),
+          actor: { ...user, id: userId },
+        });
       }
     }
 
@@ -6918,7 +6998,7 @@ export async function updateKitAssets({
         locationCascadedAssetIds.has(asset.id) &&
         (getPrimaryLocation(asset)?.id ?? null) !== kit.locationId
     );
-    if (locationMovedAssets.length > 0 && kit.location) {
+    if (locationCascadedAssetIds.size > 0 && kit.location) {
       await Promise.all(
         locationMovedAssets.map((asset) =>
           createNote({
@@ -6943,6 +7023,18 @@ export async function updateKitAssets({
           })
         )
       );
+      await createAssetLocationMoveNotes({
+        // A joining member's kit slice is new, so it comes from nowhere.
+        moves: newlyAddedAssets
+          .filter((asset) => locationCascadedAssetIds.has(asset.id))
+          .map((asset) => ({
+            asset,
+            from: kitMemberMoveOrigin(asset, null),
+            to: kit.location,
+            quantity: addedAssetKitQuantity(asset),
+          })),
+        actor: { ...user, id: userId },
+      });
     }
 
     // Activity events — one ASSET_KIT_CHANGED per asset added or removed.

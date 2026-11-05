@@ -67,7 +67,6 @@ import {
 } from "~/utils/storage.server";
 import {
   formatLocationLink,
-  buildAssetListMarkup,
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
@@ -86,7 +85,11 @@ import {
 } from "../asset/utils.server";
 import type { ArchivedFilter } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
-import { createSystemLocationNote as createSystemLocationActivityNote } from "../location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  createSystemLocationNote as createSystemLocationActivityNote,
+} from "../location-note/service.server";
+import type { AssetLocationMove } from "../location-note/service.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -1948,8 +1951,8 @@ async function createBulkLocationChangeNotes({
         });
       });
 
-    const addedAssets: Array<{ id: string; title: string }> = [];
-    const removedAssetsSummary: Array<{ id: string; title: string }> = [];
+    /** What the location activity log records, one move per changed asset. */
+    const moves: AssetLocationMove[] = [];
 
     // Iterate over the modified assets
     for (const asset of modifiedAssets) {
@@ -2015,92 +2018,19 @@ async function createBulkLocationChangeNotes({
           quantity: affectedQuantity,
         });
 
-        if (isNew && newLocation) {
-          addedAssets.push({ id: asset.id, title: asset.title });
-        }
-
-        if (isRemoving && currentLocation) {
-          removedAssetsSummary.push({ id: asset.id, title: asset.title });
-        }
-      }
-    }
-
-    // Create summary notes on the location's activity log.
-    // why: out of this rule — multi-asset popover, per-asset qty deferred.
-    // The `buildAssetListMarkup` summary renders MANY assets in one
-    // interactive chip; inlining per-asset unit counts here is the same
-    // limitation as the assets_list popover. Per-asset counts land on the
-    // individual asset notes above.
-    const userLink = wrapUserLinkForNote({ ...user, id: userId });
-
-    if (addedAssets.length > 0) {
-      // Group added assets by their previous location for "Moved from" context
-      const byPrevLoc = new Map<string, string>();
-      for (const asset of modifiedAssets) {
-        const prevLoc = getPrimaryLocation(asset);
-        if (assetIds.includes(asset.id) && prevLoc) {
-          byPrevLoc.set(prevLoc.id, prevLoc.name);
-        }
-      }
-      const prevLocLinks = [...byPrevLoc.entries()].map(([id, name]) =>
-        wrapLinkForNote(`/locations/${id}`, name)
-      );
-      const movedFromSuffix =
-        prevLocLinks.length > 0
-          ? ` Moved from ${prevLocLinks.join(", ")}.`
-          : "";
-
-      const content = `${userLink} added ${buildAssetListMarkup(
-        addedAssets,
-        "added"
-      )} to ${formatLocationLink(location)}.${movedFromSuffix}`;
-      await createSystemLocationActivityNote({
-        locationId: location.id,
-        content,
-        userId,
-      });
-
-      // Also create removal notes on previous locations
-      const byPrevLocation = new Map<
-        string,
-        { name: string; assets: typeof addedAssets }
-      >();
-      for (const asset of modifiedAssets) {
-        const prevLoc = getPrimaryLocation(asset);
-        if (!assetIds.includes(asset.id) || !prevLoc) continue;
-        const existing = byPrevLocation.get(prevLoc.id);
-        if (existing) {
-          existing.assets.push({ id: asset.id, title: asset.title });
-        } else {
-          byPrevLocation.set(prevLoc.id, {
-            name: prevLoc.name,
-            assets: [{ id: asset.id, title: asset.title }],
-          });
-        }
-      }
-      for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
-        const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
-        const assetMarkup = buildAssetListMarkup(locAssets, "removed");
-        const movedTo = ` Moved to ${formatLocationLink(location)}.`;
-        await createSystemLocationActivityNote({
-          locationId: locId,
-          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
-          userId,
+        moves.push({
+          asset,
+          from: currentLocation,
+          to: newLocation,
+          quantity: affectedQuantity,
         });
       }
     }
 
-    if (removedAssetsSummary.length > 0) {
-      const content = `${userLink} removed ${buildAssetListMarkup(
-        removedAssetsSummary,
-        "removed"
-      )} from ${formatLocationLink(location)}.`;
-      await createSystemLocationActivityNote({
-        locationId: location.id,
-        content,
-        userId,
-      });
-    }
+    await createAssetLocationMoveNotes({
+      moves,
+      actor: { ...user, id: userId },
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
