@@ -99,12 +99,16 @@ version: if they differ, publish from the release tag, or bump the runtime at a
 store cut first.
 
 Companion releases carry no git tag of their own. The base for a live version
-is the parent of the commit that moved `runtimeVersion` past it. For the 1.7.0
-builds, for example:
+is the parent of the commit that moved `expo` past that version's SDK, not the
+parent of the `runtimeVersion` bump: the SDK upgrade lands first and the bump
+comes later, so the commits in between already carry the new native code. For
+the 1.7.0 builds (SDK 54), for example:
 
 ```bash
-BUMP=$(git log --format=%H -S'"runtimeVersion": "1.8.0"' -- apps/companion/app.json | tail -1)
-git switch --detach "$BUMP^"
+SDK=$(git log --format=%H -S'"expo": "~58' -- apps/companion/package.json | tail -1)
+git switch --detach "$SDK^"
+# Must print "expo": "~54...", the SDK of the 1.7.0 builds. Stop if it does not.
+grep '"expo":' apps/companion/package.json
 ```
 
 Three steps, in this order. JS-only fix already merged to main and checked out:

@@ -55,7 +55,7 @@
     "expo-linking": "~58.0.15",
     "expo-location": "~58.0.20",
     "expo-notifications": "~58.1.7",
-    "expo-quick-actions": "^6.0.1",
+    "expo-quick-actions": "6.0.1",
     "expo-router": "~58.0.29",
     "expo-screen-orientation": "~58.0.3",
     "expo-secure-store": "~58.0.2",
