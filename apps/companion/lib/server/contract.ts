@@ -615,7 +615,12 @@ export function isSessionServerMismatched(
  */
 export function isSameOrigin(candidateUrl: string, baseUrl: string): boolean {
   try {
-    return new URL(candidateUrl).origin === new URL(baseUrl).origin;
+    // why: lowercased because the URL polyfill on device keeps a host's
+    // case as typed, and origins differing only in case are the same server.
+    return (
+      new URL(candidateUrl).origin.toLowerCase() ===
+      new URL(baseUrl).origin.toLowerCase()
+    );
   } catch {
     return false;
   }

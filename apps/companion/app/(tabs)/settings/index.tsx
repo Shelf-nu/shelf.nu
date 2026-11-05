@@ -20,7 +20,6 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import * as WebBrowser from "expo-web-browser";
 import { Image } from "expo-image";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
@@ -47,6 +46,7 @@ import {
 } from "@/lib/server";
 import ConnectServerSheet from "@/components/connect-server-sheet";
 import { getApiBaseUrl } from "@/lib/api";
+import { openShelfWebUrl } from "@/lib/navigation";
 import { usePushSettings } from "@/hooks/use-push-settings";
 import { notificationsRowValue } from "@/lib/push/preferences";
 
@@ -497,9 +497,7 @@ export default function SettingsScreen() {
             // Stays Shelf's own site on every server, unlike the links
             // around it: this policy covers the APP, which is Shelf's
             // regardless of who hosts the instance its data lives on.
-            onPress={() =>
-              WebBrowser.openBrowserAsync("https://www.shelf.nu/privacy")
-            }
+            onPress={() => openShelfWebUrl("https://www.shelf.nu/privacy")}
             activeOpacity={0.7}
             accessibilityLabel="Privacy Policy"
             accessibilityRole="link"
@@ -529,7 +527,7 @@ export default function SettingsScreen() {
                     text: "Continue",
                     style: "destructive",
                     onPress: () =>
-                      WebBrowser.openBrowserAsync(
+                      openShelfWebUrl(
                         `${getApiBaseUrl()}/account-details/general`
                       ),
                   },
@@ -559,7 +557,7 @@ export default function SettingsScreen() {
           // The web app this companion belongs to, which is the CONNECTED
           // server — a self-hosted user's advanced features live on their own
           // instance, and Shelf Cloud has no account of theirs to show them.
-          onPress={() => WebBrowser.openBrowserAsync(getApiBaseUrl())}
+          onPress={() => openShelfWebUrl(getApiBaseUrl())}
           accessibilityLabel={`Open ${serverLabel} in a browser`}
           accessibilityRole="link"
         >
