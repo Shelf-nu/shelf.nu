@@ -154,6 +154,7 @@ describe("audit image service", () => {
           auditAssetId: "auditasset-of-another-audit",
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
 
@@ -179,6 +180,7 @@ describe("audit image service", () => {
           auditSessionId: "audit-of-another-workspace",
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
 
