@@ -2769,13 +2769,13 @@ export async function updateAsset({
       try {
         const user = await loadUserForNotes();
 
-        // why: cross-org safety for the location IDs is already enforced
-        // *before* the write — `newLocationId` is hard-validated at the
-        // org-scoped findFirst guard above (it throws 404 before connecting),
-        // and `currentLocationId` only drives a `disconnect` (value unused by
-        // Prisma) plus the org-scoped name lookups below (a foreign id resolves
-        // to null, never leaks). A post-write assert here previously threw a
-        // 404 *after* db.asset.update had already committed — removed.
+        // why: cross-org safety for the location IDs is enforced *before* the
+        // write: `newLocationId` is hard-validated at the org-scoped findFirst
+        // guard above (it throws 404 before connecting), and `currentLocationId`
+        // only drives a `disconnect` (value unused by Prisma) plus the
+        // org-scoped name lookups below (a foreign id resolves to null, never
+        // leaks). The edit is already committed here, so this block must never
+        // throw an org check of its own.
         const currentLocation = currentLocationId
           ? await db.location.findFirst({
               where: {
