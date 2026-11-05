@@ -72,5 +72,7 @@ export function unlockOrientationOnTablets(): void {
 
   apply(Dimensions.get("screen"));
   // Lives as long as the app process, so the subscription is never removed.
-  Dimensions.addEventListener("change", ({ screen }) => apply(screen));
+  Dimensions.addEventListener("change", ({ screen }: { screen: ScaledSize }) =>
+    apply(screen)
+  );
 }

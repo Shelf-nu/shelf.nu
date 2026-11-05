@@ -22,8 +22,12 @@ import {
   Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useNavigation, useRouter } from "expo-router";
-import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRouter,
+  useFocusEffect,
+  useScrollToTop,
+} from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -794,7 +798,7 @@ function BookingsListContent() {
                       style={styles.footer}
                       color={colors.muted}
                     />
-                  ) : null
+                  ) : undefined
                 }
               />
             )}

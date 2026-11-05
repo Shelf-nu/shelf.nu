@@ -15,6 +15,10 @@ import {
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import {
+  assertAuditAssetBelongsToAudit,
+  assertAuditSessionBelongsToOrg,
+} from "~/utils/org-validation.server";
+import {
   getFileUploadPath,
   parseFileFormData,
   removePublicFile,
@@ -83,6 +87,21 @@ export async function uploadAuditImage({
   description?: string;
   returnParsedFormData?: boolean;
 }): Promise<AuditImage | { image: AuditImage; formData: FormData }> {
+  // Both ids come from the request (a URL segment or a form field), and the
+  // database links the image to them by id alone. Prove they are the
+  // caller's before anything is stored. An audit asset check covers its audit
+  // too, since it joins the audit's organization. Outside the `try` so the
+  // 400 is not re-wrapped as an upload failure.
+  if (auditAssetId) {
+    await assertAuditAssetBelongsToAudit({
+      auditAssetId,
+      auditSessionId,
+      organizationId,
+    });
+  } else {
+    await assertAuditSessionBelongsToOrg({ auditSessionId, organizationId });
+  }
+
   try {
     // Check image count limits before uploading
     await validateImageLimits({

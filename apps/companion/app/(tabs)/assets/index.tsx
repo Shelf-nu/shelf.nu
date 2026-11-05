@@ -10,11 +10,16 @@ import {
   RefreshControl,
   ScrollView,
   Animated,
+  type ScrollViewInstance,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
+import {
+  useRouter,
+  useLocalSearchParams,
+  useFocusEffect,
+  useScrollToTop,
+} from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -115,7 +120,7 @@ function AssetsListContent() {
   });
 
   // Keep swipe hook in sync + auto-scroll pills to keep active one visible
-  const filterScrollRef = useRef<ScrollView>(null);
+  const filterScrollRef = useRef<ScrollViewInstance>(null);
   useEffect(() => {
     syncIndex(activeFilter);
     // ~80px avg pill width — scroll to rough center of active pill
@@ -741,7 +746,7 @@ function AssetsListContent() {
                       <Text style={styles.errorBannerRetry}>Retry</Text>
                     </TouchableOpacity>
                   </View>
-                ) : null
+                ) : undefined
               }
               ListFooterComponent={
                 isLoadingMore ? (
@@ -750,7 +755,7 @@ function AssetsListContent() {
                     color={colors.muted}
                     accessibilityLabel="Loading more assets"
                   />
-                ) : null
+                ) : undefined
               }
             />
           )}
