@@ -177,9 +177,10 @@ export function AssetUtilizationContent({
             <span className="font-medium text-gray-700">
               How it's calculated:
             </span>{" "}
-            Usage rate = days the asset was on at least one booking in this
-            period ÷ days in the period × 100. Overlapping bookings count once,
-            so the rate tops out at 100%.
+            For individual assets, usage rate = days booked ÷ days in the period
+            × 100. For quantity-tracked pools, Days Booked counts calendar days
+            with at least one booking, while usage rate weights booked unit-days
+            against historical pool capacity so the rate tops out at 100%.
           </p>
         </div>
       </div>
