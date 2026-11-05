@@ -18,6 +18,8 @@ import {
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertAssetModelBelongsToOrg,
+  assertAuditAssetBelongsToAudit,
+  assertAuditSessionBelongsToOrg,
   assertCategoriesBelongToOrg,
   assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
@@ -60,6 +62,8 @@ function txWith(overrides: Record<string, any>) {
     userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     assetKit: { findMany: vitest.fn().mockResolvedValue([]) },
     assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
+    auditAsset: { findFirst: vitest.fn().mockResolvedValue(null) },
+    auditSession: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
 }
@@ -830,5 +834,74 @@ describe("assertAssetsAreNotArchived", () => {
     expect(err.message).toBe(
       '"Camera" is archived. Remove it from the booking or ask an admin to reinstate it.'
     );
+  });
+});
+
+describe("assertAuditAssetBelongsToAudit", () => {
+  const args = {
+    auditAssetId: "aa-1",
+    auditSessionId: "audit-1",
+    organizationId: ORG,
+  };
+
+  it("resolves when the audit asset is in this audit, in this workspace", async () => {
+    const tx = txWith({
+      auditAsset: { findFirst: vitest.fn().mockResolvedValue({ id: "aa-1" }) },
+    });
+
+    await expect(
+      assertAuditAssetBelongsToAudit(args, tx)
+    ).resolves.toBeUndefined();
+
+    // Both the audit and the workspace are in the query: an AuditAsset id
+    // from another audit, or from another workspace's audit, must not match.
+    expect(tx.auditAsset.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "aa-1",
+        auditSessionId: "audit-1",
+        auditSession: { organizationId: ORG },
+      },
+      select: { id: true },
+    });
+  });
+
+  it("throws an uncaptured 400 for an audit asset in another audit or workspace", async () => {
+    const tx = txWith({});
+
+    const err = await assertAuditAssetBelongsToAudit(args, tx).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err).toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+});
+
+describe("assertAuditSessionBelongsToOrg", () => {
+  const args = { auditSessionId: "audit-1", organizationId: ORG };
+
+  it("resolves when the audit is in the caller's workspace", async () => {
+    const tx = txWith({
+      auditSession: {
+        findFirst: vitest.fn().mockResolvedValue({ id: "audit-1" }),
+      },
+    });
+
+    await expect(
+      assertAuditSessionBelongsToOrg(args, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.auditSession.findFirst).toHaveBeenCalledWith({
+      where: { id: "audit-1", organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("throws an uncaptured 400 for an audit in another workspace", async () => {
+    const err = await assertAuditSessionBelongsToOrg(args, txWith({})).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err).toMatchObject({ status: 400, shouldBeCaptured: false });
   });
 });

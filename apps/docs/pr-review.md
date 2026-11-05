@@ -6,9 +6,11 @@ convention breaks and missed reuse, security holes, and what the change
 affects outside the diff. Every finding is verified before you see it, and the
 report is written in plain language.
 
-It is read-only while it reviews. After the report it edits code only for the
-findings you pick to fix, or for a "prove N" you request, which writes and then
-deletes a throwaway test. It never posts to GitHub unless you ask. For handling CodeRabbit, Codex and Copilot comments
+It is read-only while it reviews. After the report you either have it fix the
+findings you pick, or have it post them as a request-changes review for the
+author to fix, never both. The only other edit is a "prove N" you request, which
+writes and then deletes a throwaway test. It never posts to GitHub unless you
+ask. For handling CodeRabbit, Codex and Copilot comments
 after the review, use [`/watchdog`](./watchdog.md).
 
 ## Running it
@@ -79,13 +81,35 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    migration that already existed gets a warning: databases that already ran
    it never see the edit.
 
-After the report the skill asks what to do next in a picker. You tick which
-findings to fix: each finding when there are 4 or fewer, otherwise whole
-sections (must fix, should fix, nits, spotted along the way), or type a custom
-range under "Other". A second question appears when at least one of prove,
-restore or post applies. If you close the picker, it waits for a typed reply to
-the Next line. You can also type "fix 1-4",
-"restore D2", or "prove 3". `prove N`
+After the report the skill asks what to do next in a picker. First you pick
+one path:
+
+- **Post a request-changes review**, for an open PR someone else wrote
+  (GitHub refuses one on your own PR, so on your own PR you fix instead). The
+  author fixes the findings. The skill
+  writes the review, shows it to you, posts it after you confirm, and stops. It
+  edits no code and does not offer to fix anything afterwards.
+- **Fix here.** The skill fixes the findings in your checkout and posts
+  nothing.
+
+It never does both in one run. Then you tick which findings go into the review
+or get fixed: each finding when there are 4 or fewer, otherwise whole sections
+(must fix, should fix, nits, spotted along the way), or type a custom range
+under "Other". "Spotted along the way" findings never go into a posted review,
+since the PR did not cause them; the post option only appears when the PR
+caused at least one finding. With no findings but some dismissed entries, it skips the path picker and only
+asks which entries to restore. A third question appears when prove or restore applies. If you
+close the picker, it waits for a typed reply to the Next line. You can also
+type "post" (every finding the PR caused), "post 1-4", "fix 1-4", "restore D2",
+or "prove 3".
+
+The posted review is written for the author's AI agent to act on: no
+greetings or praise, no hedging, and every finding stands on its own with the
+file and line, the problem, when it happens, the change to make and how to
+check it is fixed. It keeps the report's numbers so replies line up, and ends
+with what to do before re-requesting review.
+
+`prove N`
 writes a throwaway test under
 `apps/webapp/test/` that fails if finding N is real, runs only that file
 (`pnpm webapp:test -- --run <file>`; for non-webapp code, the closest equivalent
