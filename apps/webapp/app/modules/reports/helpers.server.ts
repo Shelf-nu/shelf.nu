@@ -4284,6 +4284,7 @@ export async function assetUtilizationReport(
             },
           },
           select: {
+            quantity: true,
             booking: {
               select: {
                 id: true,
@@ -4302,6 +4303,111 @@ export async function assetUtilizationReport(
 
     // Calculate utilization for each asset
     const rows: AssetUtilizationRow[] = assets.map((asset) => {
+      if (asset.type === "QUANTITY_TRACKED") {
+        const poolQuantity =
+          typeof asset.quantity === "number" && asset.quantity > 0
+            ? asset.quantity
+            : 0;
+        const dayMs = 1000 * 60 * 60 * 24;
+        const windowMs = Math.max(
+          0,
+          timeframe.to.getTime() - timeframe.from.getTime()
+        );
+        const totalUnitMsAvailable = windowMs * poolQuantity;
+
+        // Aggregate booked units per booking (standalone + kit-driven slices on
+        // the same booking share its clamped window and sum their quantities).
+        const bookingQuantities = new Map<
+          string,
+          { start: number; end: number; quantity: number }
+        >();
+        const bookingIds = new Set<string>();
+
+        for (const ba of asset.bookingAssets) {
+          const booking = ba.booking;
+          if (!booking.from || !booking.to) continue;
+          bookingIds.add(booking.id);
+
+          const start = Math.max(
+            booking.from.getTime(),
+            timeframe.from.getTime()
+          );
+          const end = Math.min(booking.to.getTime(), timeframe.to.getTime());
+          if (end <= start) continue;
+
+          const sliceQty = ba.quantity ?? 1;
+          const existing = bookingQuantities.get(booking.id);
+          if (existing) {
+            existing.quantity += sliceQty;
+          } else {
+            bookingQuantities.set(booking.id, {
+              start,
+              end,
+              quantity: sliceQty,
+            });
+          }
+        }
+
+        // Sweep-line across clamped booking boundaries so concurrent bookings
+        // sum their booked units while instantaneous usage caps at poolQuantity.
+        let totalUnitMsInUse = 0;
+        if (poolQuantity > 0 && bookingQuantities.size > 0) {
+          const events: Array<{ time: number; delta: number }> = [];
+          for (const { start, end, quantity } of bookingQuantities.values()) {
+            if (quantity <= 0) continue;
+            events.push({ time: start, delta: quantity });
+            events.push({ time: end, delta: -quantity });
+          }
+          events.sort((a, b) => a.time - b.time);
+
+          let activeUnits = 0;
+          let prevTime = events[0]?.time ?? 0;
+          for (const ev of events) {
+            if (ev.time > prevTime && activeUnits > 0) {
+              totalUnitMsInUse +=
+                (ev.time - prevTime) * Math.min(activeUnits, poolQuantity);
+            }
+            activeUnits += ev.delta;
+            prevTime = ev.time;
+          }
+        }
+
+        const daysInUse =
+          poolQuantity > 0
+            ? Math.min(
+                totalDays,
+                Math.ceil(totalUnitMsInUse / (dayMs * poolQuantity))
+              )
+            : 0;
+
+        const utilizationRate =
+          totalUnitMsAvailable > 0
+            ? Math.min(
+                100,
+                Math.round((totalUnitMsInUse / totalUnitMsAvailable) * 100)
+              )
+            : 0;
+
+        return {
+          id: asset.id,
+          assetId: asset.id,
+          assetName: asset.title,
+          thumbnailImage: asset.thumbnailImage,
+          mainImage: asset.mainImage,
+          assetModel: asset.assetModel ?? null,
+          category: asset.category?.name || null,
+          location: getPrimaryLocation(asset)?.name || null,
+          totalDays,
+          daysInUse,
+          utilizationRate,
+          bookingCount: bookingIds.size,
+          valuation: asset.valuation,
+          type: asset.type,
+          quantity: asset.quantity,
+          unitOfMeasure: asset.unitOfMeasure,
+        };
+      }
+
       // One booking can hold several pivot rows for the same asset
       // (standalone + kit-driven slices — the pivot's partial unique indexes
       // allow it), so both aggregates key on the BOOKING: `bookingIds`
