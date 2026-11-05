@@ -65,6 +65,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
+import { MoreLocationsChip } from "~/components/location/more-locations-chip";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -1921,10 +1922,14 @@ const RowComponent = ({
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
   const { category, tags } = item;
   /**
-   * `Asset` has no location column: the Location column shows the oldest
-   * placement from `assetLocations`, the same one the assets index shows.
+   * `Asset` has no location column. The Location column shows the oldest
+   * placement from `assetLocations` as the badge and counts the rest in a
+   * "+N" chip, as the assets index does.
    */
   const location = getPrimaryLocation(item);
+  const otherLocations = (item.assetLocations ?? [])
+    .slice(1)
+    .flatMap((placement) => (placement.location ? [placement.location] : []));
   const isPartOfKit = (item.assetKits ?? []).length > 0;
   const isAddedThroughKit = isPartOfKit && checked;
   const isQtyTracked = isQuantityTracked(item);
@@ -2062,14 +2067,20 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+            {/* Opening the chip's tooltip must not toggle the row's selection. */}
+            <span role="presentation" onClick={(e) => e.stopPropagation()}>
+              <MoreLocationsChip primary={location} others={otherLocations} />
+            </span>
+          </span>
         ) : null}
       </Td>
     </>
