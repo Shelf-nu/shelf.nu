@@ -143,6 +143,37 @@ export async function getPdfTemplates({
 }
 
 /**
+ * Lists the custom fields a template's edit form offers: every field of the
+ * workspace that is not deleted, by name. Inactive ones are included with
+ * their `active` flag so the form can keep a saved slot while offering only
+ * active fields.
+ *
+ * @param params.organizationId - The caller's workspace
+ * @returns The fields' id, name, type and active flag, sorted by name
+ * @throws {ShelfError} 500 when the read fails
+ */
+export async function getPdfTemplateCustomFields({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  try {
+    return await db.customField.findMany({
+      where: { organizationId, deletedAt: null },
+      select: { id: true, name: true, type: true, active: true },
+      orderBy: { name: "asc" },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while loading the custom fields.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Picks the template a booking PDF prints with.
  *
  * - An explicitly `requestedId` must be one of this workspace's templates;

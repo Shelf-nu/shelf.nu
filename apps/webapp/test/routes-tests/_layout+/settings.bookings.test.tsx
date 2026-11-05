@@ -13,11 +13,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
-import { db } from "~/database/db.server";
 import {
   createPdfTemplate,
   deletePdfTemplate,
   duplicatePdfTemplate,
+  getPdfTemplateCustomFields,
   getPdfTemplates,
   setDefaultPdfTemplate,
   updatePdfTemplate,
@@ -41,18 +41,12 @@ vi.mock("~/config/shelf.config", async (importOriginal) => {
   };
 });
 
-// why: the loader reads the workspace's custom fields from the database
-vi.mock("~/database/db.server", () => ({
-  db: {
-    customField: { findMany: vi.fn().mockResolvedValue([]) },
-  },
-}));
-
 // why: the template rules run against the database and have their own tests
 // (`modules/pdf-template/service.server.test.ts`); this suite is about the
 // route's gate and how it reads the form.
 vi.mock("~/modules/pdf-template/service.server", () => ({
   getPdfTemplates: vi.fn().mockResolvedValue([]),
+  getPdfTemplateCustomFields: vi.fn().mockResolvedValue([]),
   createPdfTemplate: vi.fn(),
   updatePdfTemplate: vi.fn(),
   duplicatePdfTemplate: vi.fn(),
@@ -143,7 +137,7 @@ describe("settings.bookings loader", () => {
     const templates = [{ id: "template-1", name: "Checklist" }];
     vi.mocked(getPdfTemplates).mockResolvedValue(templates as any);
     const fields = [{ id: "cf-1", name: "Serial", type: "TEXT", active: true }];
-    vi.mocked(db.customField.findMany).mockResolvedValue(fields as any);
+    vi.mocked(getPdfTemplateCustomFields).mockResolvedValue(fields as any);
 
     const response = (await loader(
       createLoaderArgs({
@@ -155,10 +149,8 @@ describe("settings.bookings loader", () => {
     const body = (response.data ?? response) as Record<string, unknown>;
 
     expect(getPdfTemplates).toHaveBeenCalledWith({ organizationId: "org-1" });
-    expect(db.customField.findMany).toHaveBeenCalledWith({
-      where: { organizationId: "org-1", deletedAt: null },
-      select: { id: true, name: true, type: true, active: true },
-      orderBy: { name: "asc" },
+    expect(getPdfTemplateCustomFields).toHaveBeenCalledWith({
+      organizationId: "org-1",
     });
     expect(body.pdfTemplates).toEqual(templates);
     expect(body.templateCustomFields).toEqual(fields);

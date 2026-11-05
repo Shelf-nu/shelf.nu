@@ -40,7 +40,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
-import { db } from "~/database/db.server";
 import { scheduleExpiryArchiveForExistingReservations } from "~/modules/booking/service.server";
 import {
   getBookingSettingsForOrganization,
@@ -56,6 +55,7 @@ import {
   createPdfTemplate,
   deletePdfTemplate,
   duplicatePdfTemplate,
+  getPdfTemplateCustomFields,
   getPdfTemplates,
   setDefaultPdfTemplate,
   updatePdfTemplate,
@@ -139,13 +139,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getTeamMembersForNotify({ organizationId }),
       showPdfTemplates ? getPdfTemplates({ organizationId }) : [],
       // The custom fields a template can print, for its edit form.
-      showPdfTemplates
-        ? db.customField.findMany({
-            where: { organizationId, deletedAt: null },
-            select: { id: true, name: true, type: true, active: true },
-            orderBy: { name: "asc" },
-          })
-        : [],
+      showPdfTemplates ? getPdfTemplateCustomFields({ organizationId }) : [],
     ]);
 
     const header: HeaderData = {
