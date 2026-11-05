@@ -3175,6 +3175,159 @@ describe("updateAsset newLocationQuantity", () => {
   });
 });
 
+describe("updateAsset multi-placement location guard (issue #3345)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // `clearAllMocks` only resets call history, not queued `*Once`
+    // values. Reset the findUnique mock so any leftover queue from a
+    // prior test can't bleed into the kit-guard fetch here.
+    vi.mocked(db.asset.findUnique).mockReset();
+    vi.mocked(db.asset.findUnique).mockResolvedValue(null);
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "pool-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      assetLocations: [],
+    });
+    // The post-transaction re-read feeds the location-change notes, which
+    // render the asset's title — a bare `{}` would crash the markdoc
+    // wrappers instead of exercising the placement path.
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      title: "Pool",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      unitOfMeasure: "units",
+      assetLocations: [],
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+  });
+
+  /** Kit-guard fetch result for a 14-unit pool placed 5 / 5 / 4. */
+  function mockMultiPlacedPool() {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      {
+        type: "QUANTITY_TRACKED",
+        quantity: 14,
+        assetKits: [],
+        assetLocations: [
+          { id: "placement-a" },
+          { id: "placement-b" },
+          { id: "placement-c" },
+        ],
+      }
+    );
+  }
+
+  it("refuses a quantity-less location change for a pool placed at multiple locations", async () => {
+    // The asset edit form (and the companion edit screen) submit only
+    // `newLocationId` / `currentLocationId` — no per-location quantity
+    // and no warning. The placement rewrite would delete every manual
+    // placement and put all 14 units at the new location.
+    mockMultiPlacedPool();
+
+    await expect(
+      updateAsset({
+        id: "pool-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        newLocationId: "loc-d",
+        currentLocationId: "loc-a",
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      title: "Asset is placed at multiple locations",
+    });
+
+    // The refusal fires before the transaction, so nothing is written.
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("still allows the update-location dialog path, which warns and submits an explicit quantity", async () => {
+    mockMultiPlacedPool();
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-d",
+      name: "Storage D",
+    });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      organizationId: "org-A",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      title: "Pool",
+      unitOfMeasure: "units",
+    });
+    vi.mocked(readStockState).mockResolvedValueOnce({
+      total: 14,
+      placed: new Map([
+        ["loc-a", 5],
+        ["loc-b", 5],
+        ["loc-c", 4],
+      ]),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    } as any);
+
+    await updateAsset({
+      id: "pool-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      newLocationId: "loc-d",
+      currentLocationId: "loc-a",
+      newLocationQuantity: 14,
+    } as any);
+
+    expect(db.asset.update).toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).toHaveBeenCalled();
+  });
+
+  it("still allows a quantity-less location change for a pool placed at a single location", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      {
+        type: "QUANTITY_TRACKED",
+        quantity: 14,
+        assetKits: [],
+        assetLocations: [{ id: "placement-a" }],
+      }
+    );
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-d",
+      name: "Storage D",
+    });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      organizationId: "org-A",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      title: "Pool",
+      unitOfMeasure: "units",
+    });
+    vi.mocked(readStockState).mockResolvedValueOnce({
+      total: 14,
+      placed: new Map([["loc-a", 14]]),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    } as any);
+
+    await updateAsset({
+      id: "pool-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      newLocationId: "loc-d",
+      currentLocationId: "loc-a",
+    } as any);
+
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+});
+
 /**
  * `replaceAssetPlacements` — the manage-placements dialog's write path.
  *
