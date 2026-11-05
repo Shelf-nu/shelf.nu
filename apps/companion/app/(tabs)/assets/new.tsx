@@ -30,7 +30,6 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -47,6 +46,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CharacterCount } from "@/components/shared/character-count";
@@ -286,7 +286,6 @@ export default function CreateAssetScreen() {
   // ── Unsaved changes guard ─────────────────────
   // Track whether the form was submitted successfully (skip guard on success)
   const didSubmitRef = useRef(false);
-  const navigation = useNavigation();
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
@@ -297,30 +296,13 @@ export default function CreateAssetScreen() {
     !!imageUri ||
     Object.values(customFieldValues).some((v) => v.trim() !== "");
 
-  useEffect(() => {
-    if (!hasUnsavedChanges || didSubmitRef.current) return;
-
-    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      // If nothing changed or already submitted, allow navigation
-      if (!hasUnsavedChanges || didSubmitRef.current) return;
-
-      e.preventDefault();
-      Alert.alert(
-        "Discard changes?",
-        "You have unsaved changes. Are you sure you want to leave?",
-        [
-          { text: "Keep Editing", style: "cancel" },
-          {
-            text: "Discard",
-            style: "destructive",
-            onPress: () => navigation.dispatch(e.data.action),
-          },
-        ]
-      );
-    });
-
-    return unsubscribe;
-  }, [navigation, hasUnsavedChanges]);
+  useDiscardGuard({
+    active: hasUnsavedChanges,
+    // A submitted form leaves freely
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard changes?",
+    message: "You have unsaved changes. Are you sure you want to leave?",
+  });
 
   // ── Filtered picker lists ───────────────────────
   const filteredCategories = categorySearch
@@ -676,7 +658,6 @@ export default function CreateAssetScreen() {
             placeholder="Optional description..."
             placeholderTextColor={colors.placeholderText}
             multiline
-            numberOfLines={3}
             textAlignVertical="top"
             accessibilityLabel="Description"
           />
@@ -1167,7 +1148,10 @@ const useStyles = createStyles((colors, shadows) => ({
     ...shadows.sm,
   },
   textArea: {
+    // Grows with the text to about ten lines, then scrolls inside. A
+    // `numberOfLines` prop would cap it at that many lines on iOS.
     minHeight: 80,
+    maxHeight: 260,
     paddingTop: 12,
   },
   errorHint: {
