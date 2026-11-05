@@ -246,9 +246,19 @@ export function EvidenceModal({
   /**
    * Leaving for a link's app screen closes this sheet and drops what is
    * being added, so a note or photo not yet sent asks first: "Keep editing"
-   * stays here with the draft as it was.
+   * stays here with the draft as it was. While a note or photo is saving,
+   * the link waits: the sheet stays until the save has answered.
    */
   const leaveForLink = useCallback((): Promise<boolean> => {
+    if (isSubmittingNote || isSubmittingImage) {
+      // why: the save carries on after the sheet closes, so leaving now
+      // would add evidence the auditor could no longer see or undo here.
+      Alert.alert(
+        "Still saving",
+        "Wait until your note or photo is added, then open the link."
+      );
+      return Promise.resolve(false);
+    }
     if (!hasUnsentEvidence(noteText, selectedImageUri)) {
       handleClose();
       return Promise.resolve(true);
@@ -277,7 +287,13 @@ export function EvidenceModal({
         { cancelable: true, onDismiss: () => resolve(false) }
       );
     });
-  }, [noteText, selectedImageUri, handleClose]);
+  }, [
+    isSubmittingNote,
+    isSubmittingImage,
+    noteText,
+    selectedImageUri,
+    handleClose,
+  ]);
 
   const handleSubmitNote = useCallback(async () => {
     if (!item?.auditAssetId || !currentOrg || !noteText.trim()) return;
