@@ -82,11 +82,11 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
-import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
@@ -354,11 +354,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // roster nobody renders.
             canSeeAllCustody: false,
             locationIdsOverride,
-            extraInclude: {
-              assetLocations: {
-                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-              },
-            },
           })
       ),
       getBooking({
@@ -524,20 +519,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Attach the model flag, attach availableQuantity to qty-tracked rows and
-     * drop qty-tracked rows with nothing left to book.
+     * Attach the model flag and the primary location, attach
+     * availableQuantity to qty-tracked rows and drop qty-tracked rows with
+     * nothing left to book. `Asset` has no `location` column: the Location
+     * column reads the oldest placement from `assetLocations`, the same row
+     * the assets index shows.
      */
     const assetsWithAvailability = assets
       .map((a) => {
+        const location =
+          getPrimaryLocation<
+            Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY>
+          >(a);
         const modelReservedElsewhere =
           a.type === AssetType.INDIVIDUAL &&
           !!a.assetModelId &&
           !ownStandaloneAssetIds.has(a.id) &&
           exhaustedModelIds.has(a.assetModelId);
         if (a.type !== "QUANTITY_TRACKED")
-          return { ...a, modelReservedElsewhere };
+          return { ...a, location, modelReservedElsewhere };
         const availableQuantity = availabilityByAsset.get(a.id)?.bookable ?? 0;
-        return { ...a, modelReservedElsewhere, availableQuantity };
+        return { ...a, location, modelReservedElsewhere, availableQuantity };
       })
       .filter((a) => {
         if (a.type !== "QUANTITY_TRACKED") return true;
