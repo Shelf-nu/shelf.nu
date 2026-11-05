@@ -24,6 +24,7 @@ import {
   topBookedKitsReport,
   assetInventoryReport,
   assetUtilizationReport,
+  ACTIVITY_EXPORT_MAX_ROWS,
   assetActivityReport,
   assetDistributionReport,
   monthlyBookingTrendsReport,
@@ -70,6 +71,8 @@ import { assertUserCanUseReports } from "~/utils/subscription.server";
 /**
  * Builds the report named by `?reportId` as a CSV download, applying the same
  * filters as the report page but reading up to 10,000 rows instead of one page.
+ * The Asset Activity Summary reads every event in the timeframe instead, up
+ * to its own ceiling.
  *
  * @returns The CSV as an attachment, or the failure with its status: 400 without
  *   a report id, 404 for an unknown report, 403 for one that does not export or
@@ -155,8 +158,8 @@ export const loader = async ({
     // The client forwards the page's full query string, and the filters are
     // resolved by the same function the page loader uses, so each case hands
     // its query function exactly the filters the filtered page showed. Paging
-    // is the one deliberate difference: exports always read page 1 with a 10k
-    // page size.
+    // is the one deliberate difference: exports read page 1 with a 10k page
+    // size, except the Asset Activity Summary, which reads every event.
     const reportFilters = await resolveReportFilters({
       organizationId,
       searchParams,
@@ -314,11 +317,11 @@ export const loader = async ({
           timeframe,
           assetId: reportFilters.assetId ?? undefined,
           assetFilter: reportFilters.assetFilter,
-          page: 1,
-          pageSize: 10000,
+          allRows: true,
         });
         csvString = generateAssetActivityCsv(
-          reportData.rows as AssetActivityRow[],
+          reportData.rows,
+          reportData.totalRows,
           formatPrefs
         );
         break;
@@ -774,14 +777,19 @@ function generateAssetUtilizationCsv(rows: AssetUtilizationRow[]): string {
  */
 function generateAssetActivityCsv(
   rows: AssetActivityRow[],
+  totalRows: number,
   prefs: ResolvedFormatPrefs
 ): string {
   const headers = [
     "Date",
     "Asset ID",
+    "SAM ID",
+    "QR Code ID",
     "Asset Name",
     "Activity Type",
     "Description",
+    "From",
+    "To",
     "Performed By",
   ];
 
@@ -789,11 +797,39 @@ function generateAssetActivityCsv(
     // Datetime column ("Date & Time"): include the time part.
     formatDateForCsv(row.occurredAt, prefs, { includeTime: true }),
     row.assetId,
+    row.samId || "",
+    row.qrId || "",
     row.assetName,
     formatActivityType(row.activityType),
     row.description || "",
+    // Both sides of a change, names rather than ids, so a sheet can filter
+    // "every move into Warehouse B" without parsing the description.
+    row.changedFrom || "",
+    row.changedTo || "",
     row.performedBy || "System",
   ]);
+
+  // A file that does not hold every counted event says why, rather than
+  // ending silently: either it reached its ceiling, or assets joined or left
+  // the filter while it was being written. The note is a full-width row with
+  // the sentence under Description, so strict CSV parsers still read the file.
+  const written = rows.length.toLocaleString("en-US");
+  const total = totalRows.toLocaleString("en-US");
+  const noteRow = (sentence: string) =>
+    headers.map((header) => (header === "Description" ? sentence : ""));
+  if (rows.length >= ACTIVITY_EXPORT_MAX_ROWS && totalRows > rows.length) {
+    csvRows.push(
+      noteRow(
+        `Export stopped at ${written} of ${total} rows. Narrow the date range to export the rest.`
+      )
+    );
+  } else if (rows.length !== totalRows) {
+    csvRows.push(
+      noteRow(
+        `Rows in this file: ${written}. Rows counted when the export started: ${total}. Assets changed while it ran; export again for a matching file.`
+      )
+    );
+  }
 
   return buildCsv(headers, csvRows);
 }
