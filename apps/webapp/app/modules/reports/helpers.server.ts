@@ -25,6 +25,10 @@ import {
   resolvePlannedEnd,
   resolvePlannedStart,
 } from "~/modules/booking/lateness";
+import {
+  MOVE_CATEGORY,
+  OPENING_BALANCE_CATEGORY,
+} from "~/modules/consumption-log/stock-ledger";
 import { getAssetTotalValue } from "~/utils/asset-value";
 import { formatCurrency } from "~/utils/currency";
 import { ShelfError } from "~/utils/error";
@@ -4247,10 +4251,13 @@ export async function assetUtilizationReport(
     // Build asset where clause
     const assetWhere = mergeAssetWhere({ organizationId }, assetFilter);
 
-    // Calculate total days in period
-    const totalDays = Math.ceil(
-      (timeframe.to.getTime() - timeframe.from.getTime()) /
-        (1000 * 60 * 60 * 24)
+    // Calculate total days in period (clamped to >= 0 for reversed custom ranges)
+    const totalDays = Math.max(
+      0,
+      Math.ceil(
+        (timeframe.to.getTime() - timeframe.from.getTime()) /
+          (1000 * 60 * 60 * 24)
+      )
     );
 
     // Fetch assets with their bookings in the timeframe — Phase 3a:
@@ -4292,6 +4299,7 @@ export async function assetUtilizationReport(
             },
           },
           select: {
+            quantity: true,
             booking: {
               select: {
                 id: true,
@@ -4300,6 +4308,18 @@ export async function assetUtilizationReport(
               },
             },
           },
+        },
+        consumptionLogs: {
+          where: {
+            OR: [{ stockChange: { gt: 0 } }, { stockChange: { lt: 0 } }],
+            category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
+            createdAt: { gt: timeframe.from },
+          },
+          select: {
+            createdAt: true,
+            stockChange: true,
+          },
+          orderBy: { createdAt: "asc" },
         },
       },
     });
@@ -4310,6 +4330,157 @@ export async function assetUtilizationReport(
 
     // Calculate utilization for each asset
     const rows: AssetUtilizationRow[] = assets.map((asset) => {
+      if (asset.type === "QUANTITY_TRACKED") {
+        const liveQuantity =
+          typeof asset.quantity === "number" ? Math.max(0, asset.quantity) : 0;
+        const dayMs = 1000 * 60 * 60 * 24;
+        const windowStart = timeframe.from.getTime();
+        const windowEnd = timeframe.to.getTime();
+
+        // Aggregate booked units per booking (standalone + kit-driven slices on
+        // the same booking share its clamped window and sum their quantities).
+        const bookingQuantities = new Map<
+          string,
+          { start: number; end: number; quantity: number }
+        >();
+        const bookingIds = new Set<string>();
+
+        for (const ba of asset.bookingAssets) {
+          const booking = ba.booking;
+          if (!booking.from || !booking.to) continue;
+          bookingIds.add(booking.id);
+
+          const start = Math.max(booking.from.getTime(), windowStart);
+          const end = Math.min(booking.to.getTime(), windowEnd);
+          if (end <= start) continue;
+
+          const sliceQty = ba.quantity ?? 1;
+          const existing = bookingQuantities.get(booking.id);
+          if (existing) {
+            existing.quantity += sliceQty;
+          } else {
+            bookingQuantities.set(booking.id, {
+              start,
+              end,
+              quantity: sliceQty,
+            });
+          }
+        }
+
+        // Reconstruct historical pool capacity from the stock ledger
+        // (`ConsumptionLog.stockChange` rows after `timeframe.from`, excluding
+        // zero-net `MOVE` rows and baseline `OPENING_BALANCE` restatements) and
+        // sweep across `[windowStart, windowEnd]` alongside clamped bookings.
+        let totalUnitMsAvailable = 0;
+        let totalUnitMsInUse = 0;
+
+        if (windowEnd > windowStart) {
+          let capacityAtStart = liveQuantity;
+          const events: Array<{
+            time: number;
+            bookingDelta: number;
+            capacityDelta: number;
+          }> = [
+            { time: windowStart, bookingDelta: 0, capacityDelta: 0 },
+            { time: windowEnd, bookingDelta: 0, capacityDelta: 0 },
+          ];
+
+          for (const log of asset.consumptionLogs ?? []) {
+            const delta = log.stockChange ?? 0;
+            const logTime = log.createdAt.getTime();
+            if (delta === 0 || logTime <= windowStart) continue;
+            capacityAtStart -= delta;
+            if (logTime < windowEnd) {
+              events.push({
+                time: logTime,
+                bookingDelta: 0,
+                capacityDelta: delta,
+              });
+            }
+          }
+
+          for (const { start, end, quantity } of bookingQuantities.values()) {
+            if (quantity <= 0) continue;
+            events.push({
+              time: start,
+              bookingDelta: quantity,
+              capacityDelta: 0,
+            });
+            events.push({
+              time: end,
+              bookingDelta: -quantity,
+              capacityDelta: 0,
+            });
+          }
+
+          events.sort((a, b) => a.time - b.time);
+
+          let currentCapacity = capacityAtStart;
+          let activeUnits = 0;
+          let prevTime = windowStart;
+          for (const ev of events) {
+            if (ev.time > prevTime) {
+              const dt = ev.time - prevTime;
+              const effectiveCapacity = Math.max(0, currentCapacity);
+              totalUnitMsAvailable += dt * effectiveCapacity;
+              if (activeUnits > 0 && effectiveCapacity > 0) {
+                totalUnitMsInUse +=
+                  dt * Math.min(activeUnits, effectiveCapacity);
+              }
+              prevTime = ev.time;
+            }
+            activeUnits += ev.bookingDelta;
+            currentCapacity += ev.capacityDelta;
+          }
+        }
+
+        // Calendar days on at least one booking, matching INDIVIDUAL rows and
+        // the "Days Booked" / "Total Booking Days" / "Days in Use" labels.
+        const daysInUse =
+          totalUnitMsAvailable > 0
+            ? Math.min(
+                totalDays,
+                Math.ceil(
+                  sumMergedIntervalsMs([...bookingQuantities.values()]) / dayMs
+                )
+              )
+            : 0;
+
+        // Convert both numerator and denominator to whole unit-days so a 1-unit
+        // pool uses the exact same day-rounding basis as an INDIVIDUAL asset.
+        const unitDaysAvailable = Math.ceil(totalUnitMsAvailable / dayMs);
+        const unitDaysInUse = Math.min(
+          unitDaysAvailable,
+          Math.ceil(totalUnitMsInUse / dayMs)
+        );
+        const utilizationRate =
+          unitDaysAvailable > 0
+            ? Math.min(
+                100,
+                Math.round((unitDaysInUse / unitDaysAvailable) * 100)
+              )
+            : 0;
+
+        return {
+          id: asset.id,
+          assetId: asset.id,
+          assetName: asset.title,
+          thumbnailImage: asset.thumbnailImage,
+          mainImage: asset.mainImage,
+          assetModel: asset.assetModel ?? null,
+          category: asset.category?.name || null,
+          location: getPrimaryLocation(asset)?.name || null,
+          totalDays,
+          daysInUse,
+          utilizationRate,
+          bookingCount: bookingIds.size,
+          valuation: asset.valuation,
+          type: asset.type,
+          quantity: asset.quantity,
+          unitOfMeasure: asset.unitOfMeasure,
+        };
+      }
+
       // One booking can hold several pivot rows for the same asset
       // (standalone + kit-driven slices — the pivot's partial unique indexes
       // allow it), so both aggregates key on the BOOKING: `bookingIds`
@@ -4336,12 +4507,15 @@ export async function assetUtilizationReport(
       // so coverage can never exceed the window and utilization stays ≤100%.
       // Exact milliseconds are summed and converted to days once, so
       // per-booking rounding cannot compound.
-      const daysInUse = Math.ceil(
-        sumMergedIntervalsMs(inUseIntervals) / (1000 * 60 * 60 * 24)
+      const daysInUse = Math.min(
+        totalDays,
+        Math.ceil(sumMergedIntervalsMs(inUseIntervals) / (1000 * 60 * 60 * 24))
       );
 
       const utilizationRate =
-        totalDays > 0 ? Math.round((daysInUse / totalDays) * 100) : 0;
+        totalDays > 0
+          ? Math.min(100, Math.round((daysInUse / totalDays) * 100))
+          : 0;
 
       return {
         id: asset.id,

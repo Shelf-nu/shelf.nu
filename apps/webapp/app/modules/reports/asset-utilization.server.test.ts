@@ -38,8 +38,28 @@ const TIMEFRAME: ResolvedTimeframe = {
 };
 
 /** A booking slice as projected by the asset query's `bookingAssets` select. */
-function slice(id: string, from: string, to: string) {
-  return { booking: { id, from: new Date(from), to: new Date(to) } };
+function slice(id: string, from: string, to: string, quantity = 1) {
+  return { quantity, booking: { id, from: new Date(from), to: new Date(to) } };
+}
+
+/** A stock-ledger entry projected by `consumptionLogs`. */
+function ledgerChange(createdAt: string, stockChange: number) {
+  return { createdAt: new Date(createdAt), stockChange };
+}
+
+/** Build a QUANTITY_TRACKED asset pool. */
+function quantityAsset(
+  id: string,
+  poolQuantity: number,
+  bookingSlices: ReturnType<typeof slice>[],
+  consumptionLogs: ReturnType<typeof ledgerChange>[] = []
+) {
+  return {
+    ...asset(id, bookingSlices),
+    type: "QUANTITY_TRACKED",
+    quantity: poolQuantity,
+    consumptionLogs,
+  };
 }
 
 /**
@@ -170,5 +190,192 @@ describe("assetUtilizationReport", () => {
     expect(result.rows[0].daysInUse).toBe(result.rows[0].totalDays);
     expect(result.rows[0].utilizationRate).toBe(100);
     expect(result.rows[0].bookingCount).toBe(3);
+  });
+  it("weights quantity-tracked assets by booked units over pool capacity", async () => {
+    // 1 unit of a 14-unit asset booked for the entire 30-day window:
+    // 30 unit-days booked out of 30 * 14 = 420 available unit-days.
+    // Utilization rate should be 30 / 420 = 7%, not 100%.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-05-01T00:00:00Z", 1),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].utilizationRate).toBe(7);
+    expect(result.rows[0].bookingCount).toBe(1);
+    expect(result.rows[0].daysInUse).toBe(30); // calendar days with >= 1 unit booked
+  });
+
+  it("reports 100% utilization when all units in a quantity pool are booked", async () => {
+    // All 14 units booked for the entire window
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-05-01T00:00:00Z", 14),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(100);
+    expect(result.rows[0].daysInUse).toBe(result.rows[0].totalDays);
+  });
+
+  it("aggregates concurrent bookings of separate units in a quantity pool", async () => {
+    // Booking 1: 5 units for 15 days (Apr 1–16) -> 75 unit-days
+    // Booking 2: 5 units for 15 days (Apr 1–16) -> 75 unit-days
+    // Total: 150 unit-days out of 14 * 30 = 420 unit-days -> 36%
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 5),
+        slice("b-2", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 5),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(36);
+    expect(result.rows[0].bookingCount).toBe(2);
+  });
+
+  it("sums multiple slices belonging to the same booking in a quantity pool", async () => {
+    // One booking with two slices (e.g. kit-driven slice of 2 + standalone slice of 3 = 5 units)
+    // for 15 days = 75 unit-days out of 420 unit-days = 18%
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 2),
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 3),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(18);
+    expect(result.rows[0].bookingCount).toBe(1);
+  });
+
+  it("caps instantaneous in-use units at pool capacity during overlapping bookings", async () => {
+    // Two overlapping bookings of 8 units each on a 10-unit pool across the
+    // first 15 days (Apr 1-16), idle for the remaining 15 days:
+    // instantaneous usage caps at 10 units -> 150 / 300 = 50% (not 80%).
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 10, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 8),
+        slice("b-2", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 8),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(50);
+    expect(result.rows[0].daysInUse).toBe(15);
+    expect(result.rows[0].bookingCount).toBe(2);
+  });
+
+  it("reconstructs historical pool capacity from stock-ledger changes", async () => {
+    // Pool had 10 units during Apr 1-16 (all 10 booked), then all 10 units were
+    // consumed on Apr 16 leaving live quantity = 0 today. Historical utilization
+    // over the 150 available unit-days is 100%, and calendar daysInUse is 15.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset(
+        "pool-depleted",
+        0,
+        [slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 10)],
+        [ledgerChange("2026-04-16T00:00:00Z", -10)]
+      ),
+      // Pool grew from 10 to 20 units mid-window (Apr 16):
+      // available = 15*10 + 15*20 = 450 unit-days; 10 units booked full 30d = 300 -> 67%.
+      quantityAsset(
+        "pool-restocked",
+        20,
+        [slice("b-2", "2026-04-01T00:00:00Z", "2026-05-01T00:00:00Z", 10)],
+        [ledgerChange("2026-04-16T00:00:00Z", 10)]
+      ),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    const depleted = result.rows.find((r) => r.assetId === "pool-depleted")!;
+    const restocked = result.rows.find((r) => r.assetId === "pool-restocked")!;
+    expect(depleted.utilizationRate).toBe(100);
+    expect(depleted.daysInUse).toBe(15);
+    expect(restocked.utilizationRate).toBe(67);
+    expect(restocked.daysInUse).toBe(30);
+  });
+
+  it("matches utilization rounding between a 1-unit quantity pool and an individual asset", async () => {
+    const oneDayWindow: ResolvedTimeframe = {
+      preset: "custom",
+      label: "Apr 10",
+      from: new Date("2026-04-10T00:00:00Z"),
+      to: new Date("2026-04-11T00:00:00Z"),
+    };
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      asset("ind-1", [
+        slice("b-1", "2026-04-10T09:00:00Z", "2026-04-10T10:00:00Z", 1),
+      ]),
+      quantityAsset("pool-1", 1, [
+        slice("b-2", "2026-04-10T09:00:00Z", "2026-04-10T10:00:00Z", 1),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: oneDayWindow,
+    });
+
+    const ind = result.rows.find((r) => r.assetId === "ind-1")!;
+    const pool = result.rows.find((r) => r.assetId === "pool-1")!;
+    expect(pool.daysInUse).toBe(ind.daysInUse);
+    expect(pool.utilizationRate).toBe(ind.utilizationRate);
+    expect(pool.utilizationRate).toBe(100);
+  });
+
+  it("clamps totalDays and daysInUse to zero when custom timeframe is reversed", async () => {
+    const reversed: ResolvedTimeframe = {
+      preset: "custom",
+      label: "Reversed",
+      from: new Date("2026-04-20T00:00:00Z"),
+      to: new Date("2026-04-10T00:00:00Z"),
+    };
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 5, [
+        slice("b-1", "2026-04-05T00:00:00Z", "2026-04-25T00:00:00Z", 5),
+      ]),
+      asset("ind-1", [
+        slice("b-2", "2026-04-05T00:00:00Z", "2026-04-25T00:00:00Z", 1),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: reversed,
+    });
+
+    for (const row of result.rows) {
+      expect(row.totalDays).toBe(0);
+      expect(row.daysInUse).toBe(0);
+      expect(row.utilizationRate).toBe(0);
+    }
   });
 });
