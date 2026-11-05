@@ -38,6 +38,33 @@ export interface NoteTextFormatters {
 const FALLBACK_ATTRIBUTE = /\b(?:text|value|name)="([^"]*)"/;
 
 /**
+ * A Markdoc tag's attributes, as one capture group: `key="value"` pairs
+ * (the value may hold any character but a quote, `%` included, because the
+ * web app strips only whole `{%` and `%}` from typed values) and bare
+ * `key=value` pairs (`count=3`, `chips=true`).
+ */
+const ATTRIBUTES = String.raw`((?:[A-Za-z_][\w-]*=(?:"[^"]*"|[^\s"%/}]+)\s*)*)`;
+
+/**
+ * Matches a self-closing Markdoc tag by name, attributes in group 1.
+ *
+ * @param names - A tag name, or names joined with `|`.
+ * @returns A global pattern for `{% <name> <attributes> /%}`.
+ */
+function tagPattern(names: string): RegExp {
+  return new RegExp(String.raw`{%\s*(?:${names})\s+${ATTRIBUTES}\/%}`, "g");
+}
+
+/** Any self-closing Markdoc tag, attributes in group 1. */
+const ANY_TAG = new RegExp(
+  String.raw`{%\s*[A-Za-z_][\w-]*\s*${ATTRIBUTES}\/%}`,
+  "g"
+);
+
+/** A Markdoc tag left unread, which never links whatever it holds. */
+const UNREAD_TAG = /{%[\s\S]*?%}/g;
+
+/**
  * Converts Markdoc tag syntax in note content to readable plain text.
  *
  * @param content - The note's stored Markdoc source
@@ -48,46 +75,66 @@ export function markdocToPlainText(
   content: string,
   format: NoteTextFormatters
 ): string {
+  /** Replaces a tag by `read(attributes)`, or keeps it when that is null. */
+  const readTag =
+    (read: (attributes: string) => string | null | undefined) =>
+    (tag: string, attributes: string) =>
+      read(attributes) ?? tag;
+
   return (
     content
       // {% link to="..." text="Display Text" /%} -> Display Text
-      .replace(/{%\s*link\s+[^%]*?text="([^"]*)"[^%]*\/%}/g, "$1")
+      .replace(
+        tagPattern("link"),
+        readTag((a) => tagAttribute(a, "text"))
+      )
       // {% name text="Shoot 2" /%} -> Shoot 2 (a value a person typed)
-      .replace(/{%\s*name\s+[^%]*?text="([^"]*)"[^%]*\/%}/g, "$1")
+      .replace(
+        tagPattern("name"),
+        readTag((a) => tagAttribute(a, "text"))
+      )
       // {% date value="2024-01-01T..." /%} -> date in the user's format + timezone
       .replace(
-        /{%\s*date\s+value="([^"]*)"[^%]*\/%}/g,
-        (_match, iso: string) => {
+        tagPattern("date"),
+        readTag((a) => {
+          const iso = tagAttribute(a, "value");
+          if (iso === undefined) return null;
           try {
             return format.date(iso);
           } catch {
             return iso;
           }
-        }
+        })
       )
-      // {% category_badge name="..." ... /%} -> name
-      .replace(/{%\s*category_badge\s+name="([^"]*)"[^%]*\/%}/g, "$1")
-      // {% tag name="..." ... /%} -> name
-      .replace(/{%\s*tag\s+name="([^"]*)"[^%]*\/%}/g, "$1")
+      // {% category_badge name="..." /%} and {% tag name="..." /%} -> name
+      .replace(
+        tagPattern("category_badge|tag"),
+        readTag((a) => tagAttribute(a, "name"))
+      )
       // {% booking_status status="RESERVED" ... /%} -> Reserved
       .replace(
-        /{%\s*booking_status\s+status="([^"]*)"[^%]*\/%}/g,
-        (_match, status: string) => format.status(status)
+        tagPattern("booking_status"),
+        readTag((a) => {
+          const status = tagAttribute(a, "status");
+          return status === undefined ? null : format.status(status);
+        })
       )
       // {% assets_list count=3 ... action="added" /%} -> 3 assets added
-      .replace(
-        /{%\s*assets_list\s+count=(\d+)[^%]*action="([^"]*)"[^%]*\/%}/g,
-        "$1 assets $2"
-      )
       // {% kits_list count=2 ... action="added" /%} -> 2 kits added
       .replace(
-        /{%\s*kits_list\s+count=(\d+)[^%]*action="([^"]*)"[^%]*\/%}/g,
-        "$1 kits $2"
+        tagPattern("assets_list|kits_list"),
+        (tag, attributes: string) => {
+          const count = /\bcount=(\d+)/.exec(attributes)?.[1];
+          const action = tagAttribute(attributes, "action");
+          if (count === undefined || action === undefined) return tag;
+          const noun = tag.includes("kits_list") ? "kits" : "assets";
+          return `${count} ${noun} ${action}`;
+        }
       )
       // {% description newText="..." /%} -> (description updated)
-      .replace(/{%\s*description[^%]*\/%}/g, "(description updated)")
+      .replace(tagPattern("description"), "(description updated)")
       // Any other tag shows the words it carries, or nothing if it has none
-      .replace(/{%[^%]*\/%}/g, (tag) => FALLBACK_ATTRIBUTE.exec(tag)?.[1] ?? "")
+      .replace(ANY_TAG, (tag) => FALLBACK_ATTRIBUTE.exec(tag)?.[1] ?? "")
       // Strip **bold** markers
       .replace(/\*\*/g, "")
       // Clean up &quot; entities
@@ -99,16 +146,16 @@ export function markdocToPlainText(
 }
 
 /** A Markdoc `link` tag, with its attributes in group 1. */
-const LINK_TAG = /{%\s*link\s+([^%]*?)\/%}/g;
+const LINK_TAG = tagPattern("link");
 
 /**
  * A Markdoc `category_badge` or `tag` badge, with its attributes in group 1.
  * Its `name` is a value someone typed, shown as badge text on the web.
  */
-const BADGE_TAG = /{%\s*(?:category_badge|tag)\s+([^%]*?)\/%}/g;
+const BADGE_TAG = tagPattern("category_badge|tag");
 
 /** A Markdoc `name` tag, with its attributes in group 1. */
-const NAME_TAG = /{%\s*name\s+([^%]*?)\/%}/g;
+const NAME_TAG = tagPattern("name");
 
 /**
  * A Markdown link to an http(s) URL: label in group 1, URL in group 2. The
@@ -248,15 +295,34 @@ export function markdocToSegments(
     const runs = held[Number(match[1])];
     if (runs === undefined) continue;
     if (match.index > cursor) {
-      segments.push(...findTextLinks(plain.slice(cursor, match.index)));
+      segments.push(...linkPlainText(plain.slice(cursor, match.index)));
     }
     segments.push(...runs);
     cursor = match.index + match[0].length;
   }
   if (cursor < plain.length) {
-    segments.push(...findTextLinks(plain.slice(cursor)));
+    segments.push(...linkPlainText(plain.slice(cursor)));
   }
   return collapseBoundaries(segments);
+}
+
+/**
+ * Links the URLs and domains in a stretch of a note's plain text. A tag
+ * still in it (one no reader understood) stays text, so a value typed into
+ * its attributes never becomes a link.
+ */
+function linkPlainText(text: string): TextSegment[] {
+  const segments: TextSegment[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(UNREAD_TAG)) {
+    if (match.index > cursor) {
+      segments.push(...findTextLinks(text.slice(cursor, match.index)));
+    }
+    segments.push({ type: "text", text: match[0] });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) segments.push(...findTextLinks(text.slice(cursor)));
+  return segments;
 }
 
 /** Whether a URL parses as an http(s) URL, as `resolveLinkOpening` needs. */

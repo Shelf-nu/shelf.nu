@@ -30,6 +30,7 @@ import { createStyles } from "@/lib/create-styles";
 import { ExpandableText } from "../shared/expandable-text";
 import { LinkChip } from "./link-chip";
 import { LinkedText } from "./linked-text";
+import type { LeaveHandler } from "@/lib/link-dispatch";
 
 /**
  * Text with tappable links and a chip per outside link.
@@ -67,7 +68,7 @@ export const LinkedParagraph = memo(function LinkedParagraph({
   containerStyle?: StyleProp<ViewStyle>;
   expandable?: { label: string; numberOfLines: number };
   selectable?: boolean;
-  onLeave?: () => void;
+  onLeave?: LeaveHandler;
   testID?: string;
 }) {
   const styles = useStyles();

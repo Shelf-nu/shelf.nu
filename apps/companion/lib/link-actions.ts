@@ -32,7 +32,9 @@ import {
 } from "react-native";
 import { useMemo } from "react";
 import * as Haptics from "expo-haptics";
-import { resolveQrAndNavigate } from "./deep-links";
+import { resolveTappedQr } from "./deep-links";
+import { dispatchLinkOpening, type LeaveHandler } from "./link-dispatch";
+import { buildLinkMenu, type LinkMenuAction } from "./link-menu";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveLinkOpening,
@@ -66,6 +68,11 @@ const WEB_ONLY_NOTICE: Readonly<
     message:
       "This link is to a different workspace. Switch to that workspace to open it, or copy the link.",
   },
+  "qr-unresolved": {
+    title: "QR code not found",
+    message:
+      "This QR code is not linked to an asset or kit you can open in this workspace. Copy the link to open it in a browser where you are signed in to Shelf.",
+  },
 };
 
 /**
@@ -93,38 +100,30 @@ function showWebOnlyNotice(url: string, reason: WebOnlyReason) {
  * @param url - The link's absolute URL.
  * @param context - Where the link was tapped (the workspace on show).
  * @param leave - Runs before an app screen opens, for a link inside a modal:
- *   it closes the modal so the screen is not hidden behind it.
+ *   it closes the modal so the screen is not hidden behind it, or answers
+ *   false to stay. A notice or the in-app browser shows over the modal and
+ *   leaves it open.
  * @returns Resolves once the link has been handed off, or immediately when
  *   there is nothing to open or opening failed
  */
 export async function openLink(
   url: string,
   context: LinkContext = {},
-  leave?: () => void
+  leave?: LeaveHandler
 ): Promise<void> {
   const opening = resolveLinkOpening(url, getActiveServer().baseUrl, context);
   if (!opening) return;
   try {
-    switch (opening.opener) {
-      case "screen":
-        leave?.();
-        pushIntoTab(opening.tabRoot, opening.href ?? undefined);
-        return;
-      case "qr":
-        leave?.();
-        // A tapped link is not a scan of the label: record nothing.
-        await resolveQrAndNavigate(opening.qrId, opening.origin, {
-          recordScan: false,
-          orgId: context.currentOrgId ?? undefined,
-        });
-        return;
-      case "web-only":
-        showWebOnlyNotice(opening.url, opening.reason);
-        return;
-      case "browser":
-        await openShelfWebUrl(opening.url);
-        return;
-    }
+    await dispatchLinkOpening(opening, {
+      leave,
+      openScreen: ({ tabRoot, href }) =>
+        pushIntoTab(tabRoot, href ?? undefined),
+      // A tapped link is not a scan of the label: record nothing.
+      resolveQr: (qrId, origin) =>
+        resolveTappedQr(qrId, origin, context.currentOrgId ?? undefined),
+      showWebOnly: showWebOnlyNotice,
+      openBrowser: openShelfWebUrl,
+    });
   } catch {
     // Non-fatal by design: the screen stays as it was and the person can tap
     // the link again.
@@ -153,33 +152,43 @@ function shareLink(url: string) {
 }
 
 /**
- * Shows the long-press menu for a link: Copy link and Share, titled with the
- * URL so the person sees where it goes before acting on it.
+ * Shows the long-press menu for a link (`buildLinkMenu`): Copy link and
+ * Share, titled with the URL so the person sees where it goes before acting
+ * on it.
  *
  * @param url - The link's absolute URL.
  */
 export function showLinkMenu(url: string): void {
-  const actions = [
-    ...(clipboard ? [{ label: "Copy link", run: () => copyLink(url) }] : []),
-    { label: "Share", run: () => shareLink(url) },
-  ];
+  const menu = buildLinkMenu(url, {
+    ios: Platform.OS === "ios",
+    canCopy: clipboard !== null && clipboard !== undefined,
+  });
+  const run = (action: LinkMenuAction | null) => {
+    if (action === "copy") copyLink(url);
+    if (action === "share") shareLink(url);
+  };
 
   if (Platform.OS === "ios") {
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: url,
-        options: [...actions.map((action) => action.label), "Cancel"],
-        cancelButtonIndex: actions.length,
+        title: menu.title,
+        options: menu.buttons.map((button) => button.label),
+        cancelButtonIndex: menu.cancelIndex,
       },
-      (index) => actions[index]?.run()
+      (index) => run(menu.buttons[index]?.action ?? null)
     );
     return;
   }
 
-  Alert.alert(url, undefined, [
-    { text: "Cancel", style: "cancel" },
-    ...actions.map((action) => ({ text: action.label, onPress: action.run })),
-  ]);
+  Alert.alert(
+    menu.title,
+    undefined,
+    menu.buttons.map((button) =>
+      button.action === null
+        ? { text: button.label, style: "cancel" as const }
+        : { text: button.label, onPress: () => run(button.action) }
+    )
+  );
 }
 
 /** The tap and long-press handlers for links on one screen or modal. */
@@ -200,7 +209,7 @@ export type LinkHandlers = {
  */
 export function useLinkHandlers({
   onLeave,
-}: { onLeave?: () => void } = {}): LinkHandlers {
+}: { onLeave?: LeaveHandler } = {}): LinkHandlers {
   const currentOrgId = useOrg().currentOrg?.id ?? null;
   return useMemo(
     () => ({

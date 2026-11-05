@@ -242,6 +242,43 @@ export function EvidenceModal({
     onClose();
   }, [onClose, resetState]);
 
+  /**
+   * Leaving for a link's app screen closes this sheet and drops what is
+   * being added, so a note or photo not yet sent asks first: "Keep editing"
+   * stays here with the draft as it was.
+   */
+  const leaveForLink = useCallback((): Promise<boolean> => {
+    const hasDraft = noteText.trim().length > 0 || selectedImageUri !== null;
+    if (!hasDraft) {
+      handleClose();
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      Alert.alert(
+        "Discard your note?",
+        "Opening this link closes the audit sheet. The note or photo you have not added yet will be lost.",
+        [
+          {
+            text: "Keep editing",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Discard and open",
+            style: "destructive",
+            onPress: () => {
+              handleClose();
+              resolve(true);
+            },
+          },
+        ],
+        // why: Android dismisses the alert on a tap outside it without
+        // calling any button; that counts as staying.
+        { cancelable: true, onDismiss: () => resolve(false) }
+      );
+    });
+  }, [noteText, selectedImageUri, handleClose]);
+
   const handleSubmitNote = useCallback(async () => {
     if (!item?.auditAssetId || !currentOrg || !noteText.trim()) return;
 
@@ -514,7 +551,7 @@ export function EvidenceModal({
                     <LinkedText
                       text={note.content}
                       style={styles.existingNoteText}
-                      onLeave={handleClose}
+                      onLeave={leaveForLink}
                     />
                     <Text style={styles.existingNoteMeta}>
                       {note.authorName ?? "Unknown"}

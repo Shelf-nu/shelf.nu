@@ -341,3 +341,63 @@ test("category and tag badge names stay text", () => {
     [{ type: "text", text: "Set see acme.com and https://evil.example" }]
   );
 });
+
+test("a % in a typed name keeps the name as text, never a link", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      'Sam renamed the booking to {% name text="50% off at evil-login.com" /%}.',
+      format,
+      BASE,
+      SYSTEM
+    ),
+    [
+      {
+        type: "text",
+        text: "Sam renamed the booking to 50% off at evil-login.com.",
+      },
+    ]
+  );
+});
+
+test("a % in a link tag's text and in a badge still reads as their words", () => {
+  const segments = markdocToSegments(
+    '{% link to="/bookings/bk-1" text="Sale 50% at shop.example" /%} got ' +
+      '{% tag name="100% evil.example" /%}',
+    format,
+    BASE,
+    SYSTEM
+  );
+  assert.equal(
+    segments.map((segment) => segment.text).join(""),
+    "Sale 50% at shop.example got 100% evil.example"
+  );
+  assert.deepEqual(
+    segments.filter((segment) => segment.type === "link"),
+    [
+      {
+        type: "link",
+        text: "Sale 50% at shop.example",
+        url: `${BASE}/bookings/bk-1`,
+      },
+    ]
+  );
+  assert.equal(
+    markdocToPlainText(
+      'Renamed to {% name text="50% off" /%} and {% link to="/x" text="10% more" /%}',
+      format
+    ),
+    "Renamed to 50% off and 10% more"
+  );
+});
+
+test("a tag no reader understands never links what it holds", () => {
+  assert.deepEqual(
+    markdocToSegments(
+      'Moved {% place value="evil-login.com %} broken /%} here',
+      format,
+      BASE,
+      SYSTEM
+    ).filter((segment) => segment.type === "link"),
+    []
+  );
+});

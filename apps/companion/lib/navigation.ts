@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import { router, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { openPastStaleLock } from "./browser-lock";
+import { joinOpensInFlight, openPastStaleLock } from "./browser-lock";
 import { lightColors } from "./theme-colors";
 
 /**
@@ -84,17 +84,22 @@ const IN_APP_BROWSER_OPTIONS: WebBrowser.WebBrowserOpenOptions = {
  * renders the page directly without re-triggering link interception, making
  * web fallbacks loop-safe on both platforms.
  *
- * @param url - the absolute http(s) URL to open
  * A session iOS never released (see `./browser-lock.ts`) is released and
- * the page opened once more, so a link never silently opens nothing.
+ * the page opened once more, so a link never silently opens nothing. A
+ * second tap while the first page is still being presented joins that open
+ * (`joinOpensInFlight`), so a double tap never closes and reopens the
+ * browser.
  *
+ * @param url - the absolute http(s) URL to open
  * @returns the `WebBrowser.openBrowserAsync` result, once the browser is
  *   dismissed
  */
-export function openShelfWebUrl(url: string) {
-  return openPastStaleLock(
+export const openShelfWebUrl: (
+  url: string
+) => Promise<WebBrowser.WebBrowserResult> = joinOpensInFlight((url) =>
+  openPastStaleLock(
     () => WebBrowser.openBrowserAsync(url, IN_APP_BROWSER_OPTIONS),
     () => WebBrowser.dismissBrowser(),
     WebBrowser.WebBrowserResultType.LOCKED
-  );
-}
+  )
+);

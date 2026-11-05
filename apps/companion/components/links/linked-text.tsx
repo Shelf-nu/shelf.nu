@@ -26,6 +26,7 @@ import { segmentText, type TextSegment } from "@shelf/links";
 import { LINK_HINT, useLinkHandlers } from "@/lib/link-actions";
 import { findTextLinks } from "@/lib/text-links";
 import { createStyles } from "@/lib/create-styles";
+import type { LeaveHandler } from "@/lib/link-dispatch";
 
 /**
  * One `Text` with each link run as a nested, pressable `Text`.
@@ -61,7 +62,7 @@ export const LinkedText = memo(function LinkedText({
   numberOfLines?: number;
   selectable?: boolean;
   bareDomains?: boolean;
-  onLeave?: () => void;
+  onLeave?: LeaveHandler;
   testID?: string;
 }) {
   const styles = useStyles();

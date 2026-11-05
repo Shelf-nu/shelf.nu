@@ -9,7 +9,12 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 
-import { openPastStaleLock, RELEASE_CAP_MS } from "./browser-lock";
+import {
+  DOUBLE_TAP_WINDOW_MS,
+  joinOpensInFlight,
+  openPastStaleLock,
+  RELEASE_CAP_MS,
+} from "./browser-lock";
 
 type Result = { type: string };
 
@@ -83,4 +88,56 @@ test("a second locked answer is returned, not retried again", async () => {
   const result = await openPastStaleLock(open, async () => undefined, "locked");
   assert.deepEqual(result, { type: "locked" });
   assert.equal(calls.open, 2);
+});
+
+test("a second open while the first is presenting joins it", async () => {
+  let clock = 0;
+  const opened: string[] = [];
+  let finish: (result: Result) => void = () => {};
+  const open = joinOpensInFlight(
+    (url: string) => {
+      opened.push(url);
+      return new Promise<Result>((resolve) => {
+        finish = resolve;
+      });
+    },
+    () => clock
+  );
+
+  const first = open("https://a.example");
+  clock = DOUBLE_TAP_WINDOW_MS - 1;
+  const second = open("https://a.example");
+  assert.equal(second, first);
+  assert.deepEqual(opened, ["https://a.example"]);
+
+  finish({ type: "cancel" });
+  assert.deepEqual(await first, { type: "cancel" });
+});
+
+test("an open after the double-tap window, or after the first ends, runs", async () => {
+  let clock = 0;
+  const opened: string[] = [];
+  const open = joinOpensInFlight(
+    async (url: string): Promise<Result> => {
+      opened.push(url);
+      return { type: "cancel" };
+    },
+    () => clock
+  );
+
+  await open("https://a.example");
+  await open("https://b.example");
+  assert.deepEqual(opened, ["https://a.example", "https://b.example"]);
+
+  const pending = joinOpensInFlight(
+    (url: string) => {
+      opened.push(url);
+      return new Promise<Result>(() => {});
+    },
+    () => clock
+  );
+  void pending("https://c.example");
+  clock += DOUBLE_TAP_WINDOW_MS;
+  void pending("https://d.example");
+  assert.deepEqual(opened.slice(2), ["https://c.example", "https://d.example"]);
 });

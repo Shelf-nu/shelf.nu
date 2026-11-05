@@ -19,6 +19,7 @@ import { borderRadius, fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
 import { useTheme } from "@/lib/theme-context";
 import { LinkIcon } from "./link-icon";
+import type { LeaveHandler } from "@/lib/link-dispatch";
 
 /**
  * A full-width chip for one link.
@@ -34,7 +35,7 @@ export const LinkChip = memo(function LinkChip({
   onLeave,
 }: {
   chip: LinkChipModel;
-  onLeave?: () => void;
+  onLeave?: LeaveHandler;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();

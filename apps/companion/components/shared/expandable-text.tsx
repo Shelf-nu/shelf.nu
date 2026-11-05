@@ -31,6 +31,7 @@ import type { TextSegment } from "@shelf/links";
 import { fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
 import { LinkedText } from "../links/linked-text";
+import type { LeaveHandler } from "@/lib/link-dispatch";
 
 /**
  * Text clipped to `numberOfLines`, expandable when it overflows.
@@ -60,7 +61,7 @@ export const ExpandableText = memo(function ExpandableText({
 }: {
   text: string;
   segments?: readonly TextSegment[];
-  onLeave?: () => void;
+  onLeave?: LeaveHandler;
   label: string;
   numberOfLines: number;
   style?: StyleProp<TextStyle>;

@@ -72,7 +72,9 @@ export type WebOnlyReason =
   /** The app has no screen for the page (a location, settings, an export). */
   | "no-screen"
   /** The page belongs to another workspace than the one the app shows. */
-  | "other-workspace";
+  | "other-workspace"
+  /** A tapped QR link names no asset or kit the app can open. */
+  | "qr-unresolved";
 
 /** Where a link opens, and what to open. */
 export type LinkOpening =
