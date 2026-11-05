@@ -156,14 +156,7 @@ function shelfDestination(
   if (match.resource === "qr") {
     // The resolver hands a code from another server to that server's web.
     return match.id
-      ? {
-          opener: "qr",
-          qrId: match.id,
-          // why: lowercased because the URL polyfill on device keeps the
-          // host's case as typed, and the origin is compared with the
-          // connected server's.
-          origin: new URL(url).origin.toLowerCase(),
-        }
+      ? { opener: "qr", qrId: match.id, origin: new URL(url).origin }
       : webOnly("no-screen");
   }
   if (!onActiveServer) return null;

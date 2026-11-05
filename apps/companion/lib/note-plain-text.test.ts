@@ -424,3 +424,18 @@ test("a typed Markdown link links only in a comment, never in a system note", ()
     ]
   );
 });
+
+test("an unclosed tag with a long a=a=a run parses at once", () => {
+  const source = `{% x ${"a=".repeat(2000)}a`;
+  const started = Date.now();
+  markdocToSegments(source, format, BASE, COMMENT);
+  markdocToPlainText(source, format);
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(
+    markdocToPlainText(
+      '{% assets_list count=3 action="added" /%}, {% name text="50% off" /%}',
+      format
+    ),
+    "3 assets added, 50% off"
+  );
+});

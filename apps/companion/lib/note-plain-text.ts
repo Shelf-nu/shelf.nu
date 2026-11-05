@@ -41,9 +41,11 @@ const FALLBACK_ATTRIBUTE = /\b(?:text|value|name)="([^"]*)"/;
  * A Markdoc tag's attributes, as one capture group: `key="value"` pairs
  * (the value may hold any character but a quote, `%` included, because the
  * web app strips only whole `{%` and `%}` from typed values) and bare
- * `key=value` pairs (`count=3`, `chips=true`).
+ * `key=value` pairs (`count=3`, `chips=true`). A bare value never holds
+ * `=`: otherwise a run like `a=a=a=...` in an unclosed tag splits into
+ * pairs in exponentially many ways and the match never finishes.
  */
-const ATTRIBUTES = String.raw`((?:[A-Za-z_][\w-]*=(?:"[^"]*"|[^\s"%/}]+)\s*)*)`;
+const ATTRIBUTES = String.raw`((?:[A-Za-z_][\w-]*=(?:"[^"]*"|[^\s"%/}=]+)\s*)*)`;
 
 /**
  * Matches a self-closing Markdoc tag by name, attributes in group 1.

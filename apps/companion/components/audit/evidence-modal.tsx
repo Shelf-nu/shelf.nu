@@ -8,7 +8,7 @@
  * @see POST /api/mobile/audits/image - Upload photo with optional note
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -249,8 +249,27 @@ export function EvidenceModal({
    * stays here with the draft as it was. While a note or photo is saving,
    * the link waits: the sheet stays until the save has answered.
    */
+  /**
+   * The draft and saving state as of the last render, read by
+   * `leaveForLink` so the handler keeps one identity while the auditor types
+   * (every link in the sheet's notes would re-render otherwise).
+   */
+  const draftRef = useRef({
+    noteText,
+    selectedImageUri,
+    saving: isSubmittingNote || isSubmittingImage,
+  });
+  useEffect(() => {
+    draftRef.current = {
+      noteText,
+      selectedImageUri,
+      saving: isSubmittingNote || isSubmittingImage,
+    };
+  }, [noteText, selectedImageUri, isSubmittingNote, isSubmittingImage]);
+
   const leaveForLink = useCallback((): Promise<boolean> => {
-    if (isSubmittingNote || isSubmittingImage) {
+    const draft = draftRef.current;
+    if (draft.saving) {
       // why: the save carries on after the sheet closes, so leaving now
       // would add evidence the auditor could no longer see or undo here.
       Alert.alert(
@@ -259,7 +278,7 @@ export function EvidenceModal({
       );
       return Promise.resolve(false);
     }
-    if (!hasUnsentEvidence(noteText, selectedImageUri)) {
+    if (!hasUnsentEvidence(draft.noteText, draft.selectedImageUri)) {
       handleClose();
       return Promise.resolve(true);
     }
@@ -287,13 +306,7 @@ export function EvidenceModal({
         { cancelable: true, onDismiss: () => resolve(false) }
       );
     });
-  }, [
-    isSubmittingNote,
-    isSubmittingImage,
-    noteText,
-    selectedImageUri,
-    handleClose,
-  ]);
+  }, [handleClose]);
 
   const handleSubmitNote = useCallback(async () => {
     if (!item?.auditAssetId || !currentOrg || !noteText.trim()) return;

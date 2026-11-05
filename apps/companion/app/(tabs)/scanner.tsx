@@ -1464,7 +1464,8 @@ function ScannerContent() {
           // assetId AND kitId are null; for a kit-linked QR it silently mints a
           // *different* QR and leaves the scanned kit QR untouched, breaking
           // the "this QR will be linked" promise. The card opens the kit's own
-          // screen instead.
+          // screen instead, or offers nothing when the lookup did not return
+          // the kit (deleted, or not visible to this person).
           const isKitLinked = Boolean(kitId);
 
           // Claimed to the current org, truly unlinked, and the caller can
@@ -1491,7 +1492,7 @@ function ScannerContent() {
                 dismissResult();
               },
             };
-          } else if (qrId && canActOnUnlinked) {
+          } else if (qrId && canActOnUnlinked && !isKitLinked) {
             // Already claimed by this org — the claim step is skipped; the
             // create form / link picker attach this exact QR directly.
             const createAction: UnlinkedQrAction | undefined = canCreateAsset
@@ -1537,7 +1538,7 @@ function ScannerContent() {
             unlinkedQrAction = offered[0];
             unlinkedQrSecondaryAction = offered[1];
             unlinkedQrTertiaryAction = offered[2];
-          } else if (qrId) {
+          } else if (qrId && !isKitLinked) {
             // Unclaimed (for roles without the native claim flow) or claimed
             // by this org while the caller can't act — bridge to web
             unlinkedQrAction = {
