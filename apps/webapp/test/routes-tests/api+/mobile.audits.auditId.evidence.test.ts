@@ -116,7 +116,6 @@ const IMAGE_GENERAL = {
   description: "Rack before the sweep",
   capturedAt: new Date("2026-08-19T12:40:00.000Z"),
   captureSource: "CAMERA",
-  auditAsset: null,
   createdAt: new Date("2026-08-19T12:42:00.000Z"),
   auditAssetId: null,
   uploadedBy: { firstName: "John", lastName: "Doe", profilePicture: null },

@@ -315,19 +315,12 @@ export async function uploadFile(
       const thumbFilename = getThumbnailStoragePath(filename);
 
       // Create thumbnail version with Sharp
-      const thumbnailFile = await cropImage(
-        // Convert Buffer back to AsyncIterable for consistency
-        (async function* () {
-          await Promise.resolve(); // Satisfy eslint requirement
-          yield new Uint8Array(file);
-        })(),
-        {
-          width: thumbnailSize,
-          height: thumbnailSize,
-          fit: "cover",
-          withoutEnlargement: true,
-        }
-      );
+      const thumbnailFile = await cropImage(file, {
+        width: thumbnailSize,
+        height: thumbnailSize,
+        fit: "cover",
+        withoutEnlargement: true,
+      });
 
       // Upload thumbnail
       const { data: thumbData, error: thumbError } = await getSupabaseAdmin()

@@ -520,7 +520,8 @@ function PhotoStrip({
           image={image}
           images={images}
           alt={altFor(image)}
-          className={variant === "expanded" ? "size-28" : "size-14"}
+          // why: a tile is never narrower than its "Old photo" chip (80px).
+          className={variant === "expanded" ? "size-28" : "size-20"}
         />
       ))}
     </div>

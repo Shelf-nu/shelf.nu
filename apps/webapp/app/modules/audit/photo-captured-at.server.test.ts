@@ -67,6 +67,19 @@ describe("readExifCaptureTags", () => {
 });
 
 describe("captureTimeFromTags", () => {
+  it("reads an offset outside the real range as no offset", () => {
+    expect(
+      captureTimeFromTags(
+        {
+          dateTimeOriginal: "2026:10:21 09:15:00",
+          offsetTimeOriginal: "-99:59",
+        },
+        "UTC",
+        NOW
+      )?.toISOString()
+    ).toBe("2026-10-21T09:15:00.000Z");
+  });
+
   it("uses the offset the camera wrote", () => {
     expect(
       captureTimeFromTags(
@@ -188,6 +201,28 @@ describe("resolveCapturedAt", () => {
     });
 
     expect(lookups).toBe(0);
+  });
+
+  it("looks up the uploader's zone once when both sources need it", async () => {
+    let lookups = 0;
+    await resolveCapturedAt({
+      // An impossible day, so the form fields are read too.
+      fileTags: {
+        dateTimeOriginal: "2026:02:30 09:15:00",
+        offsetTimeOriginal: null,
+      },
+      formTags: {
+        dateTimeOriginal: "2026:10:21 09:15:00",
+        offsetTimeOriginal: null,
+      },
+      getTimeZone: () => {
+        lookups += 1;
+        return Promise.resolve("UTC");
+      },
+      now: NOW,
+    });
+
+    expect(lookups).toBe(1);
   });
 
   it("returns null, without throwing, when the zone lookup fails", async () => {

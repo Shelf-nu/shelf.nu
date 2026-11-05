@@ -8,6 +8,10 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuditFindingsPage } from "~/modules/audit/findings.server";
+import type {
+  DateFormatOptions,
+  ResolvedFormatPrefs,
+} from "~/utils/date-format";
 import { AuditFindings } from "./audit-findings";
 import { FINDINGS_REQUEST_TIMEOUT_MS } from "./audit-findings-helpers";
 
@@ -18,6 +22,36 @@ vi.mock("~/components/shared/date", () => ({
     <time>{new Date(date).toISOString()}</time>
   ),
 }));
+
+// why: `DateS` reads the acting user's format prefs through this hook, which
+// reaches the root route loader, and there is no router in a unit test. Same
+// stub shape as `audit-photo.test.tsx`.
+vi.mock("~/hooks/use-date-formatter", async () => {
+  const actual = (await vi.importActual("~/utils/date-format")) as {
+    formatDate: (
+      value: string | Date,
+      prefs: ResolvedFormatPrefs,
+      opts?: DateFormatOptions
+    ) => string;
+  };
+  const prefs: ResolvedFormatPrefs = {
+    dateFormat: "DD_MM_YYYY",
+    timeFormat: "H12",
+    weekStartsOn: 1,
+    timeZone: "UTC",
+  };
+  return {
+    useDateFormatter: () => ({
+      prefs,
+      formatDate: (value: string | Date, opts?: DateFormatOptions) =>
+        actual.formatDate(value, prefs, opts),
+      formatTime: (value: string | Date, opts?: DateFormatOptions) =>
+        actual.formatDate(value, prefs, { ...opts, onlyTime: true }),
+      formatDateTime: (value: string | Date, opts?: DateFormatOptions) =>
+        actual.formatDate(value, prefs, { ...opts, includeTime: true }),
+    }),
+  };
+});
 
 /**
  * Loading the next page of findings.
@@ -199,5 +233,56 @@ describe("AuditFindings next page", () => {
     });
 
     expect(await screen.findByText("Tripod")).toBeInTheDocument();
+  });
+});
+
+describe("AuditFindings photos", () => {
+  it("shows each photo's flag under its tile, for an asset and for the whole audit", () => {
+    render(
+      <AuditFindings
+        auditId="audit-1"
+        firstPage={{
+          ...FIRST_PAGE,
+          hasMore: false,
+          nextCursor: null,
+          findings: [
+            {
+              assetId: "a1",
+              assetName: "Camera",
+              notes: [],
+              images: [
+                {
+                  id: "img-old",
+                  imageUrl: "https://storage.test/old.webp",
+                  thumbnailUrl: null,
+                  description: null,
+                  // Taken 27 days before it was uploaded.
+                  capturedAt: new Date("2026-10-01T08:30:00.000Z"),
+                  captureSource: "LIBRARY",
+                  createdAt: new Date("2026-10-28T10:00:00.000Z"),
+                },
+              ],
+            },
+          ],
+        }}
+        auditWide={{
+          notes: [],
+          images: [
+            {
+              id: "img-undated",
+              imageUrl: "https://storage.test/undated.webp",
+              thumbnailUrl: null,
+              description: null,
+              capturedAt: null,
+              captureSource: "LIBRARY",
+              createdAt: new Date("2026-10-28T10:00:00.000Z"),
+            },
+          ],
+        }}
+      />
+    );
+
+    expect(screen.getByText("Old photo")).toBeInTheDocument();
+    expect(screen.getByText("No date")).toBeInTheDocument();
   });
 });

@@ -3,10 +3,10 @@
  *
  * Same rules and words as the webapp's audit photo tile, from
  * `describeAuditPhoto` in `@shelf/labels`: a photo that is fine shows an icon
- * for how it reached Shelf (Shelf app camera, photo library, web upload) and a
- * short date and time; only a photo taken more than a day before its asset
- * was scanned ("Old photo") or with no date ("No date") gets a chip. The full sentence
- * (`detail`) is for screen readers.
+ * for how it reached Shelf (Shelf app camera, photo library, web upload, phone
+ * app) and a short date and time; only a photo taken more than a day before
+ * it was uploaded ("Old photo") or with no date ("No date") gets a chip. The
+ * full sentence (`detail`) is for screen readers.
  *
  * @see ../../../webapp/app/components/audit/audit-photo.tsx the web tile
  * @see ./evidence-viewer.tsx

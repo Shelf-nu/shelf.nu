@@ -28,8 +28,11 @@ import { Logger } from "~/utils/logger";
 /** EXIF date format: `YYYY:MM:DD HH:MM:SS`, a wall-clock time with no zone. */
 const EXIF_DATE_TIME = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
 
-/** EXIF offset format: `+HH:MM` or `-HH:MM`. */
-const EXIF_OFFSET = /^([+-])(\d{2}):(\d{2})$/;
+/**
+ * EXIF offset format: `+HH:MM` or `-HH:MM`, hours up to 14 as real UTC offsets
+ * are. Anything else is not an offset, so the date is read as a wall-clock time.
+ */
+const EXIF_OFFSET = /^([+-])(0\d|1[0-4]):([0-5]\d)$/;
 
 /**
  * A capture time later than this past the moment of upload is a wrong camera
@@ -196,12 +199,14 @@ export async function resolveCapturedAt({
   getTimeZone: () => Promise<string>;
   now?: Date;
 }): Promise<Date | null> {
+  // Looked up once, and only when a date carries no offset.
+  let uploaderZone: Promise<string> | undefined;
   try {
     for (const tags of [fileTags, formTags]) {
       if (!tags?.dateTimeOriginal) continue;
       const timeZone = EXIF_OFFSET.test(tags.offsetTimeOriginal?.trim() ?? "")
         ? "UTC"
-        : await getTimeZone();
+        : await (uploaderZone ??= getTimeZone());
       const captured = captureTimeFromTags(tags, timeZone, now);
       if (captured) return captured;
     }

@@ -9,6 +9,8 @@
  * @see {@link file://../../../app/routes/api+/audits.$auditId.upload-image.ts}
  * @see {@link file://../../../app/modules/audit/image.service.server.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 import { action } from "~/routes/api+/audits.$auditId.upload-image";
 import { createActionArgs } from "@mocks/remix";
 
@@ -70,7 +72,7 @@ describe("POST /api/audits/:auditId/upload-image", () => {
     vi.clearAllMocks();
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      access: { audits: { seeAll: true } },
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as never);
     vi.mocked(db.auditSession.findFirst).mockResolvedValue({
       id: "audit-1",

@@ -733,6 +733,19 @@ test("a photo taken the evening before its upload is not flagged", () => {
   );
 });
 
+test("a photo is old only once it was taken more than a day before its upload", () => {
+  const flagFor = (capturedAt) =>
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt,
+      createdAt: "2026-10-28T12:00:00Z",
+    }).flag;
+
+  assert.equal(flagFor("2026-10-27T13:00:00Z"), null); // 23 h
+  assert.equal(flagFor("2026-10-27T12:00:00Z"), null); // exactly a day
+  assert.equal(flagFor("2026-10-27T11:00:00Z"), "OLD_PHOTO"); // 25 h
+});
+
 test("the year shows only when the photo is from another year than its upload or today", () => {
   assert.equal(
     describe({
