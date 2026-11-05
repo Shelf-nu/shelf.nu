@@ -8,11 +8,18 @@
  *
  * @see {@link file://../../../app/routes/_layout+/settings.bookings.tsx}
  */
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import {
+  Currency,
+  CustomFieldType,
+  OrganizationRoles,
+  OrganizationType,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
+import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-template/config";
+import type { ResolvedPdfTemplate } from "~/modules/pdf-template/service.server";
 import {
   createPdfTemplate,
   deletePdfTemplate,
@@ -134,10 +141,19 @@ describe("settings.bookings loader", () => {
   });
 
   it("lists the workspace's templates in the loader", async () => {
-    const templates = [{ id: "template-1", name: "Checklist" }];
-    vi.mocked(getPdfTemplates).mockResolvedValue(templates as any);
-    const fields = [{ id: "cf-1", name: "Serial", type: "TEXT", active: true }];
-    vi.mocked(getPdfTemplateCustomFields).mockResolvedValue(fields as any);
+    const templates: ResolvedPdfTemplate[] = [
+      {
+        id: "template-1",
+        name: "Checklist",
+        isDefault: true,
+        config: BOOKING_CHECKLIST_CONFIG,
+      },
+    ];
+    vi.mocked(getPdfTemplates).mockResolvedValue(templates);
+    const fields: Awaited<ReturnType<typeof getPdfTemplateCustomFields>> = [
+      { id: "cf-1", name: "Serial", type: CustomFieldType.TEXT, active: true },
+    ];
+    vi.mocked(getPdfTemplateCustomFields).mockResolvedValue(fields);
 
     const response = (await loader(
       createLoaderArgs({
