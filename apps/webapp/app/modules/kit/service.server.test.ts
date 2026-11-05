@@ -9162,11 +9162,15 @@ describe("kit-driven moves write the location activity log", () => {
     ]);
   });
 
-  it("logs the kit slices a kit leaves behind when its location is cleared", async () => {
+  /** A kit holding 5 of 20 sandbags, with its stored location set to `location`. */
+  function mockKitWithSandbagSlice(
+    location: { id: string; name: string } | null
+  ) {
     //@ts-expect-error missing vitest type
     db.kit.findUnique.mockResolvedValue({
       id: "kit-1",
       name: "Kit 1",
+      location,
       assetKits: [
         {
           quantity: 5,
@@ -9184,6 +9188,34 @@ describe("kit-driven moves write the location activity log", () => {
     // The kit-driven rows about to be dropped.
     //@ts-expect-error missing vitest type
     db.assetLocation.findMany.mockResolvedValue([{ assetId: "asset-qty" }]);
+  }
+
+  it("logs a cleared kit's slices at the kit's stored location, not the submitted one", async () => {
+    // The submitted `currentLocationId` is form input and can be stale.
+    mockKitWithSandbagSlice({ id: "loc-saved", name: "Saved Loc" });
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-stale",
+      newLocationId: null,
+      userId: "user-1",
+    });
+
+    expect(locationLog()).toEqual([
+      [
+        "loc-saved",
+        `${JOHN} removed 5 pcs of ${asset("asset-qty", "Sandbags")} from ${loc(
+          "loc-saved",
+          "Saved Loc"
+        )}.`,
+      ],
+    ]);
+  });
+
+  it("logs a cleared kit's slices at the submitted location when the kit has none stored", async () => {
+    mockKitWithSandbagSlice(null);
     const { updateKitLocation } = await import("./service.server");
 
     await updateKitLocation({

@@ -336,6 +336,31 @@ describe("createAssetLocationMoveNotes", () => {
     ]);
   });
 
+  it("drops the count when one asset's slices mix a known and an unknown quantity", async () => {
+    const sandbags = {
+      id: "sandbags",
+      title: "Sandbags",
+      type: "QUANTITY_TRACKED" as const,
+      unitOfMeasure: "bags",
+    };
+    await createAssetLocationMoveNotes({
+      actor,
+      moves: [
+        { asset: sandbags, from: unitA, to: dock, quantity: 5 },
+        { asset: sandbags, from: unitA, to: dock },
+      ],
+    });
+
+    const bags = '{% link to="/assets/sandbags" text="Sandbags" /%}';
+    expect(rows()[0]).toEqual([
+      "loc-dock",
+      `${ADA} added ${bags} to ${loc("loc-dock", "Dock")}. Moved from ${loc(
+        "loc-a",
+        "Unit A"
+      )}.`,
+    ]);
+  });
+
   it("names the unit count when one quantity-tracked asset moves", async () => {
     await createAssetLocationMoveNotes({
       actor,

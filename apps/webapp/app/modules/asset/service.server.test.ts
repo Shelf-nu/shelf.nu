@@ -46,6 +46,7 @@ import {
 import { getQr } from "~/modules/qr/service.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { bookableListScopeWhere } from "./list-scope.server";
@@ -2587,7 +2588,7 @@ describe("updateAsset cross-org guards", () => {
 
     expect(db.location.findFirst).toHaveBeenCalledWith({
       where: { id: "location-from-org-B", organizationId: "org-A" },
-      select: { id: true },
+      select: { id: true, name: true },
     });
   });
 
@@ -3395,6 +3396,58 @@ describe("updateAsset location activity", () => {
     expect(locationLog()).toEqual([
       ["loc-old", `${john} added 2 pcs of ${penLink} to ${oldLoc}.`],
     ]);
+  });
+
+  it("logs the unit count it wrote to the new placement", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 10]]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 7,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const written = (
+      db.assetLocation.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.map(
+      (call) =>
+        (call[0] as { data: { locationId: string; quantity: number } }).data
+    );
+    expect(written).toEqual([
+      expect.objectContaining({ locationId: "loc-new", quantity: 7 }),
+    ]);
+    expect(locationLog()[0]).toEqual([
+      "loc-new",
+      `${john} added 7 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}.`,
+    ]);
+  });
+
+  it("keeps a saved edit when the user lookup for the location log fails", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 4]]);
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    (db.user.findFirst as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        currentLocationId: "loc-old",
+        newLocationId: "loc-old",
+        newLocationQuantity: 6,
+      } as unknown as Parameters<typeof updateAsset>[0])
+    ).resolves.toBeDefined();
+
+    expect(db.locationNote.createMany).not.toHaveBeenCalled();
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
   });
 
   it("counts a quantity move the same way the phone route does", async () => {

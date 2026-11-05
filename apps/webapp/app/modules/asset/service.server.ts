@@ -2075,6 +2075,12 @@ export async function updateAsset({
       });
     }
 
+    /**
+     * The destination as the org-scoped check below read it, reused for the
+     * location activity log so the log needs no lookup of its own.
+     */
+    let newLocationRow: { id: string; name: string } | null = null;
+
     /** Connect the new location id */
     if (newLocationId) {
       // why: same IDOR concern as category — verify the location is in this
@@ -2082,7 +2088,7 @@ export async function updateAsset({
       // paginated assets and is too heavy here.
       const orgLocation = await db.location.findFirst({
         where: { id: newLocationId, organizationId },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       if (!orgLocation) {
         throw new ShelfError({
@@ -2096,6 +2102,7 @@ export async function updateAsset({
           shouldBeCaptured: false,
         });
       }
+      newLocationRow = orgLocation;
       // We can't inline a `connect` on `data` for location anymore — the
       // AssetLocation pivot write happens in the $transaction below
       // alongside the asset update.
@@ -2325,6 +2332,15 @@ export async function updateAsset({
       location: { id: string; name: string };
       quantity: number;
     }> = [];
+    /**
+     * The manual placement the rewrite wrote, with the unit count exactly as
+     * written, so the location activity log never shows a guessed count.
+     * `null` when the rewrite clears the location.
+     */
+    let writtenPlacement: {
+      location: { id: string; name: string };
+      quantity: number;
+    } | null = null;
 
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
@@ -2535,17 +2551,24 @@ export async function updateAsset({
           where: { assetId: id, assetKitId: null },
         });
         if (newLocationId) {
+          const writtenQuantity = resolveNewLocationQuantity(
+            updated,
+            newLocationQuantity
+          );
           await tx.assetLocation.create({
             data: {
               assetId: id,
               locationId: newLocationId,
               organizationId,
-              quantity: resolveNewLocationQuantity(
-                updated,
-                newLocationQuantity
-              ),
+              quantity: writtenQuantity,
             },
           });
+          if (newLocationRow) {
+            writtenPlacement = {
+              location: newLocationRow,
+              quantity: writtenQuantity,
+            };
+          }
         }
 
         /**
@@ -2800,38 +2823,27 @@ export async function updateAsset({
         // INDIVIDUAL.
         meta: assetQtyMeta(asset, locationChangeQuantity),
       });
+    }
 
-      // The rewrite collapses every manual placement into at most one, so the
-      // log reads each location's amount before and after, the same way the
-      // mobile route does.
-      await createAssetLocationMoveNotes({
-        moves: placementChangeMoves({
-          asset: {
-            id: asset.id,
-            title: asset.title,
-            type: asset.type,
-            unitOfMeasure: asset.unitOfMeasure,
-          },
-          before: manualPlacementsBefore,
-          after: newLocation
-            ? [{ location: newLocation, quantity: locationChangeQuantity ?? 1 }]
-            : [],
-        }),
-        actor: { ...user, id: userId },
-      });
-    } else if (shouldUpdatePlacement && newLocationId) {
+    if (shouldUpdatePlacement) {
       /**
-       * A new quantity at the same location still rewrites every manual
-       * placement, so the location's log records what changed there (and at
-       * any placement the rewrite dropped), the same way the mobile route
-       * does for the same edit.
+       * The rewrite collapses every manual placement into at most one, so the
+       * location log reads each location's amount before and after, the same
+       * way the mobile route does. This covers a move, a cleared location and
+       * a new quantity at the same location. The edit is already saved, so a
+       * failure here is logged and never fails the request.
        */
-      const user = await loadUserForNotes();
-      const location = await db.location.findFirst({
-        where: { id: newLocationId, organizationId },
-        select: { id: true, name: true },
-      });
-      if (location) {
+      try {
+        if (newLocationId && !writtenPlacement) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "A placement was written without its location, so the location activity log was skipped",
+            additionalData: { assetId: asset.id, newLocationId },
+            label,
+          });
+        }
+        const user = await loadUserForNotes();
         await createAssetLocationMoveNotes({
           moves: placementChangeMoves({
             asset: {
@@ -2841,10 +2853,21 @@ export async function updateAsset({
               unitOfMeasure: asset.unitOfMeasure,
             },
             before: manualPlacementsBefore,
-            after: [{ location, quantity: locationChangeQuantity ?? 1 }],
+            after: writtenPlacement ? [writtenPlacement] : [],
           }),
           actor: { ...user, id: userId },
         });
+      } catch (cause) {
+        Logger.error(
+          cause instanceof ShelfError
+            ? cause
+            : new ShelfError({
+                cause,
+                message: "Failed to write the location activity log",
+                additionalData: { assetId: asset.id },
+                label,
+              })
+        );
       }
     }
 

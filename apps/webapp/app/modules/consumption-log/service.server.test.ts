@@ -20,6 +20,7 @@ import { ConsumptionCategory } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 // why: the guard's committed-peak math is already exhaustively unit-tested
 // in `asset/availability.server.test.ts`. Stubbing it here isolates
@@ -483,6 +484,46 @@ describe("adjustQuantity: location activity", () => {
         )}.`,
       ],
     ]);
+  });
+
+  it("keeps a saved adjustment when the user lookup for the location line fails", async () => {
+    setup();
+    placedAt([["loc-wh", 10]]);
+    // No placement at the van yet, so the restock creates one.
+    // @ts-expect-error mocked
+    db.assetLocation.findFirst.mockResolvedValue(null);
+    // Only the post-commit lookup for the location line fails (it selects
+    // `id`); the activity event's own snapshot lookup inside the tx works.
+    // @ts-expect-error mocked
+    db.user.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        select.id
+          ? Promise.reject(new Error("connection reset"))
+          : Promise.resolve({
+              firstName: "Ana",
+              lastName: "Admin",
+              displayName: null,
+            })
+    );
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+
+    await expect(
+      adjustQuantity({
+        assetId: ASSET_ID,
+        quantity: 20,
+        category: ConsumptionCategory.RESTOCK,
+        direction: "add",
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        locationId: "loc-van",
+      })
+    ).resolves.toBeDefined();
+
+    expect(db.locationNote.createMany).not.toHaveBeenCalled();
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
   });
 
   it("leaves a pool at two locations to its restock line, with no second line", async () => {
