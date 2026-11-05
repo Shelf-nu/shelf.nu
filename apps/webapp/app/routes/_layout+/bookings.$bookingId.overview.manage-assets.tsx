@@ -519,27 +519,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Attach the model flag and the primary location, attach
-     * availableQuantity to qty-tracked rows and drop qty-tracked rows with
-     * nothing left to book. `Asset` has no `location` column: the Location
-     * column reads the oldest placement from `assetLocations`, the same row
-     * the assets index shows.
+     * Attach the model flag, attach availableQuantity to qty-tracked rows and
+     * drop qty-tracked rows with nothing left to book.
      */
     const assetsWithAvailability = assets
       .map((a) => {
-        const location =
-          getPrimaryLocation<
-            Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY>
-          >(a);
         const modelReservedElsewhere =
           a.type === AssetType.INDIVIDUAL &&
           !!a.assetModelId &&
           !ownStandaloneAssetIds.has(a.id) &&
           exhaustedModelIds.has(a.assetModelId);
         if (a.type !== "QUANTITY_TRACKED")
-          return { ...a, location, modelReservedElsewhere };
+          return { ...a, modelReservedElsewhere };
         const availableQuantity = availabilityByAsset.get(a.id)?.bookable ?? 0;
-        return { ...a, location, modelReservedElsewhere, availableQuantity };
+        return { ...a, modelReservedElsewhere, availableQuantity };
       })
       .filter((a) => {
         if (a.type !== "QUANTITY_TRACKED") return true;
@@ -1915,7 +1908,6 @@ const RowComponent = ({
   extraProps,
 }: {
   item: AssetsFromViewItem & {
-    location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
     availableQuantity?: number;
     modelReservedElsewhere?: boolean;
   };
@@ -1927,7 +1919,12 @@ const RowComponent = ({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const currentOrganization = useCurrentOrganization();
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
-  const { category, tags, location } = item;
+  const { category, tags } = item;
+  /**
+   * `Asset` has no location column: the Location column shows the oldest
+   * placement from `assetLocations`, the same one the assets index shows.
+   */
+  const location = getPrimaryLocation(item);
   const isPartOfKit = (item.assetKits ?? []).length > 0;
   const isAddedThroughKit = isPartOfKit && checked;
   const isQtyTracked = isQuantityTracked(item);

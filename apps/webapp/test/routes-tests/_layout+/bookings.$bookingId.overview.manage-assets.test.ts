@@ -1517,13 +1517,16 @@ describe("manage-assets loader — Models tab payload", () => {
     expect(result.items[0].custody).toHaveLength(1);
   });
 
-  it("gives each picker row the asset's primary placement as its location", async () => {
+  it("hands each picker row its placements from the shared ordered include", async () => {
     const warehouse = {
       id: "loc-warehouse",
       name: "Warehouse",
       parentId: null,
       _count: { children: 2 },
     };
+    const placements = [
+      { quantity: 1, assetKitId: null, assetKit: null, location: warehouse },
+    ];
     // why: the list query is a DB read; the fixture mirrors the
     // `assetLocations` shape `assetIndexFields()` selects (oldest first).
     vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
@@ -1534,16 +1537,7 @@ describe("manage-assets loader — Models tab payload", () => {
           title: "Camera",
           type: "INDIVIDUAL",
           custody: [],
-          assetLocations: [
-            { quantity: 1, assetKitId: null, location: warehouse },
-          ],
-        },
-        {
-          id: "unplaced",
-          title: "Tripod",
-          type: "INDIVIDUAL",
-          custody: [],
-          assetLocations: [],
+          assetLocations: placements,
         },
       ],
     } as any);
@@ -1552,11 +1546,11 @@ describe("manage-assets loader — Models tab payload", () => {
       createLoaderArgs({ context: mockContext, params: mockParams })
     );
 
-    expect(result.items[0].location).toEqual(warehouse);
-    expect(result.items[1].location).toBeNull();
-    // The shared include keeps `assetLocations` ordered oldest first, so the
-    // Location column matches the assets index. Overriding it here would drop
-    // that ordering.
+    // The Location column reads `getPrimaryLocation(item)`, the first of
+    // these placements, so the rows must arrive with them untouched.
+    expect(result.items[0].assetLocations).toEqual(placements);
+    // The shared include orders `assetLocations` oldest first, so the column
+    // matches the assets index. Overriding it here would drop that ordering.
     expect(
       vi.mocked(assetService.getPaginatedAndFilterableAssets).mock.calls[0][0]
     ).not.toHaveProperty("extraInclude");
