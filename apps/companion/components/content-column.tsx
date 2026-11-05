@@ -12,6 +12,16 @@
  * column width (an iPad window being resized) changes a style instead of
  * remounting the screen and losing its state.
  *
+ * The wrapper also keeps the screen clear of the window's side insets: an
+ * iPhone Duo's status-bar rail (about 84 pt down the left or right edge when
+ * open sideways or in Split View) and an Android foldable's camera cutout
+ * when the device is turned. The column stays centred in the screen when the
+ * insets allow it and moves only as far as an inset requires (`columnSpan`),
+ * using the insets less what the tab sidebar already covers
+ * (`tabScreenInsets`), so a rail behind the sidebar adds nothing. Computed in
+ * JS rather than by a native `SafeAreaView`, which would copy the window's
+ * insets whatever the sidebar covers. Phones held upright have no side insets.
+ *
  * @see lib/content-column.ts for the column widths
  */
 
@@ -21,6 +31,8 @@ import type { ParamListBase, RouteProp } from "@react-navigation/native";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { useContentGutter } from "@/lib/use-content-gutter";
+import { columnSpan } from "@/lib/safe-edges";
+import { useTabScreenInsets, useTabScreenWidth } from "@/lib/use-safe-edges";
 
 /** Props for {@link ContentColumn}. */
 type ContentColumnProps = {
@@ -39,21 +51,29 @@ function ContentColumn({
   children,
   maxWidth = CONTENT_MAX_WIDTH,
 }: ContentColumnProps) {
-  // Only decides the background: the column itself is centred by layout.
+  // Only decides the background: the column itself is placed by padding.
   const isWide = useContentGutter(maxWidth) > 0;
   const { colors } = useTheme();
+  // Side edges only: the header and the tab bar own the top and bottom.
+  const insets = useTabScreenInsets();
+  const { width, onLayout } = useTabScreenWidth();
+  const span = columnSpan(width, maxWidth, insets);
 
   return (
     <View
+      onLayout={onLayout}
       style={{
         flex: 1,
-        alignItems: "center",
+        // Centred in the screen when the insets allow, moved just clear of
+        // an inset otherwise (see `columnSpan`).
+        paddingLeft: span.left,
+        paddingRight: width - span.left - span.width,
         // The space either side shows the app background. Phones have none,
         // so they keep the transparent wrapper and look exactly as before.
         backgroundColor: isWide ? colors.background : undefined,
       }}
     >
-      <View style={{ flex: 1, width: "100%", maxWidth }}>{children}</View>
+      <View style={{ flex: 1 }}>{children}</View>
     </View>
   );
 }
