@@ -2,11 +2,11 @@
 /* eslint-disable @typescript-eslint/require-await -- why: the in-memory table
    answers with promises, as Prisma does, without awaiting anything itself */
 /**
- * A workspace's PDF documents: what a workspace starts with, the one-default
- * and keep-one rules, which document a print gets, and which custom fields a
- * document may name.
+ * A workspace's PDF templates: what a workspace starts with, the one-default
+ * and keep-one rules, which template a print gets, and which custom fields a
+ * template may name.
  *
- * Runs against an in-memory `pdfDocument` table that honours the same
+ * Runs against an in-memory `pdfTemplate` table that honours the same
  * workspace scoping and unique names as the real one, so the tests read what
  * the service leaves behind rather than which calls it made.
  *
@@ -15,14 +15,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BOOKING_CHECKLIST_CONFIG, CHECKOUT_RECEIPT_CONFIG } from "./config";
 import {
-  canCustomizePdfDocuments,
-  createPdfDocument,
-  deletePdfDocument,
-  duplicatePdfDocument,
-  getPdfDocuments,
-  resolvePdfDocumentForPrint,
-  setDefaultPdfDocument,
-  updatePdfDocument,
+  createPdfTemplate,
+  deletePdfTemplate,
+  duplicatePdfTemplate,
+  getPdfTemplates,
+  resolvePdfTemplateForPrint,
+  setDefaultPdfTemplate,
+  updatePdfTemplate,
 } from "./service.server";
 
 type Row = {
@@ -50,10 +49,9 @@ const store = vi.hoisted(() => ({
     organizationId: string;
     type: string;
     deletedAt: Date | null;
+    active: boolean;
   }[],
   seq: 0,
-  /** Workspaces whose paid documents were already given. */
-  seeded: new Set<string>(),
 }));
 
 function matches(row: Row, where: Where = {}) {
@@ -112,7 +110,7 @@ function sorted(rows: Row[]) {
   );
 }
 
-const pdfDocument = vi.hoisted(() => ({
+const pdfTemplate = vi.hoisted(() => ({
   count: vi.fn(
     async ({ where }: { where: Where }) =>
       store.rows.filter((row) => matches(row, where)).length
@@ -139,7 +137,7 @@ const pdfDocument = vi.hoisted(() => ({
         const row: Row = {
           ...data,
           isDefault: data.isDefault ?? false,
-          id: `document-${++store.seq}`,
+          id: `template-${++store.seq}`,
           createdAt: new Date(store.seq * 1000),
         };
         store.rows.push(row);
@@ -150,7 +148,7 @@ const pdfDocument = vi.hoisted(() => ({
     async ({ data }: { data: Omit<Row, "id" | "createdAt">[] }) => {
       for (const item of data) {
         try {
-          await pdfDocument.create({ data: item });
+          await pdfTemplate.create({ data: item });
         } catch {
           // skipDuplicates
         }
@@ -200,27 +198,17 @@ const customField = vi.hoisted(() => ({
       where: {
         id: { in: string[] };
         organizationId: string;
+        active?: boolean;
       };
     }) =>
       store.customFields.filter(
         (f) =>
           where.id.in.includes(f.id) &&
           f.organizationId === where.organizationId &&
-          f.deletedAt === null
+          f.deletedAt === null &&
+          (where.active === undefined || f.active === where.active)
       ).length
   ),
-}));
-
-const organization = vi.hoisted(() => ({
-  findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
-    paidPdfDocumentsSeededAt: store.seeded.has(where.id) ? new Date() : null,
-    pdfDocuments: sorted(
-      store.rows.filter((row) => row.organizationId === where.id)
-    ),
-  })),
-  updateMany: vi.fn(async ({ where }: { where: { id: string } }) => {
-    store.seeded.add(where.id);
-  }),
 }));
 
 /** Every raw query the service ran, as its SQL text and its values. */
@@ -237,9 +225,8 @@ const queryRaw = vi.hoisted(
 // with the real scoping and unique indexes keeps the tests off a database.
 vi.mock("~/database/db.server", () => {
   const db = {
-    pdfDocument,
+    pdfTemplate,
     customField,
-    organization,
     // why: the row lock has no effect on a single-threaded in-memory table;
     // the SQL it was given is kept so a test can read it.
     $queryRaw: queryRaw,
@@ -248,119 +235,88 @@ vi.mock("~/database/db.server", () => {
   return { db };
 });
 
-// why: the tier gate opens for everyone when premium features are off; each
-// test picks the switch.
-const premium = vi.hoisted(() => ({ enabled: true }));
-vi.mock("~/config/shelf.config", async (importOriginal) => {
-  const actual = await importOriginal<{ config: Record<string, unknown> }>();
-  return {
-    config: {
-      ...actual.config,
-      get enablePremiumFeatures() {
-        return premium.enabled;
-      },
-    },
-  };
-});
-
 const ORG = "org-1";
 
 beforeEach(() => {
   store.rows = [];
   store.customFields = [];
   store.seq = 0;
-  store.seeded = new Set();
   rawQueries.length = 0;
-  premium.enabled = true;
 });
 
-function documentsOf(organizationId = ORG) {
+function templatesOf(organizationId = ORG) {
   return sorted(store.rows.filter((r) => r.organizationId === organizationId));
 }
 
-describe("PDF documents: what a workspace starts with", () => {
-  it("gives a workspace with no documents the Checklist (default) and Check-out receipt", async () => {
-    const documents = await getPdfDocuments({ organizationId: ORG });
+describe("PDF templates: what a workspace starts with", () => {
+  it("gives a workspace with no templates the Checklist (default) and Check-out receipt", async () => {
+    const templates = await getPdfTemplates({ organizationId: ORG });
 
     expect(
-      documents.map(({ name, isDefault }) => ({ name, isDefault }))
+      templates.map(({ name, isDefault }) => ({ name, isDefault }))
     ).toEqual([
       { name: "Checklist", isDefault: true },
       { name: "Check-out receipt", isDefault: false },
     ]);
-    expect(documents[0].config).toEqual(BOOKING_CHECKLIST_CONFIG);
-    expect(documents[1].config).toEqual(CHECKOUT_RECEIPT_CONFIG);
+    expect(templates[0].config).toEqual(BOOKING_CHECKLIST_CONFIG);
+    expect(templates[1].config).toEqual(CHECKOUT_RECEIPT_CONFIG);
   });
 
-  it("gives a workspace that upgrades its Check-out receipt once, and never seeds a deleted one back", async () => {
-    // A free workspace: the Checklist only, paid documents never given.
-    store.rows.push({
-      id: "free-checklist",
-      organizationId: ORG,
-      name: "Checklist",
-      kind: "BOOKING",
-      config: BOOKING_CHECKLIST_CONFIG,
-      isDefault: true,
-      createdAt: new Date(0),
-    });
-
-    const upgraded = await getPdfDocuments({ organizationId: ORG });
-    expect(upgraded.map(({ name, isDefault }) => [name, isDefault])).toEqual([
-      ["Checklist", true],
-      ["Check-out receipt", false],
+  it("gives a workspace with no templates both built-ins on first read", async () => {
+    const first = await getPdfTemplates({ organizationId: ORG });
+    expect(first.map((t) => t.name)).toEqual([
+      "Checklist",
+      "Check-out receipt",
     ]);
+    expect(first[0].isDefault).toBe(true);
 
-    await deletePdfDocument({
-      organizationId: ORG,
-      documentId: upgraded[1].id,
-    });
-    const later = await getPdfDocuments({ organizationId: ORG });
-    expect(later.map((d) => d.name)).toEqual(["Checklist"]);
+    await getPdfTemplates({ organizationId: ORG });
+    expect(templatesOf()).toHaveLength(2);
   });
 
-  it("does not add the built-in documents again to a workspace that has documents", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    await getPdfDocuments({ organizationId: ORG });
+  it("does not add the built-in templates again to a workspace that has templates", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    await getPdfTemplates({ organizationId: ORG });
 
-    expect(documentsOf()).toHaveLength(2);
+    expect(templatesOf()).toHaveLength(2);
   });
 });
 
-describe("PDF documents: the default and the last document", () => {
-  it("locks the workspace's documents, by table and column name, before deleting", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const [, receipt] = documentsOf();
+describe("PDF templates: the default and the last template", () => {
+  it("locks the workspace's templates, by table and column name, before deleting", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    const [, receipt] = templatesOf();
 
-    await deletePdfDocument({ organizationId: ORG, documentId: receipt.id });
+    await deletePdfTemplate({ organizationId: ORG, templateId: receipt.id });
 
     expect(rawQueries).toEqual([
       {
-        sql: 'SELECT "id" FROM "PdfDocument" WHERE "organizationId" = ? FOR UPDATE',
+        sql: 'SELECT "id" FROM "PdfTemplate" WHERE "organizationId" = ? FOR UPDATE',
         values: [ORG],
       },
     ]);
   });
 
-  it("refuses to delete the last document", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const [checklist, handover] = documentsOf();
-    await deletePdfDocument({ organizationId: ORG, documentId: handover.id });
+  it("refuses to delete the last template", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    const [checklist, handover] = templatesOf();
+    await deletePdfTemplate({ organizationId: ORG, templateId: handover.id });
 
     await expect(
-      deletePdfDocument({ organizationId: ORG, documentId: checklist.id })
-    ).rejects.toMatchObject({ status: 400, title: "Keep one document" });
-    expect(documentsOf().map((s) => s.name)).toEqual(["Checklist"]);
+      deletePdfTemplate({ organizationId: ORG, templateId: checklist.id })
+    ).rejects.toMatchObject({ status: 400, title: "Keep one template" });
+    expect(templatesOf().map((s) => s.name)).toEqual(["Checklist"]);
   });
 
-  it("makes the oldest remaining document the default when the default is deleted", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const [checklist] = documentsOf();
-    await createPdfDocument({ organizationId: ORG, name: "Client quote" });
+  it("makes the oldest remaining template the default when the default is deleted", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    const [checklist] = templatesOf();
+    await createPdfTemplate({ organizationId: ORG, name: "Client quote" });
 
-    await deletePdfDocument({ organizationId: ORG, documentId: checklist.id });
+    await deletePdfTemplate({ organizationId: ORG, templateId: checklist.id });
 
     expect(
-      documentsOf().map(({ name, isDefault }) => ({ name, isDefault }))
+      templatesOf().map(({ name, isDefault }) => ({ name, isDefault }))
     ).toEqual([
       { name: "Check-out receipt", isDefault: true },
       { name: "Client quote", isDefault: false },
@@ -368,73 +324,73 @@ describe("PDF documents: the default and the last document", () => {
   });
 
   it("moves the default, keeping exactly one", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const handover = documentsOf()[1];
+    await getPdfTemplates({ organizationId: ORG });
+    const handover = templatesOf()[1];
 
-    await setDefaultPdfDocument({
+    await setDefaultPdfTemplate({
       organizationId: ORG,
-      documentId: handover.id,
+      templateId: handover.id,
     });
 
     expect(
-      documentsOf()
+      templatesOf()
         .filter((s) => s.isDefault)
         .map((s) => s.name)
     ).toEqual(["Check-out receipt"]);
   });
 
   it("names a copy after its source, never the default", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const checklist = documentsOf()[0];
+    await getPdfTemplates({ organizationId: ORG });
+    const checklist = templatesOf()[0];
 
-    await duplicatePdfDocument({
+    await duplicatePdfTemplate({
       organizationId: ORG,
-      documentId: checklist.id,
+      templateId: checklist.id,
     });
-    await duplicatePdfDocument({
+    await duplicatePdfTemplate({
       organizationId: ORG,
-      documentId: checklist.id,
+      templateId: checklist.id,
     });
 
-    const copies = documentsOf().filter((s) => s.name.startsWith("Copy of"));
+    const copies = templatesOf().filter((s) => s.name.startsWith("Copy of"));
     expect(copies.map((s) => [s.name, s.isDefault])).toEqual([
       ["Copy of Checklist", false],
       ["Copy of Checklist (2)", false],
     ]);
   });
 
-  it("refuses a name another document of the workspace has, whatever its case", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const handover = documentsOf()[1];
+  it("refuses a name another template of the workspace has, whatever its case", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    const handover = templatesOf()[1];
 
     await expect(
-      createPdfDocument({ organizationId: ORG, name: "checklist" })
+      createPdfTemplate({ organizationId: ORG, name: "checklist" })
     ).rejects.toMatchObject({ status: 400, title: "Name already used" });
     await expect(
-      updatePdfDocument({
+      updatePdfTemplate({
         organizationId: ORG,
-        documentId: handover.id,
+        templateId: handover.id,
         name: "CHECKLIST",
         config: CHECKOUT_RECEIPT_CONFIG,
       })
     ).rejects.toMatchObject({ status: 400, title: "Name already used" });
-    expect(documentsOf().map((s) => s.name)).toEqual([
+    expect(templatesOf().map((s) => s.name)).toEqual([
       "Checklist",
       "Check-out receipt",
     ]);
   });
 
   it("keeps a copy's name within the name limit", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const long = await createPdfDocument({
+    await getPdfTemplates({ organizationId: ORG });
+    const long = await createPdfTemplate({
       organizationId: ORG,
       name: "A".repeat(60),
     });
 
-    await duplicatePdfDocument({ organizationId: ORG, documentId: long!.id });
-    await duplicatePdfDocument({ organizationId: ORG, documentId: long!.id });
+    await duplicatePdfTemplate({ organizationId: ORG, templateId: long!.id });
+    await duplicatePdfTemplate({ organizationId: ORG, templateId: long!.id });
 
-    const copies = documentsOf()
+    const copies = templatesOf()
       .map((s) => s.name)
       .filter((name) => name.startsWith("Copy of"));
     expect(copies).toEqual([
@@ -445,104 +401,176 @@ describe("PDF documents: the default and the last document", () => {
   });
 });
 
-describe("PDF documents: another workspace's document", () => {
+describe("PDF templates: another workspace's template", () => {
   it("cannot be printed, edited, made default or deleted", async () => {
-    await getPdfDocuments({ organizationId: "org-2" });
-    const foreign = documentsOf("org-2")[0];
+    await getPdfTemplates({ organizationId: "org-2" });
+    const foreign = templatesOf("org-2")[0];
 
     await expect(
-      resolvePdfDocumentForPrint({
+      resolvePdfTemplateForPrint({
         organizationId: ORG,
         requestedId: foreign.id,
       })
     ).rejects.toMatchObject({ status: 404 });
     for (const call of [
       () =>
-        updatePdfDocument({
+        updatePdfTemplate({
           organizationId: ORG,
-          documentId: foreign.id,
+          templateId: foreign.id,
           name: "Mine now",
           config: BOOKING_CHECKLIST_CONFIG,
         }),
       () =>
-        setDefaultPdfDocument({ organizationId: ORG, documentId: foreign.id }),
-      () => deletePdfDocument({ organizationId: ORG, documentId: foreign.id }),
+        setDefaultPdfTemplate({ organizationId: ORG, templateId: foreign.id }),
+      () => deletePdfTemplate({ organizationId: ORG, templateId: foreign.id }),
       () =>
-        duplicatePdfDocument({ organizationId: ORG, documentId: foreign.id }),
+        duplicatePdfTemplate({ organizationId: ORG, templateId: foreign.id }),
     ]) {
       await expect(call()).rejects.toMatchObject({ status: 404 });
     }
-    expect(documentsOf("org-2")[0]).toMatchObject({
+    expect(templatesOf("org-2")[0]).toMatchObject({
       name: "Checklist",
       isDefault: true,
     });
   });
 });
 
-describe("PDF documents: which document a print gets", () => {
-  it("prints the remembered document, then the default when the remembered one is gone", async () => {
-    await getPdfDocuments({ organizationId: ORG });
-    const [, handover] = documentsOf();
+describe("PDF templates: which template a print gets", () => {
+  it("prints the remembered template, then the default when the remembered one is gone", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    const [, handover] = templatesOf();
 
-    const remembered = await resolvePdfDocumentForPrint({
+    const remembered = await resolvePdfTemplateForPrint({
       organizationId: ORG,
       rememberedId: handover.id,
     });
-    expect(remembered.document.name).toBe("Check-out receipt");
+    expect(remembered.template.name).toBe("Check-out receipt");
 
-    const stale = await resolvePdfDocumentForPrint({
+    const stale = await resolvePdfTemplateForPrint({
       organizationId: ORG,
-      rememberedId: "deleted-document",
+      rememberedId: "deleted-template",
     });
-    expect(stale.document.name).toBe("Checklist");
-    expect(stale.documents.map((s) => s.name)).toEqual([
+    expect(stale.template.name).toBe("Checklist");
+    expect(stale.templates.map((s) => s.name)).toEqual([
       "Checklist",
       "Check-out receipt",
     ]);
   });
 
-  it("refuses a requested document that no longer exists", async () => {
-    await expect(
-      resolvePdfDocumentForPrint({
+  it("prints with the oldest template when none is marked default", async () => {
+    for (const [id, name, ms] of [
+      ["newer", "Newer", 2000],
+      ["older", "Older", 1000],
+    ] as const) {
+      store.rows.push({
+        id,
         organizationId: ORG,
-        requestedId: "deleted-document",
+        name,
+        kind: "BOOKING",
+        config: BOOKING_CHECKLIST_CONFIG,
+        isDefault: false,
+        createdAt: new Date(ms),
+      });
+    }
+
+    const { template } = await resolvePdfTemplateForPrint({
+      organizationId: ORG,
+    });
+
+    expect(template.id).toBe("older");
+  });
+
+  it("falls back to the default when the remembered template is gone or foreign", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    await getPdfTemplates({ organizationId: "org-2" });
+    const foreign = templatesOf("org-2")[1];
+
+    for (const rememberedId of ["deleted-template", foreign.id]) {
+      const { template } = await resolvePdfTemplateForPrint({
+        organizationId: ORG,
+        rememberedId,
+      });
+      expect(template.name).toBe("Checklist");
+      expect(template.isDefault).toBe(true);
+    }
+  });
+
+  it("refuses a requested template that no longer exists", async () => {
+    await expect(
+      resolvePdfTemplateForPrint({
+        organizationId: ORG,
+        requestedId: "deleted-template",
       })
-    ).rejects.toMatchObject({ status: 404, title: "Document not found" });
+    ).rejects.toMatchObject({ status: 404, title: "Template not found" });
   });
 });
 
-describe("PDF documents: custom fields on a document", () => {
+describe("PDF templates: custom fields on a template", () => {
   beforeEach(() => {
     store.customFields = [
-      { id: "cf-price", organizationId: ORG, type: "AMOUNT", deletedAt: null },
-      { id: "cf-serial", organizationId: ORG, type: "TEXT", deletedAt: null },
+      {
+        id: "cf-price",
+        organizationId: ORG,
+        type: "AMOUNT",
+        deletedAt: null,
+        active: true,
+      },
+      {
+        id: "cf-serial",
+        organizationId: ORG,
+        type: "TEXT",
+        deletedAt: null,
+        active: true,
+      },
       {
         id: "cf-notes",
         organizationId: ORG,
         type: "MULTILINE_TEXT",
         deletedAt: null,
+        active: true,
       },
-      { id: "cf-date", organizationId: ORG, type: "DATE", deletedAt: null },
+      {
+        id: "cf-date",
+        organizationId: ORG,
+        type: "DATE",
+        deletedAt: null,
+        active: true,
+      },
       {
         id: "cf-old",
         organizationId: ORG,
         type: "TEXT",
         deletedAt: new Date(),
+        active: true,
+      },
+      {
+        id: "cf-inactive",
+        organizationId: ORG,
+        type: "TEXT",
+        deletedAt: null,
+        active: false,
       },
       {
         id: "cf-foreign",
         organizationId: "org-2",
         type: "TEXT",
         deletedAt: null,
+        active: true,
       },
     ];
   });
 
-  async function save(customFieldIds: string[]) {
-    await getPdfDocuments({ organizationId: ORG });
-    return updatePdfDocument({
+  async function save(customFieldIds: string[], stored: string[] = []) {
+    await getPdfTemplates({ organizationId: ORG });
+    // why: the stored config is what the update compares against; seed it
+    // directly because saving it through the service would run the checks.
+    templatesOf()[0].config = {
+      ...BOOKING_CHECKLIST_CONFIG,
+      customFieldIds: stored,
+    };
+    return updatePdfTemplate({
       organizationId: ORG,
-      documentId: documentsOf()[0].id,
+      templateId: templatesOf()[0].id,
       name: "Client quote",
       config: { ...BOOKING_CHECKLIST_CONFIG, customFieldIds },
     });
@@ -562,7 +590,7 @@ describe("PDF documents: custom fields on a document", () => {
     await expect(
       save(["cf-price", "cf-serial", "cf-notes", "cf-date"])
     ).rejects.toMatchObject({ status: 400, title: "Too many custom fields" });
-    expect(documentsOf()[0].name).toBe("Checklist");
+    expect(templatesOf()[0].name).toBe("Checklist");
   });
 
   it("refuses another workspace's field and a deleted one", async () => {
@@ -572,25 +600,41 @@ describe("PDF documents: custom fields on a document", () => {
       title: "Custom field deleted",
     });
   });
-});
 
-describe("PDF documents: which tiers include them", () => {
-  it("follows the owner's tier when premium features are on", () => {
-    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: true })).toBe(
-      true
-    );
-    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: false })).toBe(
-      false
-    );
-    expect(canCustomizePdfDocuments(null)).toBe(false);
+  it("keeps an inactive field the template already prints", async () => {
+    const saved = await save(["cf-inactive"], ["cf-inactive"]);
+
+    expect(saved?.config.customFieldIds).toEqual(["cf-inactive"]);
   });
 
-  it("includes them for every workspace when premium features are off", () => {
-    premium.enabled = false;
+  it("rejects choosing an inactive field", async () => {
+    await expect(save(["cf-inactive"])).rejects.toMatchObject({
+      status: 400,
+      title: "Custom field inactive",
+      message:
+        "One of the chosen custom fields is inactive. Reload the page and pick again.",
+    });
+  });
 
-    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: false })).toBe(
-      true
-    );
-    expect(canCustomizePdfDocuments(null)).toBe(true);
+  it("still rejects a deleted field the template already prints", async () => {
+    await expect(save(["cf-old"], ["cf-old"])).rejects.toMatchObject({
+      status: 400,
+      title: "Custom field deleted",
+    });
+  });
+
+  it("saves a template stored with an empty config", async () => {
+    await getPdfTemplates({ organizationId: ORG });
+    // why: a row written before custom fields existed has no `customFieldIds`.
+    templatesOf()[0].config = {};
+
+    const saved = await updatePdfTemplate({
+      organizationId: ORG,
+      templateId: templatesOf()[0].id,
+      name: "Client quote",
+      config: { ...BOOKING_CHECKLIST_CONFIG, customFieldIds: ["cf-price"] },
+    });
+
+    expect(saved?.config.customFieldIds).toEqual(["cf-price"]);
   });
 });
