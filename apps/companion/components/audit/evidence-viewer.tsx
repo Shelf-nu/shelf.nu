@@ -33,6 +33,8 @@ import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useCentredSheetSpan } from "@/lib/use-safe-edges";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
+import { AuditPhotoCaption } from "@/components/audit/audit-photo-caption";
+import { describeAuditPhotoForUser } from "@/lib/audit-photo-description";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -75,7 +77,8 @@ export function EvidenceViewer({
   // why: the workspace's own date format — the same hook every other audit
   // surface uses, so a completed audit does not suddenly render dates
   // differently from the screen that opened it.
-  const { formatDateTime } = useDateFormatter();
+  const formatter = useDateFormatter();
+  const { formatDateTime } = formatter;
 
   const renderNote = useCallback(
     (note: AuditEvidenceNote) => (
@@ -154,32 +157,38 @@ export function EvidenceViewer({
                       : `${images.length} photos`}
                   </Text>
                   <View style={styles.grid}>
-                    {images.map((image) => (
-                      <TouchableOpacity
-                        key={image.id}
-                        activeOpacity={onImagePress ? 0.7 : 1}
-                        onPress={
-                          onImagePress ? () => onImagePress(image) : undefined
-                        }
-                        accessibilityRole={onImagePress ? "button" : "image"}
-                        accessibilityLabel={
-                          image.description
-                            ? `Photo: ${image.description}`
-                            : `Photo by ${image.authorName ?? "Unknown"}`
-                        }
-                      >
-                        <Image
-                          source={{ uri: image.thumbnailUrl }}
-                          style={styles.thumb}
-                          contentFit="cover"
-                        />
-                        {image.description ? (
-                          <Text style={styles.caption} numberOfLines={2}>
-                            {image.description}
-                          </Text>
-                        ) : null}
-                      </TouchableOpacity>
-                    ))}
+                    {images.map((image) => {
+                      const photo = describeAuditPhotoForUser(image, formatter);
+                      return (
+                        <TouchableOpacity
+                          key={image.id}
+                          activeOpacity={onImagePress ? 0.7 : 1}
+                          onPress={
+                            onImagePress ? () => onImagePress(image) : undefined
+                          }
+                          accessibilityRole={onImagePress ? "button" : "image"}
+                          accessibilityLabel={`${
+                            image.description
+                              ? `Photo: ${image.description}`
+                              : `Photo by ${image.authorName ?? "Unknown"}`
+                          }. ${photo.detail}${
+                            photo.flagLabel ? `. ${photo.flagLabel}` : ""
+                          }`}
+                        >
+                          <Image
+                            source={{ uri: image.thumbnailUrl }}
+                            style={styles.thumb}
+                            contentFit="cover"
+                          />
+                          <AuditPhotoCaption description={photo} width={104} />
+                          {image.description ? (
+                            <Text style={styles.caption} numberOfLines={2}>
+                              {image.description}
+                            </Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 </>
               ) : null}
