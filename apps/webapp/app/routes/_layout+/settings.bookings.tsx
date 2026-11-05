@@ -7,6 +7,10 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import {
+  ApprovalSettings,
+  ApprovalSettingsSchema,
+} from "~/components/booking/approval/approval-settings";
+import {
   AutoArchiveSettings,
   AutoArchiveDaysSchema,
   AutoArchiveExpiredToggleSchema,
@@ -149,6 +153,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
+        "updateBookingApproval",
         "updateAutoArchiveToggle",
         "updateAutoArchiveExpiredToggle",
         "updateAutoArchiveDays",
@@ -223,6 +228,46 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Tags requirement setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateBookingApproval": {
+        const { requireApprovalForBase, requireApprovalForSelfService } =
+          parseData(formData, ApprovalSettingsSchema, {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          });
+
+        // No sweep of existing reservations: every reservation written while
+        // a switch is off carries `approvedAt` from `reserveBooking`, and the
+        // bookings that predate the feature were stamped by migration
+        // 20261102150100. Only genuine requests (made while a switch was on
+        // and never decided) have no stamp, and those are pending again the
+        // moment a switch comes back on, which is what they are.
+        await updateBookingSettings({
+          organizationId,
+          requireApprovalForBase,
+          requireApprovalForSelfService,
+        });
+
+        const gated = [
+          requireApprovalForBase ? "Base" : null,
+          requireApprovalForSelfService ? "Self service" : null,
+        ].filter(Boolean);
+        sendNotification({
+          title: "Settings updated",
+          message:
+            gated.length > 0
+              ? `New reservations by ${gated.join(
+                  " and "
+                )} users now wait for approval`
+              : "Booking approval is off: every reservation is final at once",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -649,6 +694,20 @@ export default function GeneralPage() {
     <>
       {/* Email notification recipient settings */}
       <NotificationSettings bookingSettings={bookingSettings} />
+
+      {/* Booking approval settings form */}
+      <ApprovalSettings
+        header={{
+          title: "Booking approval",
+          subHeading:
+            "Choose which roles' reservations wait for an administrator or manager to say yes before the gear goes out.",
+        }}
+        defaultValues={{
+          requireApprovalForBase: bookingSettings.requireApprovalForBase,
+          requireApprovalForSelfService:
+            bookingSettings.requireApprovalForSelfService,
+        }}
+      />
 
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings

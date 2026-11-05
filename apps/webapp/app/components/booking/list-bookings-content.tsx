@@ -15,6 +15,7 @@
  * @see {@link file://../../routes/_layout+/bookings._index.tsx}
  */
 import type { Prisma } from "@prisma/client";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type { ListContextLinkState } from "~/hooks/use-list-context";
 import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { BADGE_COLORS } from "~/utils/badge-colors";
@@ -22,6 +23,10 @@ import {
   canAssignModelUnits,
   countUnassignedModelUnits,
 } from "~/utils/booking-model-requests";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
@@ -176,6 +181,8 @@ export default function ListBookingsContent({
   item,
   extraProps,
 }: ListBookingsContentProps) {
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
+
   return (
     <>
       {/* Item */}
@@ -198,6 +205,11 @@ export default function ListBookingsContent({
                   status={item.status}
                   custodianUserId={item.custodianUserId || undefined}
                   to={item.to}
+                  isPendingApproval={isBookingPendingApproval({
+                    status: item.status,
+                    approvedAt: item.approvedAt,
+                    requireBookingApproval,
+                  })}
                 />
               </div>
             </div>

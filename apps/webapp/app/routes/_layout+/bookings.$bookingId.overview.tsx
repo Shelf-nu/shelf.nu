@@ -23,6 +23,7 @@ import {
   ExtendBookingSchema,
 } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
+import { RevertToDraftSchema } from "~/components/booking/revert-to-draft-dialog";
 import { ErrorContent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -75,6 +76,7 @@ import {
   getDetailedPartialCheckoutData,
   removeAssets,
   reserveBooking,
+  approveBooking,
   revertBookingToDraft,
   updateBasicBooking,
   updateBookingNotificationRecipients,
@@ -117,7 +119,10 @@ import {
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
-import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import {
+  calculateTotalValueOfAssets,
+  isBookingApprovalEnabled,
+} from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -1487,6 +1492,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
+  "approve-booking": "approve",
   "extend-booking": "change the end date of",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
@@ -1529,6 +1535,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "cancel",
           "removeKit",
           "revert-to-draft",
+          "approve-booking",
           "extend-booking",
           "bulk-remove-asset-or-kit",
           "partial-checkin",
@@ -1570,6 +1577,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
+      // Owner/Administrator (resolver short-circuit) and Manager (matrix row)
+      // decide requests; Base/Self service cannot approve their own.
+      "approve-booking": PermissionAction.approve,
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
@@ -1850,14 +1860,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
           alertsOrgOnReservation:
             access.policy.notifications.reservationAlertsAdmins,
+          actorApprovalSetting: access.policy.bookings.approvalSetting,
           tags,
           userId,
           seesAllBookings: access.bookings.seeAll,
         });
 
+        // A reservation request reads as a request, not a done deal: the
+        // service left `approvedAt` empty because the workspace requires
+        // approval for this member's role.
+        const isPendingRequest =
+          isBookingApprovalEnabled(bookingSettings) &&
+          booking.approvedAt === null;
         sendNotification({
-          title: "Booking reserved",
-          message: "Your booking has been reserved successfully",
+          title: isPendingRequest ? "Request sent" : "Booking reserved",
+          message: isPendingRequest
+            ? "Your booking request is waiting for approval. You will receive an email once it has been reviewed."
+            : "Your booking has been reserved successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
@@ -2205,12 +2224,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
+      case "approve-booking": {
+        await approveBooking({
+          id,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+        });
+
+        sendNotification({
+          title: "Booking approved",
+          message: "The booking request has been approved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
+      }
       case "revert-to-draft": {
+        // The optional note the custodian gets with the "sent back" email.
+        const { revertReason } = parseData(formData, RevertToDraftSchema, {
+          additionalData: { userId, id, organizationId },
+        });
         await revertBookingToDraft({
           id,
           organizationId,
           userId,
           hints: getClientHint(request),
+          reason: revertReason,
         });
 
         sendNotification({

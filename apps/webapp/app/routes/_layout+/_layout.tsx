@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { Roles } from "@prisma/client";
 import { useAtom } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
@@ -43,6 +44,7 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
+import { db } from "~/database/db.server";
 import { getActiveAssetImport } from "~/modules/asset-import/service.server";
 import type {
   AssetImportNoticePayload,
@@ -65,6 +67,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { isBookingApprovalEnabled } from "~/utils/bookings";
 import {
   expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
@@ -328,12 +331,40 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       activeAssetImportPromise,
     ]);
 
+    /**
+     * Reservation requests waiting for a decision, shown as a count on the
+     * Bookings menu for the people who can decide them. Zero when the
+     * workspace does not require approval or the viewer cannot approve, so
+     * nobody sees a number they cannot act on.
+     */
+    const pendingApprovalCount =
+      isBookingApprovalEnabled(bookingSettings) &&
+      (await hasPermission({
+        organizationId,
+        userId,
+        roles: currentOrganizationUserRoles ?? [],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.approve,
+      }))
+        ? await db.booking.count({
+            where: {
+              organizationId,
+              status: BookingStatus.RESERVED,
+              approvedAt: null,
+              // A request whose end date passed is dead, not waiting: the
+              // Expired option lists it, the count does not.
+              to: { gte: new Date() },
+            },
+          })
+        : 0;
+
     return data(
       payload({
         user,
         organizations,
         currentOrganizationId: organizationId,
         bookingSettings,
+        pendingApprovalCount,
         workingHours,
         currentOrganization,
         currentOrganizationUserRoles,

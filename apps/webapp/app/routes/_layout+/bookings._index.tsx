@@ -28,9 +28,11 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { cleanParamsForFilterCookie } from "~/hooks/search-params";
 import { useListContextLinkState } from "~/hooks/use-list-context";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { PENDING_APPROVAL_BOOKINGS_FILTER } from "~/modules/booking/constants";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
@@ -46,11 +48,21 @@ import {
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { bookingCustodianIsSelf } from "~/utils/bookings";
-import { setCookie, userPrefs } from "~/utils/cookies.server";
+import {
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  bookingCustodianIsSelf,
+  isBookingApprovalEnabled,
+} from "~/utils/bookings";
+import {
+  createFilterCookie,
+  serializeFilterCookieForUrl,
+  setCookie,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -120,6 +132,49 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (filters && redirectNeeded) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/bookings?${cookieParams.toString()}`);
+    }
+
+    /**
+     * "Pending approval" is only a status while the workspace requires
+     * approval. Once the switch is off the picker no longer offers it, so a
+     * URL or saved filter that still carries it would show the picker at "All"
+     * over an empty list. Drop it and land on the unfiltered list instead.
+     */
+    if (
+      getParamsValues(searchParams).status === PENDING_APPROVAL_BOOKINGS_FILTER
+    ) {
+      const approvalSettings = await db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: BOOKING_APPROVAL_SWITCHES_SELECT,
+      });
+      if (!isBookingApprovalEnabled(approvalSettings)) {
+        const cleaned = new URLSearchParams(searchParams);
+        cleaned.delete("status");
+        // The page number belonged to the filtered list; the unfiltered one
+        // may have fewer pages, so start it from page 1 like the status
+        // picker does.
+        cleaned.delete("page");
+        const query = cleaned.toString();
+        /**
+         * The saved filter cookie may still hold the stale status. Rewrite it
+         * from the cleaned query (or expire it) in the same response, or the
+         * next visit restores it from the cookie and redirects back here.
+         */
+        const rewrittenFilterCookie = await serializeFilterCookieForUrl(
+          createFilterCookie({
+            orgId: organizationId,
+            name: "bookingFilter_v2",
+            path: "/",
+          }),
+          cleanParamsForFilterCookie(query),
+          request.headers.get("Cookie")
+        );
+        return redirect(query ? `/bookings?${query}` : "/bookings", {
+          headers: rewrittenFilterCookie
+            ? [setCookie(rewrittenFilterCookie)]
+            : [],
+        });
+      }
     }
 
     const [

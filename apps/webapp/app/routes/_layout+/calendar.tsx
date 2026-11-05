@@ -88,6 +88,13 @@ export type AvailabilitySlice = {
 export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
+  /**
+   * True while the booking is a reservation request waiting for a decision
+   * (workspace requires approval, nothing approved yet). The bar is drawn in
+   * the pending palette and the popover badge says so. Absent on surfaces
+   * that do not derive it.
+   */
+  isPendingApproval?: boolean;
   name: string;
   description: string | null;
   start: string;
@@ -429,7 +436,11 @@ export default function Calendar() {
                 return getStatusClasses(
                   eventInfo.event.extendedProps.status,
                   isOneDay,
-                  viewType
+                  viewType,
+                  {
+                    pendingApproval:
+                      eventInfo.event.extendedProps.isPendingApproval === true,
+                  }
                 );
               }}
             />

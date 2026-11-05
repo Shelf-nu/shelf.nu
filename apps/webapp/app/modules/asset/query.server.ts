@@ -2215,6 +2215,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             'id', bk.id,
             'name', bk.name,
             'status', bk.status,
+            'approvedAt', bk."approvedAt",
             'from', bk."from",
             'to', bk."to",
             'description', bk.description,

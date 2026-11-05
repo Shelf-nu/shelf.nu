@@ -47,6 +47,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
   kitsWithoutActiveAssetsRefusal,
 } from "@shelf/labels";
+import type { RolePolicy } from "@shelf/permissions";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
@@ -129,7 +130,14 @@ import {
   assertCanDuplicateBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import {
+  canUserRemoveBookingAssets,
+  isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  BOOKING_APPROVAL_ENABLED_WHERE,
+} from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -245,6 +253,8 @@ import type {
 import { bookingDraftVisibilityClause } from "./draft-visibility";
 import {
   assetReservedEmailContent,
+  bookingApprovedEmailContent,
+  bookingRequestReceivedEmailContent,
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
@@ -295,6 +305,7 @@ import type {
 } from "./types";
 import {
   assertBookingIsCheckinable,
+  assertBookingIsApproved,
   assertBookingIsOpen,
   assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
@@ -398,6 +409,7 @@ async function sendBookingEmailToAllRecipients({
   templateProps?: {
     hideViewButton?: boolean;
     cancellationReason?: string;
+    revertReason?: string;
     changes?: string[];
     assets?: ReservationEmailAsset[];
     modelRequests?: ReservationEmailModelRequest[];
@@ -2244,6 +2256,7 @@ export async function reserveBooking({
   organizationId,
   hints,
   alertsOrgOnReservation,
+  actorApprovalSetting,
   tags,
   userId,
   seesAllBookings = false,
@@ -2267,6 +2280,12 @@ export async function reserveBooking({
      * caller's `notifications.reservationAlertsAdmins`.
      */
     alertsOrgOnReservation: boolean;
+    /**
+     * The reserving member's `access.policy.bookings.approvalSetting`. Decides
+     * whether this reservation lands as a request: Base and Self service each
+     * have their own approval switch, everyone else reserves approved.
+     */
+    actorApprovalSetting?: RolePolicy["bookings"]["approvalSetting"] | null;
     tags: { id: string }[];
     userId?: User["id"];
     /**
@@ -2438,6 +2457,27 @@ export async function reserveBooking({
       await assertTagsBelongToOrg({ tagIds, organizationId });
     }
 
+    /**
+     * Approval: when the workspace requires it for the actor's role, a
+     * reservation made by a BASE / SELF_SERVICE user goes into RESERVED as a pending request
+     * (`approvedAt: null`) and an admin must approve it before checkout.
+     * Every other reservation is self-approved in the same write, so
+     * `approvedAt` is populated on all post-feature reservations and the
+     * pending derivation never misfires. Both fields are written explicitly
+     * (not left undefined) so re-reserving a reverted booking resets any
+     * earlier approval.
+     */
+    const approvalSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: BOOKING_APPROVAL_SWITCHES_SELECT,
+    });
+    // Each requesting role has its own switch: Base (on by default) and Self
+    // service (off by default). Everyone else reserves approved.
+    const needsApproval = roleReservesAsRequest({
+      approvalSetting: actorApprovalSetting,
+      settings: approvalSettings,
+    });
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.RESERVED,
       name,
@@ -2446,6 +2486,11 @@ export async function reserveBooking({
         set: [],
         connect: tags,
       },
+      approvedAt: needsApproval ? null : new Date(),
+      approvedBy:
+        needsApproval || !userId
+          ? { disconnect: true }
+          : { connect: { id: userId } },
     };
 
     dataToUpdate.from = from;
@@ -2825,11 +2870,16 @@ export async function reserveBooking({
       });
 
       await sendBookingEmailToAllRecipients({
-        eventType: "RESERVATION",
+        // Recipients were resolved as a RESERVATION (the broadcast fires);
+        // the subject and push tell a pending request apart from a reserved
+        // booking.
+        eventType: needsApproval ? "REQUEST_RECEIVED" : "RESERVATION",
         recipients,
         booking: reservedBooking,
         buildText: (textArgs) =>
-          assetReservedEmailContent({
+          (needsApproval
+            ? bookingRequestReceivedEmailContent
+            : assetReservedEmailContent)({
             ...textArgs,
             bookingName: reservedBooking.name,
             assetsCount: reservedBooking._count.bookingAssets,
@@ -2840,7 +2890,10 @@ export async function reserveBooking({
             customEmailFooter: reservedBooking.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
-        buildHeading: () => `Booking reservation for ${custodian}`,
+        buildHeading: () =>
+          needsApproval
+            ? `Booking request for ${custodian}, waiting for approval`
+            : `Booking reservation for ${custodian}`,
         hints,
         actor,
         actorUserId: userId,
@@ -3165,6 +3218,85 @@ async function readFullCheckoutDepartures(
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * Whether the acting user approves a pending request by checking it out.
+ *
+ * An administrator or manager is both the approver and the person handing the
+ * gear over, so making them click Approve before Check out would be two steps
+ * for one decision. A custodian who may not approve (Self service, Base) is
+ * refused by the caller instead.
+ *
+ * @param actorUserId - The acting user; a scheduler-driven check-out has none
+ * @param organizationId - The booking's organization
+ * @returns The approver and the moment of approval, or `null` when the actor
+ * may not approve
+ */
+async function approvalOnCheckout({
+  actorUserId,
+  organizationId,
+}: {
+  actorUserId: User["id"] | null | undefined;
+  organizationId: Organization["id"];
+}) {
+  if (!actorUserId) return null;
+  const mayApprove = await hasPermission({
+    userId: actorUserId,
+    organizationId,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.approve,
+  });
+  if (!mayApprove) return null;
+  const approver = await getUserByID(actorUserId, {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
+    } satisfies Prisma.UserSelect,
+  });
+  return { approver, approvedAt: new Date() };
+}
+
+/**
+ * The audit trail of an approval made by checking the request out: the same
+ * system note and `BOOKING_APPROVED` event `approveBooking` writes, inside the
+ * check-out's transaction.
+ */
+async function recordApprovalOnCheckout(
+  tx: any,
+  {
+    bookingId,
+    organizationId,
+    approver,
+  }: {
+    bookingId: Booking["id"];
+    organizationId: Organization["id"];
+    approver: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
+  }
+) {
+  await createSystemBookingNote(
+    {
+      bookingId,
+      organizationId,
+      content: `${wrapUserLinkForNote(
+        approver
+      )} approved the booking request by checking it out`,
+    },
+    tx
+  );
+  await recordEvent(
+    {
+      organizationId,
+      actorUserId: approver.id,
+      action: "BOOKING_APPROVED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+    },
+    tx
+  );
+}
+
 async function checkoutBookingWritesWithinTx(
   tx: any,
   {
@@ -3252,6 +3384,52 @@ async function checkoutBookingWritesWithinTx(
         "There's nothing to check out yet. Add or scan at least one item to this booking first.",
       additionalData: { bookingId },
     });
+  }
+
+  // Approval gate, re-read through `tx` so it is authoritative (same doctrine
+  // as the locked status check): a pending reservation request must not reach
+  // ONGOING through EITHER full-checkout path (checkoutBooking or
+  // fulfilModelRequestsAndCheckout), no matter what the pre-tx reads said.
+  const approvalGate = await tx.bookingSettings.findUnique({
+    where: { organizationId },
+    select: BOOKING_APPROVAL_SWITCHES_SELECT,
+  });
+  if (isBookingApprovalEnabled(approvalGate)) {
+    const approvalRow = await tx.booking.findUnique({
+      where: { id: bookingId, organizationId },
+      select: { status: true, approvedAt: true },
+    });
+    if (
+      approvalRow &&
+      isBookingPendingApproval({
+        status: approvalRow.status,
+        approvedAt: approvalRow.approvedAt,
+        requireBookingApproval: true,
+      })
+    ) {
+      // Someone who may approve the request approves it by checking it out:
+      // the hand-over is the decision, in one step. Anyone else is refused.
+      const approval = await approvalOnCheckout({
+        actorUserId: checkedOutById,
+        organizationId,
+      });
+      if (!approval) {
+        assertBookingIsApproved({
+          status: approvalRow.status,
+          approvedAt: approvalRow.approvedAt,
+          requireBookingApproval: true,
+          bookingId,
+        });
+      } else {
+        dataToUpdate.approvedAt = approval.approvedAt;
+        dataToUpdate.approvedBy = { connect: { id: approval.approver.id } };
+        await recordApprovalOnCheckout(tx, {
+          bookingId,
+          organizationId,
+          approver: approval.approver,
+        });
+      }
+    }
   }
 
   // In the transaction that stamps the kits, so a kit put in custody or taken
@@ -4187,6 +4365,33 @@ export async function checkoutBooking({
       operation: "check out",
       bookingId: id,
     });
+
+    // Approval gate: a pending reservation request (org requires approval,
+    // no approvedAt) cannot be checked out from ANY entry point: web
+    // dialog, mobile route, stale tab or direct POST all funnel through here.
+    // An approver's check-out approves the request instead (decided again,
+    // under the row lock, inside the transaction).
+    const checkoutApprovalSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: BOOKING_APPROVAL_SWITCHES_SELECT,
+    });
+    if (
+      isBookingPendingApproval({
+        status: bookingFound.status,
+        approvedAt: bookingFound.approvedAt,
+        requireBookingApproval: isBookingApprovalEnabled(
+          checkoutApprovalSettings
+        ),
+      }) &&
+      !(await approvalOnCheckout({ actorUserId: userId, organizationId }))
+    ) {
+      assertBookingIsApproved({
+        status: bookingFound.status,
+        approvedAt: bookingFound.approvedAt,
+        requireBookingApproval: true,
+        bookingId: id,
+      });
+    }
 
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
     // not in this org BEFORE any asset-derived logic runs. A legacy
@@ -11449,39 +11654,129 @@ export async function partialCheckoutBooking({
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
         let bookingStatusChanged = false;
         if (bookingFound.status === BookingStatus.RESERVED) {
-          // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
-          const transitionData: Prisma.BookingUpdateInput = {
-            status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
-          };
-
-          // Early checkout: if the booking hasn't started yet and the user chose
-          // to adjust the date (via the early-checkout dialog), move `from` to now
-          // and preserve the original start in `originalFrom`. Mirrors the
-          // all-at-once checkoutBooking path so a partial early checkout doesn't
-          // leave a future start time while custody has already begun.
+          // The pre-tx snapshot said RESERVED. Decide the transition on the
+          // row as it is NOW, under a lock held until commit: a revert to
+          // DRAFT or a cancellation that committed since the snapshot must
+          // refuse this scan, and a first scan that already moved the booking
+          // to ONGOING must not be repeated. A plain re-read takes no lock
+          // under READ COMMITTED, so it could still race the update below.
+          const lockedStatus = await lockBookingForStatusCheck(
+            tx,
+            id,
+            organizationId
+          );
           if (
-            bookingFound.from &&
-            isBookingEarlyCheckout(bookingFound.from) &&
-            intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+            lockedStatus !== BookingStatus.RESERVED &&
+            lockedStatus !== BookingStatus.ONGOING &&
+            lockedStatus !== BookingStatus.OVERDUE
           ) {
-            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
-            const fromDateStr = DateTime.fromJSDate(new Date(), {
-              zone: hints.timeZone,
-            }).toFormat(DATE_TIME_FORMAT);
-            transitionData.from = DateTime.fromFormat(
-              fromDateStr,
-              DATE_TIME_FORMAT,
-              { zone: hints.timeZone }
-            ).toJSDate();
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message:
+                "This booking can't be checked out in its current status. Only reserved, ongoing, or overdue bookings can have items checked out.",
+              additionalData: { bookingId: id, status: lockedStatus },
+              shouldBeCaptured: false,
+            });
           }
+          // A concurrent first scan may already have moved the booking on;
+          // then this batch only checks out its items.
+          if (lockedStatus === BookingStatus.RESERVED) {
+            // Approval gate: a pending reservation request cannot start its
+            // checkout. This is the mobile scanner's entry point into ONGOING,
+            // so the guard must live here, not just in the web dialog. Both
+            // reads run on `tx` after the row lock above, so a revert that
+            // cleared the approval after the pre-tx snapshot is seen here and
+            // nothing falls back to that snapshot.
+            const [partialApprovalGate, approvalRow] = await Promise.all([
+              tx.bookingSettings.findUnique({
+                where: { organizationId },
+                select: BOOKING_APPROVAL_SWITCHES_SELECT,
+              }),
+              tx.booking.findUnique({
+                where: { id, organizationId },
+                select: { status: true, approvedAt: true },
+              }),
+            ]);
+            if (!approvalRow) {
+              throw new ShelfError({
+                cause: null,
+                message: "Booking not found",
+                additionalData: { bookingId: id, organizationId },
+                label,
+                status: 404,
+              });
+            }
+            // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
+            const transitionData: Prisma.BookingUpdateInput = {
+              status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+            };
 
-          await tx.booking.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
-            where: { id },
-            data: transitionData,
-            select: { id: true },
-          });
-          bookingStatusChanged = true;
+            if (
+              isBookingPendingApproval({
+                status: approvalRow.status,
+                approvedAt: approvalRow.approvedAt ?? null,
+                requireBookingApproval:
+                  isBookingApprovalEnabled(partialApprovalGate),
+              })
+            ) {
+              // An approver's first scan approves the request in the same
+              // step; anyone else is refused.
+              const approval = await approvalOnCheckout({
+                actorUserId: userId,
+                organizationId,
+              });
+              if (!approval) {
+                assertBookingIsApproved({
+                  status: approvalRow.status,
+                  approvedAt: approvalRow.approvedAt ?? null,
+                  requireBookingApproval: true,
+                  bookingId: id,
+                });
+              } else {
+                transitionData.approvedAt = approval.approvedAt;
+                transitionData.approvedBy = {
+                  connect: { id: approval.approver.id },
+                };
+                await recordApprovalOnCheckout(tx, {
+                  bookingId: id,
+                  organizationId,
+                  approver: approval.approver,
+                });
+              }
+            }
+
+            // Early checkout: if the booking hasn't started yet and the user chose
+            // to adjust the date (via the early-checkout dialog), move `from` to now
+            // and preserve the original start in `originalFrom`. Mirrors the
+            // all-at-once checkoutBooking path so a partial early checkout doesn't
+            // leave a future start time while custody has already begun.
+            if (
+              bookingFound.from &&
+              isBookingEarlyCheckout(bookingFound.from) &&
+              intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+            ) {
+              transitionData.originalFrom =
+                plannedStartToPreserve(bookingFound);
+              const fromDateStr = DateTime.fromJSDate(new Date(), {
+                zone: hints.timeZone,
+              }).toFormat(DATE_TIME_FORMAT);
+              transitionData.from = DateTime.fromFormat(
+                fromDateStr,
+                DATE_TIME_FORMAT,
+                { zone: hints.timeZone }
+              ).toJSDate();
+            }
+
+            await tx.booking.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
+              where: { id },
+              data: transitionData,
+              select: { id: true },
+            });
+            bookingStatusChanged = true;
+          }
         }
 
         // BOOKING ACTIVITY LOG: Log partial check-out activity.
@@ -13179,15 +13474,264 @@ export async function cancelBooking({
   }
 }
 
-export async function revertBookingToDraft({
+/**
+ * Approves a pending booking reservation request.
+ *
+ * Only meaningful in orgs with approval on for a role: stamps
+ * `approvedAt`/`approvedById` on a RESERVED booking whose approval is still
+ * missing, writes an activity note, and emails the custodian (and other
+ * configured recipients). Status does not change: RESERVED already holds
+ * the assets; approval only unlocks checkout.
+ *
+ * @param args.id - Booking to approve; must be RESERVED and unapproved.
+ * @param args.organizationId - Org the booking must belong to.
+ * @param args.userId - The approver, recorded on the booking and the note.
+ * @param args.hints - Client hints, used to render dates in the email.
+ * @throws {ShelfError} 400 when the booking is not an unapproved reservation,
+ *   including when another approver got there first.
+ */
+export async function approveBooking({
   id,
   organizationId,
   userId,
   hints,
 }: Pick<Booking, "id" | "organizationId"> & {
-  userId?: User["id"];
-  /** Acting user's client hints — fallback prefs for the notification emails. */
+  userId: User["id"];
   hints: ClientHint;
+}) {
+  try {
+    const [settings, bookingFound] = await Promise.all([
+      db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: BOOKING_APPROVAL_SWITCHES_SELECT,
+      }),
+      db.booking
+        .findUniqueOrThrow({
+          where: { id, organizationId },
+          select: { id: true, status: true, approvedAt: true },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            label,
+            message:
+              "Booking not found, are you sure it exists in current workspace?",
+            shouldBeCaptured: !isNotFoundError(cause),
+          });
+        }),
+    ]);
+
+    if (!isBookingApprovalEnabled(settings)) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message:
+          "This workspace does not require booking approval, so there is nothing to approve.",
+      });
+    }
+
+    if (bookingFound.status !== BookingStatus.RESERVED) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message: `Only reserved bookings can be approved. This booking is ${bookingFound.status.toLowerCase()}.`,
+        additionalData: { bookingId: id, status: bookingFound.status },
+      });
+    }
+
+    if (bookingFound.approvedAt !== null) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message: "This booking request has already been approved.",
+        additionalData: { bookingId: id },
+      });
+    }
+
+    // Resolved before the write so the note can be composed inside the same
+    // transaction as the approval.
+    const approver = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    /**
+     * Approval and its audit note commit together, and the write only matches a
+     * booking that is still an unapproved reservation.
+     *
+     * The status and `approvedAt` predicates are what serialise two approvers
+     * acting at once: the checks above are a read, so both callers can pass
+     * them, and an unconditional write would send the custodian two approval
+     * emails and leave two "approved the booking request" notes. Mirrors
+     * `archiveBooking`'s conditional write.
+     *
+     * The note is inside the transaction because a note failure after a
+     * committed approval is unrecoverable: checkout is already unlocked, the
+     * error reports the approval as failed, and a retry is refused by the
+     * already-approved guard above, so the audit trail loses the record
+     * permanently.
+     */
+    const approvedBooking = await db
+      .$transaction(async (tx) => {
+        const updated = await tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+          where: {
+            id: bookingFound.id,
+            status: BookingStatus.RESERVED,
+            approvedAt: null,
+          },
+          data: {
+            approvedAt: new Date(),
+            approvedBy: { connect: { id: userId } },
+          },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        });
+
+        // Not a status transition (the booking stays RESERVED), so this is a
+        // plain system note, paired with the structured event reports count.
+        await createSystemBookingNote(
+          {
+            bookingId: updated.id,
+            organizationId,
+            content: `${wrapUserLinkForNote({
+              ...approver,
+              id: userId,
+            })} approved the booking request`,
+          },
+          tx
+        );
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_APPROVED",
+            entityType: "BOOKING",
+            entityId: updated.id,
+            bookingId: updated.id,
+          },
+          tx
+        );
+
+        return updated;
+      })
+      .catch((cause: unknown) => {
+        // Only "no row matched" means someone else approved first. Anything
+        // else (a lost connection, a failed note write) is a real failure and
+        // must surface as one rather than as a reassuring race message.
+        if (
+          cause &&
+          typeof cause === "object" &&
+          "code" in cause &&
+          (cause as { code?: string }).code === "P2025"
+        ) {
+          return null;
+        }
+        throw cause;
+      });
+
+    if (!approvedBooking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "This booking was approved by someone else just now. Please refresh to see its current state.",
+        additionalData: { bookingId: id, organizationId },
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+
+    // The approval is committed; a notification failure must not report a
+    // failed approval (mirrors the revert-to-draft email isolation).
+    try {
+      const recipients = await getBookingNotificationRecipients({
+        booking: approvedBooking,
+        eventType: "APPROVED",
+        organizationId,
+        editorUserId: userId,
+      });
+
+      if (recipients.length > 0) {
+        const custodian = approvedBooking.custodianUser
+          ? resolveUserDisplayName(approvedBooking.custodianUser)
+          : approvedBooking.custodianTeamMember?.name ?? "";
+
+        const actor = await resolveBookingEmailActor({
+          userId,
+          label: "Approved by",
+        });
+
+        await sendBookingEmailToAllRecipients({
+          eventType: "APPROVED",
+          recipients,
+          booking: approvedBooking,
+          buildText: (textArgs) =>
+            bookingApprovedEmailContent({
+              ...textArgs,
+              bookingName: approvedBooking.name,
+              assetsCount: approvedBooking._count.bookingAssets,
+              custodian,
+              from: approvedBooking.from!,
+              to: approvedBooking.to!,
+              bookingId: approvedBooking.id,
+              customEmailFooter: approvedBooking.organization.customEmailFooter,
+            }),
+          buildHeading: () =>
+            `Booking request approved for ${custodian}: "${approvedBooking.name}"`,
+          hints,
+          actor,
+          actorUserId: userId,
+        });
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to send the booking-approved notification emails. The booking itself was approved successfully.",
+          additionalData: { bookingId: approvedBooking.id, organizationId },
+          label,
+        })
+      );
+    }
+
+    return approvedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while approving the booking.",
+    });
+  }
+}
+
+export async function revertBookingToDraft({
+  id,
+  organizationId,
+  userId,
+  hints,
+  reason,
+}: Pick<Booking, "id" | "organizationId"> & {
+  userId?: User["id"];
+  /** Acting user's client hints, the fallback prefs for the notification emails. */
+  hints: ClientHint;
+  /**
+   * Why the booking is sent back, as the actor typed it. Shown in the
+   * custodian's email so they know what to change before resubmitting.
+   */
+  reason?: string;
 }) {
   try {
     const booking = await db.booking
@@ -13219,7 +13763,13 @@ export async function revertBookingToDraft({
     const draftBooking = await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
       where: { id: booking.id },
-      data: { status: BookingStatus.DRAFT },
+      // Clear any earlier approval: a reverted request must be re-approved
+      // after it is edited and re-reserved.
+      data: {
+        status: BookingStatus.DRAFT,
+        approvedAt: null,
+        approvedById: null,
+      },
       // The custodian (and other notification recipients) are emailed below,
       // so pull the same payload the other lifecycle emails use.
       include: BOOKING_INCLUDE_FOR_EMAIL,
@@ -13291,12 +13841,14 @@ export async function revertBookingToDraft({
               to: draftBooking.to!,
               bookingId: draftBooking.id,
               customEmailFooter: draftBooking.organization.customEmailFooter,
+              reason,
             }),
           buildHeading: () =>
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
           hints,
           actor,
           actorUserId: userId,
+          templateProps: { revertReason: reason },
         });
       }
     } catch (cause) {
@@ -14313,6 +14865,16 @@ export type BookingsWhereParams = {
    * `[RESERVED]`; see `getBookingsListWhereParams`.
    */
   expiredOnly?: boolean;
+  /**
+   * Only reservation requests still waiting for a decision: the list's
+   * "Pending approval" option (`PENDING_APPROVAL_BOOKINGS_FILTER`). RESERVED,
+   * never approved, in a workspace whose settings require approval. Pending is
+   * derived, not a status (see `isBookingPendingApproval`), so it is resolved
+   * here in SQL like `expiredOnly`, never by hiding rows later. With the
+   * workspace toggle off nothing is pending, so the list is empty. Set with
+   * `statuses` = `[RESERVED]`; see `getBookingsListWhereParams`.
+   */
+  pendingApprovalOnly?: boolean;
   /** Bookings holding any of these assets. Set this or `kitId`, not both. */
   assetIds?: Asset["id"][] | null;
   /**
@@ -14398,6 +14960,7 @@ export function buildBookingsWhere(
     search,
     statuses,
     expiredOnly,
+    pendingApprovalOnly,
     custodianScope,
     custodianTeamMemberIds,
     writableBy,
@@ -14555,6 +15118,19 @@ export function buildBookingsWhere(
     where.to = { lt: new Date() };
   }
 
+  if (pendingApprovalOnly) {
+    // The same derivation as `isBookingPendingApproval`, expressed in SQL:
+    // the workspace toggle is read in the query itself, so switching it off
+    // empties this list the moment the derivation stops applying. A request
+    // whose end date passed stays in this list, drawn Expired, so a decision
+    // is still visible; only the sidebar count leaves it out.
+    where.status = BookingStatus.RESERVED;
+    where.approvedAt = null;
+    where.organization = {
+      bookingSettings: BOOKING_APPROVAL_ENABLED_WHERE,
+    };
+  }
+
   if (assetIds?.length) {
     where.bookingAssets = {
       some: {
@@ -14652,9 +15228,13 @@ export function getBookingsListWhereParams({
 }): BookingsWhereParams {
   const { search, status, teamMemberIds, tags } = getParamsValues(searchParams);
 
-  // "Expired" is RESERVED narrowed by date; see `bookingStatusFilterWhereParams`.
-  const { statuses: pickedStatuses, expiredOnly } =
-    bookingStatusFilterWhereParams(status);
+  // "Expired" is RESERVED narrowed by date and "Pending approval" is RESERVED
+  // narrowed by approval; see `bookingStatusFilterWhereParams`.
+  const {
+    statuses: pickedStatuses,
+    expiredOnly,
+    pendingApprovalOnly,
+  } = bookingStatusFilterWhereParams(status);
 
   const filters = {
     organizationId,
@@ -14664,6 +15244,7 @@ export function getBookingsListWhereParams({
     custodianTeamMemberIds: teamMemberIds,
     tags,
     expiredOnly,
+    pendingApprovalOnly,
   };
 
   switch (list.kind) {
@@ -15925,6 +16506,8 @@ export async function getBookingHeaderData({
         to: true,
         custodianUserId: true,
         organizationId: true,
+        // Feeds the derived "Pending approval" badge in the booking header.
+        approvedAt: true,
       },
     });
 
@@ -15998,53 +16581,66 @@ export async function getBookingsForCalendar(params: {
   }
 
   try {
-    const { bookings } = await getBookings({
-      // The bookings index's filters, narrowed to the visible date range.
-      ...getBookingsListWhereParams({
-        list: { kind: "index" },
-        searchParams,
-        organizationId,
-        userId,
-        custodianScope: selfServiceData?.custodianScope ?? null,
+    // The approval switch rides along with the bookings read: a pending
+    // request is drawn apart from a settled one, so the calendar tells staff
+    // where a decision is waiting without opening it.
+    const [{ bookings }, calendarApprovalSettings] = await Promise.all([
+      getBookings({
+        // The bookings index's filters, narrowed to the visible date range.
+        ...getBookingsListWhereParams({
+          list: { kind: "index" },
+          searchParams,
+          organizationId,
+          userId,
+          custodianScope: selfServiceData?.custodianScope ?? null,
+        }),
+        page: 1,
+        bookingFrom: startDate,
+        bookingTo: endDate,
+        // Calendar events carry no asset data — the mapping below projects
+        // booking scalars, two names and the tags — so the per-booking asset
+        // subtree is pure transfer cost here.
+        includeAssets: false,
+        // Only `bookings` is read below; skip the COUNT companion query.
+        skipCount: true,
+        extraInclude: {
+          // Narrow selects: the mapping reads `name` off the team member and
+          // the display-name fields + picture off the two users. `true` pulled
+          // whole `User` rows (every column, per booking, per request).
+          custodianTeamMember: { select: { id: true, name: true } },
+          custodianUser: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
+          creator: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
+          tags: TAG_WITH_COLOR_SELECT,
+        },
+        // Every booking in the window, not a page of them. `takeAll` ignores
+        // `perPage`, which is why the old `perPage: 1000` was already dead.
+        takeAll: true,
       }),
-      page: 1,
-      bookingFrom: startDate,
-      bookingTo: endDate,
-      // Calendar events carry no asset data — the mapping below projects
-      // booking scalars, two names and the tags — so the per-booking asset
-      // subtree is pure transfer cost here.
-      includeAssets: false,
-      // Only `bookings` is read below; skip the COUNT companion query.
-      skipCount: true,
-      extraInclude: {
-        // Narrow selects: the mapping reads `name` off the team member and
-        // the display-name fields + picture off the two users. `true` pulled
-        // whole `User` rows (every column, per booking, per request).
-        custodianTeamMember: { select: { id: true, name: true } },
-        custodianUser: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
-          },
-        },
-        creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
-          },
-        },
-        tags: TAG_WITH_COLOR_SELECT,
-      },
-      // Every booking in the window, not a page of them. `takeAll` ignores
-      // `perPage`, which is why the old `perPage: 1000` was already dead.
-      takeAll: true,
-    });
+      db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: BOOKING_APPROVAL_SWITCHES_SELECT,
+      }),
+    ]);
+
+    const requireBookingApproval = isBookingApprovalEnabled(
+      calendarApprovalSettings
+    );
 
     const events = bookings
       .filter((booking) => booking.from && booking.to)
@@ -16057,6 +16653,11 @@ export async function getBookingsForCalendar(params: {
         if (canSeeAllCustody) {
           title += ` | ${custodianName}`;
         }
+        const isPendingApproval = isBookingPendingApproval({
+          status: booking.status,
+          approvedAt: booking.approvedAt,
+          requireBookingApproval,
+        });
         return {
           title,
           start: (booking.from as Date).toISOString(),
@@ -16065,12 +16666,15 @@ export async function getBookingsForCalendar(params: {
             `bookingId-${booking.id}`,
             ...getStatusClasses(
               booking.status,
-              isOneDayEvent(booking.from as Date, booking.to as Date)
+              isOneDayEvent(booking.from as Date, booking.to as Date),
+              undefined,
+              { pendingApproval: isPendingApproval }
             ),
           ],
           extendedProps: {
             url: `/bookings/${booking.id}`,
             status: booking.status,
+            isPendingApproval,
             id: booking.id,
             name: booking.name,
             description: booking.description,

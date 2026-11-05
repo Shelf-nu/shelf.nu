@@ -26,6 +26,11 @@ import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { CountableModelRequest } from "~/utils/booking-model-requests";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
+import type { BookingApprovalSwitches } from "~/utils/bookings";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import {
   PermissionAction,
   PermissionEntity,
@@ -73,6 +78,13 @@ export type BookingActionsBooking = {
   modelRequests: CountableModelRequest[];
   /** Whether "Check out remaining" would find something to send. */
   hasItemsToCheckOut?: boolean;
+  /**
+   * When the reservation was approved; null on a request still waiting for a
+   * decision. While a workspace approval switch is on, such a request offers
+   * Check out only to a viewer who may approve (their check-out approves it).
+   * Absent reads as approved.
+   */
+  approvedAt?: Date | string | null;
   /** Absent reads as "receipt not available", which disables the receipt. */
   canPrintCheckinReceipt?: boolean;
   /**
@@ -88,7 +100,8 @@ export type BookingActionsViewer = {
   userId: string;
   roles: OrganizationRoles[] | undefined;
   access: RoleAccess;
-  bookingSettings: Parameters<typeof isExplicitScanRequired>[0]["settings"];
+  bookingSettings: Parameters<typeof isExplicitScanRequired>[0]["settings"] &
+    Partial<BookingApprovalSwitches>;
 };
 
 /** Why a RESERVED booking's Check out is disabled while model units are unassigned. */
@@ -193,7 +206,7 @@ function state(
  *
  * | Key                 | Visible when                                                   | Disabled when                |
  * | ------------------- | -------------------------------------------------------------- | ---------------------------- |
- * | checkOut            | RESERVED and the viewer can quick check out                    | model units unassigned       |
+ * | checkOut            | RESERVED, viewer can quick check out, and (approved or viewer may approve) | model units unassigned |
  * | checkOutRemaining   | ONGOING/OVERDUE, can quick check out, items left to check out  | never                        |
  * | checkIn             | ONGOING/OVERDUE and the viewer can quick check in              | never                        |
  * | extend              | extendable status and `booking:extend`                         | never                        |
@@ -270,9 +283,19 @@ export function resolveBookingActions({
 
   const unassignedUnits = countUnassignedModelUnits(booking.modelRequests);
 
+  // A reservation request still waiting for a decision: the server refuses
+  // its check-out to anyone who may not approve, and approves it for anyone
+  // who may, so only an approver keeps the button.
+  const isPendingApproval = isBookingPendingApproval({
+    status,
+    approvedAt: booking.approvedAt ?? null,
+    requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
+  });
+  const mayCheckOutNow = !isPendingApproval || can(PermissionAction.approve);
+
   return {
     checkOut: state(
-      isReserved && canCheckOut,
+      isReserved && canCheckOut && mayCheckOutNow,
       unassignedUnits > 0
         ? { title: CHECK_OUT_BLOCKED_TITLE, reason: ASSIGN_UNITS_FIRST_REASON }
         : false

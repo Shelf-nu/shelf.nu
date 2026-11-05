@@ -44,9 +44,18 @@ import {
 } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { BookingMethodProvenance } from "./checkout-method";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
@@ -91,6 +100,9 @@ const BULK_SELECTION_SELECT = {
   status: true,
   from: true,
   to: true,
+  // Null on a reservation request still waiting for a decision; bulk
+  // check-out refuses the batch rather than failing on it mid-loop.
+  approvedAt: true,
   modelRequests: {
     select: { quantity: true, fulfilledQuantity: true, fulfilledAt: true },
   },
@@ -385,6 +397,35 @@ export async function bulkCheckoutBookings(
         rule: `${
           notReserved.length === 1 ? "is" : "are"
         } not reserved, and only reserved bookings can be checked out`,
+        organizationId,
+      });
+    }
+
+    // The service refuses a pending request on its own, but one by one: a
+    // mixed batch would be half checked out before the refusal. Name them
+    // here, before any write, like the other batch rules. A caller who may
+    // approve is not refused: their check-out approves each request.
+    const pendingApproval = bookings.filter((booking) =>
+      isBookingPendingApproval({
+        status: booking.status,
+        approvedAt: booking.approvedAt,
+        requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
+      })
+    );
+    if (
+      pendingApproval.length > 0 &&
+      !(await hasPermission({
+        userId,
+        organizationId,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.approve,
+      }))
+    ) {
+      refuseBatch({
+        bookings: pendingApproval,
+        rule: `${
+          pendingApproval.length === 1 ? "is" : "are"
+        } still waiting for approval, and only an approved request can be checked out`,
         organizationId,
       });
     }

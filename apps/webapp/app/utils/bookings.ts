@@ -1,11 +1,102 @@
 import type { Booking, Currency } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import type { RolePolicy } from "@shelf/permissions";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
 import { canRemoveBookingItems } from "./permissions/role-access";
 import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
 import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
+
+/** The workspace's booking approval switches, one per requesting role. */
+export type BookingApprovalSwitches = {
+  requireApprovalForBase: boolean;
+  requireApprovalForSelfService: boolean;
+};
+
+/** Prisma `select` for the two approval switches. */
+export const BOOKING_APPROVAL_SWITCHES_SELECT = {
+  requireApprovalForBase: true,
+  requireApprovalForSelfService: true,
+} as const;
+
+/**
+ * Prisma `where` on `BookingSettings` for "approval is on for at least one
+ * role", the condition under which a RESERVED booking with no `approvedAt`
+ * reads as pending.
+ */
+export const BOOKING_APPROVAL_ENABLED_WHERE: {
+  OR: Partial<BookingApprovalSwitches>[];
+} = {
+  OR: [
+    { requireApprovalForBase: true },
+    { requireApprovalForSelfService: true },
+  ],
+};
+
+/**
+ * Whether booking approval is on for any role in the workspace. This is the
+ * switch the pending derivation reads: a request made under either switch is
+ * pending while either is still on.
+ *
+ * @param settings - The workspace's switches; absent reads as all off
+ */
+export function isBookingApprovalEnabled(
+  settings: Partial<BookingApprovalSwitches> | null | undefined
+): boolean {
+  return Boolean(
+    settings?.requireApprovalForBase || settings?.requireApprovalForSelfService
+  );
+}
+
+/**
+ * Whether a reservation made by a member whose policy names `approvalSetting`
+ * lands as a request that waits for approval. The role policy table says which
+ * switch (if any) gates a role: Base and Self service each have one, everyone
+ * else reserves approved.
+ *
+ * @param args.approvalSetting - `access.policy.bookings.approvalSetting`
+ * @param args.settings - The workspace's switches; absent reads as all off
+ */
+export function roleReservesAsRequest({
+  approvalSetting,
+  settings,
+}: {
+  approvalSetting: RolePolicy["bookings"]["approvalSetting"] | null | undefined;
+  settings: Partial<BookingApprovalSwitches> | null | undefined;
+}): boolean {
+  if (approvalSetting === "base") {
+    return Boolean(settings?.requireApprovalForBase);
+  }
+  if (approvalSetting === "selfService") {
+    return Boolean(settings?.requireApprovalForSelfService);
+  }
+  return false;
+}
+
+/**
+ * Whether a booking is a reservation request still waiting for an approver's
+ * approval. Derived, since there is no PENDING status: a RESERVED booking with no
+ * `approvedAt` in an org with approval on for any role is pending (see
+ * `isBookingApprovalEnabled`). Client-safe; the
+ * server-side checkout guard (`assertBookingIsApproved`) derives from this
+ * same function so UI and service can never disagree.
+ */
+export function isBookingPendingApproval({
+  status,
+  approvedAt,
+  requireBookingApproval,
+}: {
+  status: BookingStatus;
+  approvedAt: Date | string | null;
+  requireBookingApproval: boolean;
+}): boolean {
+  return (
+    requireBookingApproval &&
+    status === BookingStatus.RESERVED &&
+    approvedAt === null
+  );
+}
 
 /**
  * The statuses a booking is still open to item removal in: every status that

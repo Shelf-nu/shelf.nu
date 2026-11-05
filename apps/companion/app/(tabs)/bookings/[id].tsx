@@ -751,15 +751,22 @@ function BookingDetailScreen({ id }: { id: string }) {
     startQuantityPicker();
   };
 
+  // A reservation that will wait for approval is a request, and the prompt,
+  // the button and the success message must say so; otherwise the pending
+  // state that follows reads as a failure.
+  const reservationIsRequest = booking?.reservationNeedsApproval === true;
+
   const handleReserve = () => {
     if (!booking || !currentOrg) return;
     Alert.alert(
-      "Reserve Booking",
-      `Reserve "${booking.name}"? This confirms the booking and checks for conflicts.`,
+      reservationIsRequest ? "Request Reservation" : "Reserve Booking",
+      reservationIsRequest
+        ? `Request "${booking.name}"? The items are held while an administrator or manager reviews the request. You will be notified by email.`
+        : `Reserve "${booking.name}"? This confirms the booking and checks for conflicts.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Reserve",
+          text: reservationIsRequest ? "Request" : "Reserve",
           onPress: async () => {
             setIsActioning(true);
             const { error: err } = await api.reserveBooking(
@@ -775,9 +782,13 @@ function BookingDetailScreen({ id }: { id: string }) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
-            Alert.alert("Reserved", `"${booking.name}" is now reserved.`, [
-              { text: "OK", onPress: () => fetchBooking() },
-            ]);
+            Alert.alert(
+              reservationIsRequest ? "Request sent" : "Reserved",
+              reservationIsRequest
+                ? `"${booking.name}" is waiting for approval. You will receive an email once it has been reviewed.`
+                : `"${booking.name}" is now reserved.`,
+              [{ text: "OK", onPress: () => fetchBooking() }]
+            );
           },
         },
       ]
@@ -834,6 +845,38 @@ function BookingDetailScreen({ id }: { id: string }) {
   // ── Lifecycle actions (extend / cancel / archive / delete / duplicate) ──
   // Each is permission/status-gated server-side AND only offered when the
   // detail endpoint's `bookingActions` flag says this role/status may use it.
+
+  // Approve a pending reservation request. Offered only when the detail
+  // endpoint says this caller may decide it (`canApprove`), which is the same
+  // `booking:approve` answer the web button and the endpoint enforce.
+  const handleApprove = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Approve booking request",
+      `Approve "${booking.name}"? The custodian will be notified by email and the booking can then be checked out.`,
+      [
+        { text: "Not now", style: "cancel" },
+        {
+          text: "Approve",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.approveBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't approve", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            markBookingsListDirty();
+            fetchBooking();
+          },
+        },
+      ]
+    );
+  };
 
   const handleCancel = () => {
     if (!booking || !currentOrg) return;
@@ -1836,6 +1879,26 @@ function BookingDetailScreen({ id }: { id: string }) {
                     {formatStatus(booking.status)}
                   </Text>
                 </View>
+                {booking.isPendingApproval ? (
+                  // Approval pill: web parity for the derived pending state.
+                  // The server also refuses checkout while pending and sends
+                  // `canCheckout: false`, so this is display-only.
+                  <View
+                    style={[
+                      styles.statusBadgeLg,
+                      { backgroundColor: colors.warningBg },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusTextLg,
+                        { color: colors.warningText },
+                      ]}
+                    >
+                      Pending approval
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               {booking.description ? (
@@ -2076,7 +2139,11 @@ function BookingDetailScreen({ id }: { id: string }) {
                     // the disabled state without setting it by hand.
                     disabled={!!reserveBlockedReason}
                     onPress={handleReserve}
-                    accessibilityLabel="Reserve this booking"
+                    accessibilityLabel={
+                      reservationIsRequest
+                        ? "Request a reservation for this booking"
+                        : "Reserve this booking"
+                    }
                     accessibilityHint={reserveBlockedReason ?? undefined}
                     accessibilityRole="button"
                   >
@@ -2085,7 +2152,9 @@ function BookingDetailScreen({ id }: { id: string }) {
                       size={18}
                       color={colors.primaryForeground}
                     />
-                    <Text style={styles.actionButtonText}>Reserve</Text>
+                    <Text style={styles.actionButtonText}>
+                      {reservationIsRequest ? "Request reservation" : "Reserve"}
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -2199,6 +2268,27 @@ function BookingDetailScreen({ id }: { id: string }) {
                 >
                   {selectMode === "remove" ? "Cancel" : "Select to Remove"}
                 </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* A pending reservation request offers Approve in place of the
+                check-out paths: the server refuses check-out until it is
+                approved, and `canApprove` is the server's own answer on who
+                may decide it. */}
+            {booking.canApprove === true && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleApprove}
+                disabled={isActioning}
+                accessibilityLabel="Approve this booking request"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.actionButtonText}>Approve request</Text>
               </TouchableOpacity>
             )}
 
