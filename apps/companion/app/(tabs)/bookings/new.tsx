@@ -29,7 +29,7 @@ import {
   Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
@@ -175,7 +175,6 @@ function CreateBookingContent() {
 
   // ── Unsaved-changes guard ───────────────────────
   const didSubmitRef = useRef(false);
-  const navigation = useNavigation();
   const hasUnsavedChanges =
     name.trim().length > 0 ||
     description.trim().length > 0 ||
@@ -184,26 +183,12 @@ function CreateBookingContent() {
     (from ? from.getTime() : null) !== initialFromRef.current ||
     (to ? to.getTime() : null) !== initialToRef.current;
 
-  useEffect(() => {
-    if (!hasUnsavedChanges || didSubmitRef.current) return;
-    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      if (!hasUnsavedChanges || didSubmitRef.current) return;
-      e.preventDefault();
-      Alert.alert(
-        "Discard booking?",
-        "You have unsaved changes. Are you sure you want to leave?",
-        [
-          { text: "Keep Editing", style: "cancel" },
-          {
-            text: "Discard",
-            style: "destructive",
-            onPress: () => navigation.dispatch(e.data.action),
-          },
-        ]
-      );
-    });
-    return unsubscribe;
-  }, [navigation, hasUnsavedChanges]);
+  useDiscardGuard({
+    active: hasUnsavedChanges,
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard booking?",
+    message: "You have unsaved changes. Are you sure you want to leave?",
+  });
 
   // ── Date pickers ────────────────────────────────
   const closeFromPicker = useCallback(() => setShowFromPicker(false), []);

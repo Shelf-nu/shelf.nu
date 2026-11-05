@@ -366,7 +366,7 @@ export default function AddBookingAssetsScreen() {
     <View style={styles.listFooter}>
       <ActivityIndicator size="small" color={colors.muted} />
     </View>
-  ) : null;
+  ) : undefined;
 
   const toggleAsset = useCallback(
     (item: AvailableAsset) => {

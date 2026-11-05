@@ -169,7 +169,7 @@ export default function AnimatedSplash({
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: SHELF_ORANGE,
     justifyContent: "center",
     alignItems: "center",

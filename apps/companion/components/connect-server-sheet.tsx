@@ -27,6 +27,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -131,7 +132,7 @@ export default function ConnectServerSheet({
   const { colors } = useTheme();
   const styles = useStyles();
   const sheetColumn = useSheetColumnStyle();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   const [{ domain, isConnecting, error, updateRequired }, dispatch] =
     useReducer(reducer, INITIAL_STATE);

@@ -421,7 +421,7 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
                     {loadMoreError}. Tap to retry.
                   </Text>
                 </TouchableOpacity>
-              ) : null
+              ) : undefined
             }
           />
         )}
