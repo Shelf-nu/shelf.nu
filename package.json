@@ -116,8 +116,8 @@
       "yaml@>=2.0.0 <2.8.3": "2.8.3"
     },
     "patchedDependencies": {
-      "expo-image@55.0.6": "patches/expo-image@55.0.6.patch",
-      "expo-in-app-updates@0.12.0": "patches/expo-in-app-updates@0.12.0.patch"
+      "expo-in-app-updates@0.12.0": "patches/expo-in-app-updates@0.12.0.patch",
+      "expo-quick-actions@6.0.1": "patches/expo-quick-actions@6.0.1.patch"
     }
   },
   "engines": {

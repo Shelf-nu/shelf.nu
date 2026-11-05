@@ -57,6 +57,11 @@ vitest.mock("~/database/db.server", () => ({
     category: {
       findFirst: vitest.fn(),
     },
+    // why: the asset form's model list can ask for each model's default
+    // custom field values.
+    assetModelCustomFieldDefault: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
   },
 }));
 
@@ -288,6 +293,79 @@ describe("getAssetModels", () => {
         }),
       })
     );
+  });
+
+  it("groups each model's default custom field values when asked for them", async () => {
+    const mockModels = [
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 1 },
+      },
+      {
+        ...createAssetModelFactory({ id: "model-2", name: "Model B" }),
+        _count: { assets: 0 },
+      },
+    ];
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue(mockModels);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(2);
+    // @ts-expect-error mock setup
+    db.assetModelCustomFieldDefault.findMany.mockResolvedValueOnce([
+      {
+        assetModelId: "model-1",
+        customFieldId: "brand",
+        value: { raw: "Westermo", valueOption: "Westermo" },
+      },
+      {
+        assetModelId: "model-1",
+        customFieldId: "firmware",
+        value: { raw: "v2" },
+      },
+    ]);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      withCustomFieldDefaults: true,
+    });
+
+    expect(db.assetModelCustomFieldDefault.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assetModelId: { in: ["model-1", "model-2"] } },
+      })
+    );
+    expect(result.assetModels[0]).toMatchObject({
+      id: "model-1",
+      customFieldDefaults: [
+        {
+          customFieldId: "brand",
+          value: { raw: "Westermo", valueOption: "Westermo" },
+        },
+        { customFieldId: "firmware", value: { raw: "v2" } },
+      ],
+    });
+    // A model without defaults still gets an empty list, not a missing key.
+    expect(result.assetModels[1]).toMatchObject({
+      id: "model-2",
+      customFieldDefaults: [],
+    });
+  });
+
+  it("does not read defaults unless asked for them", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 1 },
+      },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(1);
+
+    const result = await getAssetModels({ organizationId: "org-123" });
+
+    expect(db.assetModelCustomFieldDefault.findMany).not.toHaveBeenCalled();
+    expect(result.assetModels[0]).not.toHaveProperty("customFieldDefaults");
   });
 
   it("applies search filter on name and description (case-insensitive)", async () => {

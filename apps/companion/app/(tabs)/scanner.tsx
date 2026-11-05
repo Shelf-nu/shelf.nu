@@ -7,21 +7,23 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
-  InteractionManager,
   Linking,
   Platform,
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useOrg } from "@/lib/org-context";
-import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
+import {
+  openBookingAfterAlert,
+  openShelfWebUrl,
+  pushIntoTab,
+} from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
@@ -43,6 +45,8 @@ import type {
 } from "@/lib/api/types";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { useTabScreenInsets } from "@/lib/use-safe-edges";
+import { closedManualEntryBottom } from "@/lib/scanner-manual-entry";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -304,11 +308,12 @@ function ScannerContent() {
       SCANNER_ACTIONS.filter(({ permission: perm }) =>
         userHasPermission({
           roles: currentOrg?.roles,
+          workspace: currentOrg,
           entity: perm.entity,
           action: perm.action,
         })
       ),
-    [currentOrg?.roles]
+    [currentOrg]
   );
 
   const access = useRoleAccess();
@@ -316,11 +321,13 @@ function ScannerContent() {
   // web scanner, which pre-selects self and disables the custodian picker).
   const takesCustodyForSelfOnly = access.custody.assign === "self";
 
-  // Native claim / link-existing is gated on qr:update — effectively
-  // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
-  // BASE/SELF_SERVICE only hold qr:read). Non-admins keep the web bridge.
+  // Native claim / link-existing is gated on qr:update: ADMIN/OWNER (the
+  // server short-circuits those roles to allow-all), and MANAGER when the
+  // workspace switches on managersCanEditAssets. Everyone else keeps the web
+  // bridge.
   const canManageQrCodes = userHasPermission({
     roles: currentOrg?.roles,
+    workspace: currentOrg,
     entity: "qr",
     action: "update",
   });
@@ -410,6 +417,14 @@ function ScannerContent() {
   }, [anyDrawerVisible]);
 
   const insets = useSafeAreaInsets();
+  /**
+   * Insets the overlay's controls keep clear of: an iPhone Duo's status-bar
+   * rail or a turned foldable's camera cutout on the sides, each side its own,
+   * and the home indicator once the tab bar has moved to a sidebar. The
+   * sidebar already covers the left side when it is showing.
+   */
+  const screenInsets = useTabScreenInsets();
+  const sideInsetStyle = { left: screenInsets.left, right: screenInsets.right };
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -510,21 +525,39 @@ function ScannerContent() {
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
 
+  /** Height of the overlay's bottom strip, measured. */
+  const [bottomStripHeight, setBottomStripHeight] = useState<number | null>(
+    null
+  );
+  /** Bottom edge of the camera controls within that strip, measured. */
+  const [controlsBottom, setControlsBottom] = useState<number | null>(null);
+  /** Height of the closed pill, measured: it grows with the text size. */
+  const [closedPillHeight, setClosedPillHeight] = useState<number | null>(null);
+  const closedManualEntry = closedManualEntryBottom(
+    bottomStripHeight !== null && controlsBottom !== null
+      ? bottomStripHeight - controlsBottom
+      : null,
+    screenInsets.bottom,
+    closedPillHeight ?? undefined
+  );
+
   /**
    * Absolute position of the manual-entry control.
    *
    * The open text field always lives in the top strip, just under the status
    * bar: the keyboard rises from the bottom and would cover a field anchored
    * there, and the top strip is free above the header and pills. The closed
-   * pill sits low in the bottom strip while nothing else is there, and moves
-   * to the top strip as soon as a drawer opens: the drawer shares the bottom
-   * strip with the hint text and the camera controls, and no offset keeps the
-   * pill clear of all three on a short screen.
+   * pill sits low in the bottom strip, under the camera controls, while
+   * nothing else is there. It moves to the top strip as soon as a drawer
+   * opens (the drawer shares the bottom strip with the hint text and the
+   * camera controls, and no offset keeps the pill clear of all three on a
+   * short screen), and when the strip is too short to fit it under the
+   * controls at all.
    */
   const manualEntryPlacement =
-    devScanVisible || drawerHeight > 0
+    devScanVisible || drawerHeight > 0 || closedManualEntry === null
       ? { top: insets.top + spacing.md }
-      : { bottom: MANUAL_ENTRY_BOTTOM };
+      : { bottom: closedManualEntry };
 
   // Cooldown (shared hook)
   const {
@@ -921,7 +954,7 @@ function ScannerContent() {
                 : null;
 
             if (unclaimedQrId && canManageQrCodes) {
-              // Admin/owner: native takeover of the web claim flow. The two
+              // Holds `qr:update`: native takeover of the web claim flow. The two
               // actions claim at DIFFERENT points, deliberately: "Create New
               // Asset" claims up front (the create form needs an owned code),
               // while "Link Existing Asset" does not claim at all here — the
@@ -956,8 +989,8 @@ function ScannerContent() {
                 },
               });
             } else if (unclaimedQrId) {
-              // Non-admin/owner: claiming is not allowed for their role —
-              // keep the web bridge. Loop-safe in-app browser via
+              // Without `qr:update`, their role may not claim, so they keep
+              // the web bridge. Loop-safe in-app browser via
               // openShelfWebUrl, never Linking.openURL (claimed App Link).
               setScanResult({
                 type: "not_found",
@@ -1407,7 +1440,7 @@ function ScannerContent() {
 
           // For Shelf QR codes, offer a path forward for the unlinked code:
           // - If claimed to current org → in-app asset creation and/or
-          //   linking an existing asset (admins) — no claim step needed
+          //   linking an existing asset (`qr:update`), with no claim step
           // - Otherwise → bridge to web
           // Barcodes don't have an external link flow, so no action for those
           type UnlinkedQrAction = {
@@ -1421,6 +1454,7 @@ function ScannerContent() {
 
           const canCreateAsset = userHasPermission({
             roles: currentOrg?.roles,
+            workspace: currentOrg,
             entity: "asset",
             action: "create",
           });
@@ -1433,8 +1467,8 @@ function ScannerContent() {
           const isKitLinked = Boolean(kitId);
 
           // Claimed to the current org, truly unlinked, and the caller can
-          // act on it in-app (create is admin/owner + qr:update is too, but
-          // gate each action on its own permission for correctness).
+          // act on it in-app. Create and qr:update usually travel together,
+          // but each action is gated on its own permission.
           const canActOnUnlinked =
             codeOrgId === currentOrg?.id &&
             (canCreateAsset || canManageQrCodes);
@@ -2330,17 +2364,8 @@ function ScannerContent() {
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    // Defer past the alert dismissal: navigating
-                    // synchronously from an Alert onPress wedges the
-                    // navigation transition into an endless render-commit
-                    // loop (JS thread pegged at ~125% CPU, network
-                    // callbacks starve) — verified by process sampling.
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
+                    // Opens the booking once the alert has dismissed
+                    openBookingAfterAlert(bookingId);
                   },
                 },
               ]
@@ -2457,9 +2482,7 @@ function ScannerContent() {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          InteractionManager.runAfterInteractions(() => {
-            pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
-          });
+          openBookingAfterAlert(bookingId);
         },
       },
     ]);
@@ -2711,16 +2734,9 @@ function ScannerContent() {
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
                   if (result?.isComplete) {
-                    // Anchored navigation — router.back() from a tab screen
-                    // falls through history and can land on Home. Deferred
-                    // past the alert dismissal (same render-loop wedge as
-                    // the add path — see handleBookingAdd).
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
+                    // Anchored navigation: router.back() from a tab screen
+                    // falls through history and can land on Home.
+                    openBookingAfterAlert(bookingId);
                   }
                 },
               },
@@ -2841,16 +2857,9 @@ function ScannerContent() {
             // freshness gate has to be bypassed too.
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
-              // Nothing left to scan. Anchored navigation — router.back() from
+              // Nothing left to scan. Anchored navigation: router.back() from
               // a tab screen falls through history and can land on Home.
-              // Deferred past the alert dismissal (same render-loop wedge as
-              // the add path — see handleBookingAdd).
-              InteractionManager.runAfterInteractions(() => {
-                pushIntoTab(
-                  "/(tabs)/bookings",
-                  `/(tabs)/bookings/${bookingId}`
-                );
-              });
+              openBookingAfterAlert(bookingId);
             }
           },
         },
@@ -3087,7 +3096,10 @@ function ScannerContent() {
         {/* Top - Action picker or Booking header */}
         <View style={styles.overlaySection} pointerEvents="box-none">
           {isBookingMode ? (
-            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+            <View
+              style={[styles.actionPickerContainer, sideInsetStyle]}
+              pointerEvents="box-none"
+            >
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
                   // Anchored navigation, like the submit handlers: the scanner
@@ -3142,7 +3154,10 @@ function ScannerContent() {
               </View>
             </View>
           ) : (
-            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+            <View
+              style={[styles.actionPickerContainer, sideInsetStyle]}
+              pointerEvents="box-none"
+            >
               <ActionPills
                 actions={availableActions}
                 currentAction={action}
@@ -3189,8 +3204,18 @@ function ScannerContent() {
            * The drawer is an absolutely-positioned sibling at `bottom: 0`, so
            * it never needed the overlay to make room in the first place.
            */
-          style={[styles.overlaySection, styles.bottomSection]}
+          style={[
+            styles.overlaySection,
+            styles.bottomSection,
+            {
+              paddingLeft: screenInsets.left,
+              paddingRight: screenInsets.right,
+            },
+          ]}
           pointerEvents="box-none"
+          onLayout={(e) =>
+            setBottomStripHeight(Math.round(e.nativeEvent.layout.height))
+          }
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -3234,7 +3259,14 @@ function ScannerContent() {
           </Animated.View>
 
           {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
-          <View style={styles.controlButtons} pointerEvents="box-none">
+          <View
+            style={styles.controlButtons}
+            pointerEvents="box-none"
+            onLayout={(e) => {
+              const { y, height } = e.nativeEvent.layout;
+              setControlsBottom(Math.round(y + height));
+            }}
+          >
             {/* Pause/Resume toggle */}
             <TouchableOpacity
               style={[
@@ -3286,11 +3318,24 @@ function ScannerContent() {
             be occluded (the unclaimed card is tall enough to reach this pill). */}
         {!scanResult && (
           <View
-            style={[styles.devScanContainer, manualEntryPlacement]}
+            style={[
+              styles.devScanContainer,
+              manualEntryPlacement,
+              {
+                left: spacing.md + screenInsets.left,
+                right: spacing.md + screenInsets.right,
+              },
+            ]}
             // Full-width host: only the pill or the field inside it takes
             // touches, so a tap beside them reaches the paused layer.
             pointerEvents="box-none"
             testID="manual-entry-container"
+            onLayout={(e) => {
+              // The container holds only the pill while it is closed.
+              if (!devScanVisible) {
+                setClosedPillHeight(Math.round(e.nativeEvent.layout.height));
+              }
+            }}
           >
             {devScanVisible ? (
               <View style={styles.devScanRow}>
@@ -3357,7 +3402,7 @@ function ScannerContent() {
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
         <View
-          style={styles.drawerHost}
+          style={[styles.drawerHost, sideInsetStyle]}
           pointerEvents="box-none"
           onLayout={(e) => {
             const h = Math.round(e.nativeEvent.layout.height);
@@ -3457,6 +3502,16 @@ function ScannerContent() {
               onResolveAllBlockers={resolveAllBookingBlockers}
             />
           )}
+          {/* Below a tab sidebar nothing covers the home indicator: extend
+              the drawer's white under it so its buttons stay clear. */}
+          {screenInsets.bottom > 0 ? (
+            <View
+              style={{
+                height: screenInsets.bottom,
+                backgroundColor: colors.white,
+              }}
+            />
+          ) : null}
         </View>
       )}
 
@@ -3594,8 +3649,6 @@ export default function ScannerScreen() {
 // ── Styles ────────────────────────────────────────────────
 
 const FRAME_SIZE = 240;
-/** Distance of the closed "Enter code" pill from the bottom edge when no drawer is open. */
-const MANUAL_ENTRY_BOTTOM = 90;
 
 const useStyles = createStyles((colors) => ({
   container: {
@@ -3638,16 +3691,15 @@ const useStyles = createStyles((colors) => ({
 
   // Hosts the drawers as a sibling ABOVE the paused overlay (zIndex 5) so
   // their buttons stay tappable while the camera is auto-paused.
+  // `left` and `right` come from the side insets at render time.
   drawerHost: {
     position: "absolute",
-    left: 0,
-    right: 0,
     bottom: 0,
     zIndex: 10,
   },
   // Paused overlay
   pausedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.8)",
     justifyContent: "center",
     alignItems: "center",
@@ -3672,7 +3724,7 @@ const useStyles = createStyles((colors) => ({
 
   // Overlay
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   controlButtons: {
     flexDirection: "row",
@@ -3697,11 +3749,10 @@ const useStyles = createStyles((colors) => ({
   },
 
   // Action picker
+  // `left` and `right` come from the side insets at render time.
   actionPickerContainer: {
     position: "absolute",
     bottom: spacing.lg,
-    left: 0,
-    right: 0,
   },
   bookingModeHeader: {
     flexDirection: "row",
@@ -3760,10 +3811,9 @@ const useStyles = createStyles((colors) => ({
   },
 
   // ── Dev Scan Injection (DEV only) ───────────────
+  // `left` and `right` come from the side insets at render time.
   devScanContainer: {
     position: "absolute" as const,
-    left: spacing.md,
-    right: spacing.md,
     zIndex: 999,
   },
   devScanRow: {

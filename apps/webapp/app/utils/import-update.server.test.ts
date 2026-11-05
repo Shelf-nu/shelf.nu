@@ -18,6 +18,7 @@ import { AssetType, ConsumptionType } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { updateAsset } from "~/modules/asset/service.server";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import {
   applyBulkUpdatesFromImport,
   buildUpdatePreview,
@@ -39,6 +40,7 @@ vitest.mock("~/database/db.server", () => ({
     },
     category: {
       findMany: vitest.fn().mockResolvedValue([]),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     location: {
       findMany: vitest.fn().mockResolvedValue([]),
@@ -57,6 +59,12 @@ vitest.mock("~/database/db.server", () => ({
 vitest.mock("~/modules/asset/service.server", () => ({
   updateAsset: vitest.fn().mockResolvedValue({ id: "uuid" }),
   updateAssetBookingAvailability: vitest.fn().mockResolvedValue({ id: "uuid" }),
+}));
+
+// why: reading a model's defaults has its own suite; here only how the apply
+// path folds them into the update payload matters.
+vitest.mock("~/modules/asset-model/defaults.server", () => ({
+  getAssetModelsDefaults: vitest.fn().mockResolvedValue(new Map()),
 }));
 
 // why: `getPrimaryLocation` is used by `fetchAssetsForUpdate` to synthesize
@@ -107,6 +115,7 @@ beforeEach(() => {
   vi.mocked(db.category.findMany).mockResolvedValue([]);
   vi.mocked(db.location.findMany).mockResolvedValue([]);
   vi.mocked(db.assetModel.findMany).mockResolvedValue([]);
+  vi.mocked(getAssetModelsDefaults).mockResolvedValue(new Map());
   vi.mocked(updateAsset).mockResolvedValue({ id: "uuid-1" } as Awaited<
     ReturnType<typeof updateAsset>
   >);
@@ -180,6 +189,141 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
         assetModelId: "model-existing",
       })
     );
+  });
+
+  it("fills the empty fields of an asset the file moves onto a model, and keeps the file's own values", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-i",
+        sequentialId: "SAM-I1",
+        type: AssetType.INDIVIDUAL,
+        categoryId: null,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.assetModel.findMany).mockResolvedValueOnce([
+      { id: "model-existing", name: "Dell Latitude" },
+    ] as unknown as Awaited<ReturnType<typeof db.assetModel.findMany>>);
+    vi.mocked(getAssetModelsDefaults).mockResolvedValue(
+      new Map([
+        [
+          "model-existing",
+          {
+            id: "model-existing",
+            name: "Dell Latitude",
+            defaultCategoryId: "cat-laptops",
+            defaultValuation: 900,
+            customFieldDefaults: [
+              {
+                customFieldId: "cf-brand",
+                value: { raw: "Dell", valueText: "Dell" },
+                customField: {
+                  id: "cf-brand",
+                  name: "Brand",
+                  type: "TEXT",
+                  active: true,
+                  deletedAt: null,
+                  options: [],
+                  categories: [],
+                },
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    const csvData = [
+      // The file sets its own value, which must win over the model's 900.
+      ["Asset ID", "Asset model", "Value"],
+      ["SAM-I1", "Dell Latitude", "750"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(updateAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "uuid-i",
+        assetModelId: "model-existing",
+        categoryId: "cat-laptops",
+        valuation: 750,
+        customFieldsValues: [
+          { id: "cf-brand", value: { raw: "Dell", valueText: "Dell" } },
+        ],
+      })
+    );
+  });
+
+  it("keeps a category the file clears empty, and skips model defaults limited to categories", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-i",
+        sequentialId: "SAM-I1",
+        type: AssetType.INDIVIDUAL,
+        categoryId: "cat-electronics",
+        category: { id: "cat-electronics", name: "Electronics" },
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.assetModel.findMany).mockResolvedValueOnce([
+      { id: "model-existing", name: "Dell Latitude" },
+    ] as unknown as Awaited<ReturnType<typeof db.assetModel.findMany>>);
+    vi.mocked(getAssetModelsDefaults).mockResolvedValue(
+      new Map([
+        [
+          "model-existing",
+          {
+            id: "model-existing",
+            name: "Dell Latitude",
+            defaultCategoryId: "cat-laptops",
+            defaultValuation: null,
+            customFieldDefaults: [
+              {
+                customFieldId: "cf-ram",
+                value: { raw: "16 GB", valueText: "16 GB" },
+                customField: {
+                  id: "cf-ram",
+                  name: "RAM",
+                  type: "TEXT",
+                  active: true,
+                  deletedAt: null,
+                  options: [],
+                  categories: [{ id: "cat-laptops" }],
+                },
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    const csvData = [
+      ["Asset ID", "Asset model", "Category"],
+      ["SAM-I1", "Dell Latitude", "Uncategorized"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(updateAsset).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(updateAsset).mock.calls[0][0];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        id: "uuid-i",
+        assetModelId: "model-existing",
+        categoryId: "uncategorized",
+      })
+    );
+    expect(
+      (payload.customFieldsValues ?? []).map((value) => value.id)
+    ).not.toContain("cf-ram");
   });
 
   it("creates a missing AssetModel on an INDIVIDUAL asset", async () => {

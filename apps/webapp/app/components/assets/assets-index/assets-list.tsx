@@ -64,7 +64,7 @@ import { ListItemTagsColumn } from "./list-item-tags-column";
 import BookSelectedModelsDropdown from "./model-booking/book-selected-models-dropdown";
 import { getUnselectableModelRows } from "./model-booking/unselectable-model-rows";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
-import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
+import { LazyAvailabilityCalendar } from "../../availability-calendar/availability-calendar.lazy";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
 
@@ -486,7 +486,7 @@ export const AssetsList = ({
             </>
           ) : isAvailabilityView && shouldShowAvailabilityView ? (
             <>
-              <AvailabilityCalendar
+              <LazyAvailabilityCalendar
                 resources={resources}
                 events={events}
                 resourceLabelContent={({ resource }) => {

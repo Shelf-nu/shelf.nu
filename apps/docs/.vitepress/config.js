@@ -48,6 +48,7 @@ export default {
     nav: [
       { text: "Home", link: "/" },
       { text: "Docs", link: "/local-development" },
+      { text: "Contributing", link: "/contributing" },
       {
         text: "Links",
         items: [
@@ -92,7 +93,10 @@ export default {
         collapsed: true,
         items: [
           { text: "Database Triggers", link: "/database-triggers" },
-          { text: "Protected Indexes", link: "/protected-indexes" },
+          {
+            text: "Protected Indexes and Foreign Keys",
+            link: "/protected-indexes",
+          },
         ],
       },
       {
@@ -192,7 +196,7 @@ export default {
       },
       {
         text: "📋 Project Info",
-        collapsed: true,
+        collapsed: false,
         items: [
           { text: "Contributing Guide", link: "/contributing" },
           { text: "Code of Conduct", link: "/code-of-conduct" },
@@ -209,7 +213,12 @@ export default {
 
     // Edit this page link
     editLink: {
-      pattern: "https://github.com/Shelf-nu/shelf.nu/edit/main/apps/docs/:path",
+      // The contributing page only includes the root CONTRIBUTING.md, so its
+      // edit link points at that file instead of the include stub.
+      pattern: ({ filePath }) =>
+        filePath === "contributing.md"
+          ? "https://github.com/Shelf-nu/shelf.nu/edit/main/CONTRIBUTING.md"
+          : `https://github.com/Shelf-nu/shelf.nu/edit/main/apps/docs/${filePath}`,
       text: "Edit this page on GitHub",
     },
 

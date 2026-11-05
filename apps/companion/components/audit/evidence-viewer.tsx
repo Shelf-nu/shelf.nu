@@ -30,6 +30,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
+import { useCentredSheetSpan } from "@/lib/use-safe-edges";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 import { AuditPhotoCaption } from "@/components/audit/audit-photo-caption";
@@ -70,6 +71,9 @@ export function EvidenceViewer({
 }: EvidenceViewerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  // Held to the column and centred between the side insets, so a Duo's rail
+  // or a turned foldable's camera cutout never covers the sheet.
+  const sheetSpan = useCentredSheetSpan(CONTENT_MAX_WIDTH);
   // why: the workspace's own date format — the same hook every other audit
   // surface uses, so a completed audit does not suddenly render dates
   // differently from the screen that opened it.
@@ -101,7 +105,7 @@ export function EvidenceViewer({
       onRequestClose={onClose}
     >
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, sheetSpan]}>
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
               {title}
@@ -220,9 +224,7 @@ const useStyles = createStyles((colors) => ({
     // The modal covers the whole window, outside any navigator's content
     // column, so the sheet holds itself to the column: on a tablet it lines
     // up with the screen behind it instead of spanning the window.
-    width: "100%",
-    maxWidth: CONTENT_MAX_WIDTH,
-    alignSelf: "center",
+    // Width and position come from `useCentredSheetSpan` at render time.
   },
   header: {
     flexDirection: "row",

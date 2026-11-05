@@ -37,6 +37,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
+import { useCentredSheetSpan } from "@/lib/use-safe-edges";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // Lazy-load native image modules below all imports (keeps import/first happy)
@@ -226,6 +227,9 @@ export function EvidenceModal({
   const { colors } = useTheme();
   const styles = useStyles();
   const dateFormatter = useDateFormatter();
+  // Held to the column and centred between the side insets, so a Duo's rail
+  // or a turned foldable's camera cutout never covers the sheet.
+  const sheetSpan = useCentredSheetSpan(CONTENT_MAX_WIDTH);
 
   const [noteText, setNoteText] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
@@ -441,7 +445,7 @@ export function EvidenceModal({
           activeOpacity={1}
           onPress={handleClose}
         />
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, sheetSpan]}>
           {/* Header - fixed at top */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
@@ -818,9 +822,7 @@ const useStyles = createStyles((colors) => ({
     // The modal covers the whole window, outside any navigator's content
     // column, so the sheet holds itself to the column: on a tablet it stays
     // reading width instead of spanning the window.
-    width: "100%",
-    maxWidth: CONTENT_MAX_WIDTH,
-    alignSelf: "center",
+    // Width and position come from `useCentredSheetSpan` at render time.
     ...Platform.select({
       ios: {
         shadowColor: "#000",

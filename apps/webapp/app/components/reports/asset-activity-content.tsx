@@ -24,7 +24,11 @@ import {
   DateCell,
   ReportTable,
 } from "~/components/reports/report-table";
-import type { AssetActivityRow, ReportKpi } from "~/modules/reports/types";
+import type {
+  AssetActivityRow,
+  AssetActivityType,
+  ReportKpi,
+} from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
 
 /**
@@ -51,7 +55,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
     cell: ({ row }) => {
       const type = row.original.activityType;
       // Plain English labels — no jargon or internal codes
-      const labels: Record<string, string> = {
+      // Keyed by every activity type, so a new type cannot ship without its
+      // label and color.
+      const labels: Record<AssetActivityType, string> = {
         CREATED: "Asset created",
         UPDATED: "Asset updated",
         CUSTODY_ASSIGNED: "Assigned to team member",
@@ -60,9 +66,11 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         BOOKING_CHECKED_IN: "Checked in",
         LOCATION_CHANGED: "Location changed",
         CATEGORY_CHANGED: "Category changed",
+        ARCHIVED: "Archived",
+        REINSTATED: "Reinstated",
       };
       // Semantic colors for activity types
-      const colors: Record<string, string> = {
+      const colors: Record<AssetActivityType, string> = {
         CREATED: "bg-green-100 text-green-700",
         UPDATED: "bg-blue-100 text-blue-700",
         CUSTODY_ASSIGNED: "bg-violet-100 text-violet-700",
@@ -71,6 +79,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         BOOKING_CHECKED_IN: "bg-green-100 text-green-700",
         LOCATION_CHANGED: "bg-blue-100 text-blue-700",
         CATEGORY_CHANGED: "bg-blue-100 text-blue-700",
+        // Taken out of service and back: neutral, like the archived badge.
+        ARCHIVED: "bg-gray-100 text-gray-700",
+        REINSTATED: "bg-gray-100 text-gray-700",
       };
       return (
         <span
@@ -200,6 +211,9 @@ export function AssetActivityContent({
             </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
               Checked in
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+              Archived / Reinstated
             </span>
           </div>
         </div>

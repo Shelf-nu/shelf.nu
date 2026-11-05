@@ -19,8 +19,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Modal,
-  Platform,
 } from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -41,6 +39,7 @@ import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
+import { ImageZoomModal } from "@/components/shared/image-zoom-modal";
 import { CodeSection } from "@/components/shared/code-section";
 import { KitActions } from "@/components/kit-detail/kit-actions";
 import { TeamMemberPicker } from "@/components/team-member-picker";
@@ -73,11 +72,13 @@ export default function KitDetailScreen() {
   const roles = currentOrg?.roles;
   const canCustody = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "kit",
     action: "custody",
   });
   const canUpdate = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "kit",
     action: "update",
   });
@@ -368,30 +369,13 @@ export default function KitDetailScreen() {
         </ScrollView>
       )}
 
-      {/* ── Image zoom modal ─────────────────────────────── */}
+      {/* ── Image zoom ─────────────────────────────── */}
       {kit?.image ? (
-        <Modal
+        <ImageZoomModal
+          uri={kit.image}
           visible={showImageZoom}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowImageZoom(false)}
-        >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
-            <TouchableOpacity
-              style={styles.zoomCloseBtn}
-              onPress={() => setShowImageZoom(false)}
-              accessibilityLabel="Close image viewer"
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: kit.image }}
-              style={styles.zoomImage}
-              contentFit="contain"
-            />
-          </View>
-        </Modal>
+          onClose={() => setShowImageZoom(false)}
+        />
       ) : null}
 
       {/* ── Custody + Location pickers ───────────────────── */}
@@ -585,30 +569,6 @@ const useStyles = createStyles((colors, shadows) => ({
   assetMeta: {
     fontSize: fontSize.sm,
     color: colors.muted,
-  },
-  zoomOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomCloseBtn: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  // Sized against the full-screen overlay rather than a window size read when
-  // the styles are built, so the image follows a rotation or a window resize.
-  zoomImage: {
-    width: "100%",
-    height: "70%",
   },
   centered: {
     flex: 1,

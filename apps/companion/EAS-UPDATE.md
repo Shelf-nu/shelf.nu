@@ -89,6 +89,28 @@ ahead of the stores (1.2.0 sat on main for 16 days while every install was
 like it worked. If the installed base spans two versions, publish once per live
 runtime version, from the matching release tag rather than from `main`.
 
+**Never publish from `main` across an Expo SDK change.** The runtime version only
+moves at a store cut, so `main` can run a newer Expo SDK (new native code) while
+`app.json` still names the runtime of the builds in the stores. An update
+published from `main` then reaches those builds, calls native modules they do
+not have, and crashes them on launch. Before publishing, compare `expo` in
+`apps/companion/package.json` on `main` with the release tag of the live
+version: if they differ, publish from the release tag, or bump the runtime at a
+store cut first.
+
+Companion releases carry no git tag of their own. The base for a live version
+is the parent of the commit that moved `expo` past that version's SDK, not the
+parent of the `runtimeVersion` bump: the SDK upgrade lands first and the bump
+comes later, so the commits in between already carry the new native code. For
+the 1.7.0 builds (SDK 54), for example:
+
+```bash
+SDK=$(git log --format=%H -S'"expo": "~58' -- apps/companion/package.json | tail -1)
+git switch --detach "$SDK^"
+# Must print "expo": "~54...", the SDK of the 1.7.0 builds. Stop if it does not.
+grep '"expo":' apps/companion/package.json
+```
+
 Three steps, in this order. JS-only fix already merged to main and checked out:
 
 ```bash

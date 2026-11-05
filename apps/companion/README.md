@@ -10,7 +10,7 @@
 
 ## What Is This?
 
-A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with **Expo SDK 54 + React Native + TypeScript**. It gives field teams mobile access to assets, scanning, audits, and bookings — all powered by the existing Shelf webapp backend.
+A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with **Expo SDK 58 + React Native + TypeScript**. It gives field teams mobile access to assets, scanning, audits, and bookings, all powered by the existing Shelf webapp backend.
 
 ### Features
 
@@ -389,7 +389,9 @@ Every role decision in the app comes from `@shelf/permissions`:
 `userHasPermission` (`lib/permissions.ts`) for the permission matrix and
 `useRoleAccess()` (`hooks/use-role-access.ts`) for reach: whose bookings,
 custody scope, audit scope, booking item rules. `/api/mobile/me` sends each
-workspace's visibility toggles for this. Never compare role strings in the app:
+workspace's visibility toggles and permission switches for this; pass the
+current organization to `userHasPermission` as `workspace` so an entry point
+follows a switch such as `managersCanEditAssets`. Never compare role strings in the app:
 `local-rules/no-direct-role-checks` (shared with the webapp, wired in
 `eslint.config.js`) fails `pnpm --filter @shelf/companion lint` on a role comparison
 outside tests.
@@ -408,13 +410,13 @@ reads them as off, which only under-offers.
 
 | Layer      | Technology                        |
 | ---------- | --------------------------------- |
-| Framework  | Expo SDK 54 + React Native 0.81   |
-| Routing    | Expo Router 6 (file-based)        |
-| Language   | TypeScript 5.9                    |
+| Framework  | Expo SDK 58 + React Native 0.88   |
+| Routing    | Expo Router 58 (file-based)       |
+| Language   | TypeScript 6.0                    |
 | Auth       | Supabase Auth + SecureStore       |
 | State      | React Context (auth, org, theme)  |
 | API Client | Custom fetch wrapper with caching |
 | Scanner    | expo-camera (QR + barcode types)  |
 | E2E Tests  | Maestro                           |
-| iOS Min    | iOS 15.1                          |
+| iOS Min    | iOS 16.4                          |
 | Node       | >= 24.22.1                        |

@@ -10,12 +10,14 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
+  type TextInputInstance,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
@@ -34,7 +36,7 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useStyles();
-  const passwordRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInputInstance>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -246,230 +248,243 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.container}
       >
+        {/* The scroll view spans the window, so on a wide one its scroll
+            indicator runs down the window edge; the form column sits centred
+            inside it. Each side pads for its own inset (a Duo's status-bar
+            rail, a turned foldable's camera cutout). */}
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 },
+            {
+              paddingTop: insets.top + 40,
+              paddingBottom: insets.bottom + 24,
+              paddingLeft: insets.left,
+              paddingRight: insets.right,
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           bounces={false}
         >
-          {/* ── Brand Section ─────────────────────────────────────── */}
-          <View style={styles.brand}>
-            <ShelfIcon size={72} />
-            <View style={styles.wordmarkWrap}>
-              <ShelfWordmark width={100} color={colors.foreground} />
-            </View>
-            {/* Only for a non-cloud server: on Shelf Cloud the chip would be
+          <View style={styles.column}>
+            {/* ── Brand Section ─────────────────────────────────────── */}
+            <View style={styles.brand}>
+              <ShelfIcon size={72} />
+              <View style={styles.wordmarkWrap}>
+                <ShelfWordmark width={100} color={colors.foreground} />
+              </View>
+              {/* Only for a non-cloud server: on Shelf Cloud the chip would be
                 noise on every user's login screen. It is also the only place a
                 user can tell which server they are about to hand credentials
                 to, so it must stay visible rather than being tucked away. */}
-            {!server.isCloud && (
-              <View style={styles.serverChip}>
-                <Text style={styles.serverChipText}>
-                  Connected to {server.name}
+              {!server.isCloud && (
+                <View style={styles.serverChip}>
+                  <Text style={styles.serverChipText}>
+                    Connected to {server.name}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* ── Welcome Text ──────────────────────────────────────── */}
+            <View style={styles.welcomeSection}>
+              <Text style={styles.welcomeTitle}>Welcome back</Text>
+              <Text style={styles.welcomeSubtitle}>
+                Sign in to your account
+              </Text>
+            </View>
+
+            {/* ── Form ──────────────────────────────────────────────── */}
+            <View style={styles.form}>
+              {showPassword && (
+                <>
+                  <Text style={styles.label}>Email</Text>
+                  <TextInput
+                    testID="email-input"
+                    style={[styles.input, error ? styles.inputError : null]}
+                    value={email}
+                    onChangeText={(t) => {
+                      setEmail(t);
+                      setError(null);
+                      changeCountRef.current.email++;
+                    }}
+                    placeholder="you@example.com"
+                    placeholderTextColor={colors.placeholderText}
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    textContentType="emailAddress"
+                    returnKeyType="next"
+                    onSubmitEditing={() => passwordRef.current?.focus()}
+                    blurOnSubmit={false}
+                    editable={!isSubmitting && !isSsoSubmitting}
+                    accessibilityLabel="Email"
+                  />
+
+                  <Text style={styles.label}>Password</Text>
+                  <TextInput
+                    testID="password-input"
+                    ref={passwordRef}
+                    style={[styles.input, error ? styles.inputError : null]}
+                    value={password}
+                    onChangeText={(t) => {
+                      setPassword(t);
+                      setError(null);
+                      changeCountRef.current.password++;
+                    }}
+                    placeholder="Your password"
+                    placeholderTextColor={colors.placeholderText}
+                    secureTextEntry
+                    // why: without this iOS applies its default sentence-casing to the
+                    // first character, silently sending "Trixie01" for "trixie01" and
+                    // failing login for any password that starts with a lowercase
+                    // letter. The email field already guards against this.
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete="password"
+                    textContentType="password"
+                    returnKeyType="go"
+                    onSubmitEditing={handleLogin}
+                    editable={!isSubmitting && !isSsoSubmitting}
+                    accessibilityLabel="Password"
+                  />
+                </>
+              )}
+
+              {error && (
+                <Text
+                  style={styles.errorText}
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="assertive"
+                >
+                  {error}
                 </Text>
-              </View>
-            )}
-          </View>
+              )}
 
-          {/* ── Welcome Text ──────────────────────────────────────── */}
-          <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeTitle}>Welcome back</Text>
-            <Text style={styles.welcomeSubtitle}>Sign in to your account</Text>
-          </View>
+              {offersNothing && (
+                <Text style={styles.noMethodsText}>
+                  {server.name} has no sign-in method available in the app.
+                  Contact your administrator, or connect to a different server
+                  below.
+                </Text>
+              )}
 
-          {/* ── Form ──────────────────────────────────────────────── */}
-          <View style={styles.form}>
-            {showPassword && (
-              <>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  testID="email-input"
-                  style={[styles.input, error ? styles.inputError : null]}
-                  value={email}
-                  onChangeText={(t) => {
-                    setEmail(t);
-                    setError(null);
-                    changeCountRef.current.email++;
-                  }}
-                  placeholder="you@example.com"
-                  placeholderTextColor={colors.placeholderText}
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                  returnKeyType="next"
-                  onSubmitEditing={() => passwordRef.current?.focus()}
-                  blurOnSubmit={false}
-                  editable={!isSubmitting && !isSsoSubmitting}
-                  accessibilityLabel="Email"
-                />
+              {showPassword && (
+                <>
+                  <TouchableOpacity
+                    testID="forgot-password-link"
+                    style={[
+                      styles.forgotLink,
+                      (isSubmitting || isSsoSubmitting || isResetting) &&
+                        styles.buttonDisabled,
+                    ]}
+                    onPress={handleForgotPassword}
+                    disabled={isSubmitting || isSsoSubmitting || isResetting}
+                    activeOpacity={0.7}
+                    accessibilityLabel="Forgot your password? Reset it on the web"
+                    accessibilityRole="link"
+                  >
+                    <Text style={styles.forgotText}>Forgot password?</Text>
+                  </TouchableOpacity>
 
-                <Text style={styles.label}>Password</Text>
-                <TextInput
-                  testID="password-input"
-                  ref={passwordRef}
-                  style={[styles.input, error ? styles.inputError : null]}
-                  value={password}
-                  onChangeText={(t) => {
-                    setPassword(t);
-                    setError(null);
-                    changeCountRef.current.password++;
-                  }}
-                  placeholder="Your password"
-                  placeholderTextColor={colors.placeholderText}
-                  secureTextEntry
-                  // why: without this iOS applies its default sentence-casing to the
-                  // first character, silently sending "Trixie01" for "trixie01" and
-                  // failing login for any password that starts with a lowercase
-                  // letter. The email field already guards against this.
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="password"
-                  textContentType="password"
-                  returnKeyType="go"
-                  onSubmitEditing={handleLogin}
-                  editable={!isSubmitting && !isSsoSubmitting}
-                  accessibilityLabel="Password"
-                />
-              </>
-            )}
+                  <TouchableOpacity
+                    testID="sign-in-button"
+                    style={[
+                      styles.button,
+                      (isSubmitting || isSsoSubmitting || isResetting) &&
+                        styles.buttonDisabled,
+                    ]}
+                    onPress={handleLogin}
+                    disabled={isSubmitting || isSsoSubmitting || isResetting}
+                    activeOpacity={0.8}
+                    accessibilityLabel={
+                      isSubmitting ? "Signing in" : "Sign in to your account"
+                    }
+                    accessibilityRole="button"
+                  >
+                    {isSubmitting ? (
+                      <ActivityIndicator color={colors.primaryForeground} />
+                    ) : (
+                      <Text style={styles.buttonText}>Sign In</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
 
-            {error && (
-              <Text
-                style={styles.errorText}
-                accessibilityRole="alert"
-                accessibilityLiveRegion="assertive"
-              >
-                {error}
-              </Text>
-            )}
-
-            {offersNothing && (
-              <Text style={styles.noMethodsText}>
-                {server.name} has no sign-in method available in the app.
-                Contact your administrator, or connect to a different server
-                below.
-              </Text>
-            )}
-
-            {showPassword && (
-              <>
-                <TouchableOpacity
-                  testID="forgot-password-link"
-                  style={[
-                    styles.forgotLink,
-                    (isSubmitting || isSsoSubmitting || isResetting) &&
-                      styles.buttonDisabled,
-                  ]}
-                  onPress={handleForgotPassword}
-                  disabled={isSubmitting || isSsoSubmitting || isResetting}
-                  activeOpacity={0.7}
-                  accessibilityLabel="Forgot your password? Reset it on the web"
-                  accessibilityRole="link"
-                >
-                  <Text style={styles.forgotText}>Forgot password?</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  testID="sign-in-button"
-                  style={[
-                    styles.button,
-                    (isSubmitting || isSsoSubmitting || isResetting) &&
-                      styles.buttonDisabled,
-                  ]}
-                  onPress={handleLogin}
-                  disabled={isSubmitting || isSsoSubmitting || isResetting}
-                  activeOpacity={0.8}
-                  accessibilityLabel={
-                    isSubmitting ? "Signing in" : "Sign in to your account"
-                  }
-                  accessibilityRole="button"
-                >
-                  {isSubmitting ? (
-                    <ActivityIndicator color={colors.primaryForeground} />
-                  ) : (
-                    <Text style={styles.buttonText}>Sign In</Text>
+              {showSso && (
+                <>
+                  {/* The divider only separates two things. */}
+                  {showPassword && (
+                    <View style={styles.divider}>
+                      <View style={styles.dividerLine} />
+                      <Text style={styles.dividerText}>or</Text>
+                      <View style={styles.dividerLine} />
+                    </View>
                   )}
-                </TouchableOpacity>
-              </>
-            )}
 
-            {showSso && (
-              <>
-                {/* The divider only separates two things. */}
-                {showPassword && (
-                  <View style={styles.divider}>
-                    <View style={styles.dividerLine} />
-                    <Text style={styles.dividerText}>or</Text>
-                    <View style={styles.dividerLine} />
-                  </View>
-                )}
+                  <TouchableOpacity
+                    testID="sso-sign-in-button"
+                    style={[
+                      styles.ssoButton,
+                      (isSubmitting || isSsoSubmitting || isResetting) &&
+                        styles.buttonDisabled,
+                    ]}
+                    onPress={handleSsoLogin}
+                    disabled={isSubmitting || isSsoSubmitting || isResetting}
+                    activeOpacity={0.8}
+                    accessibilityLabel="Sign in with SSO"
+                    accessibilityRole="button"
+                  >
+                    {isSsoSubmitting ? (
+                      <ActivityIndicator color={colors.primary} />
+                    ) : (
+                      <Text style={styles.ssoButtonText}>Sign in with SSO</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
 
-                <TouchableOpacity
-                  testID="sso-sign-in-button"
-                  style={[
-                    styles.ssoButton,
-                    (isSubmitting || isSsoSubmitting || isResetting) &&
-                      styles.buttonDisabled,
-                  ]}
-                  onPress={handleSsoLogin}
-                  disabled={isSubmitting || isSsoSubmitting || isResetting}
-                  activeOpacity={0.8}
-                  accessibilityLabel="Sign in with SSO"
-                  accessibilityRole="button"
-                >
-                  {isSsoSubmitting ? (
-                    <ActivityIndicator color={colors.primary} />
-                  ) : (
-                    <Text style={styles.ssoButtonText}>Sign in with SSO</Text>
-                  )}
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* One server action, and it is whichever the current state is
+              {/* One server action, and it is whichever the current state is
                 not: connect when on Shelf Cloud, disconnect when not. Changing
                 to a third server is disconnect-then-connect, which keeps the
                 choice explicit rather than offering a silent re-point. */}
-            <TouchableOpacity
-              testID={
-                server.isCloud
-                  ? "connect-server-link"
-                  : "disconnect-server-link"
-              }
-              style={[
-                styles.connectLink,
-                (isSubmitting || isSsoSubmitting || isResetting) &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={
-                server.isCloud
-                  ? () => setIsConnectVisible(true)
-                  : handleDisconnect
-              }
-              disabled={isSubmitting || isSsoSubmitting || isResetting}
-              activeOpacity={0.7}
-              accessibilityLabel={
-                server.isCloud
-                  ? "Connect to a private Shelf server"
-                  : `Disconnect from ${server.name} and return to Shelf Cloud`
-              }
-              accessibilityRole="button"
-            >
-              <Text style={styles.connectLinkText}>
-                {server.isCloud
-                  ? "Connect to a private server"
-                  : `Disconnect from ${server.name}`}
-              </Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                testID={
+                  server.isCloud
+                    ? "connect-server-link"
+                    : "disconnect-server-link"
+                }
+                style={[
+                  styles.connectLink,
+                  (isSubmitting || isSsoSubmitting || isResetting) &&
+                    styles.buttonDisabled,
+                ]}
+                onPress={
+                  server.isCloud
+                    ? () => setIsConnectVisible(true)
+                    : handleDisconnect
+                }
+                disabled={isSubmitting || isSsoSubmitting || isResetting}
+                activeOpacity={0.7}
+                accessibilityLabel={
+                  server.isCloud
+                    ? "Connect to a private Shelf server"
+                    : `Disconnect from ${server.name} and return to Shelf Cloud`
+                }
+                accessibilityRole="button"
+              >
+                <Text style={styles.connectLinkText}>
+                  {server.isCloud
+                    ? "Connect to a private server"
+                    : `Disconnect from ${server.name}`}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-          <Text style={styles.footer}>
-            Use the same credentials as your Shelf web account.
-          </Text>
+            <Text style={styles.footer}>
+              Use the same credentials as your Shelf web account.
+            </Text>
+          </View>
         </ScrollView>
 
         <ConnectServerSheet
@@ -493,6 +508,13 @@ const useStyles = createStyles((colors, shadows) => ({
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",
+    alignItems: "center",
+  },
+  // A handful of fields reads better narrower than the window: phones fill
+  // it, wider windows hold the form to FORM_MAX_WIDTH.
+  column: {
+    width: "100%",
+    maxWidth: FORM_MAX_WIDTH,
     paddingHorizontal: spacing.xxl,
   },
   brand: {

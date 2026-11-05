@@ -2,11 +2,12 @@
 /**
  * Route tests for GET /api/mobile/me.
  *
- * Pins the contract the companion depends on to resolve `RoleAccess` for
- * each of the user's workspaces: every organization in the response must
- * carry the four workspace visibility toggles (`selfServiceCanSeeBookings`,
- * `baseUserCanSeeBookings`, `selfServiceCanSeeCustody`,
- * `baseUserCanSeeCustody`), and the query that builds the response must
+ * Pins the contract the companion depends on to resolve `RoleAccess` and the
+ * permission matrix for each of the user's workspaces: every organization in
+ * the response must carry the four workspace visibility toggles
+ * (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
+ * switch `managersCanEditAssets`, and the query that builds the response must
  * actually select them, or the field is always `undefined` however correct
  * the route's mapping is.
  *
@@ -96,6 +97,7 @@ function row(
       baseUserCanSeeBookings: false,
       selfServiceCanSeeCustody: false,
       baseUserCanSeeCustody: true,
+      managersCanEditAssets: false,
       ...organizationOverrides,
     },
   };
@@ -147,6 +149,44 @@ describe("GET /api/mobile/me", () => {
       selfServiceCanSeeCustody: false,
       baseUserCanSeeCustody: true,
     });
+  });
+
+  it("selects the Managers permission switch from the database", async () => {
+    findMany.mockResolvedValue([row()] as never);
+
+    await invoke();
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          organization: expect.objectContaining({
+            select: expect.objectContaining({ managersCanEditAssets: true }),
+          }),
+        }),
+      })
+    );
+  });
+
+  it("carries each organization's own Managers switch", async () => {
+    findMany.mockResolvedValue([
+      row({ managersCanEditAssets: true }),
+      {
+        ...row(),
+        organization: { ...row().organization, id: "org-2", name: "Org Two" },
+      },
+    ] as never);
+
+    const response = await invoke();
+    const body = (await response.json()) as {
+      organizations: Array<Record<string, unknown>>;
+    };
+
+    expect(
+      body.organizations.map((org) => [org.id, org.managersCanEditAssets])
+    ).toEqual([
+      ["org-1", true],
+      ["org-2", false],
+    ]);
   });
 
   it("keeps each organization's toggles independent", async () => {
@@ -214,6 +254,7 @@ describe("GET /api/mobile/me", () => {
         "baseUserCanSeeBookings",
         "selfServiceCanSeeCustody",
         "baseUserCanSeeCustody",
+        "managersCanEditAssets",
       ])
     );
     expect(Array.isArray(org.roles)).toBe(true);
@@ -222,6 +263,7 @@ describe("GET /api/mobile/me", () => {
       "baseUserCanSeeBookings",
       "selfServiceCanSeeCustody",
       "baseUserCanSeeCustody",
+      "managersCanEditAssets",
     ] as const) {
       expect(typeof org[toggle]).toBe("boolean");
     }

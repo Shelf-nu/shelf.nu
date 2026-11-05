@@ -729,7 +729,9 @@ export type AssetActivityType =
   | "BOOKING_CHECKED_OUT"
   | "BOOKING_CHECKED_IN"
   | "LOCATION_CHANGED"
-  | "CATEGORY_CHANGED";
+  | "CATEGORY_CHANGED"
+  | "ARCHIVED"
+  | "REINSTATED";
 
 /** Row type for the Asset Activity Summary report */
 export interface AssetActivityRow {

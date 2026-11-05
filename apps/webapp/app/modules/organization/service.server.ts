@@ -496,6 +496,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   selfServiceCanSeeBookings: true,
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
+  managersCanEditAssets: true,
   barcodesEnabled: true,
   usedBarcodeTrial: true,
   auditsEnabled: true,
@@ -851,6 +852,28 @@ export function updateOrganizationPermissions({
     data: {
       ...configuration,
     },
+  });
+}
+
+/**
+ * Saves the owner-only `managersCanEditAssets` switch. Callers assert the
+ * caller owns the workspace first (`assertIsOrganizationOwner`).
+ *
+ * @param args.id - The workspace
+ * @param args.managersCanEditAssets - The new value
+ * @returns The updated organization's id and switch
+ */
+export function updateOrganizationManagersCanEditAssets({
+  id,
+  managersCanEditAssets,
+}: {
+  id: Organization["id"];
+  managersCanEditAssets: boolean;
+}) {
+  return db.organization.update({
+    where: { id },
+    data: { managersCanEditAssets },
+    select: { id: true, managersCanEditAssets: true },
   });
 }
 

@@ -97,6 +97,8 @@ const colors: Record<string, string> = {
   BOOKING_CHECKED_IN: "bg-green-100 text-green-700", // Return
   LOCATION_CHANGED: "bg-blue-100 text-blue-700", // Change
   CATEGORY_CHANGED: "bg-blue-100 text-blue-700", // Change
+  ARCHIVED: "bg-gray-100 text-gray-700", // Out of service
+  REINSTATED: "bg-gray-100 text-gray-700", // Back in service
 };
 ```
 

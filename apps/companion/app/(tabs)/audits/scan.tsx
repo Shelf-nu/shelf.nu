@@ -17,10 +17,10 @@ import {
   Platform,
   Alert,
   AppState,
+  useWindowDimensions,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
@@ -28,6 +28,12 @@ import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { scanSplit } from "@/lib/safe-edges";
+import {
+  useOverlayEdges,
+  useTabScreenInsets,
+  useTabScreenWidth,
+} from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -81,6 +87,36 @@ function AuditScannerContent() {
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
+
+  // ── Layout ───────────────────────────────────────────
+
+  /**
+   * The screen's own width: beside the tab sidebar it is narrower than the
+   * window. Seeded before the first layout, so a wide screen opens straight
+   * into the side-by-side layout.
+   */
+  const { width: screenWidth, onLayout: onScreenLayout } = useTabScreenWidth();
+  /**
+   * Height to weigh it against: the window's, which the keyboard never
+   * changes. The screen's measured height shrinks while the Android keyboard
+   * is up, and judging by it would move the list beside the camera, and back,
+   * while a code is being typed. Above a bottom tab bar the screen is a little
+   * shorter than the window, so a near-square screen stays stacked, the
+   * phone layout.
+   */
+  const { height: screenHeight } = useWindowDimensions();
+  /**
+   * Whether the list sits beside the camera, and which insets each part keeps
+   * clear of: an iPhone Duo's status-bar rail or a turned foldable's camera
+   * cutout, each side on its own. The tab sidebar already covers the left one
+   * when it is showing.
+   */
+  const split = scanSplit(
+    { width: screenWidth, height: screenHeight },
+    useTabScreenInsets()
+  );
+  const { sideBySide } = split;
+  const cameraEdges = useOverlayEdges(split.camera);
 
   // ── Camera state ─────────────────────────────────────
 
@@ -1180,324 +1216,381 @@ function AuditScannerContent() {
 
   // ── Camera view ──────────────────────────────────────
 
-  return (
-    <View style={styles.container}>
-      {/* Top 60%: Camera */}
-      <View style={styles.cameraSection}>
-        {isFocused && !isPaused && (
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            enableTorch={torchEnabled}
-            barcodeScannerSettings={{
-              barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
-            }}
-            onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
-          />
-        )}
+  // Upright, the camera sits above the progress and the scanned list, the way
+  // a phone is held. On a screen wider than it is tall (a foldable or a
+  // tablet turned sideways) that would leave a letterbox of camera over a
+  // short list, so the list moves beside the camera instead.
+  const cameraSection = (
+    <View style={styles.cameraSection}>
+      {isFocused && !isPaused && (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          enableTorch={torchEnabled}
+          barcodeScannerSettings={{
+            barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
+          }}
+          onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+        />
+      )}
 
-        {/* Paused overlay */}
-        {isPaused && (
+      {/* Paused overlay */}
+      {isPaused && (
+        <TouchableOpacity
+          style={styles.pausedOverlay}
+          onPress={togglePause}
+          activeOpacity={0.9}
+          accessibilityLabel="Camera paused. Tap to resume"
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="play-circle-outline"
+            size={64}
+            color="rgba(255,255,255,0.8)"
+          />
+          <Text style={styles.pausedTitle}>Camera Paused</Text>
+          <Text style={styles.pausedSubtitle}>Tap to resume</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Overlay with frame */}
+      <View style={[styles.cameraOverlay, { pointerEvents: "box-none" }]}>
+        {/* Header: back + audit name + controls */}
+        <View
+          style={[
+            styles.cameraHeader,
+            {
+              paddingTop: cameraEdges.top,
+              paddingLeft: spacing.lg + cameraEdges.left,
+              paddingRight: spacing.lg + cameraEdges.right,
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={styles.pausedOverlay}
-            onPress={togglePause}
-            activeOpacity={0.9}
-            accessibilityLabel="Camera paused. Tap to resume"
+            onPress={() => router.back()}
+            style={styles.headerBackButton}
+            accessibilityLabel="Go back"
             accessibilityRole="button"
           >
-            <Ionicons
-              name="play-circle-outline"
-              size={64}
-              color="rgba(255,255,255,0.8)"
-            />
-            <Text style={styles.pausedTitle}>Camera Paused</Text>
-            <Text style={styles.pausedSubtitle}>Tap to resume</Text>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
-        )}
-
-        {/* Overlay with frame */}
-        <View style={[styles.cameraOverlay, { pointerEvents: "box-none" }]}>
-          {/* Header: back + audit name + controls */}
-          <View style={styles.cameraHeader}>
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerLabel}>Audit Scanner</Text>
+            <Text style={styles.headerName} numberOfLines={1}>
+              {auditName}
+            </Text>
+          </View>
+          <View style={styles.controlButtons}>
             <TouchableOpacity
-              onPress={() => router.back()}
-              style={styles.headerBackButton}
-              accessibilityLabel="Go back"
+              style={[
+                styles.controlButton,
+                isPaused && styles.controlButtonActive,
+              ]}
+              onPress={togglePause}
+              accessibilityLabel={isPaused ? "Resume camera" : "Pause camera"}
               accessibilityRole="button"
             >
-              <Ionicons name="arrow-back" size={22} color="#fff" />
+              <Ionicons
+                name={isPaused ? "play" : "pause"}
+                size={18}
+                color="#fff"
+              />
             </TouchableOpacity>
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerLabel}>Audit Scanner</Text>
-              <Text style={styles.headerName} numberOfLines={1}>
-                {auditName}
-              </Text>
-            </View>
-            <View style={styles.controlButtons}>
-              <TouchableOpacity
-                style={[
-                  styles.controlButton,
-                  isPaused && styles.controlButtonActive,
-                ]}
-                onPress={togglePause}
-                accessibilityLabel={isPaused ? "Resume camera" : "Pause camera"}
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={isPaused ? "play" : "pause"}
-                  size={18}
-                  color="#fff"
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.controlButton,
-                  torchEnabled && styles.controlButtonActive,
-                ]}
-                onPress={() => setTorchEnabled((prev) => !prev)}
-                accessibilityLabel={
-                  torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
-                }
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={torchEnabled ? "flash" : "flash-outline"}
-                  size={18}
-                  color={torchEnabled ? "#FFD600" : "#fff"}
-                />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={[
+                styles.controlButton,
+                torchEnabled && styles.controlButtonActive,
+              ]}
+              onPress={() => setTorchEnabled((prev) => !prev)}
+              accessibilityLabel={
+                torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
+              }
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name={torchEnabled ? "flash" : "flash-outline"}
+                size={18}
+                color={torchEnabled ? "#FFD600" : "#fff"}
+              />
+            </TouchableOpacity>
           </View>
-
-          {/* Scan frame — hidden while paused so it doesn't bleed through the paused overlay */}
-          {!isPaused && (
-            <View style={styles.scanFrameContainer}>
-              <View style={styles.scanFrame}>
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerTL,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerTR,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerBL,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerBR,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                {!frameHighlight && (
-                  <Animated.View
-                    style={[
-                      styles.scanLine,
-                      {
-                        transform: [{ translateY: scanLineTranslate }],
-                      },
-                    ]}
-                  />
-                )}
-              </View>
-            </View>
-          )}
-
-          {/* Processing indicator */}
-          {isProcessing && (
-            <View style={styles.processingRow}>
-              <ActivityIndicator size="small" color="#fff" />
-              <Text style={styles.processingText}>Looking up asset...</Text>
-            </View>
-          )}
         </View>
 
-        {/* Toast overlay */}
-        {toast && (
-          <Animated.View
-            style={[
-              styles.toast,
-              toast.type === "found" && styles.toastFound,
-              toast.type === "unexpected" && styles.toastUnexpected,
-              toast.type === "duplicate" && styles.toastDuplicate,
-              toast.type === "error" && styles.toastError,
-              {
-                transform: [
-                  {
-                    translateY: toastAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-60, 0],
-                    }),
-                  },
-                ],
-                opacity: toastAnim,
-              },
-            ]}
-          >
-            <Ionicons
-              name={
-                toast.type === "found"
-                  ? "checkmark-circle"
-                  : toast.type === "unexpected"
-                  ? "alert-circle"
-                  : toast.type === "duplicate"
-                  ? "copy-outline"
-                  : "close-circle"
-              }
-              size={20}
-              color="#fff"
-            />
-            <View style={styles.toastText}>
-              <Text style={styles.toastTitle} numberOfLines={1}>
-                {toast.title}
-              </Text>
-              <Text style={styles.toastSubtitle} numberOfLines={1}>
-                {toast.subtitle}
-              </Text>
+        {/* Scan frame: hidden while paused so it doesn't bleed through the paused overlay */}
+        {!isPaused && (
+          <View style={styles.scanFrameContainer}>
+            <View style={styles.scanFrame}>
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerTL,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerTR,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerBL,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerBR,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              {!frameHighlight && (
+                <Animated.View
+                  style={[
+                    styles.scanLine,
+                    {
+                      transform: [{ translateY: scanLineTranslate }],
+                    },
+                  ]}
+                />
+              )}
             </View>
-          </Animated.View>
-        )}
-      </View>
-
-      {/* ── Manual code entry ───────────────────────────
-          Type a QR id, barcode value, or SAM id when a label can't be
-          scanned. Feeds the same resolution pipeline as the camera. Web
-          parity: the web audit scanner (audits.$auditId.scan.tsx) uses the
-          shared CodeScanner, which exposes a manual code-entry Input.
-          NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
-          control's origin so the existing e2e flows stay stable. */}
-      <View style={styles.devScanContainer}>
-        {devScanVisible ? (
-          <View style={styles.devScanRow}>
-            <TextInput
-              testID="dev-scan-input"
-              style={styles.devScanInput}
-              value={devScanInput}
-              onChangeText={setDevScanInput}
-              placeholder="Enter QR, barcode, or SAM ID"
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="go"
-              onSubmitEditing={() => {
-                if (devScanInput.trim()) {
-                  handleBarCodeScanned({ data: devScanInput.trim() });
-                  setDevScanInput("");
-                }
-              }}
-            />
-            <TouchableOpacity
-              testID="dev-scan-submit"
-              style={styles.devScanButton}
-              onPress={() => {
-                if (devScanInput.trim()) {
-                  handleBarCodeScanned({ data: devScanInput.trim() });
-                  setDevScanInput("");
-                }
-              }}
-              accessibilityLabel="Look up code"
-            >
-              <Ionicons name="arrow-forward" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.devScanClose}
-              onPress={() => setDevScanVisible(false)}
-              accessibilityLabel="Close manual entry"
-            >
-              <Ionicons name="close" size={16} color="#fff" />
-            </TouchableOpacity>
           </View>
-        ) : (
-          <TouchableOpacity
-            testID="dev-scan-toggle"
-            style={styles.devScanToggle}
-            onPress={() => setDevScanVisible(true)}
-            accessibilityLabel="Enter a code manually"
-          >
-            <Ionicons name="keypad-outline" size={14} color="#fff" />
-            <Text style={styles.devScanToggleText}>Enter code</Text>
-          </TouchableOpacity>
+        )}
+
+        {/* Processing indicator */}
+        {isProcessing && (
+          <View style={styles.processingRow}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.processingText}>Looking up asset...</Text>
+          </View>
         )}
       </View>
 
-      {/* Bottom 40%: Progress + scanned list */}
-      <View style={styles.bottomPanel}>
-        <ProgressHeader
-          foundCount={foundCount}
-          expectedCount={expectedTotal}
-          unexpectedCount={unexpectedCount}
-          progressAnim={progressAnim}
-          progressPercent={progressPercent}
-        />
+      {/* Toast overlay */}
+      {toast && (
+        <Animated.View
+          style={[
+            styles.toast,
+            {
+              left: spacing.lg + cameraEdges.left,
+              right: spacing.lg + cameraEdges.right,
+            },
+            toast.type === "found" && styles.toastFound,
+            toast.type === "unexpected" && styles.toastUnexpected,
+            toast.type === "duplicate" && styles.toastDuplicate,
+            toast.type === "error" && styles.toastError,
+            {
+              transform: [
+                {
+                  translateY: toastAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-60, 0],
+                  }),
+                },
+              ],
+              opacity: toastAnim,
+            },
+          ]}
+        >
+          <Ionicons
+            name={
+              toast.type === "found"
+                ? "checkmark-circle"
+                : toast.type === "unexpected"
+                ? "alert-circle"
+                : toast.type === "duplicate"
+                ? "copy-outline"
+                : "close-circle"
+            }
+            size={20}
+            color="#fff"
+          />
+          <View style={styles.toastText}>
+            <Text style={styles.toastTitle} numberOfLines={1}>
+              {toast.title}
+            </Text>
+            <Text style={styles.toastSubtitle} numberOfLines={1}>
+              {toast.subtitle}
+            </Text>
+          </View>
+        </Animated.View>
+      )}
+    </View>
+  );
 
-        {/* Scanned / Remaining toggle + list */}
-        <View style={styles.scannedListSection}>
-          <SegmentedControl
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            scannedCount={scannedItems.length}
-            remainingCount={remainingCount}
-            unexpectedCount={unexpectedCount}
-            unexpectedFilterActive={showUnexpectedOnly}
-            onUnexpectedPress={() => {
-              // The badge sits inside the Scanned tab button, and React Native
-              // gives the press to the inner touchable only, so the parent tab
-              // never fires. Switch the tab here: without it a press from the
-              // Not-scanned tab flips the filter while that list stays on screen.
-              setActiveTab("scanned");
-              setShowUnexpectedOnly((v) => !v);
+  // Manual code entry: type a QR id, barcode value, or SAM id when a label
+  // can't be scanned. Feeds the same resolution pipeline as the camera. Web
+  // parity: the web audit scanner (audits.$auditId.scan.tsx) uses the shared
+  // CodeScanner, which exposes a manual code-entry Input. testIDs and state
+  // keep the `dev-scan`/`devScan` prefix so the e2e flows stay stable.
+  const manualEntry = (
+    <View
+      style={[
+        styles.devScanContainer,
+        {
+          paddingLeft: spacing.md + cameraEdges.left,
+          paddingRight: spacing.md + cameraEdges.right,
+          // Beside the list it is the camera column's bottom row: clear of the
+          // home indicator when the tab sidebar leaves that edge uncovered.
+          paddingBottom: spacing.xs + split.camera.bottom,
+        },
+      ]}
+    >
+      {devScanVisible ? (
+        <View style={styles.devScanRow}>
+          <TextInput
+            testID="dev-scan-input"
+            style={styles.devScanInput}
+            value={devScanInput}
+            onChangeText={setDevScanInput}
+            placeholder="Enter QR, barcode, or SAM ID"
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="go"
+            onSubmitEditing={() => {
+              if (devScanInput.trim()) {
+                handleBarCodeScanned({ data: devScanInput.trim() });
+                setDevScanInput("");
+              }
             }}
           />
-
-          {/* why: the evidence sheet lives behind a row tap, so name it once
-              the first row exists — on the Scanned tab, where the rows are. */}
-          {activeTab === "scanned" && (
-            <EvidenceCoachmark
-              enabled={scannedItems.length > 0}
-              hasOpenedEvidence={hasOpenedEvidence}
-            />
-          )}
-
-          {/* List content */}
-          {activeTab === "scanned" ? (
-            <ScannedItemsList
-              items={visibleScannedItems}
-              onItemPress={handleItemPress}
-            />
-          ) : (
-            <RemainingAssetsList items={remainingAssets} />
-          )}
-        </View>
-
-        {/* Complete button */}
-        {scannedItems.length > 0 && (
           <TouchableOpacity
-            style={styles.completeButton}
-            onPress={handleComplete}
-            accessibilityLabel="Complete audit"
-            accessibilityRole="button"
+            testID="dev-scan-submit"
+            style={styles.devScanButton}
+            onPress={() => {
+              if (devScanInput.trim()) {
+                handleBarCodeScanned({ data: devScanInput.trim() });
+                setDevScanInput("");
+              }
+            }}
+            accessibilityLabel="Look up code"
           >
-            <Ionicons
-              name="checkmark-done-outline"
-              size={18}
-              color={colors.primaryForeground}
-            />
-            <Text style={styles.completeButtonText}>Complete Audit</Text>
+            <Ionicons name="arrow-forward" size={16} color="#fff" />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.devScanClose}
+            onPress={() => setDevScanVisible(false)}
+            accessibilityLabel="Close manual entry"
+          >
+            <Ionicons name="close" size={16} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          testID="dev-scan-toggle"
+          style={styles.devScanToggle}
+          onPress={() => setDevScanVisible(true)}
+          accessibilityLabel="Enter a code manually"
+        >
+          <Ionicons name="keypad-outline" size={14} color="#fff" />
+          <Text style={styles.devScanToggleText}>Enter code</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  // Progress and the scanned / not-scanned lists.
+  const panel = (
+    <View
+      style={[
+        styles.bottomPanel,
+        sideBySide && styles.bottomPanelBeside,
+        {
+          // Beside the camera the panel reaches the top of the screen.
+          paddingTop: spacing.md + split.panel.top,
+          paddingLeft: spacing.lg + split.panel.left,
+          paddingRight: spacing.lg + split.panel.right,
+          // Below a tab sidebar nothing takes the home-indicator inset.
+          paddingBottom: split.panel.bottom,
+        },
+      ]}
+    >
+      <ProgressHeader
+        foundCount={foundCount}
+        expectedCount={expectedTotal}
+        unexpectedCount={unexpectedCount}
+        progressAnim={progressAnim}
+        progressPercent={progressPercent}
+      />
+
+      {/* Scanned / Remaining toggle + list */}
+      <View style={styles.scannedListSection}>
+        <SegmentedControl
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          scannedCount={scannedItems.length}
+          remainingCount={remainingCount}
+          unexpectedCount={unexpectedCount}
+          unexpectedFilterActive={showUnexpectedOnly}
+          onUnexpectedPress={() => {
+            // The badge sits inside the Scanned tab button, and React Native
+            // gives the press to the inner touchable only, so the parent tab
+            // never fires. Switch the tab here: without it a press from the
+            // Not-scanned tab flips the filter while that list stays on screen.
+            setActiveTab("scanned");
+            setShowUnexpectedOnly((v) => !v);
+          }}
+        />
+
+        {/* why: the evidence sheet lives behind a row tap, so name it once
+              the first row exists — on the Scanned tab, where the rows are. */}
+        {activeTab === "scanned" && (
+          <EvidenceCoachmark
+            enabled={scannedItems.length > 0}
+            hasOpenedEvidence={hasOpenedEvidence}
+          />
+        )}
+
+        {/* List content */}
+        {activeTab === "scanned" ? (
+          <ScannedItemsList
+            items={visibleScannedItems}
+            onItemPress={handleItemPress}
+          />
+        ) : (
+          <RemainingAssetsList items={remainingAssets} />
         )}
       </View>
+
+      {/* Complete button */}
+      {scannedItems.length > 0 && (
+        <TouchableOpacity
+          style={styles.completeButton}
+          onPress={handleComplete}
+          accessibilityLabel="Complete audit"
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="checkmark-done-outline"
+            size={18}
+            color={colors.primaryForeground}
+          />
+          <Text style={styles.completeButtonText}>Complete Audit</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  return (
+    <View
+      style={[styles.container, sideBySide && styles.containerBeside]}
+      onLayout={onScreenLayout}
+    >
+      {/* One element tree in both layouts, so switching between them
+          restyles the camera instead of remounting it. */}
+      <View
+        style={sideBySide ? styles.cameraColumnBeside : styles.cameraColumn}
+      >
+        {cameraSection}
+        {manualEntry}
+      </View>
+      {panel}
 
       <CompleteAuditSheet
         key={auditId}
@@ -1529,6 +1622,25 @@ const useStyles = createStyles((colors, shadows) => ({
   container: {
     flex: 1,
     backgroundColor: "#000",
+  },
+  containerBeside: {
+    flexDirection: "row",
+  },
+  // Holds the camera and the manual entry. Upright, it takes the manual
+  // entry's height plus 6 of the 11 shares of what is left (the panel takes
+  // 5), so the camera gets 6/11 of the space beside the manual-entry row.
+  cameraColumn: {
+    flexGrow: 6,
+    flexShrink: 1,
+    flexBasis: "auto",
+    // Above the panel, which overlaps it from below: the manual-entry row
+    // inside must stay visible and take its own taps.
+    zIndex: 1,
+  },
+  // Beside the list on a wide screen: 6 of 11 shares of the width.
+  cameraColumnBeside: {
+    flex: 6,
+    zIndex: 1,
   },
   centered: {
     flex: 1,
@@ -1565,23 +1677,22 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.md,
   },
 
-  // Camera section (top 60%)
+  // Camera: above the manual entry, in the camera column.
   cameraSection: {
-    flex: 6,
+    flex: 1,
     backgroundColor: "#000",
     position: "relative",
   },
   cameraOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "space-between",
   },
 
   // Camera header
+  // Padding comes from the screen's insets at render time.
   cameraHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: Platform.OS === "ios" ? 60 : 40,
-    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
   headerBackButton: {
@@ -1691,7 +1802,7 @@ const useStyles = createStyles((colors, shadows) => ({
 
   // Paused overlay
   pausedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
     alignItems: "center",
@@ -1709,11 +1820,10 @@ const useStyles = createStyles((colors, shadows) => ({
   },
 
   // Toast
+  // `left` and `right` come from the screen's insets at render time.
   toast: {
     position: "absolute",
     bottom: spacing.lg,
-    left: spacing.lg,
-    right: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     borderRadius: borderRadius.lg,
@@ -1747,7 +1857,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: "rgba(255,255,255,0.8)",
   },
 
-  // Bottom panel (~45%) — the scanned list needs to show more than a row and
+  // Bottom panel (~45%): the scanned list needs to show more than a row and
   // a half, otherwise a fresh scan can land below the fold.
   bottomPanel: {
     flex: 5,
@@ -1756,8 +1866,14 @@ const useStyles = createStyles((colors, shadows) => ({
     borderTopRightRadius: borderRadius.xl,
     marginTop: -12,
     paddingTop: spacing.md,
-    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
+  },
+  // Beside the camera: rounded on the camera's side, without overlapping it,
+  // so the scan frame stays centred in the camera the operator sees.
+  bottomPanelBeside: {
+    marginTop: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: borderRadius.xl,
   },
 
   // Scanned items list
@@ -1785,8 +1901,8 @@ const useStyles = createStyles((colors, shadows) => ({
   },
 
   // ── Dev Scan Injection (DEV only) ───────────────
+  // Side padding comes from the screen's insets at render time.
   devScanContainer: {
-    paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     zIndex: 999,
   },

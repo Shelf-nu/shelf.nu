@@ -156,6 +156,53 @@ describe("useCalendarNowIndicatorFix", () => {
     expect(changeView).not.toHaveBeenCalled();
   });
 
+  it("switches after a cleanup cut the first attempt short", () => {
+    // React StrictMode in development runs every effect cleanup once right
+    // after mount, and FullCalendar then mounts its view again.
+    const { changeView, result } = setup();
+
+    act(() => {
+      result.current.handleNowIndicatorDidMount();
+    });
+    act(() => {
+      result.current.cleanup();
+    });
+    act(() => {
+      result.current.handleNowIndicatorDidMount();
+    });
+    advance(PAST_EVERY_TIMER);
+
+    expect(changeView).toHaveBeenCalledTimes(1);
+    expect(result.current.isCalendarReady).toBe(true);
+  });
+
+  it("tries again when the calendar was not there yet", () => {
+    const { changeView, result } = setup();
+    const calendarRef = { current: null as null | { getApi: () => unknown } };
+    const { result: early } = renderHook(() =>
+      useCalendarNowIndicatorFix({
+        resources: [{ id: "asset-1" }],
+        calendarRef: calendarRef as unknown as RefObject<FullCalendar | null>,
+        targetView: TARGET_VIEW,
+        setCalendarView: vi.fn(),
+      })
+    );
+
+    act(() => {
+      early.current.handleNowIndicatorDidMount();
+    });
+    advance(PAST_EVERY_TIMER);
+    calendarRef.current = { getApi: () => ({ changeView }) };
+    act(() => {
+      early.current.handleNowIndicatorDidMount();
+    });
+    advance(PAST_EVERY_TIMER);
+
+    expect(changeView).toHaveBeenCalledTimes(1);
+    expect(early.current.isCalendarReady).toBe(true);
+    expect(result.current.isCalendarReady).toBe(false);
+  });
+
   it("drops pending timers when the calendar unmounts", () => {
     const { changeView, result, unmount } = setup();
 
