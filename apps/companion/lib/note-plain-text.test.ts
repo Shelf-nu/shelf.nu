@@ -401,3 +401,26 @@ test("a tag no reader understands never links what it holds", () => {
     []
   );
 });
+
+test("a typed Markdown link links only in a comment, never in a system note", () => {
+  const source = "See [Verify your account](https://evil.example)";
+  assert.equal(
+    markdocToSegments(source, format, BASE, SYSTEM).some(
+      (segment) =>
+        segment.type === "link" && segment.text === "Verify your account"
+    ),
+    false
+  );
+  assert.deepEqual(
+    markdocToSegments(source, format, BASE, COMMENT).filter(
+      (segment) => segment.type === "link"
+    ),
+    [
+      {
+        type: "link",
+        text: "Verify your account",
+        url: "https://evil.example",
+      },
+    ]
+  );
+});

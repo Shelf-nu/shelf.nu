@@ -133,6 +133,8 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
       "User"
     : "System";
   const isUpdate = note.type === "UPDATE";
+  // The connected server, read each render: a note link resolves against it.
+  const baseUrl = getActiveServer().baseUrl;
   const segments = useMemo(
     () =>
       markdocToSegments(
@@ -143,12 +145,12 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
           // wording change in @shelf/labels reaches this preview too.
           status: formatStatus,
         },
-        getActiveServer().baseUrl,
+        baseUrl,
         // A comment's Markdown links read as their labels; a system note's
         // typed values never hide an outside link (as on the web).
         { allowExternalLinks: !isUpdate }
       ),
-    [note.content, prefs, isUpdate]
+    [note.content, prefs, isUpdate, baseUrl]
   );
 
   return (

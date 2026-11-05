@@ -110,7 +110,7 @@ test("a tapped QR link that does not resolve gets the notice, never the browser"
         { recordScan: false },
         recordingLookups(result).lookups
       ),
-      { kind: "web-only", url: `${CLOUD}/qr/qr_1` }
+      { kind: "web-only", url: `${CLOUD}/qr/qr_1`, reason: "qr-unresolved" }
     );
   }
 });
@@ -190,6 +190,7 @@ test("a QR link closes the modal only once its screen is known", async () => {
   const unresolved = loggingEffects({
     kind: "web-only",
     url: `${CLOUD}/qr/qr_1`,
+    reason: "qr-unresolved",
   });
   await dispatchLinkOpening(opening, unresolved.effects);
   assert.deepEqual(unresolved.log, [
@@ -258,4 +259,30 @@ test("a modal that chooses to stay keeps the link from opening its screen", asyn
     );
     assert.deepEqual(log, ["leave", "qr:qr_1", "leave"]);
   }
+});
+
+test("a tapped QR code of another workspace gets the other-workspace notice", async () => {
+  const otherWorkspace: QrLookupResult = {
+    data: { qr: { asset: { id: "as_1" }, organizationId: "org_b" } },
+  };
+  assert.deepEqual(
+    await resolveQrOutcome(
+      "qr_1",
+      CLOUD,
+      CLOUD,
+      { recordScan: false, orgId: "org_a" },
+      recordingLookups(otherWorkspace).lookups
+    ),
+    { kind: "web-only", url: `${CLOUD}/qr/qr_1`, reason: "other-workspace" }
+  );
+  assert.deepEqual(
+    await resolveQrOutcome(
+      "qr_1",
+      CLOUD,
+      CLOUD,
+      { recordScan: false, orgId: "org_b" },
+      recordingLookups(otherWorkspace).lookups
+    ),
+    { kind: "screen", tabRoot: "/(tabs)/assets", href: "/(tabs)/assets/as_1" }
+  );
 });

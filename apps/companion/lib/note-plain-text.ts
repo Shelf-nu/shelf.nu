@@ -23,7 +23,7 @@
  */
 
 import { segmentText, type TextSegment } from "@shelf/links";
-import { opensInApp } from "./open-link";
+import { opensInApp, parseWebUrl } from "./open-link";
 import { findTextLinks } from "./text-links";
 
 /** How the caller formats the parts that depend on the user's preferences. */
@@ -282,7 +282,7 @@ export function markdocToSegments(
     source = source.replace(
       MARKDOWN_LINK,
       (match, text: string, url: string) =>
-        isWebUrl(url)
+        parseWebUrl(url) !== null
           ? hold({ type: "link", text: cleanRunText(text), url })
           : match
     );
@@ -323,16 +323,6 @@ function linkPlainText(text: string): TextSegment[] {
   }
   if (cursor < text.length) segments.push(...findTextLinks(text.slice(cursor)));
   return segments;
-}
-
-/** Whether a URL parses as an http(s) URL, as `resolveLinkOpening` needs. */
-function isWebUrl(url: string): boolean {
-  try {
-    const { protocol } = new URL(url);
-    return protocol === "http:" || protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 /**

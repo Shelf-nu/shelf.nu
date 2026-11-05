@@ -91,7 +91,13 @@ export type LinkOpening =
   /** Any other page, shown in the in-app browser. */
   | { readonly opener: "browser"; readonly url: string };
 
-function parseWebUrl(url: string): URL | null {
+/**
+ * The URL when it is an http(s) URL with a host, otherwise null.
+ *
+ * @param url - Any string.
+ * @returns The parsed URL, or null.
+ */
+export function parseWebUrl(url: string): URL | null {
   try {
     const parsed = new URL(url);
     const isWeb = parsed.protocol === "http:" || parsed.protocol === "https:";
@@ -150,7 +156,14 @@ function shelfDestination(
   if (match.resource === "qr") {
     // The resolver hands a code from another server to that server's web.
     return match.id
-      ? { opener: "qr", qrId: match.id, origin: new URL(url).origin }
+      ? {
+          opener: "qr",
+          qrId: match.id,
+          // why: lowercased because the URL polyfill on device keeps the
+          // host's case as typed, and the origin is compared with the
+          // connected server's.
+          origin: new URL(url).origin.toLowerCase(),
+        }
       : webOnly("no-screen");
   }
   if (!onActiveServer) return null;

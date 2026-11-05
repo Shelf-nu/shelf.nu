@@ -141,3 +141,17 @@ test("an open after the double-tap window, or after the first ends, runs", async
   void pending("https://d.example");
   assert.deepEqual(opened.slice(2), ["https://c.example", "https://d.example"]);
 });
+
+test("a different page opened within the window opens, not the first one", () => {
+  const opened: string[] = [];
+  const open = joinOpensInFlight(
+    (url: string) => {
+      opened.push(url);
+      return new Promise<Result>(() => {});
+    },
+    () => 0
+  );
+  void open("https://a.example");
+  void open("https://b.example");
+  assert.deepEqual(opened, ["https://a.example", "https://b.example"]);
+});

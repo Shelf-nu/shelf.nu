@@ -53,9 +53,9 @@ export async function openPastStaleLock<Result extends { type: string }>(
 export const DOUBLE_TAP_WINDOW_MS = 1000;
 
 /**
- * Wraps an opener so a second call made while the first is still being
- * presented (a double tap) joins the first open instead of starting its
- * own. Without it, the second tap finds the first browser's session held,
+ * Wraps an opener so a second call for the same URL made while the first
+ * is still being presented (a double tap) joins the first open instead of
+ * starting its own. A different URL always opens. Without it, the second tap finds the first browser's session held,
  * reads it as stale, and closes and reopens the browser.
  *
  * Only the first `windowMs` count: an open still pending after that is a
@@ -72,12 +72,16 @@ export function joinOpensInFlight<Result>(
   now: () => number = Date.now,
   windowMs: number = DOUBLE_TAP_WINDOW_MS
 ): (url: string) => Promise<Result> {
-  let pending: { promise: Promise<Result>; startedAt: number } | null = null;
+  let pending: {
+    url: string;
+    promise: Promise<Result>;
+    startedAt: number;
+  } | null = null;
   return (url) => {
-    if (pending && now() - pending.startedAt < windowMs) {
+    if (pending?.url === url && now() - pending.startedAt < windowMs) {
       return pending.promise;
     }
-    const entry = { promise: open(url), startedAt: now() };
+    const entry = { url, promise: open(url), startedAt: now() };
     pending = entry;
     const settle = () => {
       if (pending === entry) pending = null;

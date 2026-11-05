@@ -25,6 +25,8 @@ export type QrLookupResult = {
     readonly qr?: {
       readonly asset?: { readonly id: string } | null;
       readonly kitId?: string | null;
+      /** The workspace the code belongs to. */
+      readonly organizationId?: string | null;
     } | null;
   } | null;
   readonly error?: unknown;
@@ -45,7 +47,11 @@ export type QrOutcome =
   /** The web QR page, in the in-app browser. */
   | { readonly kind: "browser"; readonly url: string }
   /** A notice that the code does not open in the app, with Copy link. */
-  | { readonly kind: "web-only"; readonly url: string };
+  | {
+      readonly kind: "web-only";
+      readonly url: string;
+      readonly reason: "qr-unresolved" | "other-workspace";
+    };
 
 /**
  * Looks a QR code up and says where it leads.
@@ -56,13 +62,16 @@ export type QrOutcome =
  * resolve goes to the web QR page, which offers claim, link or sign-in. A
  * link tapped in the app records nothing, and a code that does not resolve
  * gets the web-only notice: the in-app browser has no Shelf session and
- * would only show the web login.
+ * would only show the web login. A tapped code from another workspace than
+ * the one on show gets the "other workspace" notice: its screen would look
+ * the id up in the wrong workspace.
  *
  * @param qrId - The QR code id.
  * @param origin - The origin the link carried, when it had one.
  * @param apiBaseUrl - Base URL of the connected Shelf server.
  * @param options - `recordScan: false` for a tapped link, with the
- *   workspace (`orgId`) the non-recording lookup needs for a SAM id.
+ *   workspace on show (`orgId`): the non-recording lookup needs it for a
+ *   SAM id, and a code of another workspace is compared against it.
  * @param lookups - The recording and non-recording lookups.
  * @returns Where the code leads. Never rejects: a failed lookup counts as
  *   not resolved.
@@ -78,10 +87,15 @@ export async function resolveQrOutcome(
     return { kind: "browser", url: `${origin}/qr/${qrId}` };
   }
 
+  const url = `${apiBaseUrl}/qr/${qrId}`;
   try {
     const { data, error } = recordScan
       ? await lookups.scan(qrId)
       : await lookups.lookup(qrId, orgId);
+    const codeOrgId = error ? undefined : data?.qr?.organizationId;
+    if (!recordScan && orgId && codeOrgId && codeOrgId !== orgId) {
+      return { kind: "web-only", url, reason: "other-workspace" };
+    }
     const assetId = error ? undefined : data?.qr?.asset?.id;
     if (assetId) {
       return {
@@ -102,8 +116,9 @@ export async function resolveQrOutcome(
     // Not resolved: handled below like an unknown code.
   }
 
-  const url = `${apiBaseUrl}/qr/${qrId}`;
-  return recordScan ? { kind: "browser", url } : { kind: "web-only", url };
+  return recordScan
+    ? { kind: "browser", url }
+    : { kind: "web-only", url, reason: "qr-unresolved" };
 }
 
 /**
@@ -158,7 +173,7 @@ export async function dispatchLinkOpening(
           effects.openScreen(outcome);
           return;
         case "web-only":
-          effects.showWebOnly(outcome.url, "qr-unresolved");
+          effects.showWebOnly(outcome.url, outcome.reason);
           return;
         case "browser":
           await effects.openBrowser(outcome.url);

@@ -1472,9 +1472,11 @@ function ScannerContent() {
             codeOrgId === currentOrg?.id &&
             (canCreateAsset || canManageQrCodes);
 
-          if (qrId && kitId) {
+          if (qrId && kitId && kit) {
             // The kit is in this workspace (another workspace's code was
-            // handled above), and the app has its screen.
+            // handled above), and the app has its screen. A kit the lookup
+            // could not return (deleted, or not visible to this person)
+            // gets no button: its screen would only say "not found".
             const linkedKitId = kitId;
             unlinkedQrAction = {
               label: "View Kit",

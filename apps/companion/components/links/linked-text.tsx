@@ -10,7 +10,9 @@
  *
  * A tap opens the link through `openLink`: a Shelf screen the app has, or
  * the in-app browser. A long-press shows Copy link and Share, except in
- * selectable text, where it selects text as everywhere else. Link runs are
+ * selectable text, where it selects text as everywhere else. On Android,
+ * text with links is never selectable, because a selectable Text there
+ * takes the taps meant for its links. Link runs are
  * Shelf orange (`primaryText`, AA on every surface) and underlined, and keep
  * the text's font metrics, so a clipped copy measured without links wraps
  * identically.
@@ -20,7 +22,7 @@
  * @see {@link file://../../lib/link-actions.ts} `openLink`, `showLinkMenu`
  */
 import { memo, useMemo } from "react";
-import { Text } from "react-native";
+import { Platform, Text } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
 import { segmentText, type TextSegment } from "@shelf/links";
 import { LINK_HINT, useLinkHandlers } from "@/lib/link-actions";
@@ -73,12 +75,19 @@ export const LinkedText = memo(function LinkedText({
       (bareDomains ? findTextLinks(text ?? "") : segmentText(text ?? "")),
     [segments, text, bareDomains]
   );
+  // why: on Android a selectable Text takes every touch, so the link runs
+  // nested in it would never fire. Text with links there is not selectable;
+  // each link's long-press still offers Copy link.
+  const isSelectable =
+    selectable === true &&
+    (Platform.OS !== "android" ||
+      !runs.some((segment) => segment.type === "link"));
 
   return (
     <Text
       style={style}
       numberOfLines={numberOfLines}
-      selectable={selectable}
+      selectable={isSelectable}
       testID={testID}
     >
       {runs.map((segment, index) =>
@@ -91,9 +100,9 @@ export const LinkedText = memo(function LinkedText({
             // why: in selectable text a long-press starts the system's text
             // selection, and a second menu on top of its Copy callout is
             // noise; the link's chip (LinkedParagraph) still has the menu.
-            onLongPress={selectable ? undefined : () => showMenu(segment.url)}
+            onLongPress={isSelectable ? undefined : () => showMenu(segment.url)}
             accessibilityRole="link"
-            accessibilityHint={selectable ? undefined : LINK_HINT}
+            accessibilityHint={isSelectable ? undefined : LINK_HINT}
           >
             {segment.text}
           </Text>

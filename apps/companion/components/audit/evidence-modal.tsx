@@ -35,6 +35,7 @@ import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useCentredSheetSpan } from "@/lib/use-safe-edges";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 import { LinkedText } from "@/components/links/linked-text";
+import { hasUnsentEvidence } from "@/lib/audit-evidence-draft";
 
 // Lazy-load native image modules below all imports (keeps import/first happy)
 // to avoid a crash when the native module isn't present in the current build.
@@ -248,8 +249,7 @@ export function EvidenceModal({
    * stays here with the draft as it was.
    */
   const leaveForLink = useCallback((): Promise<boolean> => {
-    const hasDraft = noteText.trim().length > 0 || selectedImageUri !== null;
-    if (!hasDraft) {
+    if (!hasUnsentEvidence(noteText, selectedImageUri)) {
       handleClose();
       return Promise.resolve(true);
     }
