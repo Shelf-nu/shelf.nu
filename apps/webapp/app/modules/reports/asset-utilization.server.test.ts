@@ -38,8 +38,21 @@ const TIMEFRAME: ResolvedTimeframe = {
 };
 
 /** A booking slice as projected by the asset query's `bookingAssets` select. */
-function slice(id: string, from: string, to: string) {
-  return { booking: { id, from: new Date(from), to: new Date(to) } };
+function slice(id: string, from: string, to: string, quantity = 1) {
+  return { quantity, booking: { id, from: new Date(from), to: new Date(to) } };
+}
+
+/** Build a QUANTITY_TRACKED asset pool. */
+function quantityAsset(
+  id: string,
+  poolQuantity: number,
+  bookingSlices: ReturnType<typeof slice>[]
+) {
+  return {
+    ...asset(id, bookingSlices),
+    type: "QUANTITY_TRACKED",
+    quantity: poolQuantity,
+  };
 }
 
 /**
@@ -172,5 +185,102 @@ describe("assetUtilizationReport", () => {
     expect(result.rows[0].daysInUse).toBe(result.rows[0].totalDays);
     expect(result.rows[0].utilizationRate).toBe(100);
     expect(result.rows[0].bookingCount).toBe(3);
+  });
+  it("weights quantity-tracked assets by booked units over pool capacity", async () => {
+    // 1 unit of a 14-unit asset booked for the entire 30-day window:
+    // 30 unit-days booked out of 30 * 14 = 420 available unit-days.
+    // Utilization rate should be 30 / 420 = 7%, not 100%.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-05-01T00:00:00Z", 1),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].utilizationRate).toBe(7);
+    expect(result.rows[0].bookingCount).toBe(1);
+    expect(result.rows[0].daysInUse).toBe(3); // ceil(30 / 14)
+  });
+
+  it("reports 100% utilization when all units in a quantity pool are booked", async () => {
+    // All 14 units booked for the entire window
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-05-01T00:00:00Z", 14),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(100);
+    expect(result.rows[0].daysInUse).toBe(result.rows[0].totalDays);
+  });
+
+  it("aggregates concurrent bookings of separate units in a quantity pool", async () => {
+    // Booking 1: 5 units for 15 days (Apr 1–16) -> 75 unit-days
+    // Booking 2: 5 units for 15 days (Apr 1–16) -> 75 unit-days
+    // Total: 150 unit-days out of 14 * 30 = 420 unit-days -> 36%
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 5),
+        slice("b-2", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 5),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(36);
+    expect(result.rows[0].bookingCount).toBe(2);
+  });
+
+  it("sums multiple slices belonging to the same booking in a quantity pool", async () => {
+    // One booking with two slices (e.g. kit-driven slice of 2 + standalone slice of 3 = 5 units)
+    // for 15 days = 75 unit-days out of 420 unit-days = 18%
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 14, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 2),
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 3),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(18);
+    expect(result.rows[0].bookingCount).toBe(1);
+  });
+
+  it("caps instantaneous in-use units at pool capacity during overlapping bookings", async () => {
+    // Two overlapping bookings of 8 units each on a 10-unit pool across the
+    // first 15 days (Apr 1-16), idle for the remaining 15 days:
+    // instantaneous usage caps at 10 units -> 150 / 300 = 50% (not 80%).
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 10, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 8),
+        slice("b-2", "2026-04-01T00:00:00Z", "2026-04-16T00:00:00Z", 8),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(50);
+    expect(result.rows[0].daysInUse).toBe(15);
+    expect(result.rows[0].bookingCount).toBe(2);
   });
 });
