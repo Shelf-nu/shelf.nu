@@ -2738,10 +2738,11 @@ export async function requireAuditAssignee({
   /** When true, the caller must be an assignee; when false (the caller's `audits.seeAll`), always allowed. */
   assignedOnly?: boolean;
 }): Promise<void> {
-  // Callers who see every audit act on any audit in their workspace.
-  // Returning before the fetch is safe: every downstream service re-verifies
-  // the session against organizationId (recordAuditScan,
-  // completeAuditSession, requireAuditAssetInSession all 404 on cross-org ids).
+  // Callers who see every audit act on any audit in their workspace, so there
+  // is no assignment to look up. This does NOT prove the audit is in
+  // `organizationId`: every write that follows must check that itself
+  // (recordAuditScan, completeAuditSession and requireAuditAssetInSession
+  // 404 on cross-org ids; uploadAuditImage asserts it before storing).
   if (!assignedOnly) {
     return;
   }
