@@ -50,6 +50,10 @@ appId: com.shelf.companion.carlos
 - tapOn:
     text: "Turn on flashlight"
     optional: true
+# Every "Turn off flashlight" check in this flow reads the button label, which
+# follows React state only. It cannot see the hardware torch: iOS can switch
+# the light off while the label still says it is on. The guard for that is
+# lib/camera-frame-gate.test.ts (each camera keeps one stable scan handler).
 - assertVisible: "Turn off flashlight"
 - assertVisible:
     id: "dev-scan-toggle"

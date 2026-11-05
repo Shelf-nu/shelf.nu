@@ -46,6 +46,7 @@ import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { endScan, tryBeginScan } from "@/lib/scan-lock";
 import { useAuditInit } from "@/hooks/use-audit-init";
 import { useScanQueue } from "@/hooks/use-scan-queue";
 import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
@@ -128,11 +129,7 @@ function AuditScannerContent() {
 
   // ── Cooldown (shared hook) ───────────────────────────
 
-  const {
-    shouldSkip: shouldSkipScan,
-    startCooldown,
-    lastScanRef,
-  } = useScanCooldown();
+  const { startCooldown, lastScanRef } = useScanCooldown();
 
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
@@ -629,7 +626,7 @@ function AuditScannerContent() {
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = useCallback(() => {
-    isProcessingRef.current = false;
+    endScan(isProcessingRef);
     setIsProcessing(false);
     startCooldown();
   }, [startCooldown]);
@@ -638,11 +635,9 @@ function AuditScannerContent() {
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || shouldSkipScan(data)) return;
       if (!auditId || !currentOrg) return;
+      if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
-      isProcessingRef.current = true;
-      lastScanRef.current = data;
       setIsProcessing(true);
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -867,7 +862,6 @@ function AuditScannerContent() {
       debouncedSaverRef,
       scanQueueRef,
       failedQueueRef,
-      shouldSkipScan,
       lastScanRef,
     ]
   );

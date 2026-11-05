@@ -113,6 +113,8 @@ import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useRoleAccess } from "@/hooks/use-role-access";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { endScan, tryBeginScan } from "@/lib/scan-lock";
+import { CONTROL_ROW_GAP, SCAN_FRAME_SIZE } from "@/lib/scanner-geometry";
 import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
 import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
@@ -375,6 +377,13 @@ function ScannerContent() {
    * a tall result card can never cover the controls.
    */
   const [controlsBottom, setControlsBottom] = useState(0);
+  /**
+   * Top of the overlay's bottom strip, and the offset inside it where the
+   * scan status sits (under the mode dots). Together they place the status
+   * host under the frame while no drawer is open.
+   */
+  const [bottomStripTop, setBottomStripTop] = useState(0);
+  const [statusSlotTop, setStatusSlotTop] = useState(0);
 
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -534,11 +543,7 @@ function ScannerContent() {
   const [devScanVisible, setDevScanVisible] = useState(false);
 
   // Cooldown (shared hook)
-  const {
-    shouldSkip: shouldSkipScan,
-    startCooldown,
-    lastScanRef,
-  } = useScanCooldown();
+  const { startCooldown, lastScanRef } = useScanCooldown();
 
   // Scan processing state (extracted hook) -- created first so
   // its setIsPaused can be referenced by the inactivity callback.
@@ -687,7 +692,7 @@ function ScannerContent() {
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = () => {
-    isProcessingRef.current = false;
+    endScan(isProcessingRef);
     setIsProcessing(false);
     startCooldown();
   };
@@ -792,10 +797,8 @@ function ScannerContent() {
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || shouldSkipScan(data)) return;
+      if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
-      isProcessingRef.current = true;
-      lastScanRef.current = data;
       setIsProcessing(true);
       setScanResult(null);
       resetInactivityTimer();
@@ -1883,8 +1886,8 @@ function ScannerContent() {
         finalizeScan();
       }
     },
-    // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing, setScanResult,
-    // and shouldSkipScan are stable across renders (refs and setState identities) or
+    // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing and
+    // setScanResult are stable across renders (refs and setState identities) or
     // would cause render storms if listed; intentionally excluded. setCurrentOrg is
     // likewise stable (a useCallback with no deps in OrgProvider). `organizations`
     // IS listed: refreshing the org list hands over a new array without changing
@@ -3323,6 +3326,10 @@ function ScannerContent() {
             },
           ]}
           pointerEvents="box-none"
+          onLayout={(e) => {
+            const top = Math.round(e.nativeEvent.layout.y);
+            setBottomStripTop((prev) => (prev === top ? prev : top));
+          }}
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -3336,52 +3343,69 @@ function ScannerContent() {
             <ActionPillsCoachmark
               enabled={availableActions.length > 1}
               currentAction={action}
+              hidden={scanStatus !== null || drawerHeight > 0}
             />
           )}
 
-          {/* Status / instruction text, animated for swipe transitions.
-              Only the result card takes touches; plain text lets them pass.
-              While a drawer is open the status moves to its own host above
-              the drawer (below), and the idle hint gives way to the drawer,
-              whose title and submit button say what the scans are for. */}
-          {drawerHeight === 0 && (
+          {/* Where the scan status host starts while no drawer is open. */}
+          <View
+            pointerEvents="none"
+            onLayout={(e) => {
+              const top = Math.round(e.nativeEvent.layout.y);
+              setStatusSlotTop((prev) => (prev === top ? prev : top));
+            }}
+          />
+
+          {/* Idle instruction text, animated for swipe transitions. A lookup
+              or a result replaces it in the status host (below), and an open
+              drawer replaces it too: the drawer's title and submit button say
+              what the scans are for. */}
+          {drawerHeight === 0 && !scanStatus && (
             <Animated.View
               style={[styles.instructionContainer, statusMotion]}
-              pointerEvents={scanResult ? "auto" : "none"}
+              pointerEvents="none"
             >
-              {scanStatus ?? (
-                <Text style={styles.instructionText}>
-                  {isBookingMode
-                    ? isBookingFulfilMode
-                      ? "Scan the reserved units to assign"
-                      : isBookingAddMode
-                      ? "Scan assets or kits to add"
-                      : isBookingCheckoutMode
-                      ? "Scan assets to check out"
-                      : "Scan assets to check in"
-                    : instructionMap[action]}
-                </Text>
-              )}
+              <Text style={styles.instructionText}>
+                {isBookingMode
+                  ? isBookingFulfilMode
+                    ? "Scan the reserved units to assign"
+                    : isBookingAddMode
+                    ? "Scan assets or kits to add"
+                    : isBookingCheckoutMode
+                    ? "Scan assets to check out"
+                    : "Scan assets to check in"
+                  : instructionMap[action]}
+              </Text>
             </Animated.View>
           )}
         </View>
       </View>
 
-      {/* ── Status above an open drawer ────────────────
-          Its own screen-level host, between the camera controls and the
-          drawer's top edge, so a result card is never drawn under the list,
-          never over the controls, and stays inside its parent's bounds (on
-          Android a touch outside them is not delivered). A card taller than
-          the gap scrolls. */}
-      {drawerHeight > 0 && scanStatus && (
+      {/* ── Scan status host ───────────────────────────
+          One screen-level host for the lookup spinner and the result card.
+          With no drawer it sits under the frame, below the mode dots; with a
+          drawer open it fills the gap between the camera controls and the
+          drawer's top edge, bottom-aligned. Only its position changes, so a
+          showing card stays mounted when the drawer opens or closes. It is
+          never drawn under the list or over the controls, and it stays inside
+          its own bounds (on Android a touch outside them is not delivered).
+          A card taller than the space scrolls. */}
+      {scanStatus && (
         <View
           style={[
-            styles.statusAboveDrawer,
+            styles.statusHost,
             sideInsetStyle,
-            {
-              top: controlsBottom + spacing.sm,
-              bottom: drawerHeight + spacing.sm,
-            },
+            drawerHeight > 0
+              ? {
+                  top: controlsBottom + spacing.sm,
+                  bottom: drawerHeight + spacing.sm,
+                  justifyContent: "flex-end",
+                }
+              : {
+                  top: bottomStripTop + statusSlotTop,
+                  bottom: spacing.sm,
+                  justifyContent: "flex-start",
+                },
           ]}
           pointerEvents="box-none"
         >
@@ -3650,7 +3674,6 @@ export default function ScannerScreen() {
 
 // ── Styles ────────────────────────────────────────────────
 
-const FRAME_SIZE = 240;
 /** Touch target edge for the camera controls (Apple HIG minimum). */
 const CONTROL_SIZE = 44;
 
@@ -3758,7 +3781,7 @@ const useStyles = createStyles((colors) => ({
   // `left` and `right` come from the side insets at render time.
   actionPickerContainer: {
     position: "absolute",
-    bottom: spacing.lg,
+    bottom: CONTROL_ROW_GAP,
     // Content sits on the bottom edge, just above the frame.
     justifyContent: "flex-end",
   },
@@ -3801,7 +3824,7 @@ const useStyles = createStyles((colors) => ({
   },
   middleRow: {
     flexDirection: "row",
-    height: FRAME_SIZE,
+    height: SCAN_FRAME_SIZE,
   },
   bottomSection: {
     justifyContent: "flex-start",
@@ -3813,10 +3836,10 @@ const useStyles = createStyles((colors) => ({
     alignItems: "center",
     paddingHorizontal: spacing.xxl,
   },
-  // `left` and `right` come from the side insets at render time.
-  statusAboveDrawer: {
+  // `left`, `right`, `top`, `bottom` and the alignment come from the drawer
+  // state and side insets at render time.
+  statusHost: {
     position: "absolute",
-    justifyContent: "flex-end",
     // Same layer as the drawer host, above the paused overlay.
     zIndex: 10,
   },

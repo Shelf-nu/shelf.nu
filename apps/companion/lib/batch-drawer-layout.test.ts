@@ -15,15 +15,15 @@ import {
   batchDrawerMaxHeight,
   nextAddedFlash,
 } from "./batch-drawer-layout";
+import {
+  ASSUMED_TAB_BAR_HEIGHT as TAB_BAR,
+  CONTROL_ROW_GAP as CONTROLS_GAP,
+  SCAN_FRAME_SIZE as FRAME,
+} from "./scanner-geometry";
 
-// Scanner geometry, copied from app/(tabs)/scanner.tsx (FRAME_SIZE and the
-// control row's 16pt offset above the frame); change both together.
-// iPhone Duo closed: 678pt window, ~85pt tab bar, 240pt scan frame centred in
-// the space above the tab bar, camera controls ending 16pt above the frame.
+// iPhone Duo closed: a 678pt window. The scan frame is centred in the space
+// above the tab bar, and the camera controls end CONTROLS_GAP above the frame.
 const DUO_CLOSED_HEIGHT = 678;
-const TAB_BAR = 85;
-const FRAME = 240;
-const CONTROLS_GAP = 16;
 
 test("tall phones keep the fixed caps", () => {
   assert.equal(batchDrawerMaxHeight(874, false), 280);
