@@ -203,6 +203,11 @@ export default function IndexLoginForm() {
   const passwordReset = searchParams.get("password_reset");
   /** Set by the app layout when it ends a session whose address must use SSO. */
   const ssoRequired = searchParams.get("sso_required");
+  /**
+   * Set by the auth middleware when it ends a member's session: an admin
+   * logged them out, or the session expired or was revoked.
+   */
+  const loggedOut = searchParams.get("logged_out");
   const data = useActionData<typeof action>();
   const ssoDomainHint = Boolean(
     data && "ssoDomainHint" in data && data.ssoDomainHint
@@ -234,6 +239,12 @@ export default function IndexLoginForm() {
         <div role="alert" className="mb-8 text-center text-error-600">
           This email address signs in with single sign-on. Please use Login with
           SSO.
+        </div>
+      ) : null}
+
+      {loggedOut && !ssoRequired ? (
+        <div role="status" className="mb-8 text-center text-warning-700">
+          You have been logged out. Please log back in again.
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">

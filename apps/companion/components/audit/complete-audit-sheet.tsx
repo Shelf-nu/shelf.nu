@@ -36,6 +36,7 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 import { Ionicons } from "@expo/vector-icons";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -80,6 +81,8 @@ export function CompleteAuditSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  // Android shows the sheet full screen: hold it to the reading column there.
+  const sheetColumn = useSheetColumnStyle();
   const [note, setNote] = useState("");
 
   return (
@@ -89,7 +92,7 @@ export function CompleteAuditSheet({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
+      <SafeAreaView style={[styles.container, sheetColumn]}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
