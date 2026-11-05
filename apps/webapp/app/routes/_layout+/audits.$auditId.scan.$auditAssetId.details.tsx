@@ -106,8 +106,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         auditSession: {
           select: {
             status: true,
-            // What a photo of the whole audit is checked against.
-            startedAt: true,
             assignments: {
               select: { userId: true },
             },
@@ -1125,8 +1123,6 @@ export default function AuditAssetDetails() {
           maxCount={3}
           inputNamePrefix="auditImage"
           existingImages={localImages}
-          auditStartedAt={auditAsset.auditSession.startedAt}
-          assetScannedAt={auditAsset.scannedAt}
           onExistingImageRemove={handleImageDeleteWithConfirm}
           disabled={isUploadInProgress}
           isUploading={isUploadInProgress}

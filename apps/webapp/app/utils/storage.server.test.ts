@@ -405,7 +405,13 @@ describe("inspecting the original upload", () => {
   }
 
   /** Uploads one file through the real form-data parser. */
-  function upload(file: File, inspectOriginal: (original: Buffer) => void) {
+  function upload(
+    file: File,
+    inspectOriginal: (
+      original: Buffer,
+      upload: { fieldName: string | undefined }
+    ) => void
+  ) {
     const form = new FormData();
     form.append("image", file);
     return parseFileFormData({
@@ -424,14 +430,20 @@ describe("inspecting the original upload", () => {
     // forwarding the inspector every photo is silently saved with no date.
     const original = await jpegWithDate();
     const seen: Buffer[] = [];
+    const fields: (string | undefined)[] = [];
 
     await upload(
       new File([new Uint8Array(original)], "photo.jpg", { type: "image/jpeg" }),
-      (bytes) => void seen.push(bytes)
+      (bytes, { fieldName }) => {
+        seen.push(bytes);
+        fields.push(fieldName);
+      }
     );
 
     expect(seen).toHaveLength(1);
     expect(Buffer.compare(seen[0], original)).toBe(0);
+    // The caller is told which form field the file came in.
+    expect(fields).toEqual(["image"]);
   });
 
   it("never inspects a file the upload refuses as a format", async () => {

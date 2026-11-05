@@ -495,7 +495,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
       fields: Record<string, string> = {}
     ) {
       vi.mocked(parseFileFormData).mockImplementation(async (args) => {
-        await args.inspectOriginal?.(original);
+        await args.inspectOriginal?.(original, { fieldName: "image" });
         const parsed = new FormData();
         parsed.append(
           "image",
@@ -641,13 +641,15 @@ describe("uploadAuditImage returnParsedFormData", () => {
     });
 
     it("takes the capture time from the first image part only", async () => {
-      // why: the record is made for the first `image` part, so a later part's
-      // date must never land on it.
+      // why: the record is made for the first `image` part, so another file
+      // part, before or after it, must never decide its date.
+      const other = await jpeg({ DateTimeOriginal: "2025:06:01 00:00:00" });
       const first = await jpeg({ DateTimeOriginal: "2026:10:21 09:00:00" });
       const second = await jpeg({ DateTimeOriginal: "2026:01:01 00:00:00" });
       vi.mocked(parseFileFormData).mockImplementation(async (args) => {
-        await args.inspectOriginal?.(first);
-        await args.inspectOriginal?.(second);
+        await args.inspectOriginal?.(other, { fieldName: "attachment" });
+        await args.inspectOriginal?.(first, { fieldName: "image" });
+        await args.inspectOriginal?.(second, { fieldName: "image" });
         const parsed = new FormData();
         parsed.append(
           "image",

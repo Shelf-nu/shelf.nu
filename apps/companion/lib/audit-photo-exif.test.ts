@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  appendAuditImageUpload,
   appendPhotoCapture,
   captureTagsFromPickerExif,
   photoCaptureFromPicker,
@@ -131,4 +132,48 @@ test("a HEIC photo converted to JPEG still sends its date", () => {
       ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
     ]
   );
+});
+
+test("the upload body carries the file, the caption and how and when it was taken", () => {
+  // why: this is the body `auditsApi.uploadImage` sends; the server reads
+  // these field names, so a rename here would silently drop every date.
+  const names: string[] = [];
+  const values = new Map<string, unknown>();
+  appendAuditImageUpload(
+    {
+      append: (name: string, value: string | Blob) => {
+        names.push(name);
+        values.set(name, value);
+      },
+    },
+    {
+      imageUri: "file:///photo.jpg",
+      mimeType: "image/jpeg",
+      content: "Scratch on the lid",
+      capture: photoCaptureFromPicker(
+        true,
+        {
+          DateTimeOriginal: "2026:10:21 09:15:00",
+          OffsetTimeOriginal: "+02:00",
+        },
+        "Europe/Amsterdam"
+      ),
+    }
+  );
+
+  assert.deepEqual(names, [
+    "image",
+    "content",
+    "captureSource",
+    "deviceTimeZone",
+    "exifDateTimeOriginal",
+    "exifOffsetTimeOriginal",
+  ]);
+  assert.deepEqual(values.get("image"), {
+    uri: "file:///photo.jpg",
+    type: "image/jpeg",
+    name: "audit-photo.jpg",
+  });
+  assert.equal(values.get("captureSource"), "CAMERA");
+  assert.equal(values.get("exifDateTimeOriginal"), "2026:10:21 09:15:00");
 });

@@ -145,10 +145,10 @@ export async function uploadAuditImage({
       generateThumbnail: true,
       thumbnailSize: 108,
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-      // why: the record is made for the first `image` part, so only the first
-      // file inspected may decide its capture time.
-      inspectOriginal: async (original) => {
-        if (inspected) return;
+      // why: the record is made for the first `image` part, so only that file
+      // may decide its capture time; any other file part is never read.
+      inspectOriginal: async (original, { fieldName }) => {
+        if (fieldName !== "image" || inspected) return;
         inspected = true;
         fileTags = await readExifCaptureTags(original);
       },

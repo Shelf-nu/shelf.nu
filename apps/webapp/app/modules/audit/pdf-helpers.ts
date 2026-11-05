@@ -107,8 +107,6 @@ export interface AuditPdfDbResult {
   // Images linked to specific assets (grouped by auditAssetId)
   assetImages: (AuditImage & {
     auditAsset: {
-      /** When the asset was scanned; photos taken well before it are flagged */
-      scannedAt: Date | null;
       asset: {
         id: string;
         title: string;
@@ -247,8 +245,6 @@ export async function fetchAllAuditPdfRelatedData(
         auditAsset: {
           select: {
             id: true,
-            // A photo taken well before its asset's scan is flagged "Old photo".
-            scannedAt: true,
             asset: {
               select: {
                 id: true,

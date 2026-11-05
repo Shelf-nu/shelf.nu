@@ -73,10 +73,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         description: true,
         capturedAt: true,
         captureSource: true,
-        // What `describeAuditPhoto` checks a photo against: its asset's scan,
-        // or for a photo of the whole audit, the audit's start.
-        auditSession: { select: { startedAt: true } },
-        auditAsset: { select: { scannedAt: true } },
         createdAt: true,
       },
       orderBy: {

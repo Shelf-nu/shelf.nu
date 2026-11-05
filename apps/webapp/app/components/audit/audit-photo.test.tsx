@@ -64,9 +64,6 @@ const undated = {
   capturedAt: null,
 };
 
-const AUDIT_STARTED = "2026-08-13T13:37:00.000Z";
-const ASSET_SCANNED = "2026-10-21T09:10:00.000Z";
-
 /** The visible caption under a tile (the sr-only sentence left out). */
 function visibleCaption(container: HTMLElement) {
   const caption = container.querySelector("figcaption")!;
@@ -77,12 +74,10 @@ function visibleCaption(container: HTMLElement) {
 }
 
 describe("AuditPhoto", () => {
-  it("keeps a photo taken at the scan quiet: icon, date and time, no flag", () => {
+  it("keeps a photo taken just before upload quiet: icon, date and time, no flag", () => {
     const { container } = render(
       <AuditPhoto
         image={{ ...known, captureSource: "CAMERA" }}
-        assetScannedAt={ASSET_SCANNED}
-        auditStartedAt={AUDIT_STARTED}
         alt="Photo of Camera"
         disablePortal
       />
@@ -96,10 +91,9 @@ describe("AuditPhoto", () => {
     expect(container.textContent).not.toMatch(/Old photo|No date/);
   });
 
-  it("flags a photo taken well before its asset was scanned", () => {
-    // why: an old picture passed off as evidence of this check is the case
-    // audit photos exist to catch, so it is the one thing on the tile in
-    // colour. The audit started in August; the scan time is what decides.
+  it("flags a photo taken well before it was uploaded", () => {
+    // why: an old picture passed off as fresh evidence is the case audit
+    // photos exist to catch, so it is the one thing on the tile in colour.
     const { container } = render(
       <AuditPhoto
         image={{
@@ -107,8 +101,6 @@ describe("AuditPhoto", () => {
           captureSource: "LIBRARY",
           capturedAt: "2026-10-01T06:30:00.000Z",
         }}
-        assetScannedAt={ASSET_SCANNED}
-        auditStartedAt={AUDIT_STARTED}
         alt="Photo of Camera"
         disablePortal
       />
@@ -116,26 +108,8 @@ describe("AuditPhoto", () => {
 
     expect(visibleCaption(container)).toBe("1 Oct, 6:30 AM | Old photo");
     expect(container.querySelector("figcaption")?.title).toBe(
-      "Photo library · file says 01/10/2026, 6:30 AM · 20 days before this asset was scanned"
+      "Photo library · file says 01/10/2026, 6:30 AM · 20 days before upload"
     );
-  });
-
-  it("prefers the scan time the photo carries over the list's", () => {
-    const { container } = render(
-      <AuditPhoto
-        image={{
-          ...known,
-          captureSource: "LIBRARY",
-          capturedAt: "2026-10-01T06:30:00.000Z",
-          auditAsset: { scannedAt: "2026-10-01T07:00:00.000Z" },
-        }}
-        assetScannedAt={ASSET_SCANNED}
-        alt="Photo of Camera"
-        disablePortal
-      />
-    );
-
-    expect(container.textContent).not.toMatch(/Old photo/);
   });
 
   it("flags a new photo with no date instead of leaving it blank", () => {

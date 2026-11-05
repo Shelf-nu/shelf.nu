@@ -1365,7 +1365,6 @@ function AuditDetailContent({ id }: { id: string }) {
         title={openEvidence?.name ?? ""}
         notes={openEvidenceBucket.notes}
         images={openEvidenceBucket.images}
-        auditStartedAt={audit?.startedAt ?? null}
         isLoading={evidenceLoading}
         error={evidenceError}
         onRetry={() => {

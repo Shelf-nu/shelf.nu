@@ -24,9 +24,8 @@ import { describeAuditPhoto } from "@shelf/labels";
 export type AuditPhotoCaptureFields = {
   capturedAt: string | null;
   captureSource: AuditPhotoCaptureSource | null;
+  /** When it was uploaded: what "Old photo" is judged against */
   createdAt: string;
-  /** When the photo's asset was scanned; null for a photo of the whole audit */
-  assetScannedAt: string | null;
 };
 
 /** The two formatters of `useDateFormatter()` this reads. */
@@ -39,20 +38,15 @@ export type AuditPhotoFormatter = {
  * Describes a photo in the user's own date and time format. A plain function
  * so a list can describe every row with one formatter.
  *
- * @param image - The photo's capture fields, with its asset's scan time
- * @param auditStartedAt - When its audit started: what a photo of the whole
- *   audit is checked against
+ * @param image - The photo's capture fields
  * @param formatter - `useDateFormatter()`
  * @returns What to show for the photo
  */
 export function describeAuditPhotoForUser(
   image: AuditPhotoCaptureFields,
-  auditStartedAt: string | null | undefined,
   { formatDate, formatDateTime }: AuditPhotoFormatter
 ): AuditPhotoDescription {
   return describeAuditPhoto(image, {
-    assetScannedAt: image.assetScannedAt,
-    auditStartedAt,
     format: {
       dateTime: (value) => formatDateTime(value),
       custom: (value, options) => formatDate(value, options),

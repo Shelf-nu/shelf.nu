@@ -1,6 +1,6 @@
 import { apiFetch, apiUpload } from "./client";
 import type { PhotoCapture } from "../audit-photo-exif";
-import { appendPhotoCapture } from "../audit-photo-exif";
+import { appendAuditImageUpload } from "../audit-photo-exif";
 import type {
   AuditsResponse,
   AuditDetailResponse,
@@ -223,17 +223,7 @@ export const auditsApi = {
     capture: PhotoCapture | null = null
   ) => {
     const formData = new FormData();
-    // React Native FormData accepts objects with uri/type/name for file uploads
-    formData.append("image", {
-      uri: imageUri,
-      type: mimeType,
-      name: `audit-photo.${mimeType === "image/png" ? "png" : "jpg"}`,
-    } as any);
-
-    if (content) {
-      formData.append("content", content);
-    }
-    appendPhotoCapture(formData, capture);
+    appendAuditImageUpload(formData, { imageUri, mimeType, content, capture });
 
     const params = new URLSearchParams({
       orgId,

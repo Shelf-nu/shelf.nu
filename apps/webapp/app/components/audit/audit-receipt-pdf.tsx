@@ -481,10 +481,7 @@ export const AuditPDFContent = ({
                         className="h-24 w-full object-cover"
                       />
                       <div className="mt-1 text-[10px] leading-tight text-gray-700">
-                        <AuditPhotoPrintCaption
-                          image={img}
-                          auditStartedAt={session.startedAt}
-                        />
+                        <AuditPhotoPrintCaption image={img} />
                       </div>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">
@@ -534,10 +531,7 @@ export const AuditPDFContent = ({
                         className="h-24 w-full object-cover"
                       />
                       <div className="mt-1 text-[10px] leading-tight text-gray-700">
-                        <AuditPhotoPrintCaption
-                          image={img}
-                          auditStartedAt={session.startedAt}
-                        />
+                        <AuditPhotoPrintCaption image={img} />
                       </div>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">

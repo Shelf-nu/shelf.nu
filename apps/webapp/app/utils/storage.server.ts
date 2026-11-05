@@ -368,18 +368,27 @@ export async function uploadFile(
 export type InspectOriginal = (original: Buffer) => Promise<void> | void;
 
 /**
- * Buffers an upload, hands the bytes to `inspect`, and returns them as a
- * stream again for `cropImage`.
+ * {@link InspectOriginal} for a multipart upload: also told which form field
+ * the file came in, so a caller can read only the part it stores.
+ */
+export type InspectUploadedOriginal = (
+  original: Buffer,
+  upload: { fieldName: string | undefined }
+) => Promise<void> | void;
+
+/**
+ * Buffers an upload, hands the bytes to `inspect`, and returns the same
+ * buffer for `cropImage`, so the upload is held in memory once.
  *
  * @param fileData - The upload as it streams in
  * @param inspect - Reads the original bytes; a failure here is the caller's to
  *   handle and never stops the upload
- * @returns The same bytes as an async iterable
+ * @returns The bytes as uploaded
  */
 async function withOriginalInspected(
   fileData: AsyncIterable<Uint8Array>,
   inspect: InspectOriginal
-): Promise<AsyncIterable<Uint8Array>> {
+): Promise<Buffer> {
   const original = await createFileFromAsyncIterable(fileData);
 
   // why: only a format `cropImage` accepts reaches an inspector. The upload
@@ -393,10 +402,7 @@ async function withOriginalInspected(
     }
   }
 
-  return (async function* () {
-    await Promise.resolve(); // Satisfy eslint requirement
-    yield original;
-  })();
+  return original;
 }
 
 export interface UploadOptions {
@@ -424,8 +430,8 @@ export async function parseFileFormData({
   generateThumbnail?: boolean;
   thumbnailSize?: number;
   maxFileSize?: number;
-  /** Reads the image file as uploaded, before it is resized and re-encoded */
-  inspectOriginal?: InspectOriginal;
+  /** Reads each image file as uploaded, before it is resized and re-encoded */
+  inspectOriginal?: InspectUploadedOriginal;
 }) {
   try {
     const uploadHandler = async (upload: any) => {
@@ -467,7 +473,10 @@ export async function parseFileFormData({
         resizeOptions,
         generateThumbnail,
         thumbnailSize,
-        inspectOriginal,
+        inspectOriginal: inspectOriginal
+          ? (original) =>
+              inspectOriginal(original, { fieldName: upload?.fieldName })
+          : undefined,
       });
 
       // For profile pictures and other cases that don't need thumbnails,

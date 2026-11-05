@@ -130,3 +130,35 @@ export function appendPhotoCapture(
     formData.append("exifOffsetTimeOriginal", capture.tags.offsetTimeOriginal);
   }
 }
+
+/** What an audit photo upload carries besides how and when it was taken. */
+export type AuditImageUpload = {
+  /** Local file URI from the picker */
+  imageUri: string;
+  mimeType: string;
+  /** The caption the user typed, if any */
+  content?: string;
+  capture: PhotoCapture | null;
+};
+
+/**
+ * Fills the multipart body of `POST /api/mobile/audits/image`: the file under
+ * `image`, the optional caption, and the capture fields from
+ * {@link appendPhotoCapture}.
+ *
+ * @param formData - The body to fill
+ * @param upload - The photo and what is known about it
+ */
+export function appendAuditImageUpload(
+  formData: Pick<FormData, "append">,
+  { imageUri, mimeType, content, capture }: AuditImageUpload
+): void {
+  // React Native's FormData takes an object with uri/type/name as a file.
+  formData.append("image", {
+    uri: imageUri,
+    type: mimeType,
+    name: `audit-photo.${mimeType === "image/png" ? "png" : "jpg"}`,
+  } as unknown as Blob);
+  if (content) formData.append("content", content);
+  appendPhotoCapture(formData, capture);
+}

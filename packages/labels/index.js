@@ -874,9 +874,9 @@ export const AUDIT_PHOTO_FLAG_LABELS = Object.freeze({
 });
 
 /**
- * How much older than the check a photo may be before it is flagged. A photo
- * taken the evening before a morning audit is normal preparation; one taken
- * days before is a picture that was not taken for this check.
+ * How much older than its upload a photo may be before it is flagged. A photo
+ * taken the evening before and added in the morning is normal; one taken days
+ * before is a picture that was not taken when it was added as evidence.
  */
 export const AUDIT_PHOTO_OLD_AFTER_MS = 24 * 60 * 60 * 1000;
 
@@ -885,7 +885,7 @@ export const AUDIT_PHOTO_OLD_AFTER_MS = 24 * 60 * 60 * 1000;
  * nothing can be hovered.
  */
 export const AUDIT_PHOTO_KEY =
-  "Each photo shows how it reached Shelf (Shelf app camera, photo library, web upload or phone app) and when it was taken. Old photo: taken more than a day before its asset was scanned (for photos of the whole audit, before the audit started) or before it was uploaded, whichever came first. No date: the photo carries no capture time.";
+  "Each photo shows how it reached Shelf (Shelf app camera, photo library, web upload or phone app) and when it was taken. Old photo: taken more than a day before it was uploaded. No date: the photo carries no capture time.";
 
 /** A duration in the largest whole unit a reader would use. */
 function describeGap(ms) {
@@ -912,11 +912,11 @@ function toMs(value) {
  * icon and a short date and time; only an old photo or one with no date gets
  * a flag. The full sentence is for the preview, where there is room.
  *
- * - "Old photo": taken more than {@link AUDIT_PHOTO_OLD_AFTER_MS} before the
- *   check it is evidence for: its asset's scan, or for a photo of the whole
- *   audit, the audit's start, and never later than the photo's own upload.
- *   That is the case audit photos exist to catch, a picture that was not taken
- *   for this check.
+ * - "Old photo": taken more than {@link AUDIT_PHOTO_OLD_AFTER_MS} before it
+ *   was uploaded. That is the case audit photos exist to catch, a picture
+ *   that was not taken when it was added as evidence. The upload is the only
+ *   reference: an audit can run for days, so its start or a scan time would
+ *   flag photos taken during the audit.
  * - "No date": the photo carries no capture time.
  * - A photo uploaded before Shelf read capture times (no source, no date) is
  *   shown by its upload time with no flag: its date was never looked for, so
@@ -932,16 +932,13 @@ function toMs(value) {
  *   createdAt?: string | Date | null,
  * }} photo - the `AuditImage` fields
  * @param {{
- *   assetScannedAt?: string | Date | null,
- *   auditStartedAt?: string | Date | null,
  *   format: {
  *     dateTime: (value: string | Date) => string,
  *     custom: (value: string | Date, options: object) => string,
  *   },
  *   now?: Date,
- * }} options - when the photo's asset was scanned (null for a photo of the
- *   whole audit), when the audit started, the viewer's own formatters, and
- *   the current time (a photo from another year shows its year)
+ * }} options - the viewer's own formatters, and the current time (a photo
+ *   from another year shows its year)
  * @returns {{
  *   source: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null,
  *   sourceLabel: string | null,
@@ -951,10 +948,7 @@ function toMs(value) {
  *   detail: string,
  * }}
  */
-export function describeAuditPhoto(
-  photo,
-  { assetScannedAt, auditStartedAt, format, now = new Date() }
-) {
+export function describeAuditPhoto(photo, { format, now = new Date() }) {
   const source = AUDIT_PHOTO_SOURCE_LABELS[photo.captureSource]
     ? photo.captureSource
     : null;
@@ -1001,33 +995,14 @@ export function describeAuditPhoto(
       ? photo.createdAt
       : null;
 
-  // The photo is evidence for the check: its asset's scan, or for a photo of
-  // the whole audit, the audit's start. A photo can be added before its asset
-  // is scanned (or the scan can be undone and redone later), so the check is
-  // never later than the upload itself: a photo is old only against the
-  // earlier of the two. With neither a scan nor an audit start known, the
-  // upload alone is the check.
-  const scannedMs = toMs(assetScannedAt);
-  const baseMs = scannedMs ?? toMs(auditStartedAt);
-  const checkMs =
-    baseMs !== null && uploadedMs !== null
-      ? Math.min(baseMs, uploadedMs)
-      : baseMs ?? uploadedMs;
-  const checkLabel =
-    checkMs !== null && checkMs === uploadedMs && checkMs !== baseMs
-      ? "upload"
-      : scannedMs !== null
-      ? "this asset was scanned"
-      : "this audit started";
-
   // A photo with no capture time is flagged even when a camera photo shows its
   // upload time: a camera claim with no date is exactly what a modified client
   // would send with an old, stripped picture.
   let flag = null;
   if (capturedMs === null) flag = "NO_DATE";
   else if (
-    checkMs !== null &&
-    checkMs - capturedMs > AUDIT_PHOTO_OLD_AFTER_MS
+    uploadedMs !== null &&
+    uploadedMs - capturedMs > AUDIT_PHOTO_OLD_AFTER_MS
   ) {
     flag = "OLD_PHOTO";
   }
@@ -1040,13 +1015,7 @@ export function describeAuditPhoto(
   else when = `taken ${format.dateTime(shownValue)}`;
 
   let relation = null;
-  if (flag === "OLD_PHOTO") {
-    relation = `${describeGap(checkMs - capturedMs)} before ${checkLabel}`;
-  } else if (
-    capturedMs !== null &&
-    uploadedMs !== null &&
-    uploadedMs >= capturedMs
-  ) {
+  if (capturedMs !== null && uploadedMs !== null && uploadedMs >= capturedMs) {
     relation = `${describeGap(uploadedMs - capturedMs)} before upload`;
   }
 

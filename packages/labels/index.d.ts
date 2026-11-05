@@ -513,7 +513,7 @@ export declare const AUDIT_PHOTO_FLAG_LABELS: {
   readonly NO_DATE: string;
 };
 
-/** How much older than its check a photo may be before it is flagged. */
+/** How much older than its upload a photo may be before it is flagged. */
 export declare const AUDIT_PHOTO_OLD_AFTER_MS: number;
 
 /** One line explaining the icons and flags, for a printed receipt. */
@@ -534,14 +534,12 @@ export type AuditPhotoDescription = {
 
 /**
  * Describes one audit photo: quiet when it is fine (icon and short date and
- * time), "Old photo" when taken more than a day before its asset was scanned
- * (or the audit started), "No date" when it has no time, and the full
- * sentence for the preview. Photos from before capture times were read show
- * their upload time with no flag.
+ * time), "Old photo" when taken more than a day before it was uploaded, "No
+ * date" when it has no time, and the full sentence for the preview. Photos
+ * from before capture times were read show their upload time with no flag.
  *
  * @param photo - the `AuditImage` fields
- * @param options - the asset's scan time (null for a photo of the whole
- *   audit), the audit's start, and the viewer's own formatters
+ * @param options - the viewer's own formatters
  */
 export declare function describeAuditPhoto(
   photo: {
@@ -550,8 +548,6 @@ export declare function describeAuditPhoto(
     createdAt?: string | Date | null;
   },
   options: {
-    assetScannedAt?: string | Date | null;
-    auditStartedAt?: string | Date | null;
     /** The current time; defaults to now. A photo from another year shows it. */
     now?: Date;
     format: {

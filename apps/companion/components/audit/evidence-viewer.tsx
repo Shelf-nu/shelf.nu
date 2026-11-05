@@ -42,8 +42,6 @@ type EvidenceViewerProps = {
   title: string;
   notes: AuditEvidenceNote[];
   images: AuditEvidenceImage[];
-  /** When the audit started: what a photo of the whole audit is checked against */
-  auditStartedAt?: string | null;
   isLoading?: boolean;
   error?: string | null;
   /** Opens one photo full-screen. Omitted when there is nothing to open into. */
@@ -65,7 +63,6 @@ export function EvidenceViewer({
   title,
   notes,
   images,
-  auditStartedAt = null,
   isLoading = false,
   error = null,
   onImagePress,
@@ -157,11 +154,7 @@ export function EvidenceViewer({
                   </Text>
                   <View style={styles.grid}>
                     {images.map((image) => {
-                      const photo = describeAuditPhotoForUser(
-                        image,
-                        auditStartedAt,
-                        formatter
-                      );
+                      const photo = describeAuditPhotoForUser(image, formatter);
                       return (
                         <TouchableOpacity
                           key={image.id}

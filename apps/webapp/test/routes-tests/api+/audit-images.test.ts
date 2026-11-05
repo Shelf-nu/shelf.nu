@@ -153,8 +153,6 @@ describe("GET /api/audit-images", () => {
       capturedAt: true,
       captureSource: true,
       createdAt: true,
-      auditSession: { select: { startedAt: true } },
-      auditAsset: { select: { scannedAt: true } },
     });
   });
 

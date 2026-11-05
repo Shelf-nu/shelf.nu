@@ -30,33 +30,23 @@ const evidence: AuditEvidenceImage = {
   description: null,
   capturedAt: "2026-10-01T06:30:00.000Z",
   captureSource: "LIBRARY",
-  assetScannedAt: "2026-10-28T10:50:00.000Z",
   createdAt: "2026-10-28T10:52:00.000Z",
   authorName: null,
   authorImage: null,
 };
 
-test("flags a library photo taken weeks before its asset was scanned", () => {
-  const photo = describeAuditPhotoForUser(
-    evidence,
-    "2026-08-13T13:37:00.000Z",
-    formatter
-  );
+test("flags a library photo taken weeks before its upload", () => {
+  const photo = describeAuditPhotoForUser(evidence, formatter);
 
   assert.equal(photo.flag, "OLD_PHOTO");
   assert.equal(photo.flagLabel, "Old photo");
   assert.equal(photo.source, "LIBRARY");
-  assert.match(photo.detail, /27 days before this asset was scanned$/);
+  assert.match(photo.detail, /27 days before upload$/);
 });
 
-test("checks a whole-audit photo against the audit's start", () => {
+test("keeps a photo taken just before its upload quiet", () => {
   const photo = describeAuditPhotoForUser(
-    {
-      ...evidence,
-      assetScannedAt: null,
-      capturedAt: "2026-10-28T10:51:00.000Z",
-    },
-    "2026-10-28T10:00:00.000Z",
+    { ...evidence, capturedAt: "2026-10-28T10:51:00.000Z" },
     formatter
   );
 
@@ -70,7 +60,6 @@ test("checks a whole-audit photo against the audit's start", () => {
 test("marks a new photo with no date", () => {
   const photo = describeAuditPhotoForUser(
     { ...evidence, capturedAt: null },
-    null,
     formatter
   );
 

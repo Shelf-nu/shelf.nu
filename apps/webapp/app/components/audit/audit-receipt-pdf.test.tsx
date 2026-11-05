@@ -480,7 +480,7 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
     expect(cellText("Photo of Camera")).toMatch(/^Uploaded 21\/10\/2026/);
   });
 
-  it("prints the Old photo flag on a photo taken days before its asset's scan", () => {
+  it("prints the Old photo flag on a photo taken days before its upload", () => {
     const pdfMeta = {
       ...pdfMetaWith({ displayCode: SAM_CODE }),
       generalImages: [],
@@ -488,10 +488,7 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
         auditPhoto(
           "asset-photo-1",
           "2026-10-01T06:30:00.000Z",
-          {
-            scannedAt: "2026-10-21T09:00:00.000Z",
-            asset: { id: "asset-1", title: "Camera" },
-          },
+          { asset: { id: "asset-1", title: "Camera" } },
           "LIBRARY"
         ),
       ],
@@ -500,9 +497,7 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
       <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
     );
 
-    expect(cellText("Photo of Camera")).toContain(
-      "20 days before this asset was scanned"
-    );
+    expect(cellText("Photo of Camera")).toContain("20 days before upload");
     expect(cellText("Photo of Camera")).toMatch(/Old photo$/);
   });
 

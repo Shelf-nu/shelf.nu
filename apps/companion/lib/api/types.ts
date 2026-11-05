@@ -1711,8 +1711,6 @@ export type AuditEvidenceImage = {
   capturedAt: string | null;
   /** How the photo reached Shelf; null when unknown. */
   captureSource: AuditPhotoCaptureSource | null;
-  /** When the photo's asset was scanned (ISO); null for a whole-audit photo. */
-  assetScannedAt: string | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;

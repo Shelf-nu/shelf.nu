@@ -131,7 +131,6 @@ const IMAGE_ASSET = {
   description: null,
   capturedAt: null,
   captureSource: null,
-  auditAsset: { scannedAt: new Date("2026-08-19T12:30:00.000Z") },
   createdAt: new Date("2026-08-19T12:34:00.000Z"),
   auditAssetId: "aa-1",
   uploadedBy: null,
@@ -267,24 +266,16 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
 
       expect(json.general.images[0].captureSource).toBe("CAMERA");
       expect(json.byAuditAsset["aa-1"].images[0].captureSource).toBeNull();
-      // The asset's scan time, for the "Old photo" flag; none for a general photo.
-      expect(json.byAuditAsset["aa-1"].images[0].assetScannedAt).toBe(
-        "2026-08-19T12:30:00.000Z"
-      );
-      expect(json.general.images[0].assetScannedAt).toBeNull();
     });
 
-    it("asks the database for the capture time and the asset's scan", async () => {
+    it("asks the database for the capture time", async () => {
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
-      // The mocked rows carry every field whatever the select asks for, so
-      // only the select itself shows the scan time is fetched.
       expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           select: expect.objectContaining({
             capturedAt: true,
             captureSource: true,
-            auditAsset: { select: { scannedAt: true } },
           }),
         })
       );

@@ -31,8 +31,6 @@ const apiAuditImagesPayload = {
       capturedAt: "2026-10-01T06:30:00.000Z",
       captureSource: "LIBRARY",
       createdAt: "2026-10-21T09:17:00.000Z",
-      auditSession: { startedAt: "2026-08-13T13:37:00.000Z" },
-      auditAsset: { scannedAt: "2026-10-21T09:10:00.000Z" },
     },
     {
       id: "img-2",
@@ -42,8 +40,6 @@ const apiAuditImagesPayload = {
       capturedAt: "2026-10-21T09:15:00.000Z",
       captureSource: "WEB_UPLOAD",
       createdAt: "2026-10-21T09:17:00.000Z",
-      auditSession: { startedAt: "2026-10-21T09:00:00.000Z" },
-      auditAsset: null,
     },
   ],
 };
@@ -98,12 +94,10 @@ describe("AuditImagesComponent", () => {
 
     const captions = [...container.querySelectorAll("figcaption")];
     expect(captions).toHaveLength(2);
-    // The first is checked against its asset's scan, not the August start.
     expect(captions[0].title).toBe(
-      "Photo library · file says 01/10/2026, 6:30 AM · 20 days before this asset was scanned"
+      "Photo library · file says 01/10/2026, 6:30 AM · 20 days before upload"
     );
     expect(captions[0].textContent).toContain("Old photo");
-    // The second is a photo of the whole audit, checked against its start.
     expect(captions[1].textContent).not.toMatch(/Old photo|No date/);
   });
 });

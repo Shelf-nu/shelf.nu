@@ -1,9 +1,9 @@
 /**
  * Tests for the scan details loader's photo data.
  *
- * Every photo caption on the page reads the photo's capture fields and, for
- * the "Old photo" check, its audit's start. A select that drops one renders
- * every new photo as "No date", or stops the check, with nothing failing.
+ * Every photo caption on the page reads the photo's capture fields. A select
+ * that drops one renders every new photo as "No date", or stops the "Old
+ * photo" check, with nothing failing.
  *
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.scan.$auditAssetId.details.tsx}
  * @see {@link file://../../../app/components/audit/audit-photo.tsx}
@@ -50,9 +50,8 @@ describe("audits.$auditId.scan.$auditAssetId.details loader", () => {
     } as never);
     vi.mocked(db.auditAsset.findFirst).mockResolvedValue({
       id: "audit-asset-1",
-      scannedAt: new Date("2026-10-21T09:10:00Z"),
       asset: { id: "asset-1", title: "Camera" },
-      auditSession: { status: "ACTIVE", startedAt: null, assignments: [] },
+      auditSession: { status: "ACTIVE", assignments: [] },
     } as never);
     vi.mocked(db.auditNote.findMany).mockResolvedValue([]);
     vi.mocked(db.auditImage.findMany).mockResolvedValue([]);
@@ -73,13 +72,6 @@ describe("audits.$auditId.scan.$auditAssetId.details loader", () => {
         capturedAt: true,
         captureSource: true,
         createdAt: true,
-      })
-    );
-
-    const assetQuery = vi.mocked(db.auditAsset.findFirst).mock.calls[0][0];
-    expect(assetQuery?.include?.auditSession).toEqual(
-      expect.objectContaining({
-        select: expect.objectContaining({ startedAt: true }),
       })
     );
   });
