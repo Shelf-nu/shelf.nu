@@ -3,6 +3,12 @@ import { CompassIcon, MapPinIcon, PackageIcon } from "lucide-react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 
+/**
+ * Explains the other ways an audit can be started: from a selection on the
+ * assets, locations or kits index. The dedicated creation page is
+ * `/audits/new`; this dialog is the companion for workflows that begin with
+ * an existing selection.
+ */
 export function NewAuditInfoDialog() {
   const [open, setOpen] = useState(false);
 
@@ -10,8 +16,8 @@ export function NewAuditInfoDialog() {
 
   return (
     <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        New Audit
+      <Button type="button" variant="secondary" onClick={() => setOpen(true)}>
+        Other ways to start
       </Button>
       <DialogPortal>
         <Dialog
@@ -23,8 +29,8 @@ export function NewAuditInfoDialog() {
           <div className="px-6 pb-6">
             <p className="mb-6 text-sm text-gray-600">
               Audits help you verify your asset inventory by checking that
-              expected assets are in their designated locations. Choose how
-              you'd like to create your audit:
+              expected assets are in their designated locations. Besides the New
+              audit page, an audit can start from a selection on these pages:
             </p>
 
             <div className="space-y-4">
