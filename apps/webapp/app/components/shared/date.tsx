@@ -69,6 +69,19 @@ export const DateS = ({
     return null;
   }
 
+  // `Intl.DateTimeFormat` throws on an invalid date, and a throw here takes
+  // down the whole page around it. Dates also arrive from stored note content
+  // (`{% date value="…" /%}`), which a user can fill with anything, so an
+  // unparseable value renders as its raw text, matching the CSV/PDF export.
+  // A bare `YYYY-MM-DD` is parsed field by field by the formatter, not by
+  // `new Date`, so it is always formattable and skips this check.
+  const isCalendarDate =
+    typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date);
+  const parsed = date instanceof Date ? date : new Date(date);
+  if (!isCalendarDate && Number.isNaN(parsed.getTime())) {
+    return <span>{String(date)}</span>;
+  }
+
   if (resolvedLocaleOnly && resolvedIncludeTime) {
     // eslint-disable-next-line no-console
     console.warn("includeTime is not supported with localeOnly formatting");

@@ -1,9 +1,9 @@
 /**
- * What each document prints: the Check-out receipt, a document with custom field
- * columns, and a document grouped by category.
+ * What each template prints: the Check-out receipt, a template with custom field
+ * columns, and a template grouped by category.
  *
  * Rendered from the same busy booking as the Checklist parity test, so every
- * difference on the page comes from the document.
+ * difference on the page comes from the template.
  *
  * @see {@link file://./booking-overview-pdf.tsx}
  * @see {@link file://./booking-overview-pdf.checklist.test.tsx}
@@ -13,11 +13,11 @@ import { describe, expect, it, vi } from "vitest";
 import { busyBookingPdfMeta } from "@factories";
 
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
-import type { BookingDocumentConfig } from "~/modules/pdf-document/config";
+import type { BookingTemplateConfig } from "~/modules/pdf-template/config";
 import {
   BOOKING_CHECKLIST_CONFIG,
   CHECKOUT_RECEIPT_CONFIG,
-} from "~/modules/pdf-document/config";
+} from "~/modules/pdf-template/config";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -55,16 +55,16 @@ vi.mock("~/hooks/use-date-formatter", async () => {
   };
 });
 
-function renderDocument(
+function renderTemplate(
   name: string,
-  config: BookingDocumentConfig,
+  config: BookingTemplateConfig,
   pdfMeta: PdfDbResult = busyBookingPdfMeta()
 ) {
   return render(
     <BookingPDFPreview
       componentRef={{ current: null }}
       pdfMeta={pdfMeta}
-      pdfDocument={{ name, config }}
+      pdfTemplate={{ name, config }}
     />
   );
 }
@@ -81,9 +81,9 @@ function widths(container: HTMLElement) {
   );
 }
 
-describe("booking PDF: the Check-out receipt document", () => {
-  it("is titled by the document and drops descriptions and the total value", () => {
-    const { container } = renderDocument(
+describe("booking PDF: the Check-out receipt template", () => {
+  it("is titled by the template and drops descriptions and the total value", () => {
+    const { container } = renderTemplate(
       "Check-out receipt",
       CHECKOUT_RECEIPT_CONFIG
     );
@@ -112,7 +112,7 @@ describe("booking PDF: the Check-out receipt document", () => {
   });
 
   it("ends with signature lines, the custodian's name printed under theirs", () => {
-    renderDocument("Check-out receipt", CHECKOUT_RECEIPT_CONFIG);
+    renderTemplate("Check-out receipt", CHECKOUT_RECEIPT_CONFIG);
 
     const signatures = within(screen.getByLabelText("Signatures"));
     expect(signatures.getByText("Custodian signature · date")).toBeVisible();
@@ -121,7 +121,7 @@ describe("booking PDF: the Check-out receipt document", () => {
   });
 
   it("has no signature lines on the Checklist", () => {
-    renderDocument("Checklist", BOOKING_CHECKLIST_CONFIG);
+    renderTemplate("Checklist", BOOKING_CHECKLIST_CONFIG);
 
     expect(screen.queryByLabelText("Signatures")).not.toBeInTheDocument();
   });
@@ -142,14 +142,14 @@ describe("booking PDF: custom field columns", () => {
     return pdfMeta;
   }
 
-  const quote: BookingDocumentConfig = {
+  const quote: BookingTemplateConfig = {
     ...BOOKING_CHECKLIST_CONFIG,
     columns: { ...BOOKING_CHECKLIST_CONFIG.columns, image: false },
     customFieldIds: ["cf-price", "cf-notes"],
   };
 
   it("prints a column per field before Code, with the printed values and an empty cell for none", () => {
-    const { container } = renderDocument("Client quote", quote, quoteMeta());
+    const { container } = renderTemplate("Client quote", quote, quoteMeta());
 
     expect(headers(container)).toEqual([
       "#",
@@ -174,14 +174,14 @@ describe("booking PDF: custom field columns", () => {
   });
 
   it("prints a multi-line field under the asset, not as a column", () => {
-    renderDocument("Client quote", quote, quoteMeta());
+    renderTemplate("Client quote", quote, quoteMeta());
 
     expect(screen.getByText("Handling notes")).toBeVisible();
     expect(screen.getByText(/Keep the sensor cap on\./)).toBeVisible();
   });
 
   it("drops the multi-line field with the description row", () => {
-    renderDocument(
+    renderTemplate(
       "Client quote",
       { ...quote, assetDescription: false },
       quoteMeta()
@@ -191,7 +191,7 @@ describe("booking PDF: custom field columns", () => {
   });
 
   it("keeps Code at its own width and shares the rest among the other columns", () => {
-    const { container } = renderDocument("Client quote", quote, quoteMeta());
+    const { container } = renderTemplate("Client quote", quote, quoteMeta());
     const shares = widths(container);
 
     expect(shares.at(-1)).toBe(27);
@@ -201,13 +201,13 @@ describe("booking PDF: custom field columns", () => {
 });
 
 describe("booking PDF: grouped by category", () => {
-  const grouped: BookingDocumentConfig = {
+  const grouped: BookingTemplateConfig = {
     ...BOOKING_CHECKLIST_CONFIG,
     groupBy: "category",
   };
 
   it("prints a header per category with its count, A to Z, uncategorized last", () => {
-    const { container } = renderDocument("By category", grouped);
+    const { container } = renderTemplate("By category", grouped);
 
     const groupHeaders = [...container.querySelectorAll("tbody td[colspan]")]
       .map((td) => td.textContent)
@@ -222,7 +222,7 @@ describe("booking PDF: grouped by category", () => {
   });
 
   it("keeps numbering the rows straight through, each with its kit", () => {
-    renderDocument("By category", grouped);
+    renderTemplate("By category", grouped);
 
     const rowOf = (title: string) =>
       [...screen.getByText(title).closest("tr")!.querySelectorAll("td")].map(

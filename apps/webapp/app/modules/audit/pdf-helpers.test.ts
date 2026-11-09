@@ -176,7 +176,13 @@ describe("audit receipt — the printed asset code", () => {
     // why: names which assets are on the audit; the helper skips the asset
     // read entirely when this is empty, and there would be no row to check.
     mockOf(db.auditAsset.findMany).mockResolvedValue([
-      { assetId: "asset-1", expected: true, status: null },
+      {
+        assetId: "asset-1",
+        expected: true,
+        status: null,
+        expectedQuantity: 14,
+        foundQuantity: 8,
+      },
     ]);
     // why: the receipt's photo and note sections. Empty keeps these cases
     // about the Code column.
@@ -206,6 +212,21 @@ describe("audit receipt — the printed asset code", () => {
       new Request("http://localhost/x")
     );
   }
+
+  it("carries each row's unit counts to the receipt", async () => {
+    const result = await run({
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    });
+
+    expect(
+      mockOf(db.auditAsset.findMany).mock.calls[0][0].select
+    ).toMatchObject({ expectedQuantity: true, foundQuantity: true });
+    expect(result.assets[0].auditData).toMatchObject({
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+  });
 
   it("asks the database for the columns the resolver reads", async () => {
     await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });

@@ -5,13 +5,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { BOOKING_CHECKLIST_CONFIG } from "./config";
-import { documentColumns, groupDocumentRows } from "./rows";
+import { templateColumns, groupTemplateRows } from "./rows";
 
 function widths(
   config = BOOKING_CHECKLIST_CONFIG,
   customFieldIds: string[] = []
 ) {
-  return documentColumns({ config, customFieldIds, codePercent: 27 }).map(
+  return templateColumns({ config, customFieldIds, codePercent: 27 }).map(
     (column): [string, number] => [
       column.kind === "customField" ? column.customFieldId : column.kind,
       Math.round(column.percent * 100) / 100,
@@ -75,12 +75,12 @@ describe("booking PDF row groups", () => {
   ];
 
   it("keeps one group in the given order when not grouped", () => {
-    expect(groupDocumentRows(rows, "none")).toEqual([{ name: null, rows }]);
+    expect(groupTemplateRows(rows, "none")).toEqual([{ name: null, rows }]);
   });
 
   it("groups by category A to Z, uncategorized last, rows in the given order", () => {
     expect(
-      groupDocumentRows(rows, "category").map((group) => [
+      groupTemplateRows(rows, "category").map((group) => [
         group.name,
         group.rows.map((row) => row.title),
       ])
