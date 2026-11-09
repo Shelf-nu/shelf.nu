@@ -161,8 +161,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // Only the asset id is read from the request. The file to sign always
     // comes from the asset row below, so a path in the query string can never
     // reach the service-role signer.
+    // Only `assetId` is handed to the parser, so no other query value can
+    // reach a validation error's logged data either.
     const { assetId } = parseData(
-      url.searchParams,
+      { assetId: url.searchParams.get("assetId") ?? undefined },
       z.object({ assetId: z.string() })
     );
 
@@ -326,7 +328,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         additionalData: {
           userId,
           assetId: url.searchParams.get("assetId"),
-          mainImage: url.searchParams.get("mainImage"),
         },
       })
     );
