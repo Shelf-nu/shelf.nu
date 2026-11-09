@@ -1,6 +1,7 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
+import { DateS } from "~/components/shared/date";
 import type * as DateFormatModule from "~/utils/date-format";
 import { MarkdownViewer } from "./markdown-viewer";
 
@@ -56,7 +57,41 @@ describe("MarkdownViewer", () => {
       );
 
       expect(queryByText("2024-01-15T10:30:00.000Z")).toBeNull();
-      expect(container.textContent).toMatch(/2024/);
+      expect(container.textContent).toContain("01/15/2024");
+    });
+  });
+
+  describe("DateS values outside a note", () => {
+    it("formats a bare calendar date as that day", () => {
+      render(<DateS date="2024-02-29" />);
+
+      expect(screen.getByText("02/29/2024")).toBeVisible();
+    });
+
+    it("renders an invalid Date object as its text instead of throwing", () => {
+      render(<DateS date={new Date(Number.NaN)} />);
+
+      expect(screen.getByText("Invalid Date")).toBeVisible();
+    });
+  });
+
+  describe("free text without tags", () => {
+    it("drops Markdoc tags but keeps the text and markdown", () => {
+      const { container } = render(
+        <MemoryRouter>
+          <MarkdownViewer
+            content={
+              'Spare **battery** {% booking_status status="COMPLETE" /%} kept'
+            }
+            withTags={false}
+          />
+        </MemoryRouter>
+      );
+
+      expect(container.querySelector("strong")?.textContent).toBe("battery");
+      expect(container.textContent).toContain("Spare");
+      expect(container.textContent).toContain("kept");
+      expect(container.textContent).not.toMatch(/COMPLETE|booking_status/i);
     });
   });
 

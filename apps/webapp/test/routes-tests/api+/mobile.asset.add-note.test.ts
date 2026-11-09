@@ -150,6 +150,18 @@ describe("POST /api/mobile/asset/add-note", () => {
     );
   });
 
+  it("rejects content that is only Markdoc delimiters", async () => {
+    vi.mocked(db.asset.findUnique).mockResolvedValue({
+      id: "asset-1",
+    } as never);
+
+    const request = createRequest({ assetId: "asset-1", content: "{% %}" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(createNote).not.toHaveBeenCalled();
+  });
+
   it("gates adding a note on note:create", async () => {
     vi.mocked(db.asset.findUnique).mockResolvedValue({
       id: "asset-1",
