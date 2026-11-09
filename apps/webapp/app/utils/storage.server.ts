@@ -539,6 +539,9 @@ export async function parseFileFormData({
     };
 
     const uploadHandler = async (upload: FileUpload) => {
+      // A file sent under a text field's name is neither uploaded nor
+      // returned: the field must only ever carry the text the client typed.
+      if (textFields.includes(upload.fieldName)) return undefined;
       const value = await uploadAndStore(upload);
       if (value != null && upload.fieldName) {
         uploaded.append(upload.fieldName, value);

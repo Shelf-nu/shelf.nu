@@ -634,6 +634,26 @@ describe("parseFileFormData text fields", () => {
     expect(result.get("captureSource")).toBe("CAMERA");
   });
 
+  it("neither uploads nor returns a file sent under a text field's name", async () => {
+    storageUploadMock.mockClear();
+    const form = new FormData();
+    form.append("content", await png());
+    form.append("content", "Dent on the lid");
+
+    const result = await parseFileFormData({
+      request: new Request("http://localhost/api/mobile/audits/image", {
+        method: "POST",
+        body: form,
+      }),
+      newFileName: "org-1/audits/a1/img",
+      bucketName: PUBLIC_BUCKET,
+      textFields: AUDIT_IMAGE_TEXT_FIELDS,
+    });
+
+    expect(result.getAll("content")).toEqual(["Dent on the lid"]);
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
   it("returns only the named text fields, never one posing as the upload", async () => {
     const form = new FormData();
     form.append("image", FOREIGN_PATH);
