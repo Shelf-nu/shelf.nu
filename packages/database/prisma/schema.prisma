@@ -422,6 +422,7 @@ model AssetIndexSettings {
   @@index([organizationId])
 }
 
+/// Deprecated: replaced by PdfTemplate, dropped in the cleanup PR. Do not use.
 /// The document a PdfDocument lays out. Only the booking PDF has saved
 /// layouts today; the check-in receipt and the audit receipt can join as new
 /// kinds.
@@ -433,6 +434,7 @@ enum PdfDocumentKind {
 /// columns, rows and header lines print, and in what order the rows come. A
 /// row is a layout, not a generated file; the person generating a PDF picks a
 /// layout by name.
+/// Deprecated: replaced by PdfTemplate, dropped in the cleanup PR. Do not use.
 model PdfDocument {
   id   String          @id @default(cuid())
   name String
@@ -445,6 +447,43 @@ model PdfDocument {
   /// The document the PDF dialog offers first. One per workspace and kind,
   /// enforced by a partial unique index in raw SQL (migration
   /// 20261028120000_add_pdf_documents).
+  isDefault Boolean @default(false)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, kind, name])
+}
+
+/// The kind of PDF a PdfTemplate lays out. Only the booking PDF has saved
+/// layouts today; the check-in receipt and the audit receipt can join as new
+/// kinds.
+enum PdfTemplateKind {
+  BOOKING
+}
+
+/// A saved layout for a generated PDF, kept per team workspace under a name:
+/// which columns, rows and header lines print, and in what order the rows
+/// come. A row is a layout, not a generated file; the person generating a PDF
+/// picks a template by name.
+model PdfTemplate {
+  id   String          @id @default(cuid())
+  name String
+  kind PdfTemplateKind @default(BOOKING)
+
+  /// The layout's switches. Read through `parseBookingTemplateConfig`,
+  /// which fills any key a stored row lacks from the Checklist template's
+  /// values.
+  config Json @default("{}")
+
+  /// The template the PDF dialog offers first. One per workspace and kind,
+  /// enforced by a partial unique index in raw SQL (migration
+  /// 20261103120000_add_pdf_templates). Names are also unique per workspace
+  /// and kind ignoring case, through an expression index in the same
+  /// migration.
   isDefault Boolean @default(false)
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
@@ -1165,7 +1204,9 @@ model Organization {
   auditImages        AuditImage[]
   assetImports       AssetImport[]
   linkPreviews       LinkPreview[]
+  /// Deprecated: replaced by PdfTemplate, dropped in the cleanup PR. Do not use.
   pdfDocuments       PdfDocument[]
+  pdfTemplates       PdfTemplate[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
@@ -1189,6 +1230,7 @@ model Organization {
   // Off means the sheet cannot be scanned in place of the label on the item.
   showQrCodesOnPdfs Boolean @default(true)
 
+  /// Deprecated: replaced by PdfTemplate, dropped in the cleanup PR. Do not use.
   // When the workspace was given the PDF documents of a paid plan (the
   // Check-out receipt). Null until its tier first includes PDF documents; set
   // once, so a document an admin deleted is never seeded back.
@@ -1368,6 +1410,7 @@ model TierLimit {
   canHideShelfBranding Boolean  @default(false)
   canUseReports        Boolean  @default(false)
   canUseRecurringReminders Boolean @default(false)
+  /// Deprecated: replaced by PdfTemplate, dropped in the cleanup PR. Do not use.
   canCustomizePdfDocuments Boolean @default(false)
   canUsePushNotifications Boolean @default(false)
   maxCustomFields      Int      @default(0)
@@ -1387,6 +1430,7 @@ model CustomTierLimit {
   canHideShelfBranding Boolean  @default(true)
   canUseReports        Boolean  @default(true)
   canUseRecurringReminders Boolean @default(true)
+  /// Deprecated: replaced by PdfTemplate, dropped in the cleanup PR. Do not use.
   canCustomizePdfDocuments Boolean @default(true)
   canUsePushNotifications Boolean @default(true)
   maxCustomFields      Int      @default(1000)

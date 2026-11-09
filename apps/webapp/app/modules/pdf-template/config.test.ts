@@ -1,7 +1,7 @@
 /**
- * Reading a stored document config: a row saved before a key existed, or one
+ * Reading a stored template config: a row saved before a key existed, or one
  * with a value it cannot read, still prints, filling the gap from the
- * Checklist document.
+ * Checklist template.
  *
  * @see {@link file://./config.ts}
  */
@@ -9,19 +9,19 @@ import { describe, expect, it } from "vitest";
 import {
   BOOKING_CHECKLIST_CONFIG,
   CHECKOUT_RECEIPT_CONFIG,
-  parseBookingDocumentConfig,
+  parseBookingTemplateConfig,
 } from "./config";
 
-describe("parseBookingDocumentConfig", () => {
+describe("parseBookingTemplateConfig", () => {
   it("reads a complete config as stored", () => {
-    expect(parseBookingDocumentConfig(CHECKOUT_RECEIPT_CONFIG)).toEqual(
+    expect(parseBookingTemplateConfig(CHECKOUT_RECEIPT_CONFIG)).toEqual(
       CHECKOUT_RECEIPT_CONFIG
     );
   });
 
-  it("fills every key an older row lacks from the Checklist document", () => {
+  it("fills every key an older row lacks from the Checklist template", () => {
     expect(
-      parseBookingDocumentConfig({
+      parseBookingTemplateConfig({
         totalValue: false,
         columns: { image: false },
       })
@@ -34,7 +34,7 @@ describe("parseBookingDocumentConfig", () => {
 
   it("replaces only the values it cannot read", () => {
     expect(
-      parseBookingDocumentConfig({
+      parseBookingTemplateConfig({
         groupBy: "location",
         sortBy: "name",
         signatureLines: "yes",
@@ -47,15 +47,15 @@ describe("parseBookingDocumentConfig", () => {
 
   it("keeps at most three distinct custom fields", () => {
     expect(
-      parseBookingDocumentConfig({ customFieldIds: ["a", "b", "a", "c", "d"] })
+      parseBookingTemplateConfig({ customFieldIds: ["a", "b", "a", "c", "d"] })
         .customFieldIds
     ).toEqual(["a", "b", "c"]);
   });
 
   it("prints the Checklist for an empty or unreadable config", () => {
-    expect(parseBookingDocumentConfig({})).toEqual(BOOKING_CHECKLIST_CONFIG);
-    expect(parseBookingDocumentConfig(null)).toEqual(BOOKING_CHECKLIST_CONFIG);
-    expect(parseBookingDocumentConfig("nonsense")).toEqual(
+    expect(parseBookingTemplateConfig({})).toEqual(BOOKING_CHECKLIST_CONFIG);
+    expect(parseBookingTemplateConfig(null)).toEqual(BOOKING_CHECKLIST_CONFIG);
+    expect(parseBookingTemplateConfig("nonsense")).toEqual(
       BOOKING_CHECKLIST_CONFIG
     );
   });
