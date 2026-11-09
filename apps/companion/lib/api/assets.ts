@@ -68,8 +68,9 @@ export const assetsApi = {
    * workspace, so callers pass `orgId` to scope SAM resolution (the server
    * ignores it on the QR path).
    *
-   * Recording is an endpoint property here, NOT a flag: use this from genuine
-   * in-app camera scans (the scanner tab). To resolve a code WITHOUT
+   * Recording is an endpoint property here, NOT a flag: use this for scans
+   * (the scanner tab, and https QR links the OS delivers, which count as a
+   * scan like opening the web QR page). To resolve a code WITHOUT
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
    * Wire contract for coordinates (matches the route's Zod schema): optional

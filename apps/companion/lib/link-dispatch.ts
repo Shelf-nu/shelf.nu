@@ -32,11 +32,10 @@ export type QrLookupResult = {
   readonly error?: unknown;
 };
 
-/**
- * How a link looks a QR code up. A link never records a scan: only the
- * in-app scanner does, so the one lookup here is the non-recording one.
- */
+/** The two ways to look a QR code up. */
 export type QrLookups = {
+  /** Resolves and records a scan (`api.qr`, with the scan's coordinates). */
+  readonly scan: (qrId: string) => Promise<QrLookupResult>;
   /** Resolves without recording anything (`api.getScannedItem`). */
   readonly lookup: (qrId: string, orgId?: string) => Promise<QrLookupResult>;
 };
@@ -52,6 +51,28 @@ export type QrLookups = {
  *   on show gets the "other workspace" notice.
  */
 export type QrLinkSource = "os-link" | "tapped";
+
+/**
+ * Whether opening a QR link records a scan.
+ *
+ * Opening a QR code's web address counts as a scan everywhere in Shelf: the
+ * web QR page records one for every visit, signed in or anonymous. An https
+ * link the OS delivers is that same address (a label scanned with the system
+ * camera, or the link opened elsewhere), so it records a scan too. A
+ * `shelf://qr/<id>` link never does: no label encodes the custom scheme, so
+ * only another app or a web page can produce it. A link tapped inside the app
+ * never records either.
+ *
+ * @param source - Where the link came from
+ * @param origin - The link's http(s) origin, or undefined for `shelf://`
+ * @returns True when the lookup should record a scan
+ */
+export function qrLinkRecordsScan(
+  source: QrLinkSource,
+  origin: string | undefined
+): boolean {
+  return source === "os-link" && origin !== undefined;
+}
 
 /** Where a QR code leads once looked up. */
 export type QrOutcome =
@@ -69,8 +90,9 @@ export type QrOutcome =
 /**
  * Looks a QR code up and says where it leads.
  *
- * The lookup never records a scan, whatever the source: any app or web page
- * can open a QR link, so a link is not proof that the label was scanned.
+ * Whether the lookup records a scan is decided by {@link qrLinkRecordsScan}:
+ * an https link the OS delivers records one, like the web QR page; a
+ * `shelf://` link and a link tapped in the app record nothing.
  *
  * A code from another Shelf server is not looked up: its id means nothing
  * to the connected one, so it goes to that server's QR page. An OS-delivered
@@ -87,7 +109,7 @@ export type QrOutcome =
  * @param options - Where the link came from (`source`), and for a tapped
  *   link the workspace on show (`orgId`): the lookup needs it for a SAM id,
  *   and a code of another workspace is compared against it.
- * @param lookups - The non-recording lookup.
+ * @param lookups - The recording and non-recording lookups.
  * @returns Where the code leads. Never rejects: a failed lookup counts as
  *   not resolved.
  */
@@ -104,7 +126,9 @@ export async function resolveQrOutcome(
 
   const url = `${apiBaseUrl}/qr/${qrId}`;
   try {
-    const { data, error } = await lookups.lookup(qrId, orgId);
+    const { data, error } = qrLinkRecordsScan(source, origin)
+      ? await lookups.scan(qrId)
+      : await lookups.lookup(qrId, orgId);
     const codeOrgId = error ? undefined : data?.qr?.organizationId;
     if (source === "tapped" && orgId && codeOrgId && codeOrgId !== orgId) {
       return { kind: "web-only", url, reason: "other-workspace" };

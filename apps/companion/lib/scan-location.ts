@@ -22,13 +22,14 @@
  *    re-shows the system prompt once answered) and never gates any flow:
  *    denied simply means scans carry no coordinates.
  * 3. **Read paths never prompt.** {@link getScanCoordinates} only checks the
- *    already-determined permission state, so it never surfaces a permission
- *    dialog mid-scan.
- * 4. **Only in-app camera scans read a position.** A QR link the OS delivers
- *    (`lib/deep-links.ts`) resolves without recording and never calls this
- *    module, because any app or web page can open such a link.
+ *    already-determined permission state, so callers outside the scanner
+ *    (an https QR link the OS delivers, which records a scan like the web QR
+ *    page) can attach coordinates without ever surfacing a permission dialog
+ *    mid-navigation. A `shelf://` QR link records no scan and reads no
+ *    position.
  *
  * @see {@link file://./../app/(tabs)/scanner.tsx} (primes + attaches on scan)
+ * @see {@link file://./deep-links.ts} (https QR links)
  * @see apps/webapp/app/routes/api+/mobile+/qr.$qrId.ts (the consuming route)
  */
 

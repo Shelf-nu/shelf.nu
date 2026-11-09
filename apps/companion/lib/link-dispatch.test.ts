@@ -13,6 +13,7 @@ import { test } from "node:test";
 
 import {
   dispatchLinkOpening,
+  qrLinkRecordsScan,
   resolveQrOutcome,
   type LinkEffects,
   type QrLookupResult,
@@ -31,6 +32,10 @@ function recordingLookups(result: QrLookupResult | Error) {
     return result;
   };
   const lookups: QrLookups = {
+    scan: async (qrId) => {
+      calls.push(`scan:${qrId}`);
+      return answer();
+    },
     lookup: async (qrId, orgId) => {
       calls.push(`lookup:${qrId}:${orgId}`);
       return answer();
@@ -57,7 +62,13 @@ test("a tapped QR link looks the code up without recording a scan", async () => 
   assert.deepEqual(calls, ["lookup:qr_1:org_1"]);
 });
 
-test("an OS-delivered QR link also looks the code up without recording", async () => {
+test("an OS-delivered https QR link records the scan, like the web QR page", async () => {
+  const { lookups, calls } = recordingLookups(ASSET_QR);
+  await resolveQrOutcome("qr_1", CLOUD, CLOUD, { source: "os-link" }, lookups);
+  assert.deepEqual(calls, ["scan:qr_1"]);
+});
+
+test("a shelf:// QR link looks the code up without recording", async () => {
   const { lookups, calls } = recordingLookups(ASSET_QR);
   await resolveQrOutcome(
     "qr_1",
@@ -67,6 +78,12 @@ test("an OS-delivered QR link also looks the code up without recording", async (
     lookups
   );
   assert.deepEqual(calls, ["lookup:qr_1:undefined"]);
+});
+
+test("only an OS-delivered https link records a scan", () => {
+  assert.equal(qrLinkRecordsScan("os-link", CLOUD), true);
+  assert.equal(qrLinkRecordsScan("os-link", undefined), false);
+  assert.equal(qrLinkRecordsScan("tapped", CLOUD), false);
 });
 
 test("a QR code on an asset or a kit opens its screen", async () => {

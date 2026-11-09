@@ -1,6 +1,7 @@
 /**
- * Tests for QR links the OS delivers: they open the asset or kit without
- * recording a scan and without reading the device position.
+ * Tests for links the OS delivers: an https QR link records a scan like the
+ * web QR page, a `shelf://` QR link records nothing and reads no position,
+ * and only plain record ids name a screen.
  *
  * @see {@link file://./deep-links.ts}
  */
@@ -23,13 +24,13 @@ const calls = {
 };
 
 // why: the API layer reaches the network through Supabase and SecureStore.
-// `qr` is the recording resolve and must never run for a link.
+// `qr` is the recording resolve; the fake counts calls to it.
 mock.module(pathToFileURL(join(__dirname, "api.ts")).href, {
   namedExports: {
     api: {
       qr: async () => {
         calls.recordingResolve += 1;
-        throw new Error("a link must not record a scan");
+        return lookupResult;
       },
       getScannedItem: async (qrId: string) => {
         calls.lookup.push(qrId);
@@ -96,7 +97,7 @@ beforeEach(() => {
 });
 
 describe("resolveQrAndNavigate", () => {
-  it("opens an asset-linked code without recording or reading a position", async () => {
+  it("a shelf:// link opens the asset without recording or reading a position", async () => {
     lookupResult = { data: { qr: { asset: { id: "as_1" } } }, error: null };
 
     await deepLinks.resolveQrAndNavigate("qr_1");
@@ -107,13 +108,14 @@ describe("resolveQrAndNavigate", () => {
     assert.deepEqual(calls.pushed, [["/(tabs)/assets", "/(tabs)/assets/as_1"]]);
   });
 
-  it("opens a kit-linked code the same way", async () => {
+  it("an https link from the connected server records the scan with its position", async () => {
     lookupResult = { data: { qr: { kitId: "kt_1" } }, error: null };
 
     await deepLinks.resolveQrAndNavigate("qr_1", "https://app.shelf.test");
 
-    assert.equal(calls.recordingResolve, 0);
-    assert.equal(calls.coordinates, 0);
+    assert.equal(calls.recordingResolve, 1);
+    assert.equal(calls.coordinates, 1);
+    assert.deepEqual(calls.lookup, []);
     assert.deepEqual(calls.pushed, [
       ["/(tabs)/assets", "/(tabs)/assets/kits/kt_1"],
     ]);

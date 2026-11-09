@@ -81,8 +81,8 @@ export const mobilePaths = {
     `/api/mobile/barcode/${pathSegment(value)}${query({ orgId })}`,
 
   /**
-   * The recording resolve: the server stores a scan. Only the in-app scanner
-   * uses it.
+   * The recording resolve: the server stores a scan. Used by the scanner tab
+   * and by https QR links the OS delivers.
    *
    * @param codeId - A QR id or SAM id
    * @param orgId - The active workspace, which scopes a SAM id

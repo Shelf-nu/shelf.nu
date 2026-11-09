@@ -8,6 +8,7 @@ import {
   type QrOutcome,
 } from "./link-dispatch";
 import { matchResourcePath } from "./resource-path";
+import { getScanCoordinates } from "./scan-location";
 
 /**
  * Supported deep link patterns:
@@ -128,20 +129,24 @@ export function parseDeepLink(url: string): ParsedLink {
 }
 
 /**
- * The lookup behind {@link resolveQrOutcome}. It records nothing: scans are
- * recorded only by the in-app scanner.
+ * The real lookups behind {@link resolveQrOutcome}: `scan` records the scan
+ * with its best-effort coordinates (read-only: `getScanCoordinates` never
+ * prompts, returns within about 1.5s, and null records the scan without a
+ * position); `lookup` records nothing.
  */
 const QR_LOOKUPS: QrLookups = {
+  scan: async (qrId) => api.qr(qrId, undefined, await getScanCoordinates()),
   lookup: (qrId, orgId) => api.getScannedItem(qrId, orgId),
 };
 
 /**
  * Resolves a QR code link the OS delivered and opens its asset or kit.
  *
- * An OS-delivered link is not proof of a camera scan: any app or web page can
- * open `shelf://qr/<id>`, and a shared https link looks the same as a label
- * scan. The code is therefore resolved WITHOUT recording (no scan, no
- * position, no note), and the person acts on the screen it opens.
+ * An https link from the connected server records a scan, exactly as opening
+ * the same address on the web does (a label scanned with the system camera
+ * arrives this way). A `shelf://qr/<id>` link records nothing: no label
+ * encodes the custom scheme, so only another app or a web page can open it.
+ * See `qrLinkRecordsScan` in `./link-dispatch.ts`.
  *
  * A code that does not resolve in the app (another workspace, unclaimed,
  * not authorized, or a failed lookup), or one from another Shelf server,
