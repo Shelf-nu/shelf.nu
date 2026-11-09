@@ -1,13 +1,13 @@
 /**
- * Printed Document Config
+ * Printed Template Config
  *
- * The switches a booking document holds, the two built-in documents every workspace
- * starts with, and the parser that turns a stored `PdfDocument.config` into a
+ * The switches a booking template holds, the two built-in templates every workspace
+ * starts with, and the parser that turns a stored `PdfTemplate.config` into a
  * complete config. Client-safe: the settings form and the PDF renderer read
  * these as well as the server.
  *
  * A stored config is parsed key by key and every key it lacks or holds in an
- * unreadable shape takes the Checklist document's value, so a row saved before a
+ * unreadable shape takes the Checklist template's value, so a row saved before a
  * key existed still prints.
  *
  * @see {@link file://./service.server.ts}
@@ -16,17 +16,17 @@
 import type { CustomFieldType } from "@prisma/client";
 import { z } from "zod";
 
-/** The most custom fields one document prints. */
-export const MAX_DOCUMENT_CUSTOM_FIELDS = 3;
+/** The most custom fields one template prints. */
+export const MAX_TEMPLATE_CUSTOM_FIELDS = 3;
 
-/** The longest document name, in characters. */
-export const MAX_DOCUMENT_NAME_LENGTH = 60;
+/** The longest template name, in characters. */
+export const MAX_TEMPLATE_NAME_LENGTH = 60;
 
 /**
  * Custom field types that print as a column. Each one fits a table cell as a
  * short line of text.
  */
-export const DOCUMENT_COLUMN_CUSTOM_FIELD_TYPES = [
+export const TEMPLATE_COLUMN_CUSTOM_FIELD_TYPES = [
   "TEXT",
   "OPTION",
   "DATE",
@@ -42,12 +42,12 @@ export const DOCUMENT_COLUMN_CUSTOM_FIELD_TYPES = [
  */
 export function printsAsColumn(type: CustomFieldType) {
   return (
-    DOCUMENT_COLUMN_CUSTOM_FIELD_TYPES as readonly CustomFieldType[]
+    TEMPLATE_COLUMN_CUSTOM_FIELD_TYPES as readonly CustomFieldType[]
   ).includes(type);
 }
 
 /** The optional columns of the asset table. `#`, Name and Code always print. */
-export const DOCUMENT_OPTIONAL_COLUMNS = [
+export const TEMPLATE_OPTIONAL_COLUMNS = [
   { key: "image", label: "Image" },
   { key: "quantity", label: "Qty" },
   { key: "kit", label: "Kit" },
@@ -55,11 +55,11 @@ export const DOCUMENT_OPTIONAL_COLUMNS = [
   { key: "location", label: "Location" },
 ] as const;
 
-export type DocumentOptionalColumn =
-  (typeof DOCUMENT_OPTIONAL_COLUMNS)[number]["key"];
+export type TemplateOptionalColumn =
+  (typeof TEMPLATE_OPTIONAL_COLUMNS)[number]["key"];
 
 /** How the asset rows are grouped: not at all, or under one header per category. */
-export const DOCUMENT_GROUP_BY = ["none", "category"] as const;
+export const TEMPLATE_GROUP_BY = ["none", "category"] as const;
 
 /**
  * The order of the asset rows. `status` follows the booking page's order,
@@ -67,35 +67,35 @@ export const DOCUMENT_GROUP_BY = ["none", "category"] as const;
  * sorted the page otherwise; `name` is A to Z by name, with a kit's members
  * kept together at the kit's place, as on the booking page.
  */
-export const DOCUMENT_SORT_BY = ["status", "name"] as const;
+export const TEMPLATE_SORT_BY = ["status", "name"] as const;
 
-export type DocumentGroupBy = (typeof DOCUMENT_GROUP_BY)[number];
-export type DocumentSortBy = (typeof DOCUMENT_SORT_BY)[number];
+export type TemplateGroupBy = (typeof TEMPLATE_GROUP_BY)[number];
+export type TemplateSortBy = (typeof TEMPLATE_SORT_BY)[number];
 
-export const DOCUMENT_GROUP_BY_OPTIONS = [
+export const TEMPLATE_GROUP_BY_OPTIONS = [
   { value: "none", label: "No grouping" },
   { value: "category", label: "Category" },
-] as const satisfies readonly { value: DocumentGroupBy; label: string }[];
+] as const satisfies readonly { value: TemplateGroupBy; label: string }[];
 
-export const DOCUMENT_SORT_BY_OPTIONS = [
+export const TEMPLATE_SORT_BY_OPTIONS = [
   { value: "status", label: "Same as the booking page (status by default)" },
   { value: "name", label: "Name (A to Z, kits kept together)" },
-] as const satisfies readonly { value: DocumentSortBy; label: string }[];
+] as const satisfies readonly { value: TemplateSortBy; label: string }[];
 
-/** Everything a booking document decides about the printed page. */
-export type BookingDocumentConfig = {
+/** Everything a booking template decides about the printed page. */
+export type BookingTemplateConfig = {
   /** Optional asset table columns, each printed or not. */
-  columns: Record<DocumentOptionalColumn, boolean>;
+  columns: Record<TemplateOptionalColumn, boolean>;
   /**
    * Custom fields to print, in this order, at most
-   * {@link MAX_DOCUMENT_CUSTOM_FIELDS}. Column types print as columns before
+   * {@link MAX_TEMPLATE_CUSTOM_FIELDS}. Column types print as columns before
    * Code; a multi-line text prints in the description row.
    */
   customFieldIds: string[];
   /** The "Asset Description" row under each asset. */
   assetDescription: boolean;
-  groupBy: DocumentGroupBy;
-  sortBy: DocumentSortBy;
+  groupBy: TemplateGroupBy;
+  sortBy: TemplateSortBy;
   /** The booking's description in the header. */
   bookingDescription: boolean;
   /** The "Total assets value" line in the header. */
@@ -104,8 +104,8 @@ export type BookingDocumentConfig = {
   signatureLines: boolean;
 };
 
-/** The "Checklist" document: the booking PDF exactly as it prints without documents. */
-export const BOOKING_CHECKLIST_CONFIG: BookingDocumentConfig = {
+/** The "Checklist" template: the booking PDF exactly as it prints without templates. */
+export const BOOKING_CHECKLIST_CONFIG: BookingTemplateConfig = {
   columns: {
     image: true,
     quantity: true,
@@ -123,11 +123,11 @@ export const BOOKING_CHECKLIST_CONFIG: BookingDocumentConfig = {
 };
 
 /**
- * The "Check-out receipt" document: the signed list of what went out, the
+ * The "Check-out receipt" template: the signed list of what went out, the
  * departure twin of the check-in receipt. No descriptions and no value, rows A
  * to Z, signature lines at the foot.
  */
-export const CHECKOUT_RECEIPT_CONFIG: BookingDocumentConfig = {
+export const CHECKOUT_RECEIPT_CONFIG: BookingTemplateConfig = {
   ...BOOKING_CHECKLIST_CONFIG,
   assetDescription: false,
   sortBy: "name",
@@ -136,39 +136,30 @@ export const CHECKOUT_RECEIPT_CONFIG: BookingDocumentConfig = {
   signatureLines: true,
 };
 
-/** The name of the built-in default document. */
-export const CHECKLIST_DOCUMENT_NAME = "Checklist";
+/** The name of the built-in default template. */
+export const CHECKLIST_TEMPLATE_NAME = "Checklist";
+
+/** The name of the built-in check-out receipt template. */
+export const CHECKOUT_RECEIPT_TEMPLATE_NAME = "Check-out receipt";
 
 /**
- * The documents a workspace starts with, in list order; the first is the
- * default. Every workspace gets the Checklist; a workspace whose tier includes
- * PDF documents also gets the Check-out receipt. The data migration
- * `20261028120000_add_pdf_documents` seeds the same for workspaces that
- * existed before documents.
- *
- * @param params.canCustomize - Whether the workspace's tier includes PDF
- *   documents
+ * The templates a team workspace starts with, in list order;
+ * the first is the default: the Checklist, then the Check-out receipt. The
+ * data migration `20261103120000_add_pdf_templates` seeds the same for team
+ * workspaces that existed before templates.
  */
-export function builtInBookingDocuments({
-  canCustomize,
-}: {
-  canCustomize: boolean;
-}) {
+export function builtInBookingTemplates() {
   return [
     {
-      name: CHECKLIST_DOCUMENT_NAME,
+      name: CHECKLIST_TEMPLATE_NAME,
       config: BOOKING_CHECKLIST_CONFIG,
       isDefault: true,
     },
-    ...(canCustomize
-      ? [
-          {
-            name: "Check-out receipt",
-            config: CHECKOUT_RECEIPT_CONFIG,
-            isDefault: false,
-          },
-        ]
-      : []),
+    {
+      name: CHECKOUT_RECEIPT_TEMPLATE_NAME,
+      config: CHECKOUT_RECEIPT_CONFIG,
+      isDefault: false,
+    },
   ];
 }
 
@@ -188,12 +179,12 @@ const storedConfigSchema = z
     customFieldIds: z
       .array(z.string())
       .transform((ids) =>
-        [...new Set(ids)].slice(0, MAX_DOCUMENT_CUSTOM_FIELDS)
+        [...new Set(ids)].slice(0, MAX_TEMPLATE_CUSTOM_FIELDS)
       )
       .catch(fallback.customFieldIds),
     assetDescription: z.boolean().catch(fallback.assetDescription),
-    groupBy: z.enum(DOCUMENT_GROUP_BY).catch(fallback.groupBy),
-    sortBy: z.enum(DOCUMENT_SORT_BY).catch(fallback.sortBy),
+    groupBy: z.enum(TEMPLATE_GROUP_BY).catch(fallback.groupBy),
+    sortBy: z.enum(TEMPLATE_SORT_BY).catch(fallback.sortBy),
     bookingDescription: z.boolean().catch(fallback.bookingDescription),
     totalValue: z.boolean().catch(fallback.totalValue),
     signatureLines: z.boolean().catch(fallback.signatureLines),
@@ -201,17 +192,17 @@ const storedConfigSchema = z
   .catch(fallback);
 
 /**
- * Reads a stored `PdfDocument.config` into a complete config.
+ * Reads a stored `PdfTemplate.config` into a complete config.
  *
- * Never throws. A missing or unreadable key takes the Checklist document's value,
+ * Never throws. A missing or unreadable key takes the Checklist template's value,
  * so an older row, or one written by hand, still prints a sensible page.
  *
  * @param stored - The JSON value from the database
  * @returns A config with every key present
  */
-export function parseBookingDocumentConfig(
+export function parseBookingTemplateConfig(
   stored: unknown
-): BookingDocumentConfig {
+): BookingTemplateConfig {
   const value =
     stored && typeof stored === "object" && !Array.isArray(stored)
       ? stored
@@ -219,8 +210,8 @@ export function parseBookingDocumentConfig(
   return storedConfigSchema.parse(value);
 }
 
-/** One PDF document as the print dialog and the settings list see it. */
-export type PdfDocumentSummary = {
+/** One PDF template as the print dialog and the settings list see it. */
+export type PdfTemplateSummary = {
   id: string;
   name: string;
   isDefault: boolean;
