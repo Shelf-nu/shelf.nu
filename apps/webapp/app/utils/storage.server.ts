@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 
 import { parseFormData } from "@remix-run/form-data-parser";
+import type { FileUpload } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -407,20 +408,46 @@ export interface UploadOptions {
 }
 
 /**
+ * The extension to give a stored upload, taken from the client's filename.
+ *
+ * Only 1 to 5 letters or digits are kept: the filename is client-chosen, and
+ * anything else (`/`, `%2e%2e`) would become part of the storage path.
+ *
+ * @param originalName - The filename the client sent, if any
+ * @returns The lower-cased extension, or `undefined` when there is no safe one
+ */
+export function safeUploadExtension(
+  originalName: string | undefined
+): string | undefined {
+  if (!originalName?.includes(".")) return undefined;
+  const extension = originalName.split(".").pop() ?? "";
+  return /^[a-z0-9]{1,5}$/i.test(extension)
+    ? extension.toLowerCase()
+    : undefined;
+}
+
+/**
  * Uploads every image file part of a multipart request to storage and returns
  * the stored paths, keyed by the form field each file came in on.
  *
- * The result holds ONLY values this function's own upload handler produced.
- * Callers sign and save what they read from it with the service-role client,
- * so a plain text part named like a file field (`mainImage=<some path>`) must
- * never come back: it would let a member point the signer at any object in the
- * bucket, including another workspace's. Read other form fields from a clone
- * of the request instead.
+ * The result holds the values this function's own upload handler produced,
+ * plus only the text parts the caller names in `textFields`. Callers sign and
+ * save the upload fields with the service-role client, so a plain text part
+ * named like a file field (`mainImage=<some path>`) must never come back: it
+ * would let a member point the signer at any object in the bucket, including
+ * another workspace's. Never list a file field in `textFields`.
+ *
+ * The stored file's extension is taken from the uploaded filename only when it
+ * is 1 to 5 letters or digits. Anything else (a `/`, a `%`) would put a client-
+ * chosen segment into the storage path, so it is dropped.
  *
  * @param args.request - The multipart request carrying the file parts
  * @param args.newFileName - Storage path (without extension) for the upload
+ * @param args.textFields - Text parts to return alongside the uploads, read
+ *   from the same size-limited parse (never a second, unbounded one)
  * @returns A FormData of `fieldName -> uploaded path` (or a JSON string of
- *   `{ originalPath, thumbnailPath }` when `generateThumbnail` is set)
+ *   `{ originalPath, thumbnailPath }` when `generateThumbnail` is set), plus
+ *   the named text fields
  * @throws {ShelfError} 400 when a file exceeds `maxFileSize`
  */
 export async function parseFileFormData({
@@ -432,6 +459,7 @@ export async function parseFileFormData({
   thumbnailSize = 108,
   maxFileSize = DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   inspectOriginal,
+  textFields = [],
 }: {
   request: Request;
   newFileName: string;
@@ -442,6 +470,8 @@ export async function parseFileFormData({
   maxFileSize?: number;
   /** Reads each image file as uploaded, before it is resized and re-encoded */
   inspectOriginal?: InspectUploadedOriginal;
+  /** Text parts to return with the uploads. Never a file field name. */
+  textFields?: readonly string[];
 }) {
   try {
     /** The values this function uploaded, the only thing it returns. */
@@ -472,9 +502,9 @@ export async function parseFileFormData({
         return undefined;
       }
 
-      const extension = originalName?.includes(".")
-        ? originalName.split(".").pop()
-        : undefined;
+      // Only a short alphanumeric extension reaches the storage path; the
+      // filename is client-chosen and could otherwise carry `/` or `%2e%2e`.
+      const extension = safeUploadExtension(originalName);
       const targetFilename = extension
         ? `${newFileName}.${extension}`
         : newFileName;
@@ -508,17 +538,22 @@ export async function parseFileFormData({
       return (uploadedFilePaths as { originalPath: string }).originalPath;
     };
 
-    const uploadHandler = async (upload: any) => {
+    const uploadHandler = async (upload: FileUpload) => {
       const value = await uploadAndStore(upload);
-      if (value != null && upload?.fieldName) {
+      if (value != null && upload.fieldName) {
         uploaded.append(upload.fieldName, value);
       }
       return value;
     };
 
-    // The parser also returns text parts verbatim; they are deliberately
-    // dropped by returning `uploaded` instead of its result.
-    await parseFormData(request, { maxFileSize }, uploadHandler);
+    // The parser also returns every text part verbatim. Only the named ones
+    // are copied over; the rest are dropped by returning `uploaded`.
+    const parsed = await parseFormData(request, { maxFileSize }, uploadHandler);
+    for (const field of textFields) {
+      for (const value of parsed.getAll(field)) {
+        if (typeof value === "string") uploaded.append(field, value);
+      }
+    }
 
     return uploaded;
   } catch (cause) {

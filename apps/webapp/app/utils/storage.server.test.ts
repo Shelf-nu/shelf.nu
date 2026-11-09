@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AUDIT_IMAGE_TEXT_FIELDS } from "~/modules/audit/image-form-fields";
 import { PUBLIC_BUCKET } from "./constants";
 import { SUPABASE_URL } from "./env";
 import { ShelfError } from "./error";
@@ -9,6 +10,7 @@ import {
   MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFiles,
+  safeUploadExtension,
   uploadFile,
 } from "./storage.server";
 
@@ -536,5 +538,134 @@ describe("parseFileFormData returns only what it uploaded", () => {
     expect(result.getAll("mainImage")).toEqual([
       "user-1/a1/main-image-1760000000.png",
     ]);
+  });
+
+  it("drops a rejected non-image file part that shares a text part's name", async () => {
+    const form = new FormData();
+    form.append("mainImage", FOREIGN_PATH);
+    form.append(
+      "mainImage",
+      new File(["<html></html>"], "page.html", { type: "text/html" })
+    );
+
+    const result = await parse(form);
+
+    expect(result.get("mainImage")).toBeNull();
+  });
+
+  it("returns the thumbnail pair as one JSON value under the field", async () => {
+    const form = new FormData();
+    form.append("mainImage", await png());
+
+    const result = await parseFileFormData({
+      request: new Request("http://localhost/assets/a1/edit", {
+        method: "POST",
+        body: form,
+      }),
+      newFileName: "user-1/a1/main-image-1760000000",
+      bucketName: "assets",
+      generateThumbnail: true,
+    });
+
+    expect(JSON.parse(String(result.get("mainImage")))).toEqual({
+      originalPath: "user-1/a1/main-image-1760000000.png",
+      thumbnailPath: "user-1/a1/main-image-1760000000-thumbnail.png",
+    });
+  });
+
+  it("keeps a client filename's path characters out of the storage path", async () => {
+    const form = new FormData();
+    form.append(
+      "mainImage",
+      new File(
+        [new Uint8Array(await (await png()).arrayBuffer())],
+        "x./%2e%2e/%2e%2e/victim/y",
+        {
+          type: "image/png",
+        }
+      )
+    );
+
+    const result = await parse(form);
+
+    expect(result.get("mainImage")).toBe("user-1/a1/main-image-1760000000");
+  });
+});
+
+describe("parseFileFormData text fields", () => {
+  const FOREIGN_PATH = "other-user/other-asset/main-image-1.jpg";
+
+  async function png(): Promise<File> {
+    const sharp = (await import("sharp")).default;
+    const bytes = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: "#2b6cb0" },
+    })
+      .png()
+      .toBuffer();
+    return new File([new Uint8Array(bytes)], "photo.png", {
+      type: "image/png",
+    });
+  }
+
+  it("returns the audit photo's note and capture details from the same parse", async () => {
+    const form = new FormData();
+    form.append("image", await png());
+    form.append("content", "Dent on the lid");
+    form.append("exifDateTimeOriginal", "2026:10:21 09:15:00");
+    form.append("exifOffsetTimeOriginal", "+02:00");
+    form.append("deviceTimeZone", "Europe/Sofia");
+    form.append("captureSource", "CAMERA");
+
+    const result = await parseFileFormData({
+      request: new Request("http://localhost/api/mobile/audits/image", {
+        method: "POST",
+        body: form,
+      }),
+      newFileName: "org-1/audits/a1/img",
+      bucketName: PUBLIC_BUCKET,
+      textFields: AUDIT_IMAGE_TEXT_FIELDS,
+    });
+
+    expect(result.get("image")).toBe("org-1/audits/a1/img.png");
+    expect(result.get("content")).toBe("Dent on the lid");
+    expect(result.get("exifDateTimeOriginal")).toBe("2026:10:21 09:15:00");
+    expect(result.get("exifOffsetTimeOriginal")).toBe("+02:00");
+    expect(result.get("deviceTimeZone")).toBe("Europe/Sofia");
+    expect(result.get("captureSource")).toBe("CAMERA");
+  });
+
+  it("returns only the named text fields, never one posing as the upload", async () => {
+    const form = new FormData();
+    form.append("image", FOREIGN_PATH);
+    form.append("content", "note");
+    form.append("unlisted", "dropped");
+
+    const result = await parseFileFormData({
+      request: new Request("http://localhost/api/mobile/audits/image", {
+        method: "POST",
+        body: form,
+      }),
+      newFileName: "org-1/audits/a1/img",
+      bucketName: PUBLIC_BUCKET,
+      textFields: AUDIT_IMAGE_TEXT_FIELDS,
+    });
+
+    expect(result.get("image")).toBeNull();
+    expect(result.get("content")).toBe("note");
+    expect(result.get("unlisted")).toBeNull();
+  });
+});
+
+describe("safeUploadExtension", () => {
+  it.each([
+    ["photo.PNG", "png"],
+    ["a.b.jpeg", "jpeg"],
+    ["noext", undefined],
+    ["x./%2e%2e/y", undefined],
+    ["x.png/../../z", undefined],
+    ["x.toolongext", undefined],
+    [undefined, undefined],
+  ])("%s -> %s", (name, expected) => {
+    expect(safeUploadExtension(name)).toBe(expected);
   });
 });
