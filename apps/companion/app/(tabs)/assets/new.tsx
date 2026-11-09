@@ -41,6 +41,7 @@ import {
 } from "@/lib/api";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 import { valuationFromInput } from "@/lib/asset-valuation";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -165,10 +166,13 @@ export default function CreateAssetScreen() {
   const loadLocations = useCallback(async () => {
     if (!currentOrg) return;
     setIsLocationsLoading(true);
-    const { data } = await api.locations(currentOrg.id);
-    if (data?.locations) {
-      setLocations(data.locations);
-    }
+    // Every page: the field searches only what it holds.
+    const orgId = currentOrg.id;
+    const { rows, error } = await fetchAllPages(
+      (page, perPage) => api.locations(orgId, undefined, { page, perPage }),
+      (data) => data.locations
+    );
+    if (!error) setLocations(rows);
     setIsLocationsLoading(false);
   }, [currentOrg]);
 

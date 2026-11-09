@@ -24,6 +24,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { valuationToInput } from "@/lib/asset-valuation";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import {
   api,
   type AssetDetail,
@@ -294,8 +295,12 @@ export function useEditAssetForm(
   const loadLocations = useCallback(async () => {
     if (!orgId) return;
     setIsLocationsLoading(true);
-    const { data } = await api.locations(orgId);
-    if (data?.locations) setLocations(data.locations);
+    // Every page: the field searches only what it holds.
+    const { rows, error } = await fetchAllPages(
+      (page, perPage) => api.locations(orgId, undefined, { page, perPage }),
+      (data) => data.locations
+    );
+    if (!error) setLocations(rows);
     setIsLocationsLoading(false);
   }, [orgId]);
 
