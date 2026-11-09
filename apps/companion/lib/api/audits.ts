@@ -104,7 +104,11 @@ export const auditsApi = {
       { signal }
     ),
 
-  /** Record a scan during an audit (idempotent) */
+  /**
+   * Record a scan during an audit (idempotent). A quantity-tracked asset
+   * carries `foundQuantity`, the units counted; sending it for an asset that
+   * is already scanned replaces the count.
+   */
   recordAuditScan: (
     orgId: string,
     payload: {
@@ -112,6 +116,7 @@ export const auditsApi = {
       qrId: string;
       assetId: string;
       isExpected: boolean;
+      foundQuantity?: number;
     }
   ) =>
     apiFetch<RecordScanResponse>(
