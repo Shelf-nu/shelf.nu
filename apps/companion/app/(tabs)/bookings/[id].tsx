@@ -75,7 +75,7 @@ import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
 import {
   canOfferDiscardDraft,
-  discardLanded,
+  discardOutcome,
 } from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
@@ -920,17 +920,24 @@ function BookingDetailScreen({ id }: { id: string }) {
             );
             // An error can still mean the discard landed (a timed-out
             // response), so re-read the booking before reporting a failure.
-            const landed =
-              !err ||
-              discardLanded(
-                (await api.booking(booking.id, currentOrg.id)).data?.booking
-                  .status
-              );
+            const outcome = err
+              ? discardOutcome(
+                  (await api.booking(booking.id, currentOrg.id)).data
+                    ?.booking ?? null
+                )
+              : "landed";
             setIsActioning(false);
             // Either way the booking may have changed: refresh list and detail.
             markBookingsListDirty();
             fetchBooking();
-            if (!landed) {
+            if (outcome === "unknown") {
+              Alert.alert(
+                "Discard status unknown",
+                "We couldn't confirm whether the draft was discarded. Pull to refresh once you're back online."
+              );
+              return;
+            }
+            if (outcome === "not-landed") {
               Alert.alert("Couldn't discard", err ?? "Please try again.");
               return;
             }

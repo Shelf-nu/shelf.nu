@@ -23,17 +23,25 @@ export function canOfferDiscardDraft(
   return actions.canDiscardDraft === true;
 }
 
+/** What a discard that answered with an error actually did. */
+export type DiscardOutcome = "landed" | "not-landed" | "unknown";
+
 /**
- * Whether a discard that answered with an error has nonetheless landed.
+ * Reads the outcome of a discard that answered with an error.
  *
  * A request can archive the draft and still fail on the way back (a timeout),
  * so the screen re-reads the booking before reporting a failure. An ARCHIVED
- * booking means the discard went through.
+ * booking means the discard went through; any other status means it did not.
+ * When the re-read fails as well, usually because the connection dropped, the
+ * outcome is unknown and the screen must not claim either.
  *
- * @param status - The booking's status as re-read after the error, or
- *   `undefined` when it could not be re-read
- * @returns `true` when the draft is already archived
+ * @param reread - The booking as re-read after the error, or `null` when it
+ *   could not be re-read
+ * @returns Whether the discard landed, did not, or cannot be told
  */
-export function discardLanded(status: string | undefined): boolean {
-  return status === "ARCHIVED";
+export function discardOutcome(
+  reread: { status: string } | null
+): DiscardOutcome {
+  if (!reread) return "unknown";
+  return reread.status === "ARCHIVED" ? "landed" : "not-landed";
 }
