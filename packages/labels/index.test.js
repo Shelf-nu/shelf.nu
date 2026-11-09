@@ -20,6 +20,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  AUDIT_PHOTO_FLAG_LABELS,
+  AUDIT_PHOTO_KEY,
+  AUDIT_PHOTO_SOURCE_LABELS,
+  describeAuditPhoto,
   ASSET_BOOKING_PSEUDO_STATUS_LABELS,
   ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
@@ -632,4 +636,200 @@ test("a withheld custodian is a name, never the empty answer", () => {
   // must stay a non-empty string a row can carry in the name slot.
   assert.equal(typeof WITHHELD_CUSTODIAN_NAME, "string");
   assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
+});
+
+/** Formatters that show which one was used. */
+const format = {
+  dateTime: (value) => `dt(${new Date(value).toISOString().slice(0, 16)})`,
+  // A year-only request returns the year; a tile request returns s(...), with
+  // the year only when the caller asked for one.
+  custom: (value, options) => {
+    const iso = new Date(value).toISOString();
+    if (!options.month) return iso.slice(0, 4);
+    return `s(${iso.slice(options.year ? 0 : 5, 16)})`;
+  },
+};
+const NOW = new Date("2026-10-28T12:00:00Z");
+const describe = (photo) => describeAuditPhoto(photo, { format, now: NOW });
+
+test("a camera photo taken just before upload is quiet: icon, date and time, no flag", () => {
+  const photo = describe({
+    captureSource: "CAMERA",
+    capturedAt: "2026-10-28T10:56:00Z",
+    createdAt: "2026-10-28T10:58:00Z",
+  });
+
+  assert.equal(photo.source, "CAMERA");
+  assert.equal(photo.short, "s(10-28T10:56)");
+  assert.equal(photo.flag, null);
+  assert.equal(
+    photo.detail,
+    "Shelf app camera · dt(2026-10-28T10:56) · 2 min before upload"
+  );
+});
+
+test("a photo taken days before its upload is an old photo", () => {
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: "2026-10-01T06:30:00Z",
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+  assert.equal(photo.flagLabel, "Old photo");
+  assert.equal(
+    photo.detail,
+    "Photo library · file says dt(2026-10-01T06:30) · 27 days before upload"
+  );
+});
+
+test("a photo taken a year before upload is old, whatever the audit knows", () => {
+  // why: the upload is the only reference, so a photo needs nothing but its
+  // own two times to be checked.
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: "2025-10-28T09:00:00Z",
+    createdAt: "2026-10-28T09:00:00Z",
+  });
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+});
+
+test("the gap reads in seconds, hours or days as it grows", () => {
+  const gap = (capturedAt) =>
+    describe({
+      captureSource: "CAMERA",
+      capturedAt,
+      createdAt: "2026-10-28T10:00:00Z",
+    }).detail.split(" · ")[2];
+
+  assert.equal(gap("2026-10-28T09:59:30Z"), "under a minute before upload");
+  assert.equal(gap("2026-10-28T05:00:00Z"), "5 h before upload");
+  assert.equal(gap("2026-10-25T10:00:00Z"), "3 days before upload");
+});
+
+test("an upload from an app version that does not say how is still checked", () => {
+  // why: older app versions send no source and, after their HEIC to JPEG
+  // conversion, no date. The server stores PHONE for them, so they are not
+  // mistaken for photos from before capture times were read.
+  const photo = describe({
+    captureSource: "PHONE",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.sourceLabel, "Phone app");
+  assert.equal(photo.flag, "NO_DATE");
+});
+
+test("a photo taken the evening before its upload is not flagged", () => {
+  assert.equal(
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt: "2026-10-27T20:00:00Z",
+      createdAt: "2026-10-28T10:52:00Z",
+    }).flag,
+    null
+  );
+});
+
+test("a photo is old only once it was taken more than a day before its upload", () => {
+  const flagFor = (capturedAt) =>
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt,
+      createdAt: "2026-10-28T12:00:00Z",
+    }).flag;
+
+  assert.equal(flagFor("2026-10-27T13:00:00Z"), null); // 23 h
+  assert.equal(flagFor("2026-10-27T12:00:00Z"), null); // exactly a day
+  assert.equal(flagFor("2026-10-27T11:00:00Z"), "OLD_PHOTO"); // 25 h
+});
+
+test("the year shows only when the photo is from another year than its upload or today", () => {
+  assert.equal(
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt: "2025-12-30T10:00:00Z",
+      createdAt: "2026-10-28T10:52:00Z",
+    }).short,
+    "s(2025-12-30T10:00)"
+  );
+});
+
+test("a new photo with no date is flagged, and never borrows its upload time", () => {
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.short, null);
+  assert.equal(photo.flag, "NO_DATE");
+  assert.equal(photo.detail, "Photo library · time taken unknown");
+});
+
+test("a camera photo with no EXIF date shows its upload time, and is flagged", () => {
+  const photo = describe({
+    captureSource: "CAMERA",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:58:00Z",
+  });
+
+  assert.equal(photo.short, "s(10-28T10:58)");
+  // why: the official app sends the camera's date, so a camera claim with no
+  // date is what a modified client would send with an old, stripped picture.
+  assert.equal(photo.flag, "NO_DATE");
+  assert.equal(
+    photo.detail,
+    "Shelf app camera · uploaded dt(2026-10-28T10:58)"
+  );
+});
+
+test("a photo from before capture times were read shows its upload time, unflagged", () => {
+  // why: its date was never looked for. Flagging it would put "No date" on
+  // every photo in every audit taken before this release.
+  const photo = describe({
+    captureSource: null,
+    capturedAt: null,
+    createdAt: "2026-08-19T16:27:00Z",
+  });
+
+  assert.equal(photo.flag, null);
+  assert.equal(photo.short, "s(08-19T16:27)");
+  assert.equal(photo.detail, "Uploaded dt(2026-08-19T16:27)");
+});
+
+test("no age flag without an upload time to measure against", () => {
+  const photo = describeAuditPhoto(
+    { captureSource: "LIBRARY", capturedAt: "2020-01-01T00:00:00Z" },
+    { format, now: NOW }
+  );
+
+  assert.equal(photo.flag, null);
+});
+
+test("audit photo labels carry no dashes", () => {
+  assert.deepEqual(Object.keys(AUDIT_PHOTO_SOURCE_LABELS), [
+    "CAMERA",
+    "LIBRARY",
+    "WEB_UPLOAD",
+    "PHONE",
+  ]);
+  for (const text of [
+    ...Object.values(AUDIT_PHOTO_SOURCE_LABELS),
+    ...Object.values(AUDIT_PHOTO_FLAG_LABELS),
+    AUDIT_PHOTO_KEY,
+  ]) {
+    assert.doesNotMatch(text, /[\u2013\u2014]/);
+  }
+});
+
+test("the printed key names every way a photo can reach Shelf", () => {
+  for (const label of Object.values(AUDIT_PHOTO_SOURCE_LABELS)) {
+    assert.ok(
+      AUDIT_PHOTO_KEY.toLowerCase().includes(label.toLowerCase()),
+      label
+    );
+  }
 });

@@ -11,6 +11,7 @@
 import type {
   AssetFinding,
   AuditFindingsPage,
+  FindingImage,
   FindingNote,
   FindingsCursor,
 } from "~/modules/audit/findings.server";
@@ -174,11 +175,16 @@ export function findingSummary({
 }
 
 /**
- * A page of findings as JSON carries it: note dates arrive as ISO strings.
+ * A page of findings as JSON carries it: note and photo dates arrive as ISO
+ * strings.
  */
 export type SerializedFindingsPage = Omit<AuditFindingsPage, "findings"> & {
-  findings: (Omit<AssetFinding, "notes"> & {
+  findings: (Omit<AssetFinding, "notes" | "images"> & {
     notes: (Omit<FindingNote, "createdAt"> & { createdAt: string })[];
+    images: (Omit<FindingImage, "capturedAt" | "createdAt"> & {
+      capturedAt: string | null;
+      createdAt: string;
+    })[];
   })[];
 };
 
@@ -187,7 +193,7 @@ export type SerializedFindingsPage = Omit<AuditFindingsPage, "findings"> & {
  * loader sends, so every row renders from the same types.
  *
  * @param page - The JSON page
- * @returns The page with note dates as `Date`s
+ * @returns The page with note and photo dates as `Date`s
  */
 export function reviveFindingsPage(
   page: SerializedFindingsPage
@@ -199,6 +205,11 @@ export function reviveFindingsPage(
       notes: finding.notes.map((note) => ({
         ...note,
         createdAt: new Date(note.createdAt),
+      })),
+      images: finding.images.map((image) => ({
+        ...image,
+        capturedAt: image.capturedAt ? new Date(image.capturedAt) : null,
+        createdAt: new Date(image.createdAt),
       })),
     })),
   };

@@ -122,6 +122,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       uploadedById: user.id,
       auditAssetId,
+      uploadedVia: "phone",
       returnParsedFormData: true,
     });
 
