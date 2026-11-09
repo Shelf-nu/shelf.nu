@@ -351,6 +351,63 @@ describe("getAssetModels", () => {
     });
   });
 
+  it("puts the included model first when it falls outside the page", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    const ownModel = {
+      ...createAssetModelFactory({ id: "model-own", name: "Old Model" }),
+      _count: { assets: 4 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(150);
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(ownModel);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      perPage: 100,
+      includeId: "model-own",
+    });
+
+    // Scoped to the workspace, so another workspace's id cannot be pulled in.
+    expect(db.assetModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "model-own", organizationId: "org-123" },
+      })
+    );
+    expect(result.assetModels.map((m) => m.id)).toEqual([
+      "model-own",
+      "model-1",
+    ]);
+    expect(result.assetModels[0]).toMatchObject({ activeAssetCount: 4 });
+    // The total still counts the workspace's models, not the list length.
+    expect(result.totalAssetModels).toBe(150);
+  });
+
+  it("does not fetch the included model again when it is on the page", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 1 },
+      },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(1);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      includeId: "model-1",
+    });
+
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+    expect(result.assetModels).toHaveLength(1);
+  });
+
   it("does not read defaults unless asked for them", async () => {
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue([
