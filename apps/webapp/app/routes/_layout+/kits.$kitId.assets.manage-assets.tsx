@@ -1094,14 +1094,19 @@ const RowComponent = ({
       {/* Location */}
       <Td className={allowCursor}>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          // Clicks on the badge or its hierarchy hover card (portalled, but React
+          // events still bubble through it) must not toggle the row's
+          // selection: the row's click handler selects the asset.
+          <span role="presentation" onClick={(e) => e.stopPropagation()}>
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+          </span>
         ) : null}
       </Td>
     </>

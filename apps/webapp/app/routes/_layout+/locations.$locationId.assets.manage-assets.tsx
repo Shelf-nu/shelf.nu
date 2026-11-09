@@ -749,14 +749,19 @@ const RowComponent = ({
           const primary = getPrimaryLocation(item);
           if (!primary) return null;
           return (
-            <LocationBadge
-              location={{
-                id: primary.id,
-                name: primary.name,
-                parentId: primary.parentId ?? undefined,
-                childCount: primary._count?.children ?? 0,
-              }}
-            />
+            // Clicks on the badge or its hierarchy hover card (portalled, but React
+            // events still bubble through it) must not toggle the row's
+            // selection: the row's click handler selects the asset.
+            <span role="presentation" onClick={(e) => e.stopPropagation()}>
+              <LocationBadge
+                location={{
+                  id: primary.id,
+                  name: primary.name,
+                  parentId: primary.parentId ?? undefined,
+                  childCount: primary._count?.children ?? 0,
+                }}
+              />
+            </span>
           );
         })()}
       </Td>
