@@ -132,8 +132,10 @@ describe("POST /api/mobile/asset/add-note", () => {
   });
 
   it("strips Markdoc delimiters so a comment cannot carry a live tag", async () => {
-    (db.asset.findUnique as any).mockResolvedValue({ id: "asset-1" });
-    (createNote as any).mockResolvedValue({ id: "note-1" });
+    vi.mocked(db.asset.findUnique).mockResolvedValue({
+      id: "asset-1",
+    } as never);
+    vi.mocked(createNote).mockResolvedValue({ id: "note-1" } as never);
 
     const request = createRequest({
       assetId: "asset-1",

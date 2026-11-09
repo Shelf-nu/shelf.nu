@@ -5,8 +5,9 @@ import type * as DateFormatModule from "~/utils/date-format";
 import { MarkdownViewer } from "./markdown-viewer";
 
 // why: the hook reads the user's prefs from the root route loader, which a
-// MemoryRouter does not have. The real pure formatter still runs, so an
-// invalid date throws here exactly as it does on the page.
+// MemoryRouter does not have. Keep the real pure formatter rather than a stub:
+// it throws on an invalid date, so the unparseable-date test fails unless
+// DateS guards the value before formatting.
 vi.mock("~/hooks/use-date-formatter", async () => {
   const { formatDate } = await vi.importActual<typeof DateFormatModule>(
     "~/utils/date-format"
