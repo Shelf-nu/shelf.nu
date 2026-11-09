@@ -658,6 +658,9 @@ export function getActionTextFromTransition(
     case "COMPLETE->ARCHIVED":
     case "RESERVED->ARCHIVED":
       return "archived the booking";
+    // "Discard draft": members who may not delete drop a draft by archiving it.
+    case "DRAFT->ARCHIVED":
+      return "discarded the draft";
     default:
       return "changed the booking status";
   }
@@ -15563,21 +15566,15 @@ export async function assertBookingDeleteConfirmed({
  * @param booking - Org-scoped booking identifier
  * @param hints - Client hints used to format email subject lines and times
  * @param userId - Optional editor user id, used to skip notifying the actor
- * @param options.onlyIfDraft - The caller's policy allows deleting drafts only
- *          (`access.policy.bookings.deleteOnlyDrafts`). The delete then
- *          matches a DRAFT row only, so a booking reserved after the caller's
- *          check is refused instead of deleted.
  * @returns The deleted booking row (with the includes needed for email
  *          rendering and the post-tx caller).
- * @throws {ShelfError} 404 if the booking does not exist; 403 when
- *          `onlyIfDraft` is set and the booking is no longer a draft; otherwise
- *          wraps any underlying Prisma/email failure.
+ * @throws {ShelfError} 404 if the booking does not exist; otherwise wraps any
+ *          underlying Prisma/email failure.
  */
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint,
-  userId?: string,
-  options: { onlyIfDraft?: boolean } = {}
+  userId?: string
 ) {
   const { id, organizationId } = booking;
   const currentBooking = await db.booking.findUnique({
@@ -15642,41 +15639,18 @@ export async function deleteBooking(
      * atomicity rationale.
      */
     const b = await db.$transaction(async (tx) => {
-      const deleted = await tx.booking
-        .delete({
-          where: {
-            id,
-            organizationId,
-            ...(options.onlyIfDraft ? { status: BookingStatus.DRAFT } : {}),
-          },
-          include: {
-            ...BOOKING_COMMON_INCLUDE,
-            ...BOOKING_INCLUDE_FOR_EMAIL,
-            bookingAssets: {
-              include: {
-                asset: { select: { id: true } },
-              },
+      const deleted = await tx.booking.delete({
+        where: { id, organizationId },
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true } },
             },
           },
-        })
-        .catch((cause: unknown) => {
-          // With `onlyIfDraft`, no matching row means the booking stopped
-          // being a draft after the caller's check.
-          if (options.onlyIfDraft && isNotFoundError(cause)) {
-            // `cause: null`: a not-found cause would set the status to 404.
-            throw new ShelfError({
-              cause: null,
-              label,
-              message:
-                "You are not authorized to delete this booking. Only draft bookings can be deleted.",
-              status: 403,
-              shouldBeCaptured: false,
-              additionalData: { id, organizationId },
-            });
-          }
-          throw cause;
-        });
-
+        },
+      });
       /** Assets that were checked out on an ONGOING/OVERDUE booking need
        * terminal-status reconciliation, NOT a blanket flip to AVAILABLE.
        * The cascade above has already removed this booking's
@@ -17020,10 +16994,8 @@ export async function assertSelectAllWithinOwnership({
  *
  * The selection is the explicit ids, or with select-all every booking the
  * list shows for its filters, and in both cases only the bookings the caller
- * may act on (see {@link getBulkBookingsWhereInput}). Roles whose
- * policy limits delete to drafts are refused the whole
- * request when the selection contains any non-draft booking, the same rule
- * `assertCanDeleteBooking` applies to a single delete.
+ * may act on (see {@link getBulkBookingsWhereInput}). The route has already
+ * checked `booking:delete`, which only roles that may delete any status hold.
  *
  * @param params.bookingIds - Selected booking ids, or the select-all key
  * @param params.organizationId - The caller's workspace
@@ -17132,24 +17104,6 @@ export async function bulkDeleteBookings({
       label,
     });
 
-    // Roles whose policy limits delete to drafts may not delete a selection
-    // that contains anything else. The whole request is refused rather than
-    // silently deleting part of it.
-    if (
-      access.policy.bookings.deleteOnlyDrafts &&
-      bookings.some((booking) => booking.status !== BookingStatus.DRAFT)
-    ) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
-        status: 403,
-        shouldBeCaptured: false,
-        additionalData: { bookingIds, organizationId },
-      });
-    }
-
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
@@ -17161,36 +17115,13 @@ export async function bulkDeleteBookings({
     );
 
     await db.$transaction(async (tx) => {
-      /**
-       * Deleting all selected bookings. For a drafts-only role the write
-       * re-checks the status itself: a booking reserved after the read above
-       * matches nothing, and a short count refuses the whole request so the
-       * transaction rolls back before any note, reconciliation or email.
-       */
-      const { count } = await tx.booking.deleteMany({
+      /** Deleting all selected bookings */
+      await tx.booking.deleteMany({
         where: {
           id: { in: bookings.map((booking) => booking.id) },
           organizationId,
-          ...(access.policy.bookings.deleteOnlyDrafts
-            ? { status: BookingStatus.DRAFT }
-            : {}),
         },
       });
-
-      if (
-        access.policy.bookings.deleteOnlyDrafts &&
-        count !== bookings.length
-      ) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message:
-            "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
-          status: 403,
-          shouldBeCaptured: false,
-          additionalData: { bookingIds, organizationId },
-        });
-      }
 
       /** Making assets and kits available */
       if (overdueOrOngoingBookings.length > 0) {

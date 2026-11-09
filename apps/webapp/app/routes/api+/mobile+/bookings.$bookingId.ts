@@ -846,14 +846,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // Duplicate: any status; gated by create permission and by writing this
       // booking, the two checks the duplicate endpoint makes.
       canDuplicate: writesBooking && canCreatePerm,
-      // Delete: the delete permission, and drafts only for roles whose policy
-      // says so, the same rule the endpoint enforces (`assertCanDeleteBooking`).
-      // The companion reads this server-computed flag as is.
-      canDelete:
-        (!access.policy.bookings.deleteOnlyDrafts ||
-          booking.status === "DRAFT") &&
-        writesBooking &&
-        canDeletePerm,
+      // Delete: the delete permission and writing this booking, the checks
+      // the endpoint makes (`assertCanDeleteBooking`). The companion reads
+      // this server-computed flag as is.
+      canDelete: writesBooking && canDeletePerm,
       // Extend: the service's state rules (started, something still out) +
       // extend permission, so the app never offers an extension it refuses.
       canExtend:

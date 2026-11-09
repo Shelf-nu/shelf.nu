@@ -409,8 +409,9 @@ export const bookingsApi = {
     ),
 
   /**
-   * Permanently delete a booking (ownership + BASE-only-DRAFT enforced
-   * server-side). `confirmation` is the name the user typed in the delete
+   * Permanently delete a booking. The server requires `booking:delete` (Base
+   * and Self Service hold none; they use `discardDraftBooking` for drafts) and
+   * ownership. `confirmation` is the name the user typed in the delete
    * sheet; the server checks it once every supported build sends it (#3175).
    */
   deleteBooking: (orgId: string, bookingId: string, confirmation: string) =>

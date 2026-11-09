@@ -1608,13 +1608,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * so we must not call findUniqueOrThrow before this.
      */
     if (intent === "delete") {
-      // A caller who writes every booking and may delete any status needs no
-      // lookup. Everyone else is held to their own bookings, and roles whose
-      // policy limits delete to drafts are held to drafts.
-      if (
-        !access.bookings.writeAll ||
-        access.policy.bookings.deleteOnlyDrafts
-      ) {
+      // A caller who writes every booking needs no lookup. Everyone else is
+      // held to their own bookings.
+      if (!access.bookings.writeAll) {
         const b = await getBooking({ id, organizationId, request });
         assertCanDeleteBooking({ access, booking: b, userId });
       }
@@ -1627,9 +1623,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const deletedBooking = await deleteBooking(
         { id, organizationId },
         getClientHint(request),
-        userId,
-        // Re-checked at write time: the booking may have left DRAFT since.
-        { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
+        userId
       );
 
       const actor = wrapUserLinkForNote({ ...user, id: userId });

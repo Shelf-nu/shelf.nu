@@ -40,7 +40,10 @@ vi.mock("~/modules/booking/service.server", () => ({
   archiveBooking: vi.fn(),
 }));
 
-import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
+import {
+  getMobileUserContext,
+  requireMobilePermission,
+} from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { archiveBooking } from "~/modules/booking/service.server";
 import { action } from "~/routes/api+/mobile+/bookings.archive";
@@ -135,6 +138,10 @@ describe("POST /api/mobile/bookings/archive: discard draft", () => {
     const response = await post({ discardDraft: true });
 
     expect(response.status).toBe(200);
+    // A discard archives, so it is gated on booking:archive, which BASE holds.
+    expect(requireMobilePermission).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: "booking", action: "archive" })
+    );
     expect(archiveBooking).toHaveBeenCalledWith(
       expect.objectContaining({ id: "booking-1", discardDraft: true })
     );

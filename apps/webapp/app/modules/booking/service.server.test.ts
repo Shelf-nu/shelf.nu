@@ -61,7 +61,6 @@ import {
 import * as noteService from "~/modules/note/service.server";
 import { sendPush } from "~/modules/push/service.server";
 import { ShelfError } from "~/utils/error";
-import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
@@ -8928,41 +8927,6 @@ describe("deleteBooking", () => {
     vitest.clearAllMocks();
   });
 
-  it("refuses to delete a booking that stopped being a draft when only drafts may be deleted", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue({
-      ...mockBookingData,
-      status: BookingStatus.DRAFT,
-    });
-    // The row was reserved between the read and the write: the draft-only
-    // delete matches nothing and Prisma reports P2025.
-    //@ts-expect-error missing vitest type
-    db.booking.delete.mockRejectedValueOnce(
-      Object.assign(new Error("Record to delete does not exist."), {
-        code: "P2025",
-      })
-    );
-
-    await expect(
-      deleteBooking(
-        { id: "booking-1", organizationId: "org-1" },
-        mockClientHints,
-        "user-1",
-        { onlyIfDraft: true }
-      )
-    ).rejects.toMatchObject({ status: 403 });
-    expect(db.booking.delete).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: "booking-1",
-          organizationId: "org-1",
-          status: BookingStatus.DRAFT,
-        },
-      })
-    );
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
   it("should delete booking successfully", async () => {
     expect.assertions(1);
 
@@ -13907,6 +13871,12 @@ describe("wrapBookingStatusForNote", () => {
 });
 
 describe("getActionTextFromTransition", () => {
+  it("names a DRAFT->ARCHIVED transition as discarding the draft", () => {
+    expect(
+      getActionTextFromTransition(BookingStatus.DRAFT, BookingStatus.ARCHIVED)
+    ).toBe("discarded the draft");
+  });
+
   it("should return correct action text for DRAFT->RESERVED transition", () => {
     const result = getActionTextFromTransition(
       BookingStatus.DRAFT,
@@ -18141,79 +18111,7 @@ describe("bulkDeleteBookings", () => {
     _count: { bookingAssets: 0 },
   });
 
-  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-    "refuses a %s selection that includes a non-draft booking, deleting nothing",
-    async (role) => {
-      //@ts-expect-error missing vitest type
-      db.booking.findMany.mockResolvedValue([
-        row("bk-draft", BookingStatus.DRAFT),
-        row("bk-reserved", BookingStatus.RESERVED),
-      ]);
-
-      await expect(
-        bulkDeleteBookings({
-          bookingIds: ["bk-draft", "bk-reserved"],
-          confirmation: "2",
-          organizationId: "org-1",
-          userId: "user-1",
-          access: accessFor([role]),
-          hints: mockClientHints,
-        })
-      ).rejects.toMatchObject({ status: 403 });
-      expect(db.$transaction).not.toHaveBeenCalled();
-    }
-  );
-
-  it("refuses a SELF_SERVICE select-all whose resolved rows include a non-draft booking", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findMany.mockResolvedValue([
-      row("bk-draft", BookingStatus.DRAFT),
-      row("bk-ongoing", BookingStatus.ONGOING),
-    ]);
-
-    await expect(
-      bulkDeleteBookings({
-        bookingIds: [ALL_SELECTED_KEY],
-        list: { kind: "index" },
-        currentSearchParams: "status=ALL",
-        organizationId: "org-1",
-        userId: "user-1",
-        access: accessFor([OrganizationRoles.SELF_SERVICE]),
-        hints: mockClientHints,
-        // Both resolved rows, so the drafts-only rule is what refuses.
-        confirmation: "2",
-      })
-    ).rejects.toMatchObject({ status: 403 });
-    expect(db.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("refuses the whole request when a draft stops being a draft before the delete", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findMany.mockResolvedValue([
-      row("bk-draft", BookingStatus.DRAFT),
-    ]);
-    // The row was reserved between the read and the write, so the draft-only
-    // delete matches nothing.
-    //@ts-expect-error missing vitest type
-    db.booking.deleteMany.mockResolvedValueOnce({ count: 0 });
-
-    await expect(
-      bulkDeleteBookings({
-        bookingIds: ["bk-draft"],
-        confirmation: "1",
-        organizationId: "org-1",
-        userId: "user-1",
-        access: accessFor([OrganizationRoles.SELF_SERVICE]),
-        hints: mockClientHints,
-      })
-    ).rejects.toMatchObject({ status: 403 });
-    expect(db.booking.deleteMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ status: BookingStatus.DRAFT }),
-    });
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
-  it("does not narrow the delete to drafts for a role that may delete any status", async () => {
+  it("deletes every selected booking whatever its status", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findMany.mockResolvedValue([
       row("bk-reserved", BookingStatus.RESERVED),
@@ -18237,31 +18135,6 @@ describe("bulkDeleteBookings", () => {
     const [args] = (db.booking.deleteMany as ReturnType<typeof vitest.fn>).mock
       .calls[0];
     expect(args.where).not.toHaveProperty("status");
-  });
-
-  it("lets SELF_SERVICE bulk-delete a selection of its own drafts", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findMany.mockResolvedValue([
-      row("bk-draft", BookingStatus.DRAFT),
-    ]);
-    // The draft-only delete still matches the one draft that was read.
-    //@ts-expect-error missing vitest type
-    db.booking.deleteMany.mockResolvedValueOnce({ count: 1 });
-    (
-      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([]);
-    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
-
-    await bulkDeleteBookings({
-      bookingIds: ["bk-draft"],
-      confirmation: "1",
-      organizationId: "org-1",
-      userId: "user-1",
-      access: accessFor([OrganizationRoles.SELF_SERVICE]),
-      hints: mockClientHints,
-    });
-
-    expect(db.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it("lets ADMIN bulk-delete a selection that includes non-draft bookings", async () => {

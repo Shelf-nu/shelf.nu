@@ -1,9 +1,10 @@
 /**
- * POST /api/mobile/bookings/delete: the delete guard a direct request is held
- * to (`assertCanDeleteBooking`, shared with the web delete intent). Seeing a
- * booking (workspace toggle) never grants deleting it, roles whose policy
- * limits delete to drafts are held to drafts, and a mixed membership is judged
- * by its highest role.
+ * POST /api/mobile/bookings/delete: the guards a direct request is held to.
+ * The `booking:delete` gate runs on the real matrix, so BASE and SELF_SERVICE
+ * (which hold no delete grant) are refused even on their own drafts; they
+ * discard drafts instead. A mixed membership is judged by its highest role.
+ * Ownership (`assertCanDeleteBooking`, shared with the web delete intent) is
+ * pinned in `booking-authorization.server.test.ts`.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.delete.ts}
  */
@@ -18,11 +19,12 @@ vi.mock("react-router", async () => ({
     new Response(JSON.stringify(body), { status: init?.status ?? 200 }),
 }));
 
-// why: external auth; each case picks the caller's roles through the context
+// why: external auth; each case picks the caller's roles through the context,
+// and `actAs` makes the permission gate answer with the real matrix for them
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
   requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
-  requireMobilePermission: vi.fn().mockResolvedValue(undefined),
+  requireMobilePermission: vi.fn(),
   assertMobileCanUseBookings: vi.fn().mockResolvedValue(undefined),
   getMobileUserContext: vi.fn(),
 }));
@@ -42,10 +44,19 @@ vi.mock("~/modules/booking/service.server", () => ({
   deleteBooking: vi.fn(),
 }));
 
-import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
+import {
+  getMobileUserContext,
+  requireMobilePermission,
+} from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { deleteBooking } from "~/modules/booking/service.server";
 import { action } from "~/routes/api+/mobile+/bookings.delete";
+import { ShelfError } from "~/utils/error";
+import type {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 
 // @vitest-environment node
 
@@ -68,100 +79,77 @@ function post() {
   } as never) as unknown as Promise<Response>;
 }
 
-describe("POST /api/mobile/bookings/delete: ownership and status", () => {
+/**
+ * Acts as a member holding `roles`: the context carries them and the
+ * permission gate answers with the real matrix (403 when the grant is missing).
+ */
+function actAs(
+  roles: OrganizationRoles[],
+  workspace: Parameters<typeof mobileUserContext>[0]["workspace"] = {}
+) {
+  vi.mocked(getMobileUserContext).mockResolvedValue(
+    mobileUserContext({ roles, workspace }) as never
+  );
+  vi.mocked(requireMobilePermission).mockImplementation((async ({
+    entity,
+    action: permissionAction,
+  }: {
+    entity: PermissionEntity;
+    action: PermissionAction;
+  }) => {
+    if (!userHasPermission({ roles, entity, action: permissionAction })) {
+      throw new ShelfError({
+        cause: null,
+        message: "Forbidden",
+        status: 403,
+        label: "Permission",
+        shouldBeCaptured: false,
+      });
+    }
+  }) as never);
+}
+
+/** The booking the org-scoped lookup returns. */
+function bookingRow(
+  creatorId: string,
+  custodianUserId: string | null,
+  status: string
+) {
+  vi.mocked(db.booking.findFirst).mockResolvedValue({
+    id: "booking-1",
+    creatorId,
+    custodianUserId,
+    status,
+  } as never);
+}
+
+describe("POST /api/mobile/bookings/delete: permission and ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(deleteBooking).mockResolvedValue(undefined as never);
   });
 
-  it("holds BASE to its own drafts", async () => {
-    vi.mocked(getMobileUserContext).mockResolvedValue(
-      mobileUserContext({ roles: [OrganizationRoles.BASE] }) as never
-    );
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      id: "booking-1",
-      creatorId: "user-1",
-      custodianUserId: null,
-      status: "RESERVED",
-    } as never);
+  it.each([
+    [OrganizationRoles.BASE, "DRAFT"],
+    [OrganizationRoles.BASE, "RESERVED"],
+    [OrganizationRoles.SELF_SERVICE, "DRAFT"],
+    [OrganizationRoles.SELF_SERVICE, "RESERVED"],
+  ])("refuses %s deleting its own %s booking", async (role, status) => {
+    actAs([role]);
+    bookingRow("user-1", "user-1", status);
 
     expect((await post()).status).toBe(403);
-    expect(deleteBooking).not.toHaveBeenCalled();
-  });
-
-  it("refuses SELF_SERVICE on someone else's booking with the see-toggle on", async () => {
-    vi.mocked(getMobileUserContext).mockResolvedValue(
-      mobileUserContext({
-        roles: [OrganizationRoles.SELF_SERVICE],
-        workspace: { selfServiceCanSeeBookings: true },
-      }) as never
+    expect(requireMobilePermission).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: "booking", action: "delete" })
     );
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      id: "booking-1",
-      creatorId: "someone-else",
-      custodianUserId: "someone-else",
-      status: "DRAFT",
-    } as never);
-
-    expect((await post()).status).toBe(403);
     expect(deleteBooking).not.toHaveBeenCalled();
   });
 
   it("judges a mixed [SELF_SERVICE, ADMIN] membership by its highest role", async () => {
-    vi.mocked(getMobileUserContext).mockResolvedValue(
-      mobileUserContext({
-        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
-      }) as never
-    );
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      id: "booking-1",
-      creatorId: "someone-else",
-      custodianUserId: "someone-else",
-      status: "ONGOING",
-    } as never);
+    actAs([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+    bookingRow("someone-else", "someone-else", "ONGOING");
 
     expect((await post()).status).toBe(200);
     expect(deleteBooking).toHaveBeenCalledTimes(1);
-    // The highest role (ADMIN) may delete any status.
-    expect(vi.mocked(deleteBooking).mock.calls[0][3]).toEqual({
-      onlyIfDraft: false,
-    });
   });
-
-  it("holds SELF_SERVICE to its own drafts", async () => {
-    vi.mocked(getMobileUserContext).mockResolvedValue(
-      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
-    );
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      id: "booking-1",
-      creatorId: "user-1",
-      custodianUserId: "user-1",
-      status: "RESERVED",
-    } as never);
-
-    expect((await post()).status).toBe(403);
-    expect(deleteBooking).not.toHaveBeenCalled();
-  });
-
-  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-    "lets %s delete its own draft",
-    async (role) => {
-      vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileUserContext({ roles: [role] }) as never
-      );
-      vi.mocked(db.booking.findFirst).mockResolvedValue({
-        id: "booking-1",
-        creatorId: "user-1",
-        custodianUserId: null,
-        status: "DRAFT",
-      } as never);
-
-      expect((await post()).status).toBe(200);
-      expect(deleteBooking).toHaveBeenCalledTimes(1);
-      // The draft-only rule is re-checked when the row is deleted.
-      expect(vi.mocked(deleteBooking).mock.calls[0][3]).toEqual({
-        onlyIfDraft: true,
-      });
-    }
-  );
 });

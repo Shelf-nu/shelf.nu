@@ -54,11 +54,6 @@ type RolePolicyShape = {
     bypassTimeLimits: boolean;
     /** Which workspace explicit check-out/in switch applies; "none" = exempt or not covered. */
     explicitScanSetting: "admin" | "selfService" | "none";
-    /**
-     * Delete is limited to DRAFT bookings. Only narrows a `booking: delete`
-     * grant from the matrix; a role without that grant deletes nothing.
-     */
-    deleteOnlyDrafts: boolean;
     /** The booking custodian picker is fixed to the user themself. */
     custodianPicker: "anyone" | "self";
     /** The bookings-index bulk-actions menu is shown. */
@@ -169,7 +164,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "none",
-      deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -211,7 +205,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
-      deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -258,7 +251,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
-      deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -302,7 +294,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: true,
       bypassTimeLimits: false,
       explicitScanSetting: "selfService",
-      deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,
@@ -344,7 +335,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: false,
       explicitScanSetting: "none",
-      deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,

@@ -81,26 +81,29 @@ describe("roleHasPermission — ADMIN/OWNER short-circuit", () => {
 });
 
 describe("roleHasPermission — matrix lookup", () => {
-  test("denies BASE booking delete and grants booking archive", () => {
-    // Base members keep their list tidy by archiving; deleting would erase
-    // workspace booking history that admins and owners rely on.
-    assert.equal(
-      roleHasPermission({
-        roles: ["BASE"],
-        entity: PermissionEntity.booking,
-        action: PermissionAction.delete,
-      }),
-      false
-    );
-    assert.equal(
-      roleHasPermission({
-        roles: ["BASE"],
-        entity: PermissionEntity.booking,
-        action: PermissionAction.archive,
-      }),
-      true
-    );
-  });
+  for (const role of ["BASE", "SELF_SERVICE"] as const) {
+    test(`denies ${role} booking delete and grants booking archive`, () => {
+      // These members keep their list tidy by archiving (and discarding
+      // drafts); deleting would erase workspace booking history that admins
+      // and owners rely on.
+      assert.equal(
+        roleHasPermission({
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.delete,
+        }),
+        false
+      );
+      assert.equal(
+        roleHasPermission({
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.archive,
+        }),
+        true
+      );
+    });
+  }
 
   test("denies BASE an asset create and grants an asset read", () => {
     assert.equal(
