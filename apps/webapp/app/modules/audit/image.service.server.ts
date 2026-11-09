@@ -27,6 +27,7 @@ import {
   parseFileFormData,
   removePublicFile,
 } from "~/utils/storage.server";
+import { AUDIT_IMAGE_TEXT_FIELDS } from "./image-form-fields";
 import type { ExifCaptureTags } from "./photo-captured-at.server";
 import type { AuditImageUploadedVia } from "./photo-captured-at.server";
 import {
@@ -71,10 +72,9 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * @param returnParsedFormData - When `false` (default), returns only the
  *   created `AuditImage`. When `true`, returns `{ image, formData }` where
  *   `formData` is the already-bounded `FormData` produced by
- *   `parseFileFormData` (maxFileSize enforced). Because
- *   `@remix-run/form-data-parser` passes non-file text fields through, the
- *   caller can read fields like `content` from it without issuing a second,
- *   unbounded `request.clone().formData()` parse.
+ *   `parseFileFormData` (maxFileSize enforced). It holds the uploaded `image`
+ *   and the text fields in `AUDIT_IMAGE_TEXT_FIELDS`, so the caller can read
+ *   `content` from it without a second, unbounded `request.clone().formData()`.
  * @returns The created `AuditImage` (default), or `{ image, formData }` when
  *   `returnParsedFormData` is `true`
  */
@@ -164,6 +164,9 @@ export async function uploadAuditImage({
       generateThumbnail: true,
       thumbnailSize: 108,
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      // The note and the phone's capture details travel as text parts; only
+      // these named fields come back, so none can stand in for `image`.
+      textFields: AUDIT_IMAGE_TEXT_FIELDS,
       // why: the record is made for the first `image` part, so only that file
       // may decide its capture time; any other file part is never read.
       inspectOriginal: async (original, { fieldName }) => {

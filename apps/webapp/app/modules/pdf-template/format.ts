@@ -1,8 +1,8 @@
 /**
- * Printed Document Values
+ * Printed Template Values
  *
- * Turns a stored custom field value into the text a PDF document shows in
- * its cell. The document is paper, so every value becomes plain text: an amount
+ * Turns a stored custom field value into the text a PDF template shows in
+ * its cell. The template is paper, so every value becomes plain text: an amount
  * in the workspace currency, a date in the acting user's date format, a yes
  * or no for a boolean, and a multi-line text as the text that was typed.
  *
@@ -24,7 +24,7 @@ import type { ResolvedFormatPrefs } from "~/utils/date-format";
  * @param params.prefs - The acting user's format preferences, for dates
  * @returns The text, or `null` when there is nothing to print
  */
-export function formatDocumentCustomFieldValue({
+export function formatTemplateCustomFieldValue({
   value,
   type,
   currency,

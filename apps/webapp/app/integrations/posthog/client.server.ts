@@ -120,13 +120,13 @@ export type ServerAnalyticsEvent =
         /** Which report, for `sheet: "report"` only. */
         reportId?: string;
         /**
-         * The saved PDF document shown when the preview opens, for
+         * The saved PDF template shown when the preview opens, for
          * `booking_checklist` only. The person may still close the preview
-         * without printing. `null` for a workspace without PDF documents,
+         * without printing. `null` for a workspace without PDF templates,
          * whose preview shows the built-in Checklist.
          */
         documentId?: string | null;
-        /** That document's name, alongside `documentId`. */
+        /** That template's name, alongside `documentId`. */
         documentName?: string | null;
       };
     }

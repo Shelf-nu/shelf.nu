@@ -9,7 +9,12 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useLoaderData } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  useRouteLoaderData,
+} from "react-router";
 import { z } from "zod";
 
 import { AuditAssetListItem } from "~/components/audit/audit-asset-list-item";
@@ -37,6 +42,7 @@ import {
   getAuditFindingsPage,
   getAuditWideFindings,
 } from "~/modules/audit/findings.server";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
@@ -46,6 +52,7 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
+import type { loader as auditLayoutLoader } from "~/routes/_layout+/audits.$auditId";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -312,6 +319,13 @@ export default function AuditOverview() {
     auditWideFindings,
     canRemoveAssets,
   } = useLoaderData<typeof loader>();
+  // The audit layout's loader already reads the unit totals for the header's
+  // Complete Audit dialog; reading them here again would repeat the query on
+  // every revalidation.
+  const unitTotals =
+    useRouteLoaderData<typeof auditLayoutLoader>(
+      "routes/_layout+/audits.$auditId"
+    )?.unitTotals ?? null;
 
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
@@ -390,6 +404,11 @@ export default function AuditOverview() {
                 isActive={currentFilter === "UNEXPECTED"}
               />
             </div>
+            {unitTotals ? (
+              <p className="mt-3 text-sm text-gray-600">
+                {describeAuditUnits(unitTotals)}
+              </p>
+            ) : null}
           </div>
 
           <div>

@@ -220,6 +220,56 @@ export function auditAssetStatusLabel(status, isAuditCompleted) {
   return AUDIT_ASSET_STATUS_LABELS[status];
 }
 
+/**
+ * The unit count of one audit row of a quantity-tracked asset, as every
+ * surface in both apps prints it (scan lists, the audit overview, the receipt).
+ *
+ * A row of a quantity-tracked asset carries `expectedQuantity` (snapshotted
+ * when the row is created) and `foundQuantity` (what the auditor counted).
+ * Individual assets have neither, and get no label.
+ *
+ * - FOUND, counted: "8 of 14 pcs", or "16 of 14 pcs (+2)" for a surplus
+ * - UNEXPECTED, counted: "8 pcs counted"
+ * - FOUND or UNEXPECTED with no count (an app build without the count
+ *   prompt): "Not counted"
+ * - MISSING: "0 of 14 pcs"
+ * - PENDING (not scanned while the audit runs): "14 pcs expected"
+ *
+ * @param {{ status: string, expectedQuantity?: number | null, foundQuantity?: number | null }} row
+ * @param {string | null | undefined} [unit] - `Asset.unitOfMeasure`; the default
+ *   literal "units" is treated as no unit
+ * @returns {string | null} the label, or null for an individual asset
+ */
+export function auditCountLabel(row, unit) {
+  if (row.expectedQuantity === null || row.expectedQuantity === undefined) {
+    return null;
+  }
+  const named = unit && unit !== "units" ? unit : null;
+  const suffix = named ? ` ${named}` : "";
+  const unitWord = named ?? "units";
+  const expected = row.expectedQuantity;
+  const counted = row.foundQuantity !== null && row.foundQuantity !== undefined;
+
+  switch (row.status) {
+    case "FOUND": {
+      if (!counted) return "Not counted";
+      // A surplus is a finding too: say how many more than the record.
+      const surplus = row.foundQuantity - expected;
+      return `${row.foundQuantity} of ${expected}${suffix}${
+        surplus > 0 ? ` (+${surplus})` : ""
+      }`;
+    }
+    case "UNEXPECTED":
+      return counted
+        ? `${row.foundQuantity} ${unitWord} counted`
+        : "Not counted";
+    case "MISSING":
+      return `0 of ${expected}${suffix}`;
+    default:
+      return `${expected} ${unitWord} expected`;
+  }
+}
+
 // Why a booking cannot be reserved yet: the rules web's Reserve button
 // disables on, in one register for every surface that states them: the web
 // tooltip, the mobile route's 400, the in-transaction guard's 400 and the
