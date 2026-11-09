@@ -8,7 +8,13 @@ import {
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
 import useApiQuery from "~/hooks/use-api-query";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isSelectingAllItems } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import type { PendingAudit } from "../audit/audit-selector";
 import AuditSelector from "../audit/audit-selector";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -27,6 +33,13 @@ export default function BulkAddToAuditDialog() {
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
   const selectedCount = useAtomValue(selectedBulkItemsCountAtom);
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
+  const roles = useOrganizationRoles();
+  /** Only roles that can start audits are offered "Create new audit". */
+  const canCreateAudit = userHasPermission({
+    roles,
+    entity: PermissionEntity.audit,
+    action: PermissionAction.create,
+  });
 
   const isOpen = bulkDialogOpenState["add-to-audit"] === true;
 
@@ -100,11 +113,15 @@ export default function BulkAddToAuditDialog() {
                 </div>
               </>
             ) : !isLoading && data?.audits?.length === 0 ? (
-              // Empty state - no pending audits
+              // Empty state. Members limited to assigned audits only get
+              // their own, so the copy must hold for them too.
               <>
                 <div className="mb-6 rounded-md border border-gray-200 bg-gray-50 p-4">
                   <p className="text-sm text-gray-600">
-                    There are no pending audits.
+                    There are no pending audits you can add assets to.
+                    {canCreateAudit
+                      ? null
+                      : " Ask an administrator to assign you to an audit."}
                   </p>
                 </div>
                 <div className="flex gap-3">
@@ -114,16 +131,18 @@ export default function BulkAddToAuditDialog() {
                     width="full"
                     onClick={handleCloseDialog}
                   >
-                    Cancel
+                    {canCreateAudit ? "Cancel" : "Close"}
                   </Button>
-                  <Button
-                    variant="primary"
-                    width="full"
-                    to="/audits"
-                    onClick={handleCloseDialog}
-                  >
-                    Create new audit
-                  </Button>
+                  {canCreateAudit ? (
+                    <Button
+                      variant="primary"
+                      width="full"
+                      to="/audits"
+                      onClick={handleCloseDialog}
+                    >
+                      Create new audit
+                    </Button>
+                  ) : null}
                 </div>
               </>
             ) : (

@@ -451,6 +451,8 @@ describe("audit service", () => {
 
       const result = await getPendingAuditsForOrganization({
         organizationId: "org-1",
+        userId: "user-1",
+        assignedOnly: false,
       });
 
       expect(mockDb.auditSession.findMany).toHaveBeenCalledWith({
@@ -486,6 +488,26 @@ describe("audit service", () => {
       });
 
       expect(result).toEqual(mockAudits);
+    });
+
+    it("limits a member who sees only assigned audits to their own", async () => {
+      mockDb.auditSession.findMany.mockResolvedValue([]);
+
+      await getPendingAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "user-1",
+        assignedOnly: true,
+      });
+
+      expect(mockDb.auditSession.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            organizationId: "org-1",
+            status: "PENDING",
+            assignments: { some: { userId: "user-1" } },
+          },
+        })
+      );
     });
   });
 
