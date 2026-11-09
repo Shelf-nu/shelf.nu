@@ -475,3 +475,66 @@ describe("inspecting the original upload", () => {
     expect(form.get("image")).toBeTruthy();
   });
 });
+
+describe("parseFileFormData returns only what it uploaded", () => {
+  const FOREIGN_PATH =
+    "9a8b7c6d-aaaa-4bbb-8ccc-ddddeeeeffff/cmotherasset0002/main-image-1750000000.jpg";
+
+  /** A real, decodable PNG, so the upload runs end to end. */
+  async function png(): Promise<File> {
+    const sharp = (await import("sharp")).default;
+    const bytes = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: "#2b6cb0" },
+    })
+      .png()
+      .toBuffer();
+    return new File([new Uint8Array(bytes)], "photo.png", {
+      type: "image/png",
+    });
+  }
+
+  function parse(body: BodyInit) {
+    return parseFileFormData({
+      request: new Request("http://localhost/assets/a1/edit", {
+        method: "POST",
+        body,
+      }),
+      newFileName: "user-1/a1/main-image-1760000000",
+      bucketName: "assets",
+    });
+  }
+
+  beforeEach(() => {
+    storageUploadMock.mockClear();
+  });
+
+  it("drops a multipart text field that names a storage path", async () => {
+    const form = new FormData();
+    form.append("mainImage", FOREIGN_PATH);
+
+    const result = await parse(form);
+
+    expect(result.get("mainImage")).toBeNull();
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it("drops the field from a non-multipart body", async () => {
+    const result = await parse(
+      new URLSearchParams({ mainImage: FOREIGN_PATH })
+    );
+
+    expect(result.get("mainImage")).toBeNull();
+  });
+
+  it("returns the uploaded path, not a text part sent under the same name", async () => {
+    const form = new FormData();
+    form.append("mainImage", FOREIGN_PATH);
+    form.append("mainImage", await png());
+
+    const result = await parse(form);
+
+    expect(result.getAll("mainImage")).toEqual([
+      "user-1/a1/main-image-1760000000.png",
+    ]);
+  });
+});

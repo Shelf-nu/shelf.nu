@@ -406,6 +406,23 @@ export interface UploadOptions {
   upsert?: boolean;
 }
 
+/**
+ * Uploads every image file part of a multipart request to storage and returns
+ * the stored paths, keyed by the form field each file came in on.
+ *
+ * The result holds ONLY values this function's own upload handler produced.
+ * Callers sign and save what they read from it with the service-role client,
+ * so a plain text part named like a file field (`mainImage=<some path>`) must
+ * never come back: it would let a member point the signer at any object in the
+ * bucket, including another workspace's. Read other form fields from a clone
+ * of the request instead.
+ *
+ * @param args.request - The multipart request carrying the file parts
+ * @param args.newFileName - Storage path (without extension) for the upload
+ * @returns A FormData of `fieldName -> uploaded path` (or a JSON string of
+ *   `{ originalPath, thumbnailPath }` when `generateThumbnail` is set)
+ * @throws {ShelfError} 400 when a file exceeds `maxFileSize`
+ */
 export async function parseFileFormData({
   request,
   newFileName,
@@ -427,7 +444,10 @@ export async function parseFileFormData({
   inspectOriginal?: InspectUploadedOriginal;
 }) {
   try {
-    const uploadHandler = async (upload: any) => {
+    /** The values this function uploaded, the only thing it returns. */
+    const uploaded = new FormData();
+
+    const uploadAndStore = async (upload: any) => {
       const file = upload?.file ?? upload;
       const mimeType =
         upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
@@ -488,13 +508,19 @@ export async function parseFileFormData({
       return (uploadedFilePaths as { originalPath: string }).originalPath;
     };
 
-    const formData = await parseFormData(
-      request,
-      { maxFileSize },
-      uploadHandler
-    );
+    const uploadHandler = async (upload: any) => {
+      const value = await uploadAndStore(upload);
+      if (value != null && upload?.fieldName) {
+        uploaded.append(upload.fieldName, value);
+      }
+      return value;
+    };
 
-    return formData;
+    // The parser also returns text parts verbatim; they are deliberately
+    // dropped by returning `uploaded` instead of its result.
+    await parseFormData(request, { maxFileSize }, uploadHandler);
+
+    return uploaded;
   } catch (cause) {
     const sizeLimitError = getMaxFileSizeExceededError(cause);
 
