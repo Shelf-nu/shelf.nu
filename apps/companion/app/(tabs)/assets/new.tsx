@@ -163,8 +163,12 @@ export default function CreateAssetScreen() {
   }, [currentOrg]);
 
   // ── Load locations ──────────────────────────────
+  // Only the latest location load commits, so a slow load for a previous
+  // workspace cannot replace the current list.
+  const latestLocationsRequestRef = useRef(0);
   const loadLocations = useCallback(async () => {
     if (!currentOrg) return;
+    const requestId = ++latestLocationsRequestRef.current;
     setIsLocationsLoading(true);
     // Every page: the field searches only what it holds.
     const orgId = currentOrg.id;
@@ -172,7 +176,10 @@ export default function CreateAssetScreen() {
       (page, perPage) => api.locations(orgId, undefined, { page, perPage }),
       (data) => data.locations
     );
-    if (!error) setLocations(rows);
+    // A newer load (e.g. after a workspace switch) owns the list now.
+    if (requestId !== latestLocationsRequestRef.current) return;
+    // Keep what did load when a later page fails.
+    if (!error || rows.length > 0) setLocations(rows);
     setIsLocationsLoading(false);
   }, [currentOrg]);
 
