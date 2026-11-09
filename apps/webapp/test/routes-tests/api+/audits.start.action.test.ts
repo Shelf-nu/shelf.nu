@@ -28,12 +28,12 @@ import { action } from "~/routes/api+/audits.start";
 const {
   createAuditSession,
   resolveAssetIdsForAudit,
-  resolveAuditUnitScope,
+  resolveAssetIdsForLocationSelection,
   resolveUserFormatPrefsById,
 } = vi.hoisted(() => ({
   createAuditSession: vi.fn(),
   resolveAssetIdsForAudit: vi.fn(),
-  resolveAuditUnitScope: vi.fn(),
+  resolveAssetIdsForLocationSelection: vi.fn(),
   resolveUserFormatPrefsById: vi.fn(),
 }));
 
@@ -62,12 +62,11 @@ vi.mock("~/utils/date-format.server", () => ({
 
 // why: asset resolution is orthogonal to the date parse under test.
 vi.mock("~/modules/audit/context-helpers.server", () => ({
-  // why: the scope resolver reads locations from the database; each case sets
-  // the scope it needs.
-  resolveAuditUnitScope,
+  // why: the resolvers read assets and their scope from the database; each
+  // case sets the assets and the scope it needs.
   resolveAssetIdsForAudit,
+  resolveAssetIdsForLocationSelection,
   resolveAssetIdsForKitSelection: vi.fn(),
-  resolveAssetIdsForLocationSelection: vi.fn(),
 }));
 
 // why: capture the persisted dueDate; return a session with a null dueDate so
@@ -118,8 +117,10 @@ function buildArgs(dueDate: string) {
 describe("start-audit action — dueDate timezone round-trip", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resolveAssetIdsForAudit.mockResolvedValue(["asset-1"]);
-    resolveAuditUnitScope.mockResolvedValue(null);
+    resolveAssetIdsForAudit.mockResolvedValue({
+      assetIds: ["asset-1"],
+      unitScope: null,
+    });
     createAuditSession.mockResolvedValue({
       session: { id: "session-1", dueDate: null },
     });
@@ -153,7 +154,10 @@ describe("start-audit action — dueDate timezone round-trip", () => {
 describe("start-audit action, location scope", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resolveAssetIdsForAudit.mockResolvedValue(["asset-1"]);
+    resolveAssetIdsForAudit.mockResolvedValue({
+      assetIds: ["asset-1"],
+      unitScope: null,
+    });
     createAuditSession.mockResolvedValue({
       session: { id: "session-1", dueDate: null },
     });
@@ -175,11 +179,14 @@ describe("start-audit action, location scope", () => {
   }
 
   it("hands the audited locations to the new audit", async () => {
-    resolveAuditUnitScope.mockResolvedValue({ locationIds: ["loc-1"] });
+    resolveAssetIdsForAudit.mockResolvedValue({
+      assetIds: ["asset-1"],
+      unitScope: { locationIds: ["loc-1"] },
+    });
 
     await action(locationPageArgs());
 
-    expect(resolveAuditUnitScope).toHaveBeenCalledWith(
+    expect(resolveAssetIdsForAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: "org-1",
         contextType: "location",
@@ -191,9 +198,36 @@ describe("start-audit action, location scope", () => {
     );
   });
 
-  it("starts an audit without a location scope as unscoped", async () => {
-    resolveAuditUnitScope.mockResolvedValue(null);
+  it("keeps the locations the selection resolver found, with no second lookup", async () => {
+    resolveAssetIdsForLocationSelection.mockResolvedValue({
+      assetIds: ["asset-1", "asset-2"],
+      locationIds: ["loc-1"],
+    });
+    const formData = new FormData();
+    formData.set("name", "Selected locations check");
+    formData.set("contextType", "location");
+    formData.set("locationIds[0]", "loc-1");
+    formData.set("locationIds[1]", "loc-empty");
+    const request = new Request("https://app.shelf.nu/api/audits/start", {
+      method: "POST",
+      body: formData,
+    });
+    const context = { getSession: () => ({ userId: "user-1" }) };
 
+    await action({ request, context } as unknown as Parameters<
+      typeof action
+    >[0]);
+
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["asset-1", "asset-2"],
+        scopeMeta: { locationIds: ["loc-1"] },
+      })
+    );
+    expect(resolveAssetIdsForAudit).not.toHaveBeenCalled();
+  });
+
+  it("starts an audit without a location scope as unscoped", async () => {
     await action(buildArgs("2099-07-20T15:48"));
 
     expect(createAuditSession).toHaveBeenCalledWith(

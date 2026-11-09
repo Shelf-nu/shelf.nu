@@ -5,12 +5,14 @@
  * @see {@link file://./quantity.ts}
  */
 import { describe, expect, it } from "vitest";
+import type { AuditUnitGroup } from "./quantity";
 import {
   describeAuditUnits,
   expectedQuantityFor,
   auditRowHeading,
   auditUnitScope,
   scopedExpectedUnits,
+  totalAuditUnitGroups,
   totalAuditUnits,
 } from "./quantity";
 
@@ -261,5 +263,75 @@ describe("auditRowHeading", () => {
     expect(
       auditRowHeading(null, { status: "FOUND", foundQuantity: null })
     ).toBe("Notes and images");
+  });
+});
+
+describe("totalAuditUnitGroups", () => {
+  it("gives the same totals as the row-by-row sum", () => {
+    const rows = [
+      {
+        expected: true,
+        status: "FOUND",
+        expectedQuantity: 14,
+        foundQuantity: 8,
+      },
+      {
+        expected: true,
+        status: "FOUND",
+        expectedQuantity: 10,
+        foundQuantity: null,
+      },
+      {
+        expected: true,
+        status: "MISSING",
+        expectedQuantity: 5,
+        foundQuantity: null,
+      },
+      {
+        expected: true,
+        status: "PENDING",
+        expectedQuantity: 4,
+        foundQuantity: null,
+      },
+      {
+        expected: false,
+        status: "UNEXPECTED",
+        expectedQuantity: 9,
+        foundQuantity: 3,
+      },
+      {
+        expected: false,
+        status: "UNEXPECTED",
+        expectedQuantity: 2,
+        foundQuantity: null,
+      },
+    ];
+    const groups = new Map<string, AuditUnitGroup>();
+    for (const row of rows) {
+      const key = `${row.expected}:${row.status}`;
+      const group = groups.get(key) ?? {
+        expected: row.expected,
+        status: row.status,
+        rows: 0,
+        countedRows: 0,
+        expectedUnits: null,
+        foundUnits: null,
+      };
+      group.rows += 1;
+      group.expectedUnits = (group.expectedUnits ?? 0) + row.expectedQuantity;
+      if (row.foundQuantity !== null) {
+        group.countedRows += 1;
+        group.foundUnits = (group.foundUnits ?? 0) + row.foundQuantity;
+      }
+      groups.set(key, group);
+    }
+
+    expect(totalAuditUnitGroups([...groups.values()])).toEqual(
+      totalAuditUnits(rows)
+    );
+  });
+
+  it("returns null when there are no groups", () => {
+    expect(totalAuditUnitGroups([])).toBeNull();
   });
 });

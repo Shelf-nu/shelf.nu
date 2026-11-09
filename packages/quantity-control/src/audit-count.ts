@@ -37,3 +37,23 @@ export function countExpectation(prompt: {
   if (!prompt.isExpected) return "unlisted";
   return prompt.expectedQuantity > 0 ? "expected" : "none-expected";
 }
+
+/**
+ * The value the count prompt opens with, on the web and on the phone: the
+ * count already recorded, else the expected units when there are some to
+ * confirm, else blank (null), so an asset with nothing expected or not on the
+ * list is counted, not confirmed.
+ *
+ * @param prompt - whether the asset is on the list, its expected units and
+ *   the count already recorded
+ */
+export function countPromptDefault(prompt: {
+  isExpected: boolean;
+  expectedQuantity: number;
+  foundQuantity: number | null;
+}): number | null {
+  if (prompt.foundQuantity !== null) return prompt.foundQuantity;
+  return countExpectation(prompt) === "expected"
+    ? prompt.expectedQuantity
+    : null;
+}

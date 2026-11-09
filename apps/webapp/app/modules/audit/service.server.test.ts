@@ -31,6 +31,7 @@ import {
   bulkDeleteAudits,
   duplicateAuditSession,
   getAuditScans,
+  getAuditUnitTotals,
   getAssetsForAuditSession,
   recordAuditScan,
   requireAuditAssignee,
@@ -147,6 +148,8 @@ vi.mock("~/database/db.server", () => {
       // why: completing an audit counts found/missing/unexpected rows inside
       // its transaction before the session write.
       count: vi.fn(),
+      // why: the unit totals are summed in the database, grouped by row kind.
+      groupBy: vi.fn(),
     },
     auditAssignment: {
       createMany: vi.fn(),
@@ -222,6 +225,7 @@ const mockDb = db as unknown as {
     delete: ReturnType<typeof vi.fn>;
     deleteMany: ReturnType<typeof vi.fn>;
     count: ReturnType<typeof vi.fn>;
+    groupBy: ReturnType<typeof vi.fn>;
   };
   auditAssignment: {
     createMany: ReturnType<typeof vi.fn>;
@@ -3218,8 +3222,8 @@ describe("audit status guards", () => {
     expect(recordEvent).not.toHaveBeenCalled();
   });
 
-  it("fills the expected units of a pool row that has none before completing", async () => {
-    // A row written without a snapshot (old code during a deploy). The
+  it("fills the expected units of pool rows that have none, one write per value, before completing", async () => {
+    // Rows written without a snapshot (old code during a deploy). The
     // completion then races a cancel and refuses, which is irrelevant here.
     mockDb.auditSession.findUnique.mockResolvedValue({
       id: "audit-1",
@@ -3230,6 +3234,14 @@ describe("audit status guards", () => {
       {
         id: "audit-asset-pool",
         asset: { id: "pool-1", type: "QUANTITY_TRACKED", quantity: 14 },
+      },
+      {
+        id: "audit-asset-pool-2",
+        asset: { id: "pool-2", type: "QUANTITY_TRACKED", quantity: 14 },
+      },
+      {
+        id: "audit-asset-pool-3",
+        asset: { id: "pool-3", type: "QUANTITY_TRACKED", quantity: 5 },
       },
     ]);
     mockDb.auditAsset.updateMany.mockResolvedValue({ count: 0 });
@@ -3253,10 +3265,15 @@ describe("audit status guards", () => {
         },
       })
     );
-    expect(mockDb.auditAsset.update).toHaveBeenCalledWith({
-      where: { id: "audit-asset-pool" },
+    expect(mockDb.auditAsset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["audit-asset-pool", "audit-asset-pool-2"] } },
       data: { expectedQuantity: 14 },
     });
+    expect(mockDb.auditAsset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["audit-asset-pool-3"] } },
+      data: { expectedQuantity: 5 },
+    });
+    expect(mockDb.auditAsset.update).not.toHaveBeenCalled();
   });
 
   it("does not add assets to an audit that stopped being pending", async () => {
@@ -3662,6 +3679,28 @@ describe("audit unit counts on quantity-tracked assets", () => {
     expect(mockDb.auditScan.create).not.toHaveBeenCalled();
     expect(mockDb.auditAsset.updateMany).not.toHaveBeenCalled();
     expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+  });
+
+  it("answers a count-less rescan of a found pool with its stored count, not a first-count prompt", async () => {
+    // The client took the scan for a first one (its list missed the earlier
+    // scan) and sent no count. The server already holds the scan as Found.
+    mockDb.auditScan.findFirst.mockResolvedValue({
+      id: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      auditAsset: { expectedQuantity: 14, foundQuantity: 8 },
+    });
+
+    const result = await recordAuditScan(scanInput);
+
+    expect(result).toMatchObject({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+    expect(mockDb.auditScan.create).not.toHaveBeenCalled();
+    expect(mockDb.auditAsset.updateMany).not.toHaveBeenCalled();
   });
 
   it("records the count with the scan and leaves the asset counters as they were", async () => {
@@ -4674,5 +4713,69 @@ describe("audit unit counts: surplus and location scope", () => {
         ],
       })
     );
+  });
+});
+
+describe("getAuditUnitTotals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sums only the quantity rows of the audit, in one grouped query", async () => {
+    mockDb.auditAsset.groupBy.mockResolvedValue([]);
+
+    await getAuditUnitTotals("audit-1");
+
+    expect(mockDb.auditAsset.groupBy).toHaveBeenCalledTimes(1);
+    expect(mockDb.auditAsset.groupBy).toHaveBeenCalledWith({
+      by: ["expected", "status"],
+      // without this filter individual assets would join the units line
+      where: { auditSessionId: "audit-1", expectedQuantity: { not: null } },
+      _count: { _all: true, foundQuantity: true },
+      _sum: { expectedQuantity: true, foundQuantity: true },
+    });
+    expect(mockDb.auditAsset.findMany).not.toHaveBeenCalled();
+  });
+
+  it("totals mixed rows: found, short, uncounted, missing and unexpected pools", async () => {
+    mockDb.auditAsset.groupBy.mockResolvedValue([
+      // three found pools of 14, 10 and 6; two counted (8 and 10)
+      {
+        expected: true,
+        status: "FOUND",
+        _count: { _all: 3, foundQuantity: 2 },
+        _sum: { expectedQuantity: 30, foundQuantity: 18 },
+      },
+      // a pool the completed audit never found: zero found, not uncounted
+      {
+        expected: true,
+        status: "MISSING",
+        _count: { _all: 1, foundQuantity: 0 },
+        _sum: { expectedQuantity: 5, foundQuantity: null },
+      },
+      // two unlisted pools, one counted at 3
+      {
+        expected: false,
+        status: "UNEXPECTED",
+        _count: { _all: 2, foundQuantity: 1 },
+        _sum: { expectedQuantity: 20, foundQuantity: 3 },
+      },
+    ]);
+
+    expect(await getAuditUnitTotals("audit-1")).toEqual({
+      quantityRows: 4,
+      expectedUnits: 35,
+      foundUnits: 18,
+      uncountedRows: 1,
+      unexpectedRows: 2,
+      unexpectedUnits: 3,
+      unexpectedUncountedRows: 1,
+    });
+  });
+
+  it("is null for an audit of individual assets only", async () => {
+    mockDb.auditAsset.groupBy.mockResolvedValue([]);
+
+    expect(await getAuditUnitTotals("audit-1")).toBeNull();
   });
 });

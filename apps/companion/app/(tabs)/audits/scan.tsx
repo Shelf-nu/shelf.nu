@@ -1127,12 +1127,6 @@ function AuditScannerContent() {
       expectedAssetIdsRef,
       scannedItemsRef,
       commitScan,
-      shouldSkipScan,
-      setFoundCount,
-      setUnexpectedCount,
-      debouncedSaverRef,
-      scanQueueRef,
-      failedQueueRef,
       lastScanRef,
     ]
   );

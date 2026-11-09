@@ -75,7 +75,7 @@ import {
   expectedQuantityFor,
   MAX_AUDIT_FOUND_QUANTITY,
   scopedExpectedUnits,
-  totalAuditUnits,
+  totalAuditUnitGroups,
 } from "./quantity";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -1669,7 +1669,31 @@ export async function recordAuditScan(
           ).then((snapshots) => snapshots.get(scannedAsset.id) ?? null)
         : Promise.resolve(null);
 
-    if (isQuantityAsset && count === null && !acceptUncounted) {
+    // Check if this asset was already scanned in this audit. Read before the
+    // count prompt: a scan the client took for a first one, with no count, of
+    // an asset the audit already found is answered as already recorded, with
+    // its stored count. A first-count prompt there would let the client
+    // discard locally a scan the server keeps as Found.
+    const existingScan = await db.auditScan.findFirst({
+      where: {
+        auditSessionId,
+        assetId,
+      },
+      select: {
+        id: true,
+        auditAssetId: true,
+        auditAsset: {
+          select: { expectedQuantity: true, foundQuantity: true },
+        },
+      },
+    });
+
+    if (
+      !existingScan &&
+      isQuantityAsset &&
+      count === null &&
+      !acceptUncounted
+    ) {
       const row = await db.auditAsset.findUnique({
         where: { auditSessionId_assetId: { auditSessionId, assetId } },
         select: { expectedQuantity: true, foundQuantity: true },
@@ -1685,21 +1709,6 @@ export async function recordAuditScan(
         unitOfMeasure: scannedAsset.unitOfMeasure,
       };
     }
-
-    // Check if this asset was already scanned in this audit
-    const existingScan = await db.auditScan.findFirst({
-      where: {
-        auditSessionId,
-        assetId,
-      },
-      select: {
-        id: true,
-        auditAssetId: true,
-        auditAsset: {
-          select: { expectedQuantity: true, foundQuantity: true },
-        },
-      },
-    });
 
     if (existingScan) {
       // A second scan of a quantity-tracked asset carries a recount.
@@ -2381,16 +2390,22 @@ async function updateAuditScanCount({
 export async function getAuditUnitTotals(
   auditSessionId: string
 ): Promise<AuditUnitTotals | null> {
-  const rows = await db.auditAsset.findMany({
+  const groups = await db.auditAsset.groupBy({
+    by: ["expected", "status"],
     where: { auditSessionId, expectedQuantity: { not: null } },
-    select: {
-      expected: true,
-      status: true,
-      expectedQuantity: true,
-      foundQuantity: true,
-    },
+    _count: { _all: true, foundQuantity: true },
+    _sum: { expectedQuantity: true, foundQuantity: true },
   });
-  return totalAuditUnits(rows);
+  return totalAuditUnitGroups(
+    groups.map((group) => ({
+      expected: group.expected,
+      status: group.status,
+      rows: group._count._all,
+      countedRows: group._count.foundQuantity,
+      expectedUnits: group._sum.expectedQuantity,
+      foundUnits: group._sum.foundQuantity,
+    }))
+  );
 }
 
 /** Arguments for {@link removeAuditScan}. */
@@ -2870,10 +2885,18 @@ async function fillMissingExpectedQuantities({
     auditUnitScope(scopeMeta),
     tx
   );
+  // One write per distinct snapshot value, not one per row.
+  const rowIdsByQuantity = new Map<number, string[]>();
   for (const row of rows) {
-    await tx.auditAsset.update({
-      where: { id: row.id },
-      data: { expectedQuantity: snapshots.get(row.asset.id) ?? 0 },
+    const quantity = snapshots.get(row.asset.id) ?? 0;
+    const ids = rowIdsByQuantity.get(quantity) ?? [];
+    ids.push(row.id);
+    rowIdsByQuantity.set(quantity, ids);
+  }
+  for (const [expectedQuantity, ids] of rowIdsByQuantity) {
+    await tx.auditAsset.updateMany({
+      where: { id: { in: ids } },
+      data: { expectedQuantity },
     });
   }
 }

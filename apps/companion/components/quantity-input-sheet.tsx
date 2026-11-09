@@ -403,7 +403,7 @@ export function QuantityInputSheet({
                   : placeholder !== undefined
                   ? placeholder
                   : min > 1
-                  ? `${min}–${max}`
+                  ? `${min} to ${max}`
                   : `Max: ${max}`
               }
               placeholderTextColor={colors.placeholderText}

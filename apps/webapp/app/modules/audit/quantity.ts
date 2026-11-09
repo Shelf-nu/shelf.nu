@@ -185,6 +185,60 @@ export function totalAuditUnits(
   return totals.quantityRows + totals.unexpectedRows > 0 ? totals : null;
 }
 
+/**
+ * One group of an audit's quantity rows, as a `groupBy` over `expected` and
+ * `status` returns it: the row count, how many carry a count, and the sums.
+ */
+export type AuditUnitGroup = {
+  expected: boolean;
+  status: string;
+  /** Rows in the group. */
+  rows: number;
+  /** Rows in the group with a `foundQuantity`. */
+  countedRows: number;
+  expectedUnits: number | null;
+  foundUnits: number | null;
+};
+
+/**
+ * {@link totalAuditUnits} over grouped rows, so the database sums the units
+ * instead of sending every row. Same rules: unexpected rows are totalled apart,
+ * and an uncounted MISSING row counts as zero found, not as uncounted.
+ *
+ * @param groups - the quantity rows of one audit (`expectedQuantity` set),
+ *   grouped by `expected` and `status`
+ * @returns the totals, or null when there are no quantity rows
+ */
+export function totalAuditUnitGroups(
+  groups: ReadonlyArray<AuditUnitGroup>
+): AuditUnitTotals | null {
+  const totals: AuditUnitTotals = {
+    quantityRows: 0,
+    expectedUnits: 0,
+    foundUnits: 0,
+    uncountedRows: 0,
+    unexpectedRows: 0,
+    unexpectedUnits: 0,
+    unexpectedUncountedRows: 0,
+  };
+
+  for (const group of groups) {
+    const uncounted = group.rows - group.countedRows;
+    if (!group.expected) {
+      totals.unexpectedRows += group.rows;
+      totals.unexpectedUnits += group.foundUnits ?? 0;
+      totals.unexpectedUncountedRows += uncounted;
+      continue;
+    }
+    totals.quantityRows += group.rows;
+    totals.expectedUnits += group.expectedUnits ?? 0;
+    totals.foundUnits += group.foundUnits ?? 0;
+    if (group.status !== "MISSING") totals.uncountedRows += uncounted;
+  }
+
+  return totals.quantityRows + totals.unexpectedRows > 0 ? totals : null;
+}
+
 /** "1 quantity-tracked asset" / "2 quantity-tracked assets". */
 function quantityAssets(count: number): string {
   return `${count} quantity-tracked ${count === 1 ? "asset" : "assets"}`;

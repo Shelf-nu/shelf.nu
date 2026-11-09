@@ -17,6 +17,7 @@ import {
   countWasRefused,
   countFieldsFromScan,
   countTargetFor,
+  drainScanQueue,
   dropSupersededCounts,
   entriesToResync,
   isSupersededCount,
@@ -24,6 +25,9 @@ import {
   recountQueueEntry,
   storedCountFor,
   type CountedQueueEntry,
+  type ReplayAnswer,
+  type ReplayQueueEntry,
+  type ReplayScannedItem,
 } from "./audit-scan-queue";
 
 /** A queued scan of the 14-unit pool, or of another asset. */
@@ -449,5 +453,225 @@ describe("recountAnswerToast", () => {
       recountAnswerToast({ ...pending, isExpected: false }, 12)?.subtitle,
       "Count updated · 12"
     );
+  });
+});
+
+describe("drainScanQueue", () => {
+  type Entry = ReplayQueueEntry & { qrId: string };
+
+  /** A queued scan of the 14-unit pool, or of another asset. */
+  const queued = (overrides: Partial<Entry>): Entry => ({
+    auditSessionId: "audit-1",
+    assetId: "pool-1",
+    qrId: "qr-1",
+    ...overrides,
+  });
+
+  /**
+   * Runs the replay against a fake server that answers each request from
+   * `answers` in turn (a thrown error stands for a network failure), and
+   * records what was sent and reported.
+   */
+  async function replay({
+    queue,
+    failed = [],
+    items = [{ assetId: "pool-1" }],
+    answers,
+    maxRetries = 3,
+  }: {
+    queue: Entry[];
+    failed?: Entry[];
+    items?: ReplayScannedItem[];
+    answers: (ReplayAnswer | Error)[];
+    maxRetries?: number;
+  }) {
+    const sent: Entry[] = [];
+    const synced: unknown[][] = [];
+    const failures: string[] = [];
+    let persisted = 0;
+    const refs = {
+      queue: { current: queue },
+      failed: { current: failed },
+      items: { current: items },
+    };
+    const result = await drainScanQueue({
+      ...refs,
+      maxRetries,
+      recordScan: async (entry) => {
+        sent.push(entry);
+        const answer = answers.shift();
+        if (!answer) throw new Error("no answer scripted");
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+      persist: () => {
+        persisted += 1;
+      },
+      onSynced: (...args) => synced.push(args),
+      onFailed: (entry) => failures.push(entry.assetId),
+    });
+    return { result, refs, sent, synced, failures, persisted };
+  }
+
+  it("sends every scan in order and gives each row its server row and count", async () => {
+    const run = await replay({
+      queue: [
+        queued({ foundQuantity: 8 }),
+        queued({ assetId: "camera-1", qrId: "qr-2" }),
+      ],
+      items: [{ assetId: "pool-1" }, { assetId: "camera-1" }],
+      answers: [
+        { data: { auditAssetId: "row-pool", foundQuantity: 8 } },
+        { data: { auditAssetId: "row-camera", foundQuantity: null } },
+      ],
+    });
+
+    assert.deepEqual(run.result, { backoffAttempt: null });
+    assert.deepEqual(
+      run.sent.map((e) => e.assetId),
+      ["pool-1", "camera-1"]
+    );
+    assert.equal(run.refs.queue.current.length, 0);
+    assert.deepEqual(run.refs.items.current[0], {
+      assetId: "pool-1",
+      auditAssetId: "row-pool",
+      syncFailed: false,
+      foundQuantity: 8,
+    });
+    assert.deepEqual(run.synced[0], ["pool-1", "row-pool", 8, false]);
+    assert.equal(run.persisted, 2);
+  });
+
+  it("reports a recount the server refused with the count it kept", async () => {
+    const run = await replay({
+      queue: [queued({ foundQuantity: 12, recount: true })],
+      answers: [{ data: { auditAssetId: "row-pool", foundQuantity: 11 } }],
+    });
+
+    assert.deepEqual(run.synced[0], ["pool-1", "row-pool", 11, true]);
+    assert.equal(run.refs.items.current[0].foundQuantity, 11);
+  });
+
+  it("lets a newer queued count settle the row instead of an older answer", async () => {
+    const run = await replay({
+      queue: [
+        queued({ foundQuantity: 8, queuedAt: 1 }),
+        queued({ foundQuantity: 10, queuedAt: 2, recount: true }),
+      ],
+      answers: [
+        { data: { auditAssetId: "row-pool", foundQuantity: 8 } },
+        { data: { auditAssetId: "row-pool", foundQuantity: 10 } },
+      ],
+    });
+
+    // The first answer leaves the count alone: the newer one is queued.
+    assert.deepEqual(run.synced[0], ["pool-1", "row-pool", undefined, false]);
+    assert.deepEqual(run.synced[1], ["pool-1", "row-pool", 10, false]);
+    assert.equal(run.refs.items.current[0].foundQuantity, 10);
+  });
+
+  it("drops a failed count with a newer one queued, so it can never land after it", async () => {
+    const run = await replay({
+      queue: [
+        queued({ foundQuantity: 8, queuedAt: 1 }),
+        queued({ foundQuantity: 10, queuedAt: 2, recount: true }),
+      ],
+      answers: [
+        new Error("offline"),
+        { data: { auditAssetId: "row-pool", foundQuantity: 10 } },
+      ],
+    });
+
+    // Sent once each: the older count is not retried after the newer one.
+    assert.deepEqual(
+      run.sent.map((e) => e.foundQuantity),
+      [8, 10]
+    );
+    assert.equal(run.refs.queue.current.length, 0);
+    assert.equal(run.refs.items.current[0].foundQuantity, 10);
+  });
+
+  it("makes the newer count a first scan when the dropped one never reached the server", async () => {
+    const run = await replay({
+      queue: [
+        queued({ foundQuantity: 8, queuedAt: 1 }),
+        queued({ foundQuantity: 10, queuedAt: 2, recount: true }),
+      ],
+      answers: [
+        new Error("offline"),
+        { data: { auditAssetId: "row-pool", foundQuantity: 10 } },
+      ],
+    });
+
+    assert.equal(run.sent[1].recount, false);
+  });
+
+  it("carries the first scan into a newer count waiting in the failed list", async () => {
+    const run = await replay({
+      queue: [queued({ foundQuantity: 8, queuedAt: 1 })],
+      failed: [queued({ foundQuantity: 10, queuedAt: 2, recount: true })],
+      answers: [{ error: "Server error" }],
+    });
+
+    assert.equal(run.refs.queue.current.length, 0);
+    assert.equal(run.refs.failed.current.length, 1);
+    assert.equal(run.refs.failed.current[0].recount, false);
+    assert.equal(run.refs.failed.current[0].foundQuantity, 10);
+  });
+
+  it("puts a failed scan at the back with one more retry and stops to back off", async () => {
+    const run = await replay({
+      queue: [queued({}), queued({ assetId: "camera-1", qrId: "qr-2" })],
+      items: [{ assetId: "pool-1" }, { assetId: "camera-1" }],
+      answers: [{ error: "Server error" }],
+    });
+
+    assert.deepEqual(run.result, { backoffAttempt: 1 });
+    assert.deepEqual(
+      run.refs.queue.current.map((e) => [e.assetId, e.retryCount]),
+      [
+        ["camera-1", undefined],
+        ["pool-1", 1],
+      ]
+    );
+    assert.equal(run.sent.length, 1);
+  });
+
+  it("moves a scan out of retries to the failed list and marks its row, never dropping it", async () => {
+    const run = await replay({
+      queue: [queued({ foundQuantity: 8, retryCount: 2 })],
+      answers: [new Error("offline")],
+    });
+
+    assert.deepEqual(run.result, { backoffAttempt: null });
+    assert.equal(run.refs.queue.current.length, 0);
+    assert.deepEqual(run.refs.failed.current, [
+      queued({ foundQuantity: 8, retryCount: undefined }),
+    ]);
+    assert.equal(run.refs.items.current[0].syncFailed, true);
+    assert.deepEqual(run.failures, ["pool-1"]);
+  });
+
+  it("updates the rows the screen holds now, not the array it held when the request left", async () => {
+    const queue = [queued({ foundQuantity: 8 })];
+    const items = { current: [{ assetId: "pool-1" }] as ReplayScannedItem[] };
+    const swapped: ReplayScannedItem[] = [
+      { assetId: "pool-1" },
+      { assetId: "camera-1" },
+    ];
+    await drainScanQueue({
+      queue: { current: queue },
+      failed: { current: [] },
+      items,
+      maxRetries: 3,
+      recordScan: async () => {
+        // A scan made while the request was in flight replaced the array.
+        items.current = swapped;
+        return { data: { auditAssetId: "row-pool", foundQuantity: 8 } };
+      },
+      persist: () => {},
+    });
+
+    assert.equal(swapped[0].auditAssetId, "row-pool");
   });
 });

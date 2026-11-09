@@ -38,11 +38,11 @@ import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
-import { describeAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditFindingsPage,
   getAuditWideFindings,
 } from "~/modules/audit/findings.server";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
@@ -52,8 +52,8 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import type { loader as auditLayoutLoader } from "~/routes/_layout+/audits.$auditId";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, parseData, payload } from "~/utils/http.server";
@@ -323,8 +323,9 @@ export default function AuditOverview() {
   // Complete Audit dialog; reading them here again would repeat the query on
   // every revalidation.
   const unitTotals =
-    useRouteLoaderData<typeof auditLayoutLoader>("routes/_layout+/audits.$auditId")
-      ?.unitTotals ?? null;
+    useRouteLoaderData<typeof auditLayoutLoader>(
+      "routes/_layout+/audits.$auditId"
+    )?.unitTotals ?? null;
 
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(

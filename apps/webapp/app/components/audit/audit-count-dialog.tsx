@@ -24,6 +24,7 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
+import { countPromptDefault } from "@shelf/quantity-control";
 import { useAtomValue } from "jotai";
 import { auditCountPromptAtom } from "~/atoms/qr-scanner";
 import { countExpectation } from "~/components/audit/audit-count-flow";
@@ -95,8 +96,12 @@ function AuditCountDialogContent({
   onCancel,
 }: AuditCountDialogContentProps) {
   const expectation = countExpectation({ isExpected, expectedQuantity });
-  const initial =
-    foundQuantity ?? (expectation === "expected" ? expectedQuantity : null);
+  // Same rule as the phone's count sheet, from `@shelf/quantity-control`.
+  const initial = countPromptDefault({
+    isExpected,
+    expectedQuantity,
+    foundQuantity,
+  });
   const [value, setValue] = useState(initial === null ? "" : String(initial));
   const inputRef = useAutoFocus<HTMLInputElement>();
   const unit = unitOfMeasure && unitOfMeasure !== "units" ? unitOfMeasure : "";
@@ -113,13 +118,14 @@ function AuditCountDialogContent({
   }
 
   return (
+    // Escape closes the dialog through `onOpenChange`, so it cancels once.
     <AlertDialog
       open
       onOpenChange={(open) => {
         if (!open) onCancel();
       }}
     >
-      <AlertDialogContent onEscapeKeyDown={onCancel}>
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
             {mode === "recount" ? "Update count" : "How many did you find?"}

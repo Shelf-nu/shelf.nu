@@ -18,7 +18,7 @@
  * @see {@link file://../hooks/use-audit-init.ts}
  */
 
-import { countExpectation } from "@shelf/quantity-control";
+import { countExpectation, countPromptDefault } from "@shelf/quantity-control";
 
 /** The fields of a queued scan these rules read. */
 export type CountedQueueEntry = {
@@ -224,21 +224,10 @@ export function countWasRefused(
 }
 
 /**
- * The value the count sheet opens with: the count already recorded, else the
- * expected units when there are some to confirm, else blank (null), so an
- * asset with nothing expected or not on the list is counted, not confirmed.
- * Mirrors the web dialog's initial value in `audit-count-dialog.tsx`.
+ * The value the count sheet opens with. The rule is shared with the web
+ * dialog through `@shelf/quantity-control`.
  */
-export function countSheetDefault(request: {
-  isExpected: boolean;
-  expectedQuantity: number;
-  foundQuantity: number | null;
-}): number | null {
-  if (request.foundQuantity !== null) return request.foundQuantity;
-  return countExpectation(request) === "expected"
-    ? request.expectedQuantity
-    : null;
-}
+export const countSheetDefault = countPromptDefault;
 
 /** What a scan of an asset in an audit leads to. */
 export type AuditScanDecision =
@@ -372,4 +361,177 @@ export function recountAnswerToast(
         ? "Count not saved: the scan is no longer in this audit"
         : `Count not saved: the audit kept ${storedCount}`,
   };
+}
+
+// ── Queue replay ──────────────────────────────────────────
+
+/** A queued scan, with the retry count the replay keeps on it. */
+export type ReplayQueueEntry = CountedQueueEntry & { retryCount?: number };
+
+/** The fields of a scanned row the replay updates when its scan syncs. */
+export type ReplayScannedItem = {
+  assetId: string;
+  auditAssetId?: string | null;
+  syncFailed?: boolean;
+  foundQuantity?: number | null;
+};
+
+/** What the server answered for one queued scan. */
+export type ReplayAnswer = {
+  data?: { auditAssetId?: string | null; foundQuantity?: number | null } | null;
+  error?: string | null;
+};
+
+/**
+ * A React ref's shape. The replay reads `current` again after every request,
+ * because the screen may replace the array while one is in flight.
+ */
+export type ReplayRef<T> = { current: T };
+
+/** Arguments for {@link drainScanQueue}. */
+export type DrainScanQueueArgs<
+  E extends ReplayQueueEntry,
+  I extends ReplayScannedItem,
+> = {
+  /** The live queue; its array is mutated in place (a pending save holds it). */
+  queue: ReplayRef<E[]>;
+  /** Scans that exhausted their retries; mutated in place. */
+  failed: ReplayRef<E[]>;
+  /** The scanned rows, updated when a scan syncs or fails. */
+  items: ReplayRef<I[]>;
+  /** Sends one scan. A thrown error counts as a failed attempt. */
+  recordScan: (entry: E) => Promise<ReplayAnswer>;
+  /** Attempts before a scan moves to `failed`. */
+  maxRetries: number;
+  /** Saves the queues and rows; called after every change to them. */
+  persist: (entry: E) => void;
+  /** A scan synced; see `onScanSynced` in `use-scan-queue.ts`. */
+  onSynced?: (
+    assetId: string,
+    auditAssetId: string | null,
+    storedCount?: number | null,
+    countRefused?: boolean
+  ) => void;
+  /** A scan exhausted its retries and moved to `failed`. */
+  onFailed?: (entry: E) => void;
+};
+
+/**
+ * Sends the queued scans in order until the queue is empty or an attempt
+ * fails and must wait. The processing loop of `use-scan-queue.ts`, kept here
+ * so its ordering rules are tested without React:
+ *
+ * - a synced scan leaves the queue and its row takes the server's row id and,
+ *   unless a newer count for the asset is still queued, the stored count;
+ * - a failed scan with a newer count for the same asset queued is dropped, not
+ *   retried, so it can never land after that count; when it was the asset's
+ *   first scan, the newer counts carry the first scan (`carryFirstScan`);
+ * - any other failed scan goes to the back of the queue with one more retry,
+ *   and the loop stops so the caller can wait before the next attempt;
+ * - a scan out of retries moves to `failed` and its row is marked, never
+ *   dropped.
+ *
+ * @returns the attempt number to back off for, or null when the queue drained
+ *   (or every remaining scan moved to `failed`)
+ */
+export async function drainScanQueue<
+  E extends ReplayQueueEntry,
+  I extends ReplayScannedItem,
+>({
+  queue,
+  failed,
+  items,
+  recordScan,
+  maxRetries,
+  persist,
+  onSynced,
+  onFailed,
+}: DrainScanQueueArgs<E, I>): Promise<{ backoffAttempt: number | null }> {
+  while (queue.current.length > 0) {
+    const entry = queue.current[0];
+    let answer: ReplayAnswer | null = null;
+    try {
+      answer = await recordScan(entry);
+    } catch {
+      answer = null;
+    }
+    const data = answer && !answer.error ? answer.data : null;
+
+    if (data) {
+      queue.current.shift();
+      // The count the server stored, unless a newer count for this asset is
+      // still queued and will settle the row itself.
+      const storedCount = storedCountFor(
+        entry.foundQuantity,
+        data,
+        isSupersededCount(entry, [...queue.current, ...failed.current])
+      );
+      // A count answer without a row (the scan was removed) still reaches the
+      // caller, so a refused recount is always reported.
+      if (data.auditAssetId || storedCount !== undefined) {
+        const rows = items.current;
+        const index = rows.findIndex((item) => item.assetId === entry.assetId);
+        if (index !== -1) {
+          rows[index] = {
+            ...rows[index],
+            ...(data.auditAssetId ? { auditAssetId: data.auditAssetId } : {}),
+            // A successful (re)sync clears any prior failed marker.
+            syncFailed: false,
+            ...(storedCount !== undefined
+              ? { foundQuantity: storedCount }
+              : {}),
+          };
+        }
+        onSynced?.(
+          entry.assetId,
+          data.auditAssetId ?? null,
+          storedCount,
+          countWasRefused(entry.foundQuantity, storedCount)
+        );
+      }
+      persist(entry);
+      continue;
+    }
+
+    // A newer count for this asset is queued: this one must not land after
+    // it, so it is dropped rather than retried.
+    if (
+      isSupersededCount(entry, [...queue.current.slice(1), ...failed.current])
+    ) {
+      queue.current.shift();
+      // This failed entry may have been the asset's first scan: the newer
+      // counts then carry it.
+      for (const list of [queue.current, failed.current]) {
+        list.forEach((other, index) => {
+          list[index] = carryFirstScan(other, [entry]);
+        });
+      }
+      persist(entry);
+      continue;
+    }
+
+    const retries = (entry.retryCount ?? 0) + 1;
+    if (retries >= maxRetries) {
+      // Never silently drop the scan, or an asset the worker saw as Found is
+      // lost and later marked MISSING on completion. Move it to the failed
+      // queue (persisted, re-syncable) and mark its row.
+      queue.current.shift();
+      failed.current.push({ ...entry, retryCount: undefined });
+      const rows = items.current;
+      const index = rows.findIndex((item) => item.assetId === entry.assetId);
+      if (index !== -1) rows[index] = { ...rows[index], syncFailed: true };
+      onFailed?.(entry);
+      persist(entry);
+      continue;
+    }
+
+    // Back of the queue with one more retry; the caller waits, then calls
+    // again.
+    queue.current.shift();
+    queue.current.push({ ...entry, retryCount: retries });
+    persist(entry);
+    return { backoffAttempt: retries };
+  }
+
+  return { backoffAttempt: null };
 }

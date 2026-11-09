@@ -4,10 +4,8 @@ import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import {
   carryFirstScan,
+  drainScanQueue,
   dropSupersededCounts,
-  isSupersededCount,
-  countWasRefused,
-  storedCountFor,
 } from "@/lib/audit-scan-queue";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
@@ -77,155 +75,52 @@ export function useScanQueue({
 
     isProcessingQueueRef.current = true;
 
-    while (scanQueueRef.current.length > 0) {
-      const entry = scanQueueRef.current[0];
-      try {
-        const { data, error } = await api.recordAuditScan(orgId, entry);
-        // Treat envelope errors as failures — keep item in queue for retry
-        if (error || !data) {
-          throw new Error(error ?? "Failed to sync audit scan");
-        }
-        // Success: remove from queue and persist immediately
-        scanQueueRef.current.shift();
+    const persist = (entry: ScanQueueEntry) =>
+      saveAuditScanState(
+        entry.auditSessionId,
+        scannedItemsRef.current,
+        scanQueueRef.current,
+        failedQueueRef.current
+      );
 
-        // The count the server stored, unless a newer count for this asset
-        // is still queued and will settle the row itself.
-        const storedCount = storedCountFor(
-          entry.foundQuantity,
-          data,
-          isSupersededCount(entry, [
-            ...scanQueueRef.current,
-            ...failedQueueRef.current,
-          ])
+    // The ordering rules live in `drainScanQueue`, where they are tested.
+    const { backoffAttempt } = await drainScanQueue({
+      queue: scanQueueRef,
+      failed: failedQueueRef,
+      items: scannedItemsRef,
+      recordScan: (entry) => api.recordAuditScan(orgId, entry),
+      maxRetries: MAX_QUEUE_RETRIES,
+      persist,
+      onSynced: onScanSynced,
+      onFailed: (entry) => {
+        onScanFailed?.(entry.assetId);
+        // Surface to Sentry: a scan the worker saw as Found has not reached
+        // the server after all retries. This is the field signal we'd
+        // otherwise only learn about from a "my audit is wrong" report.
+        reportAuditDurabilityEvent(
+          "scan_sync_failed",
+          {
+            auditSessionId: entry.auditSessionId,
+            assetId: entry.assetId,
+            retries: MAX_QUEUE_RETRIES,
+          },
+          "error"
         );
+        if (__DEV__)
+          console.warn(
+            `[AuditQueue] Scan failed after ${MAX_QUEUE_RETRIES} retries; moved to failed queue:`,
+            entry.assetId
+          );
+      },
+    });
 
-        // Capture auditAssetId from response so notes/photos can be attached.
-        // A count answer without a row (the scan was removed) still reaches
-        // the caller, so a refused recount is always reported.
-        if (data?.auditAssetId || storedCount !== undefined) {
-          const itemIndex = scannedItemsRef.current.findIndex(
-            (item) => item.assetId === entry.assetId
-          );
-          if (itemIndex !== -1) {
-            scannedItemsRef.current[itemIndex] = {
-              ...scannedItemsRef.current[itemIndex],
-              ...(data.auditAssetId ? { auditAssetId: data.auditAssetId } : {}),
-              // A successful (re)sync clears any prior failed marker.
-              syncFailed: false,
-              ...(storedCount !== undefined
-                ? { foundQuantity: storedCount }
-                : {}),
-            };
-          }
-          // Notify caller to update React state for re-render
-          onScanSynced?.(
-            entry.assetId,
-            data.auditAssetId ?? null,
-            storedCount,
-            countWasRefused(entry.foundQuantity, storedCount)
-          );
-        }
-
-        saveAuditScanState(
-          entry.auditSessionId,
-          scannedItemsRef.current,
-          scanQueueRef.current,
-          failedQueueRef.current
-        );
-      } catch {
-        // A newer count for this asset is queued: this one must not land
-        // after it, so it is dropped rather than retried.
-        if (
-          isSupersededCount(entry, [
-            ...scanQueueRef.current.slice(1),
-            ...failedQueueRef.current,
-          ])
-        ) {
-          scanQueueRef.current.shift();
-          // This failed entry may have been the asset's first scan: the
-          // newer counts then carry it.
-          for (const queue of [scanQueueRef.current, failedQueueRef.current]) {
-            queue.forEach((other, index) => {
-              queue[index] = carryFirstScan(other, [entry]);
-            });
-          }
-          saveAuditScanState(
-            entry.auditSessionId,
-            scannedItemsRef.current,
-            scanQueueRef.current,
-            failedQueueRef.current
-          );
-          continue;
-        }
-        // Network error: retry with backoff
-        const retries = (entry.retryCount ?? 0) + 1;
-        if (retries >= MAX_QUEUE_RETRIES) {
-          // Max retries reached. CRITICAL: never silently drop the scan, or an
-          // asset the worker saw as "Found" is lost and later marked MISSING on
-          // completion. Move it to the failed queue (persisted, re-syncable) and
-          // mark the item so the UI surfaces it and completion can be blocked.
-          scanQueueRef.current.shift();
-          failedQueueRef.current.push({ ...entry, retryCount: undefined });
-          // Mark the scanned item directly on the ref (mirrors the success path)
-          // so the persisted snapshot captures the failed state on crash.
-          const failedIndex = scannedItemsRef.current.findIndex(
-            (item) => item.assetId === entry.assetId
-          );
-          if (failedIndex !== -1) {
-            scannedItemsRef.current[failedIndex] = {
-              ...scannedItemsRef.current[failedIndex],
-              syncFailed: true,
-            };
-          }
-          onScanFailed?.(entry.assetId);
-          saveAuditScanState(
-            entry.auditSessionId,
-            scannedItemsRef.current,
-            scanQueueRef.current,
-            failedQueueRef.current
-          );
-          // Surface to Sentry: a scan the worker saw as Found has not reached
-          // the server after all retries. This is the field signal we'd
-          // otherwise only learn about from a "my audit is wrong" report.
-          reportAuditDurabilityEvent(
-            "scan_sync_failed",
-            {
-              auditSessionId: entry.auditSessionId,
-              assetId: entry.assetId,
-              retries: MAX_QUEUE_RETRIES,
-            },
-            "error"
-          );
-          if (__DEV__)
-            console.warn(
-              `[AuditQueue] Scan failed after ${MAX_QUEUE_RETRIES} retries; moved to failed queue:`,
-              entry.assetId
-            );
-          continue;
-        } else {
-          // Move to end of queue with incremented retry count
-          scanQueueRef.current.shift();
-          scanQueueRef.current.push({ ...entry, retryCount: retries });
-          // Persist the requeued state NOW. The success and max-retry branches
-          // both persist; without this one, an app kill during the backoff —
-          // or a sub-2s scanning burst that perpetually resets the debounced
-          // saver — loses the in-memory queue entry, so a scan the worker saw
-          // as Found vanishes and is marked MISSING on completion.
-          saveAuditScanState(
-            entry.auditSessionId,
-            scannedItemsRef.current,
-            scanQueueRef.current,
-            failedQueueRef.current
-          );
-          // Clear any prior timer before scheduling a new one, so a rapid
-          // re-entry can't orphan a setTimeout that re-fires processQueue after
-          // unmount (post-unmount work / double-record).
-          if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-          const delay = RETRY_DELAYS[retries - 1] ?? 15_000;
-          retryTimerRef.current = setTimeout(() => processQueue(), delay);
-          break;
-        }
-      }
+    if (backoffAttempt !== null) {
+      // Clear any prior timer before scheduling a new one, so a rapid
+      // re-entry can't orphan a setTimeout that re-fires processQueue after
+      // unmount (post-unmount work / double-record).
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      const delay = RETRY_DELAYS[backoffAttempt - 1] ?? 15_000;
+      retryTimerRef.current = setTimeout(() => processQueue(), delay);
     }
 
     isProcessingQueueRef.current = false;
