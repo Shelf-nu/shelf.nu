@@ -73,6 +73,10 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  canOfferDiscardDraft,
+  discardLanded,
+} from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
@@ -914,15 +918,23 @@ function BookingDetailScreen({ id }: { id: string }) {
               currentOrg.id,
               booking.id
             );
+            // An error can still mean the discard landed (a timed-out
+            // response), so re-read the booking before reporting a failure.
+            const landed =
+              !err ||
+              discardLanded(
+                (await api.booking(booking.id, currentOrg.id)).data?.booking
+                  .status
+              );
             setIsActioning(false);
-            if (err) {
-              Alert.alert("Couldn't discard", err);
+            // Either way the booking may have changed: refresh list and detail.
+            markBookingsListDirty();
+            fetchBooking();
+            if (!landed) {
+              Alert.alert("Couldn't discard", err ?? "Please try again.");
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking: force the list to refetch.
-            markBookingsListDirty();
-            fetchBooking();
           },
         },
       ]
@@ -1054,7 +1066,7 @@ function BookingDetailScreen({ id }: { id: string }) {
       destructive: false,
       onPress: handleArchive,
     });
-  if (bookingActions.canDiscardDraft)
+  if (canOfferDiscardDraft(bookingActions))
     lifecycleActions.push({
       key: "discardDraft",
       label: "Discard draft",

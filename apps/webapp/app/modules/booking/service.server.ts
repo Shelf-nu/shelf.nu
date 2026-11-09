@@ -12925,10 +12925,14 @@ export async function archiveBooking({
     }
 
     /**
-     * A booking archived straight from RESERVED was never checked in, so flag
-     * it: return-behaviour reports (Booking Compliance) exclude these.
+     * A booking archived before any check-out (a past-due RESERVED, or a
+     * discarded DRAFT) was never returned, so flag it: return-behaviour
+     * reports (Booking Compliance, returned-booking counts) and the lifecycle
+     * progress bar exclude these.
      */
-    const archivedWithoutCheckin = booking.status === BookingStatus.RESERVED;
+    const archivedWithoutCheckin =
+      booking.status === BookingStatus.RESERVED ||
+      booking.status === BookingStatus.DRAFT;
 
     /**
      * Guard the write on the status we just read. If a concurrent checkout

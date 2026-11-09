@@ -837,7 +837,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         canArchivePerm,
       // Discard draft: archive a DRAFT, for a caller who may archive but not
       // delete (web `discardDraft` in booking-actions.ts). Served by
-      // `bookings/discard-draft`.
+      // `bookings/archive` with `discardDraft: true`.
       canDiscardDraft:
         booking.status === "DRAFT" &&
         writesBooking &&

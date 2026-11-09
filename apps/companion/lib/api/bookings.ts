@@ -402,6 +402,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, discardDraft: true }),
+        // why: non-idempotent; a timed-out-but-landed discard re-sent finds
+        // the booking ARCHIVED and is refused. The screen reconciles instead.
+        retry: false,
       }
     ),
 

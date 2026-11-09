@@ -2034,10 +2034,11 @@ model Booking {
   // When a booking is auto-archived, we store the timestamp here
   autoArchivedAt DateTime? @db.Timestamptz(3)
 
-  // True when the booking was archived directly from RESERVED — i.e. its end
-  // date passed without ever being checked out/in. Such bookings were never
-  // "returned", so return-behaviour reports (e.g. Booking Compliance) must
-  // exclude them. Bookings archived from COMPLETE keep the default `false`.
+  // True when the booking was archived before any check-out: from RESERVED
+  // (its end date passed unused) or from DRAFT ("Discard draft"). Such bookings
+  // were never "returned", so return-behaviour reports (e.g. Booking
+  // Compliance) must exclude them. Bookings archived from COMPLETE keep the
+  // default `false`.
   archivedWithoutCheckin Boolean @default(false)
 
   cancellationReason String?

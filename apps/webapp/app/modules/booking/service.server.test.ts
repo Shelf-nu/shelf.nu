@@ -8603,7 +8603,7 @@ describe("archiveBooking", () => {
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
-  it("discards a DRAFT by archiving it, guarded on the DRAFT status", async () => {
+  it("discards a DRAFT by archiving it, flagged as never checked out", async () => {
     expect.assertions(1);
 
     const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
@@ -8622,9 +8622,10 @@ describe("archiveBooking", () => {
       discardDraft: true,
     });
 
+    // A discarded draft never went out, so return reports must skip it.
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1", status: BookingStatus.DRAFT },
-      data: { status: BookingStatus.ARCHIVED },
+      data: { status: BookingStatus.ARCHIVED, archivedWithoutCheckin: true },
     });
   });
 
