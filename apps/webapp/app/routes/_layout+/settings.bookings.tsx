@@ -47,6 +47,10 @@ import {
   updateBookingSettings,
 } from "~/modules/booking-settings/service.server";
 import {
+  assertCanUsePdfTemplates,
+  canUsePdfTemplates,
+} from "~/modules/pdf-template/access";
+import {
   AddTemplateFormSchema,
   PdfTemplateFormSchema,
   templateFromForm,
@@ -86,12 +90,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import {
-  assertCanUseBookings,
-  canUseBookings,
-} from "~/utils/subscription.server";
 
-/** The PDF template intents; each needs a workspace that can use bookings. */
+/** The PDF template intents; each needs a team workspace. */
 const TEMPLATE_INTENTS = [
   "add-template",
   "save-template",
@@ -123,9 +123,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    // PDF templates belong to bookings: a workspace that cannot use bookings
-    // has no card and none of its templates are read.
-    const showPdfTemplates = canUseBookings(currentOrganization);
+    // Only a team workspace has PDF templates; any other gets no card and
+    // none of its templates are read.
+    const showPdfTemplates = canUsePdfTemplates(currentOrganization);
 
     const [
       bookingSettings,
@@ -219,10 +219,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    // PDF templates belong to bookings, gated here as well as in the UI: a
-    // hand-made POST from a personal workspace must not create or change them.
+    // Templates are team-only. This guard does not rely on the loader: a
+    // hand-made POST from a personal workspace must not create or change one,
+    // even on an install with premium features off.
     if (TEMPLATE_INTENTS.includes(intent)) {
-      assertCanUseBookings(currentOrganization);
+      assertCanUsePdfTemplates(currentOrganization);
     }
 
     switch (intent) {

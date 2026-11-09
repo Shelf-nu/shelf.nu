@@ -6,7 +6,7 @@
  * edit, duplicate, delete and pick the default template here; the Generate PDF
  * dialog on a booking then offers them by name.
  *
- * The card is shown only for workspaces that can use bookings.
+ * The card is shown only for team workspaces (`canUsePdfTemplates`).
  *
  * Every change posts to the settings route's action, which re-checks the
  * caller's permission and scopes every write to the workspace.

@@ -26,6 +26,7 @@ import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
+import { canUsePdfTemplates } from "~/modules/pdf-template/access";
 import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-template/config";
 import {
   readLastPdfTemplateId,
@@ -48,7 +49,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canUseBookings } from "~/utils/subscription.server";
 
 export const loader = async ({
   context,
@@ -79,9 +79,10 @@ export const loader = async ({
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
 
-    // A workspace that cannot use bookings prints the Checklist: its
-    // templates are never read and a `?template=` never reaches the database.
-    const canUseTemplates = canUseBookings(currentOrganization);
+    // A workspace without templates (any but a team workspace) prints the
+    // Checklist: no template is read or seeded, and a `?template=` never
+    // reaches the database.
+    const canUseTemplates = canUsePdfTemplates(currentOrganization);
     const requestedTemplateId = canUseTemplates
       ? searchParams.get("template")
       : null;

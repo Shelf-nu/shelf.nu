@@ -56,7 +56,7 @@ export type PdfTemplateForPdf = {
 type PdfApiResponse =
   | {
       pdfMeta: PdfDbResult;
-      /** `null` when the workspace cannot use bookings, so has no templates. */
+      /** `null` when the workspace has no templates (it is not a team workspace). */
       template: PdfTemplateForPdf | null;
       templates: PdfTemplateSummary[];
       error: null;

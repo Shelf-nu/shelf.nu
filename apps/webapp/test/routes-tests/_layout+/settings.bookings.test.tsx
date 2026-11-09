@@ -2,9 +2,9 @@
  * Settings > Bookings: the PDF template intents and the template data the
  * loader hands the card.
  *
- * The workspace gate (`canUseBookings` / `assertCanUseBookings`) runs for
- * real with the premium switch on, so a PERSONAL workspace is refused by the
- * production rule and not by a stub.
+ * The template gate (`assertCanUsePdfTemplates`) runs for real with the
+ * premium switch off, the setting where every workspace can use bookings, so
+ * a PERSONAL workspace is refused by the team-only rule and not by a stub.
  *
  * @see {@link file://../../../app/routes/_layout+/settings.bookings.tsx}
  */
@@ -38,13 +38,14 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
-// why: premium features are an environment switch; turning it on makes the
-// real `canUseBookings` refuse every workspace that is not a TEAM workspace.
+// why: premium features are an environment switch; turning it off lets every
+// workspace use bookings, so only the team-only template rule can refuse a
+// personal workspace.
 vi.mock("~/config/shelf.config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/config/shelf.config")>();
   return {
     ...actual,
-    config: { ...actual.config, enablePremiumFeatures: true },
+    config: { ...actual.config, enablePremiumFeatures: false },
   };
 });
 
@@ -83,7 +84,7 @@ vi.mock("~/modules/booking/service.server", () => ({
 
 // why: Stripe is initialised at import by billing helpers
 vi.mock("~/utils/stripe.server", () => ({
-  premiumIsEnabled: true,
+  premiumIsEnabled: false,
   getOwnerSubscriptionInfo: vi.fn(),
   userHasActiveSubscription: vi.fn(),
 }));
@@ -339,7 +340,7 @@ describe("settings.bookings PDF templates", () => {
     expect(updatePdfTemplate).not.toHaveBeenCalled();
   });
 
-  it("refuses a template write from a personal workspace", async () => {
+  it("refuses a template write from a personal workspace, even with premium features off", async () => {
     grant(OrganizationRoles.OWNER, OrganizationType.PERSONAL);
 
     const response = await post([

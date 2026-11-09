@@ -26,7 +26,6 @@ import { resolvePdfTemplateForPrint } from "~/modules/pdf-template/service.serve
 import { loader } from "~/routes/api+/bookings.$bookingId.generate-pdf";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
-import { canUseBookings } from "~/utils/subscription.server";
 
 // why: data() returns a fetch Response so the loader can be invoked directly,
 // with no router runtime to stand up.
@@ -88,12 +87,6 @@ vi.mock("~/modules/pdf-template/service.server", () => ({
   resolvePdfTemplateForPrint: vi.fn(),
 }));
 
-// why: whether a workspace can use bookings depends on its type and on the
-// premium-features switch of the environment; each test sets the answer.
-vi.mock("~/utils/subscription.server", () => ({
-  canUseBookings: vi.fn(),
-}));
-
 // why: PostHog is an external service; record what would be sent.
 vi.mock("~/integrations/posthog/client.server", () => ({
   captureServerEvent: vi.fn(),
@@ -145,14 +138,24 @@ function buildArgs({
   } as unknown as LoaderFunctionArgs;
 }
 
+/**
+ * A `requirePermission` result for a workspace of the given type. Templates
+ * belong to team workspaces, so the type decides whether a print reads them.
+ */
+function inWorkspace(type: "TEAM" | "PERSONAL", context = permissionContext()) {
+  return {
+    ...context,
+    currentOrganization: { ...context.currentOrganization, type },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requirePermission).mockResolvedValue(permissionContext() as never);
+  vi.mocked(requirePermission).mockResolvedValue(inWorkspace("TEAM") as never);
   vi.mocked(fetchAllPdfRelatedData).mockResolvedValue({
     booking: { from: null, to: null, originalFrom: null, originalTo: null },
     assets: ROWS,
   } as never);
-  vi.mocked(canUseBookings).mockReturnValue(true);
   // Answers like the real lookup: the requested template, else the
   // remembered one, else the default.
   vi.mocked(resolvePdfTemplateForPrint).mockImplementation(
@@ -174,7 +177,7 @@ beforeEach(() => {
 
 describe("booking checklist loader", () => {
   it("hands the caller's access to the data read, which runs the ownership check", async () => {
-    const context = permissionContext({ roles: ["BASE"] });
+    const context = inWorkspace("TEAM", permissionContext({ roles: ["BASE"] }));
     vi.mocked(requirePermission).mockResolvedValue(context as never);
 
     await loader(buildArgs());
@@ -315,7 +318,10 @@ describe("booking template loader: which template prints", () => {
     );
 
     vi.mocked(requirePermission).mockResolvedValue(
-      permissionContext({ organizationId: "org-2" }) as never
+      inWorkspace(
+        "TEAM",
+        permissionContext({ organizationId: "org-2" })
+      ) as never
     );
     await loader(buildArgs({ cookie }));
     expect(resolvePdfTemplateForPrint).toHaveBeenLastCalledWith(
@@ -395,12 +401,14 @@ describe("booking template loader: which template prints", () => {
   });
 });
 
-describe("booking PDF loader: a workspace that cannot use bookings", () => {
+describe("booking PDF loader: a personal workspace", () => {
   beforeEach(() => {
-    vi.mocked(canUseBookings).mockReturnValue(false);
+    vi.mocked(requirePermission).mockResolvedValue(
+      inWorkspace("PERSONAL") as never
+    );
   });
 
-  it("prints the Checklist for a workspace that cannot use bookings without reading templates", async () => {
+  it("prints the Checklist without reading, or seeding, any template", async () => {
     const response = (await loader(
       buildArgs({ query: "?template=template-check-out-receipt" })
     )) as unknown as Response;
@@ -422,23 +430,5 @@ describe("booking PDF loader: a workspace that cannot use bookings", () => {
       customFieldIds: [],
       formatPrefs: expect.objectContaining({ dateFormat: "DD_MM_YYYY" }),
     });
-  });
-});
-
-describe("booking PDF loader: premium features off", () => {
-  it("offers templates to a personal workspace when premium features are off", async () => {
-    // why: with premium off canUseBookings answers true for every workspace
-    // type, personal included; the stub returns that answer.
-    vi.mocked(canUseBookings).mockReturnValue(true);
-    vi.mocked(requirePermission).mockResolvedValue({
-      ...permissionContext(),
-      currentOrganization: { id: "org-1", type: "PERSONAL" },
-    } as never);
-
-    const response = (await loader(buildArgs())) as unknown as Response;
-    const body = await response.json();
-
-    expect(resolvePdfTemplateForPrint).toHaveBeenCalled();
-    expect(body.templates).toHaveLength(2);
   });
 });

@@ -5,10 +5,11 @@
  * booking PDF. Every function takes the caller's `organizationId` and scopes
  * every query by it, so a template id from another workspace reads as not found.
  *
- * A workspace that can use bookings always has at least one template and
+ * A team workspace always has at least one template and
  * exactly one default. New team workspaces get the built-in templates when they
  * are created; a workspace that has none gets them the first time its
- * templates are read. Callers gate on `canUseBookings`; this module does not.
+ * templates are read. Callers gate on `canUsePdfTemplates` (`./access.ts`);
+ * this module takes only an `organizationId` and does not.
  * Template names are unique per workspace, ignoring case.
  *
  * @see {@link file://./config.ts}
@@ -97,9 +98,9 @@ export function pdfTemplatesForNewWorkspace() {
  * calls create each built-in once, because the name and the default are both
  * unique per workspace.
  *
- * Callers must have checked `canUseBookings` first (`~/utils/subscription.server`):
- * this module cannot import it without an import cycle through the user
- * service, so it does not gate on the workspace type itself.
+ * Callers must have checked `canUsePdfTemplates` first (`./access.ts`): this
+ * function seeds rows for any workspace it is given, so a personal workspace
+ * must never reach it.
  *
  * @param params.organizationId - The caller's workspace
  * @returns The templates with their configs parsed

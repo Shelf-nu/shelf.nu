@@ -143,7 +143,7 @@ export const CHECKLIST_TEMPLATE_NAME = "Checklist";
 export const CHECKOUT_RECEIPT_TEMPLATE_NAME = "Check-out receipt";
 
 /**
- * The templates a workspace that can use bookings starts with, in list order;
+ * The templates a team workspace starts with, in list order;
  * the first is the default: the Checklist, then the Check-out receipt. The
  * data migration `20261103120000_add_pdf_templates` seeds the same for team
  * workspaces that existed before templates.
