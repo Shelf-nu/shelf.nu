@@ -31,6 +31,13 @@ import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
+import {
+  describeChange,
+  loadReferenceNames,
+  type ActivityDescription,
+  type DescribableEvent,
+  type ReferenceNames,
+} from "./asset-activity-description.server";
 import { mergeAssetWhere, type ReportAssetFilter } from "./asset-filter";
 import { resolveCheckInTimes } from "./check-in-time.server";
 import { WITHOUT_LOCATION_ID } from "./filter-params";
@@ -64,6 +71,7 @@ import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
+import { ASSET_CODE_RESOLUTION_SELECT } from "../barcode/display";
 import { refreshExpiredKitImages } from "../kit/service.server";
 import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -4478,6 +4486,13 @@ interface AssetActivityArgs {
   assetFilter?: ReportAssetFilter;
   page?: number;
   pageSize?: number;
+  /**
+   * Read every event in the timeframe instead of one page, for the CSV
+   * export: in batches of {@link ACTIVITY_EXPORT_BATCH_SIZE}, up to
+   * {@link ACTIVITY_EXPORT_MAX_ROWS}, without re-signing thumbnails. Ignores
+   * `page` and `pageSize`.
+   */
+  allRows?: boolean;
 }
 
 /**
@@ -4498,6 +4513,7 @@ export async function assetActivityReport(
     assetFilter,
     page = 1,
     pageSize = 50,
+    allRows = false,
   } = args;
 
   const startTime = performance.now();
@@ -4526,70 +4542,188 @@ export async function assetActivityReport(
       "ASSET_UNARCHIVED",
     ];
 
-    const { events, totalCount, actionCounts, mostActive } =
-      assetFilter && !assetFilter.isEmpty
-        ? await fetchFilteredActivityEvents({
-            organizationId,
-            timeframe,
-            actions: assetActions,
-            assetId,
-            assetFilter,
-            page,
-            pageSize,
-          })
-        : await fetchActivityEvents({
-            organizationId,
-            timeframe,
-            actions: assetActions,
-            assetId,
-            page,
-            pageSize,
-          });
+    // An export ends when it starts: a range ending later today would
+    // otherwise count events the batches never reach, and the file would not
+    // match its own count.
+    const readTimeframe = allRows
+      ? {
+          ...timeframe,
+          to: new Date(Math.min(timeframe.to.getTime(), Date.now())),
+        }
+      : timeframe;
 
-    // Get asset details for the events. `mainImage`, `mainImageExpiration`,
-    // `organizationId` are selected so we can pipe assets through
-    // `refreshExpiredAssetImages` below without an extra round-trip.
-    const assetIds = [
-      ...new Set(events.map((e) => e.assetId).filter(Boolean)),
-    ] as string[];
-    const assets = await db.asset.findMany({
-      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
-      where: { id: { in: assetIds }, organizationId },
-      select: {
-        id: true,
-        organizationId: true,
-        title: true,
-        mainImage: true,
-        mainImageExpiration: true,
-        thumbnailImage: true,
-        // Model cover image for assets with no image of their own
-        ...ASSET_MODEL_IMAGE_SELECT,
-      },
-    });
-    const refreshedAssets = await refreshExpiredAssetImages(assets);
-    const assetMap = new Map(refreshedAssets.map((a) => [a.id, a]));
-
-    // Map events to rows
-    const rows: AssetActivityRow[] = events.map((event) => {
-      const asset = event.assetId ? assetMap.get(event.assetId) : null;
-      const actorSnapshot = event.actorSnapshot as UserNameFields | null;
-
-      return {
-        id: event.id,
-        assetId: event.assetId || "",
-        assetName: asset?.title || "Unknown Asset",
-        thumbnailImage: asset?.thumbnailImage || null,
-        mainImage: asset?.mainImage || null,
-        assetModel: asset?.assetModel ?? null,
-        activityType: mapActionToActivityType(event.action),
-        description: buildActivityDescription(event),
-        occurredAt: event.occurredAt,
-        performedBy: actorSnapshot
-          ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
-          : null,
-        context: null,
+    /**
+     * Reads one page of events, with as much of the summary as `summary` asks.
+     * Export batches pass `after`, the last event already read.
+     */
+    const readEvents = (
+      pageNumber: number,
+      size: number,
+      summary: SummaryNeed,
+      after?: ActivityEventCursor
+    ) => {
+      const query = {
+        organizationId,
+        timeframe: readTimeframe,
+        actions: assetActions,
+        assetId,
+        page: pageNumber,
+        pageSize: size,
+        summary,
+        after,
       };
-    });
+      return assetFilter && !assetFilter.isEmpty
+        ? fetchFilteredActivityEvents({ ...query, assetFilter })
+        : fetchActivityEvents(query);
+    };
+
+    /** The asset fields every row reads, on the page and in a file. */
+    const rowAssetSelect = {
+      id: true,
+      title: true,
+      unitOfMeasure: true,
+    } as const satisfies Prisma.AssetSelect;
+
+    /**
+     * Assets for the page: the row fields plus images, re-signed when expired.
+     * `organizationId` and `mainImageExpiration` feed the re-signing.
+     */
+    const readPageAssets = async (assetIds: string[]) =>
+      (
+        await refreshExpiredAssetImages(
+          await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
+            where: { id: { in: assetIds }, organizationId },
+            select: {
+              ...rowAssetSelect,
+              organizationId: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              thumbnailImage: true,
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
+            },
+          })
+        )
+      ).map((asset) => ({
+        ...asset,
+        // The page has no SAM ID or QR code column; only a file writes them.
+        sequentialId: null,
+        qrCodes: [] as { id: string }[],
+      }));
+
+    /**
+     * Assets for a file: only the fields it writes, including SAM ID and the
+     * first QR code in the order every other surface shows them. Image URLs
+     * run to hundreds of characters each, and an export holds up to
+     * {@link ACTIVITY_EXPORT_MAX_ROWS} rows, so it never reads them.
+     */
+    const readExportAssets = async (assetIds: string[]) => {
+      const assets = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still name their asset
+        where: { id: { in: assetIds }, organizationId },
+        select: {
+          ...rowAssetSelect,
+          // The shared code fragment's SAM ID and QR parts, without its
+          // barcode list, which a file never writes.
+          sequentialId: ASSET_CODE_RESOLUTION_SELECT.sequentialId,
+          qrCodes: ASSET_CODE_RESOLUTION_SELECT.qrCodes,
+        },
+      });
+      return assets.map((asset) => ({
+        ...asset,
+        mainImage: null,
+        thumbnailImage: null,
+        assetModel: null,
+      }));
+    };
+
+    /** Names loaded by earlier export batches, so each is read only once. */
+    let knownNames: ReferenceNames | undefined;
+
+    /** Turns a batch of events into rows. */
+    const toRows = async (
+      events: ActivityEventRecord[]
+    ): Promise<AssetActivityRow[]> => {
+      const assetIds = [
+        ...new Set(events.map((e) => e.assetId).filter(Boolean)),
+      ] as string[];
+      const [assets, referenceNames] = await Promise.all([
+        allRows ? readExportAssets(assetIds) : readPageAssets(assetIds),
+        loadReferenceNames(organizationId, events, knownNames),
+      ]);
+      const assetMap = new Map(assets.map((a) => [a.id, a]));
+      knownNames = referenceNames;
+
+      return events.map((event) => {
+        const asset = event.assetId ? assetMap.get(event.assetId) : null;
+        const actorSnapshot = event.actorSnapshot as UserNameFields | null;
+        const { description, changedFrom, changedTo } =
+          buildActivityDescription(event, referenceNames, asset?.unitOfMeasure);
+
+        return {
+          id: event.id,
+          assetId: event.assetId || "",
+          samId: asset?.sequentialId ?? null,
+          qrId: asset?.qrCodes[0]?.id ?? null,
+          assetName: asset?.title || "Unknown Asset",
+          thumbnailImage: asset?.thumbnailImage || null,
+          mainImage: asset?.mainImage || null,
+          assetModel: asset?.assetModel ?? null,
+          activityType: mapActionToActivityType(event.action),
+          description,
+          // Only a file shows the two sides; the page shows the sentence.
+          changedFrom: allRows ? changedFrom : null,
+          changedTo: allRows ? changedTo : null,
+          occurredAt: event.occurredAt,
+          performedBy: actorSnapshot
+            ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
+            : null,
+          context: null,
+        };
+      });
+    };
+
+    const batchSize = allRows
+      ? Math.min(ACTIVITY_EXPORT_BATCH_SIZE, ACTIVITY_EXPORT_MAX_ROWS)
+      : pageSize;
+    // A file needs only the total, for its row-count note; the page needs
+    // everything its KPIs show.
+    const first = await readEvents(
+      allRows ? 1 : page,
+      batchSize,
+      allRows ? "count" : "full"
+    );
+    const { totalCount, actionCounts, mostActive } =
+      first.summary ?? NO_ACTIVITY_SUMMARY;
+    const rows = await toRows(first.events);
+
+    // The export reads on until a short batch ends the timeframe. Each batch
+    // starts after the last event read rather than at an offset, so an asset
+    // that joins or leaves the filter mid-export cannot repeat or skip rows
+    // of other assets.
+    let batch = first.events;
+    // Each read asks for at most the rows left under the ceiling, so the file
+    // never passes ACTIVITY_EXPORT_MAX_ROWS whatever the two constants are.
+    let requested = batchSize;
+    while (
+      allRows &&
+      batch.length === requested &&
+      rows.length < ACTIVITY_EXPORT_MAX_ROWS
+    ) {
+      const last = batch[batch.length - 1];
+      requested = Math.min(
+        ACTIVITY_EXPORT_BATCH_SIZE,
+        ACTIVITY_EXPORT_MAX_ROWS - rows.length
+      );
+      batch = (
+        await readEvents(1, requested, "none", {
+          occurredAt: last.occurredAt,
+          id: last.id,
+        })
+      ).events;
+      rows.push(...(await toRows(batch)));
+    }
 
     const custodyChanges =
       (actionCounts.get("CUSTODY_ASSIGNED") || 0) +
@@ -4647,9 +4781,8 @@ export async function assetActivityReport(
       },
     ];
 
-    // Thumbnail URLs were already refreshed when we built `assetMap` above,
-    // so the rows we just constructed have fresh URLs — no separate
-    // refresh step needed here.
+    // `toRows` re-signs thumbnails as it builds page rows, so they need no
+    // separate refresh here. Export rows keep whatever URL is stored.
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -4666,8 +4799,8 @@ export async function assetActivityReport(
       rows,
       computedMs,
       totalRows: totalCount,
-      page,
-      pageSize,
+      page: allRows ? 1 : page,
+      pageSize: allRows ? rows.length : pageSize,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -4679,6 +4812,21 @@ export async function assetActivityReport(
   }
 }
 
+/**
+ * Events read per query while building an export. Each batch's asset and
+ * name lookups pass at most this many ids, well under Postgres' bind limit.
+ */
+const ACTIVITY_EXPORT_BATCH_SIZE = 5000;
+
+/**
+ * Most rows one Activity Summary export writes: about three times the busiest
+ * workspace's whole history. The export holds every row and the CSV text in
+ * memory at once (about 220 MB at this ceiling when a tenth of the rows are
+ * long description edits), so raise it only after timing it. A file that
+ * reaches it says so in its last line.
+ */
+export const ACTIVITY_EXPORT_MAX_ROWS = 100_000;
+
 /** Arguments shared by the two Asset Activity event readers. */
 interface ActivityEventQueryArgs {
   organizationId: string;
@@ -4688,17 +4836,46 @@ interface ActivityEventQueryArgs {
   assetId: string | undefined;
   page: number;
   pageSize: number;
+  /**
+   * What to count across every page: nothing, the total only (an export), or
+   * everything the KPIs read (the page).
+   */
+  summary: SummaryNeed;
+  /** Read the page that follows this event in report order; ignores `page`. */
+  after?: ActivityEventCursor;
 }
 
-/** One page of Asset Activity events plus the counts its KPIs read. */
-interface ActivityEventPage {
-  events: Prisma.ActivityEventGetPayload<object>[];
+/** An event's place in report order (`occurredAt` desc, then `id` asc). */
+interface ActivityEventCursor {
+  occurredAt: Date;
+  id: string;
+}
+
+type ActivityEventRecord = Prisma.ActivityEventGetPayload<object>;
+
+/** Counts across every page of the timeframe, which the KPIs read. */
+interface ActivitySummary {
   totalCount: number;
   /** Event count per action across every page. */
   actionCounts: Map<ActivityAction, number>;
   /** The asset with the most events, or `null` when there are none. */
   mostActive: { assetId: string; count: number } | null;
 }
+
+/** How much of the timeframe's summary a read needs. */
+type SummaryNeed = "none" | "count" | "full";
+
+/** One page of Asset Activity events, with the summary when asked for. */
+interface ActivityEventPage {
+  events: ActivityEventRecord[];
+  summary: ActivitySummary | null;
+}
+
+const NO_ACTIVITY_SUMMARY: ActivitySummary = {
+  totalCount: 0,
+  actionCounts: new Map(),
+  mostActive: null,
+};
 
 /**
  * Reads one page of asset events, unfiltered by asset attributes, through
@@ -4711,6 +4888,8 @@ async function fetchActivityEvents({
   assetId,
   page,
   pageSize,
+  summary: summaryNeed,
+  after,
 }: ActivityEventQueryArgs): Promise<ActivityEventPage> {
   const where: Prisma.ActivityEventWhereInput = {
     organizationId,
@@ -4719,39 +4898,66 @@ async function fetchActivityEvents({
     assetId: assetId ? assetId : { not: null },
   };
 
-  const [events, totalCount, byAction, byAsset] = await Promise.all([
+  const readSummary = async (): Promise<ActivitySummary> => {
+    if (summaryNeed === "count") {
+      return {
+        ...NO_ACTIVITY_SUMMARY,
+        totalCount: await db.activityEvent.count({ where }),
+      };
+    }
+    const [totalCount, byAction, byAsset] = await Promise.all([
+      db.activityEvent.count({ where }),
+      db.activityEvent.groupBy({
+        by: ["action"],
+        where,
+        _count: { id: true },
+      }),
+      db.activityEvent.groupBy({
+        by: ["assetId"],
+        where,
+        _count: { id: true },
+        orderBy: { _count: { id: "desc" } },
+        take: 1,
+      }),
+    ]);
+    const top = byAsset[0];
+    return {
+      totalCount,
+      actionCounts: new Map(byAction.map((g) => [g.action, g._count.id])),
+      mostActive: top?.assetId
+        ? { assetId: top.assetId, count: top._count.id }
+        : null,
+    };
+  };
+
+  const [events, summary] = await Promise.all([
     db.activityEvent.findMany({
-      where,
-      // `id` tiebreaker keeps skip/take paging deterministic for events
-      // sharing an `occurredAt` (bulk mutations emit same-instant events).
+      where: after
+        ? {
+            AND: [
+              where,
+              // The plain bound lets the (organizationId, occurredAt) index
+              // start at the cursor; the OR settles same-instant events.
+              { occurredAt: { lte: after.occurredAt } },
+              {
+                OR: [
+                  { occurredAt: { lt: after.occurredAt } },
+                  { occurredAt: after.occurredAt, id: { gt: after.id } },
+                ],
+              },
+            ],
+          }
+        : where,
+      // `id` tiebreaker keeps paging deterministic for events sharing an
+      // `occurredAt` (bulk mutations emit same-instant events).
       orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
-      skip: (page - 1) * pageSize,
+      skip: after ? 0 : (page - 1) * pageSize,
       take: pageSize,
     }),
-    db.activityEvent.count({ where }),
-    db.activityEvent.groupBy({
-      by: ["action"],
-      where,
-      _count: { id: true },
-    }),
-    db.activityEvent.groupBy({
-      by: ["assetId"],
-      where,
-      _count: { id: true },
-      orderBy: { _count: { id: "desc" } },
-      take: 1,
-    }),
+    summaryNeed === "none" ? null : readSummary(),
   ]);
 
-  const top = byAsset[0];
-  return {
-    events,
-    totalCount,
-    actionCounts: new Map(byAction.map((g) => [g.action, g._count.id])),
-    mostActive: top?.assetId
-      ? { assetId: top.assetId, count: top._count.id }
-      : null,
-  };
+  return { events, summary };
 }
 
 /**
@@ -4770,6 +4976,8 @@ async function fetchFilteredActivityEvents({
   assetFilter,
   page,
   pageSize,
+  summary: summaryNeed,
+  after,
 }: ActivityEventQueryArgs & {
   assetFilter: ReportAssetFilter;
 }): Promise<ActivityEventPage> {
@@ -4788,28 +4996,55 @@ async function fetchFilteredActivityEvents({
     ${assetId ? Prisma.sql`AND e."assetId" = ${assetId}` : Prisma.empty}
   `;
 
-  const [pageRows, byAction, byAsset] = await Promise.all([
+  const readSummary = async (): Promise<ActivitySummary> => {
+    if (summaryNeed === "count") {
+      const [row] = await db.$queryRaw<{ count: number }[]>(Prisma.sql`
+        SELECT COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+      `);
+      return { ...NO_ACTIVITY_SUMMARY, totalCount: row?.count ?? 0 };
+    }
+    const [byAction, byAsset] = await Promise.all([
+      db.$queryRaw<{ action: ActivityAction; count: number }[]>(Prisma.sql`
+        SELECT e.action::text AS action, COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+        GROUP BY e.action
+      `),
+      db.$queryRaw<{ assetId: string; count: number }[]>(Prisma.sql`
+        SELECT e."assetId" AS "assetId", COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+        GROUP BY e."assetId"
+        ORDER BY count DESC
+        LIMIT 1
+      `),
+    ]);
+    // Every event matched one of `actions`, so the per-action counts sum to
+    // the total.
+    const top = byAsset[0];
+    return {
+      totalCount: byAction.reduce((sum, row) => sum + row.count, 0),
+      actionCounts: new Map(byAction.map((row) => [row.action, row.count])),
+      mostActive: top ? { assetId: top.assetId, count: top.count } : null,
+    };
+  };
+
+  const [pageRows, summary] = await Promise.all([
     db.$queryRaw<{ id: string }[]>(Prisma.sql`
       SELECT e.id
       FROM "ActivityEvent" e
       WHERE ${eventWhereSql}
+      ${
+        after
+          ? Prisma.sql`AND e."occurredAt" <= ${after.occurredAt} AND (e."occurredAt" < ${after.occurredAt} OR (e."occurredAt" = ${after.occurredAt} AND e.id > ${after.id}))`
+          : Prisma.empty
+      }
       ORDER BY e."occurredAt" DESC, e.id ASC
-      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+      LIMIT ${pageSize} OFFSET ${after ? 0 : (page - 1) * pageSize}
     `),
-    db.$queryRaw<{ action: ActivityAction; count: number }[]>(Prisma.sql`
-      SELECT e.action::text AS action, COUNT(*)::int AS count
-      FROM "ActivityEvent" e
-      WHERE ${eventWhereSql}
-      GROUP BY e.action
-    `),
-    db.$queryRaw<{ assetId: string; count: number }[]>(Prisma.sql`
-      SELECT e."assetId" AS "assetId", COUNT(*)::int AS count
-      FROM "ActivityEvent" e
-      WHERE ${eventWhereSql}
-      GROUP BY e."assetId"
-      ORDER BY count DESC
-      LIMIT 1
-    `),
+    summaryNeed === "none" ? null : readSummary(),
   ]);
 
   const events =
@@ -4820,16 +5055,7 @@ async function fetchFilteredActivityEvents({
         })
       : [];
 
-  // Every event matched one of `actions`, so the per-action counts sum to
-  // the total.
-  const totalCount = byAction.reduce((sum, row) => sum + row.count, 0);
-  const top = byAsset[0];
-  return {
-    events,
-    totalCount,
-    actionCounts: new Map(byAction.map((row) => [row.action, row.count])),
-    mostActive: top ? { assetId: top.assetId, count: top.count } : null,
-  };
+  return { events, summary };
 }
 
 /** Map ActivityAction enum to the report's activity type */
@@ -4858,13 +5084,15 @@ function mapActionToActivityType(action: ActivityAction): AssetActivityType {
   }
 }
 
-/** Build human-readable description from activity event */
-function buildActivityDescription(event: {
-  action: ActivityAction;
-  field?: string | null;
-  fromValue?: unknown;
-  toValue?: unknown;
-}): string {
+/**
+ * Describes an activity event in plain words, with record ids replaced by the
+ * names in `names`.
+ */
+function buildActivityDescription(
+  event: DescribableEvent,
+  names: ReferenceNames,
+  unitOfMeasure?: string | null
+): ActivityDescription {
   const actionLabels: Record<string, string> = {
     ASSET_CREATED: "Asset created",
     ASSET_NAME_CHANGED: "Name changed",
@@ -4890,27 +5118,5 @@ function buildActivityDescription(event: {
   const label =
     actionLabels[event.action] || event.action.replace(/_/g, " ").toLowerCase();
 
-  // Add from/to values for change events
-  if (
-    event.field &&
-    event.fromValue !== undefined &&
-    event.toValue !== undefined
-  ) {
-    const from = formatFieldValue(event.fromValue);
-    const to = formatFieldValue(event.toValue);
-    if (from && to) {
-      return `${label}: ${from} → ${to}`;
-    }
-  }
-
-  return label;
-}
-
-/** Format a field value for display */
-function formatFieldValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  return JSON.stringify(value);
+  return describeChange(label, event, names, unitOfMeasure);
 }

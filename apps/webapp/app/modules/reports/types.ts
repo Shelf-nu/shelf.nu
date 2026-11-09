@@ -737,6 +737,10 @@ export type AssetActivityType =
 export interface AssetActivityRow {
   id: string;
   assetId: string;
+  /** The asset's sequential id (e.g. "SAM-0042"), the one people read */
+  samId: string | null;
+  /** Id of the asset's QR code, as printed on its label */
+  qrId: string | null;
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
@@ -750,8 +754,12 @@ export interface AssetActivityRow {
   assetModel: ResolvableAssetModelImage;
   /** Type of activity */
   activityType: AssetActivityType;
-  /** Human-readable description */
+  /** Human-readable description, with names instead of record ids */
   description: string;
+  /** Readable value before the change; filled for export rows only */
+  changedFrom: string | null;
+  /** Readable value after the change; filled for export rows only */
+  changedTo: string | null;
   /** When the activity occurred */
   occurredAt: Date;
   /** User who performed the action (if applicable) */
