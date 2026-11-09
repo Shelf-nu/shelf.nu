@@ -158,12 +158,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSesssion;
 
   try {
-    const { assetId, mainImage } = parseData(
+    // Only the asset id is read from the request. The file to sign always
+    // comes from the asset row below, so a path in the query string can never
+    // reach the service-role signer.
+    const { assetId } = parseData(
       url.searchParams,
-      z.object({
-        assetId: z.string(),
-        mainImage: z.string(),
-      })
+      z.object({ assetId: z.string() })
     );
 
     // Validate user has permission to access assets in their organization
@@ -192,8 +192,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return data(payload({ asset: null }));
     }
 
-    // Extract the path from the URL using the consistent function
-    const mainImagePath = extractStoragePath(mainImage, "assets");
+    // Sign the file the asset row names, scoped to the caller's organization
+    // above. The bucket is signed with the service-role client, so a path
+    // taken from anywhere else would grant access to any workspace's files.
+    const mainImagePath = asset.mainImage
+      ? extractStoragePath(asset.mainImage, "assets")
+      : null;
 
     let newMainImageUrl = asset.mainImage; // Default to existing URL
 
