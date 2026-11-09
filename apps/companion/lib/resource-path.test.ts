@@ -13,6 +13,7 @@ import { test } from "node:test";
 import {
   isPlainRecordId,
   matchResourcePath,
+  queryIdsArePlain,
   nativeRouteForLink,
   splitLinkUrl,
 } from "./resource-path";
@@ -184,4 +185,27 @@ test("a resource link with a refused id lands on the start screen", () => {
   ]) {
     assert.equal(nativeRouteForLink(url), "/", url);
   }
+});
+
+test("the scanner ignores its id, so any id still opens it", () => {
+  assert.deepEqual(matchResourcePath(["scanner", "v1.2"]), {
+    resource: "scanner",
+    id: null,
+  });
+  assert.equal(nativeRouteForLink("https://app.shelf.nu/scan/a.b"), "/scanner");
+});
+
+test("an id-named query value must be a plain record id too", () => {
+  assert.equal(queryIdsArePlain("qrId=qr_1&tab=assets"), true);
+  assert.equal(queryIdsArePlain("note=a%26b"), true);
+  assert.equal(queryIdsArePlain("qrId=qr_1%26orgId%3Dother"), false);
+  assert.equal(queryIdsArePlain("auditId=..%2Fx"), false);
+  assert.equal(
+    nativeRouteForLink("shelf://assets/new?qrId=qr_1"),
+    "/assets/new?qrId=qr_1"
+  );
+  assert.equal(
+    nativeRouteForLink("https://app.shelf.nu/audits/scan?auditId=a%2Fb"),
+    "/"
+  );
 });

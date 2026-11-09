@@ -56,6 +56,52 @@ export const mobilePaths = {
     `/api/mobile/assets/${pathSegment(assetId)}${query({ orgId })}`,
 
   /**
+   * @param assetId - The asset whose bookings are listed
+   * @param orgId - The active workspace
+   * @param page - Pagination: `page` and `perPage`, both optional
+   * @returns The asset bookings path
+   */
+  assetBookings: (
+    assetId: string,
+    orgId: string,
+    page: { page?: number; perPage?: number } = {}
+  ) =>
+    `/api/mobile/assets/${pathSegment(assetId)}/bookings${query({
+      orgId,
+      page: page.page ? String(page.page) : undefined,
+      perPage: page.perPage ? String(page.perPage) : undefined,
+    })}`,
+
+  /**
+   * @param value - A scanned barcode value (any characters)
+   * @param orgId - The active workspace
+   * @returns The barcode resolve path
+   */
+  barcode: (value: string, orgId: string) =>
+    `/api/mobile/barcode/${pathSegment(value)}${query({ orgId })}`,
+
+  /**
+   * The recording resolve: the server stores a scan. Only the in-app scanner
+   * uses it.
+   *
+   * @param codeId - A QR id or SAM id
+   * @param orgId - The active workspace, which scopes a SAM id
+   * @returns The recording QR resolve path
+   */
+  qr: (codeId: string, orgId?: string) =>
+    `/api/mobile/qr/${pathSegment(codeId)}${query({ orgId })}`,
+
+  /**
+   * The non-recording resolve.
+   *
+   * @param codeId - A QR id or SAM id
+   * @param orgId - The active workspace, which scopes a SAM id
+   * @returns The non-recording resolve path
+   */
+  scannedItem: (codeId: string, orgId?: string) =>
+    `/api/mobile/get-scanned-item/${pathSegment(codeId)}${query({ orgId })}`,
+
+  /**
    * @param assetId - The asset whose main image is replaced
    * @param orgId - The active workspace
    * @returns The image upload path

@@ -162,6 +162,63 @@ export async function clearAuditScanState(
   }
 }
 
+/** How long a draft is kept before {@link pruneStaleAuditDrafts} drops it. */
+export const AUDIT_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * Removes drafts nobody can recover.
+ *
+ * - A draft with no owning account (saved under the audit id alone) is never
+ *   offered, so it is removed; when it still held unsynced scans, the loss
+ *   is reported to Sentry so it is visible.
+ * - A draft of any account saved more than {@link AUDIT_DRAFT_MAX_AGE_MS} ago
+ *   is removed, so a shared device does not keep other members' scans
+ *   forever.
+ *
+ * Best-effort: errors are logged in dev, never thrown.
+ *
+ * @param now - The current time in milliseconds
+ */
+export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
+  try {
+    const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
+      key.startsWith(AUDIT_SCAN_KEY_PREFIX)
+    );
+    const stale: string[] = [];
+    for (const key of keys) {
+      const raw = await AsyncStorage.getItem(key);
+      let parsed: Partial<PersistedScanState> & { version?: number } = {};
+      try {
+        parsed = raw ? JSON.parse(raw) : {};
+      } catch {
+        stale.push(key);
+        continue;
+      }
+      if (parsed.version !== 2 || !parsed.userId) {
+        const unsynced =
+          (parsed.pendingQueue?.length ?? 0) +
+          (parsed.failedQueue?.length ?? 0);
+        if (unsynced > 0) {
+          reportAuditDurabilityEvent(
+            "unowned_draft_dropped",
+            { auditId: parsed.auditId ?? "unknown", unsynced },
+            "warning"
+          );
+        }
+        stale.push(key);
+        continue;
+      }
+      const savedAt = Date.parse(parsed.savedAt ?? "");
+      if (!Number.isFinite(savedAt) || now - savedAt > AUDIT_DRAFT_MAX_AGE_MS) {
+        stale.push(key);
+      }
+    }
+    if (stale.length > 0) await AsyncStorage.removeMany(stale);
+  } catch (e) {
+    if (__DEV__) console.warn("[AuditPersistence] prune failed:", e);
+  }
+}
+
 // ── Debounced saver ──────────────────────────────────────
 
 /**
@@ -172,7 +229,7 @@ export async function clearAuditScanState(
  * @param userId - The signed-in account the drafts belong to
  * @param auditId - The audit session being scanned
  * @param delayMs - The debounce window
- * @returns `save`, `flush` and `cancel`
+ * @returns `save`, `flush`, `cancel` and `clear`, all bound to that account
  */
 export function createDebouncedSaver(
   userId: string,
@@ -222,6 +279,17 @@ export function createDebouncedSaver(
     cancel() {
       if (timer) clearTimeout(timer);
       timer = null;
+    },
+
+    /**
+     * Cancel any pending write and remove this account's draft. Bound to the
+     * account the saver was created for, so it still clears the right draft
+     * after the session has ended.
+     */
+    clear() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      return clearAuditScanState(userId, auditId);
     },
   };
 }

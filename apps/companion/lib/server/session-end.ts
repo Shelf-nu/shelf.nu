@@ -87,9 +87,9 @@ export function onAfterSessionEnd(task: () => void): () => void {
  * Called by `endSessionOnDevice` (`./end-session.ts`) once the stored session
  * is gone.
  *
- * @returns Resolves once every task has run. Never rejects.
+ * Never throws.
  */
-export async function runAfterSessionEnd(): Promise<void> {
+export function runAfterSessionEnd(): void {
   for (const task of afterSessionEndTasks) {
     try {
       task();

@@ -5,6 +5,7 @@ import {
   loadAuditScanState,
   clearAuditScanState,
   createDebouncedSaver,
+  pruneStaleAuditDrafts,
 } from "@/lib/audit-scan-persistence";
 import { auditDeletedAssetLabel } from "@shelf/labels";
 import { announce } from "@/lib/a11y";
@@ -208,6 +209,7 @@ export function useAuditInit({
       debouncedSaverRef.current = createDebouncedSaver(userId, auditId);
 
       // ── Crash recovery ───────────────────────────────
+      await pruneStaleAuditDrafts();
       const persisted = await loadAuditScanState(userId, auditId);
       // why: gate on whether there is ANYTHING to recover (the inner check
       // below decides recover-vs-clear from scanned items OR a non-empty

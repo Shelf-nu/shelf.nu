@@ -24,8 +24,37 @@ export type SessionEndingClient = {
     signOut: (options?: {
       scope?: "global" | "local" | "others";
     }) => Promise<{ error: unknown }>;
+    getSession: () => Promise<{ data: { session: unknown } }>;
   };
 };
+
+/**
+ * How many times a forced teardown re-checks that the stored session stayed
+ * gone. One re-check covers a token refresh that was already running when the
+ * session was deleted; the second is a margin.
+ */
+const FORCED_TEARDOWN_CHECKS = 2;
+
+/**
+ * Whether the client still finds a stored session.
+ *
+ * `getSession` waits for supabase-js's auth lock, so it returns only after any
+ * token refresh that was in flight has finished (and possibly written the
+ * session back).
+ *
+ * @param client - The live Supabase client
+ * @returns True when a session is still stored, or when the check failed
+ */
+async function sessionStillStored(
+  client: SessionEndingClient
+): Promise<boolean> {
+  try {
+    const { data } = await client.auth.getSession();
+    return Boolean(data.session);
+  } catch {
+    return true;
+  }
+}
 
 /** How far the teardown had to go. */
 export type SessionEndOutcome =
@@ -76,13 +105,24 @@ export async function endSessionOnDevice(
     outcome = "local";
     if (!(await trySignOut(client, "local"))) {
       outcome = "forced";
-      try {
-        await removePersistedSession();
-      } catch {
-        // Nothing more can be done; the in-memory teardown below still runs.
+      // The deletion happens outside supabase-js's auth lock, so a token
+      // refresh that was already running can write the session back. Delete,
+      // then check under the lock, and delete again if it came back.
+      for (let check = 0; check <= FORCED_TEARDOWN_CHECKS; check++) {
+        try {
+          await removePersistedSession();
+        } catch {
+          // Nothing more can be done; the in-memory teardown below still runs.
+        }
+        if (
+          check === FORCED_TEARDOWN_CHECKS ||
+          !(await sessionStillStored(client))
+        ) {
+          break;
+        }
       }
     }
   }
-  await runAfterSessionEnd();
+  runAfterSessionEnd();
   return outcome;
 }

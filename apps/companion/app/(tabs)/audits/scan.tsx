@@ -42,7 +42,6 @@ import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { playScanSound } from "@/lib/scan-sound";
-import { clearAuditScanState } from "@/lib/audit-scan-persistence";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -383,8 +382,7 @@ function AuditScannerContent() {
           failedQueueRef.current
         );
       } else {
-        debouncedSaverRef.current?.cancel();
-        if (userId) void clearAuditScanState(userId, auditId);
+        void debouncedSaverRef.current?.clear();
       }
       // The totals describe rows the server holds — recomputed when it deleted
       // a scan, the session's own counters when it had none left to delete —
@@ -421,7 +419,6 @@ function AuditScannerContent() {
     [
       currentOrg,
       auditId,
-      userId,
       setScannedItems,
       scannedItemsRef,
       scannedAssetIdsRef,
@@ -565,14 +562,12 @@ function AuditScannerContent() {
           failedQueueRef.current
         );
       } else {
-        debouncedSaverRef.current?.cancel();
-        if (auditId && userId) clearAuditScanState(userId, auditId);
+        void debouncedSaverRef.current?.clear();
       }
       /* eslint-enable react-hooks/exhaustive-deps */
     };
   }, [
     auditId,
-    userId,
     toastTimerRef,
     retryTimerRef,
     debouncedSaverRef,
@@ -930,10 +925,9 @@ function AuditScannerContent() {
       // recovery snapshot. Clear the in-memory queues too (in place): otherwise
       // the unmount cleanup would see a non-empty failedQueue on navigate-back and
       // re-flush a recovery snapshot for an audit that is already completed.
-      debouncedSaverRef.current?.cancel();
       scanQueueRef.current.length = 0;
       failedQueueRef.current.length = 0;
-      if (userId) await clearAuditScanState(userId, auditId);
+      await debouncedSaverRef.current?.clear();
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
@@ -956,7 +950,6 @@ function AuditScannerContent() {
     },
     [
       auditId,
-      userId,
       currentOrg,
       auditName,
       router,

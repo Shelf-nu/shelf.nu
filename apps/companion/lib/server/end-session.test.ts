@@ -20,7 +20,12 @@ type Answer = "ok" | "error" | "throw";
  * session only when supabase-js would (a sign-out with no error).
  */
 function stubClient(global: Answer, local: Answer) {
-  const state = { stored: true, scopes: [] as string[] };
+  const state = {
+    stored: true,
+    scopes: [] as string[],
+    writeBacks: 0,
+    deletes: 0,
+  };
   const client: SessionEndingClient = {
     auth: {
       signOut: async (options) => {
@@ -32,9 +37,19 @@ function stubClient(global: Answer, local: Answer) {
         state.stored = false;
         return { error: null };
       },
+      getSession: async () => {
+        // A refresh that was running when the session was deleted writes it
+        // back once, the first time the lock is taken after the delete.
+        if (state.writeBacks > 0) {
+          state.writeBacks -= 1;
+          state.stored = true;
+        }
+        return { data: { session: state.stored ? { user: "u" } : null } };
+      },
     },
   };
   const removeStored = async () => {
+    state.deletes += 1;
     state.stored = false;
   };
   return { client, state, removeStored };
@@ -63,6 +78,15 @@ describe("endSessionOnDevice", () => {
     const { client, state, removeStored } = stubClient("error", "error");
 
     assert.equal(await endSessionOnDevice(client, removeStored), "forced");
+    assert.equal(state.stored, false);
+  });
+
+  it("deletes again when a running refresh writes the session back", async () => {
+    const { client, state, removeStored } = stubClient("error", "error");
+    state.writeBacks = 1;
+
+    assert.equal(await endSessionOnDevice(client, removeStored), "forced");
+    assert.equal(state.deletes, 2);
     assert.equal(state.stored, false);
   });
 

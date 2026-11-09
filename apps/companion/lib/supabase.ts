@@ -21,6 +21,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import type { ServerConfig } from "./server/contract";
+import { sessionStorageKey, sessionStorageKeys } from "./session-storage-keys";
 
 /**
  * Maximum bytes per SecureStore item on iOS.
@@ -151,18 +152,6 @@ let clientUrl: string | null = null;
 let clientStorageKey: string | null = null;
 
 /**
- * The session storage key for a Supabase project: `sb-<project-ref>-auth-token`,
- * the same name supabase-js derives by default, so passing it explicitly keeps
- * every stored session readable.
- *
- * @param supabaseUrl - The project's URL
- * @returns The storage key
- */
-function sessionStorageKey(supabaseUrl: string): string {
-  return `sb-${new URL(supabaseUrl).hostname.split(".")[0]}-auth-token`;
-}
-
-/**
  * Creates a client for one server, with the shared secure-storage adapter.
  *
  * @param supabaseUrl - The server's Supabase project URL.
@@ -230,11 +219,7 @@ export function getSupabase(): SupabaseClient {
  */
 export async function clearPersistedSession(): Promise<void> {
   if (!clientStorageKey) return;
-  for (const key of [
-    clientStorageKey,
-    `${clientStorageKey}-code-verifier`,
-    `${clientStorageKey}-user`,
-  ]) {
+  for (const key of sessionStorageKeys(clientStorageKey)) {
     await secureStoreAdapter.removeItem(key);
   }
 }

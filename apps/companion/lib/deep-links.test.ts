@@ -62,10 +62,19 @@ mock.module(pathToFileURL(join(__dirname, "scan-location.ts")).href, {
   },
 });
 
-// why: expo-linking is a native module; these tests call the resolver directly.
+// why: expo-linking is a native module. `parse` mirrors its shape: for a
+// custom scheme the first segment is the hostname, for http(s) the path holds
+// the resource; the path keeps its percent-encoding.
 mock.module("expo-linking", {
   namedExports: {
-    parse: () => ({}),
+    parse: (url: string) => {
+      const parsed = new URL(url);
+      return {
+        scheme: parsed.protocol.replace(/:$/, ""),
+        hostname: parsed.hostname || null,
+        path: parsed.pathname.replace(/^\//, "") || null,
+      };
+    },
     getInitialURL: async () => null,
     addEventListener: () => ({ remove: () => {} }),
   },
@@ -124,5 +133,46 @@ describe("resolveQrAndNavigate", () => {
 
     assert.deepEqual(calls.lookup, []);
     assert.deepEqual(calls.web, ["https://other.example/qr/qr_1"]);
+  });
+});
+
+describe("parseDeepLink", () => {
+  it("reads custom-scheme and https links with plain ids", () => {
+    assert.deepEqual(deepLinks.parseDeepLink("shelf://assets/as_1"), {
+      type: "asset",
+      id: "as_1",
+    });
+    assert.deepEqual(deepLinks.parseDeepLink("shelf://assets/kits/kt_1"), {
+      type: "kit",
+      id: "kt_1",
+    });
+    assert.deepEqual(deepLinks.parseDeepLink("shelf://bookings/bk_1"), {
+      type: "booking",
+      id: "bk_1",
+    });
+    assert.deepEqual(deepLinks.parseDeepLink("shelf://qr/qr_1"), {
+      type: "qr",
+      id: "qr_1",
+      origin: undefined,
+    });
+    assert.deepEqual(
+      deepLinks.parseDeepLink("https://app.shelf.test/qr/qr_1"),
+      { type: "qr", id: "qr_1", origin: "https://app.shelf.test" }
+    );
+    assert.deepEqual(deepLinks.parseDeepLink("shelf://scanner/v1.2"), {
+      type: "scanner",
+    });
+  });
+
+  it("names nothing for an id that is not a plain record id", () => {
+    for (const url of [
+      "shelf://assets/as_1%3ForgId%3Dother",
+      "shelf://bookings/bk_1%2Fmodel-requests",
+      "shelf://audits/au_1%23x",
+      "shelf://assets/kits/kt_1%26orgId%3Dother",
+      "shelf://qr/qr_1%2F..",
+    ]) {
+      assert.deepEqual(deepLinks.parseDeepLink(url), { type: "unknown" }, url);
+    }
   });
 });

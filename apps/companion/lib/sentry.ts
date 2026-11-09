@@ -165,7 +165,12 @@ export type AuditDurabilityEvent =
   /** "Resume Previous Session?" was shown — a kill left unsynced scans behind. */
   | "session_recovered"
   /** Audit completion was blocked because scans were still unsynced. */
-  | "completion_blocked_unsynced";
+  | "completion_blocked_unsynced"
+  /**
+   * A draft with no owning account held unsynced scans and was removed
+   * unrecovered, because nothing says which account made them.
+   */
+  | "unowned_draft_dropped";
 
 /**
  * Report a durability event to Sentry. No-ops when Sentry isn't configured.

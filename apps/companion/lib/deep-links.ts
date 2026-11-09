@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
-import { isPlainRecordId } from "./resource-path";
+import { matchResourcePath } from "./resource-path";
 import { isSameOrigin } from "./server/contract";
 
 /**
@@ -42,7 +42,8 @@ import { isSameOrigin } from "./server/contract";
  * Acting on other HTTPS links here would double-navigate.
  */
 
-type ParsedLink =
+/** A link the OS delivered, read into the screen it names. */
+export type ParsedLink =
   | { type: "asset"; id: string }
   | { type: "kit"; id: string }
   | { type: "booking"; id: string }
@@ -61,7 +62,17 @@ type ParsedLink =
   | { type: "scanner" }
   | { type: "unknown" };
 
-function parseDeepLink(url: string): ParsedLink {
+/**
+ * Reads a link the OS delivered into the screen it names.
+ *
+ * Matching goes through {@link matchResourcePath}, the same allowlist the
+ * `+native-intent` rewrite uses, so a warm start and a cold start agree on
+ * every link, and an id that is not a plain record id names nothing.
+ *
+ * @param url - The raw URL (custom scheme or http(s))
+ * @returns The parsed link, or `unknown` when it names no screen
+ */
+export function parseDeepLink(url: string): ParsedLink {
   try {
     const parsed = Linking.parse(url);
     const path = parsed.path ?? "";
@@ -75,44 +86,37 @@ function parseDeepLink(url: string): ParsedLink {
       isHttp ? path.split("/") : [parsed.hostname ?? "", ...path.split("/")]
     ).filter(Boolean);
 
-    if (segments.length === 0) return { type: "unknown" };
-
     // A path that nests deeper than `resource/id` (e.g. /assets/:id/overview,
-    // the canonical web asset URL) resolves to the resource detail — that is
-    // what the tapper wants, and it matches the +native-intent rewrite so warm
-    // and cold starts behave identically.
-    const [resource, id] = segments;
-    // A link chooses its own id, so only a plain record id may reach a route
-    // or an API path.
-    if (id !== undefined && !isPlainRecordId(id)) return { type: "unknown" };
+    // the canonical web asset URL) resolves to the resource detail, which is
+    // what the tapper wants.
+    const match = matchResourcePath(segments);
+    if (!match) return { type: "unknown" };
+    const { resource, id } = match;
+
+    if (resource === "scanner") return { type: "scanner" };
+    if (!id) return { type: "unknown" };
 
     switch (resource) {
       case "assets":
-        return id ? { type: "asset", id } : { type: "unknown" };
+        return { type: "asset", id };
       case "kits":
-        return id ? { type: "kit", id } : { type: "unknown" };
+        return { type: "kit", id };
       case "bookings":
-        return id ? { type: "booking", id } : { type: "unknown" };
+        return { type: "booking", id };
       case "audits":
-        return id ? { type: "audit", id } : { type: "unknown" };
+        return { type: "audit", id };
       case "qr": {
-        if (!id) return { type: "unknown" };
         // Only an http(s) link names a server. `new URL()` reports the string
         // "null" as the origin of a custom-scheme URL, and carrying that
         // forward would mark the app's own `shelf://qr/<id>` links foreign and
         // send them to "null/qr/<id>".
-        const parsed = new URL(url);
+        const parsedUrl = new URL(url);
         const origin =
-          parsed.protocol === "http:" || parsed.protocol === "https:"
-            ? parsed.origin
+          parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+            ? parsedUrl.origin
             : undefined;
         return { type: "qr", id, origin };
       }
-      case "scanner":
-      case "scan":
-        return { type: "scanner" };
-      default:
-        return { type: "unknown" };
     }
   } catch {
     return { type: "unknown" };

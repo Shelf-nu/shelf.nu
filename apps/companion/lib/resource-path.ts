@@ -80,6 +80,23 @@ export function isPlainRecordId(id: string): boolean {
 }
 
 /**
+ * Whether every id-named query value is a plain record id.
+ *
+ * A parameter counts as an id when its name ends in `id` or `Id` (`qrId`,
+ * `auditId`, `orgId`). Other parameters pass through untouched.
+ *
+ * @param query - A query string without its `?`
+ * @returns False when an id-named value is not a plain record id
+ */
+export function queryIdsArePlain(query: string): boolean {
+  if (!query) return true;
+  for (const [key, value] of new URLSearchParams(query)) {
+    if (/id$/i.test(key) && !isPlainRecordId(value)) return false;
+  }
+  return true;
+}
+
+/**
  * Splits a raw link into path segments and its query string.
  *
  * Handles the three shapes a link arrives in:
@@ -132,7 +149,7 @@ export function splitLinkUrl(url: string): {
  * - `scanner` and `scan` name the scanner
  * - a resource without an id names its list
  * - an id that is not a plain record id ({@link isPlainRecordId}) matches
- *   nothing
+ *   nothing (the scanner ignores its id, so it is not checked)
  *
  * @param segments - Path segments, as {@link splitLinkUrl} returns them
  * @returns The resource and id, or null when the path is not on the allowlist
@@ -142,7 +159,10 @@ export function matchResourcePath(
 ): ResourcePath | null {
   const [resource, id = null, nestedId = null] = segments;
   const recordId = resource === "assets" && id === "kits" ? nestedId : id;
-  if (recordId !== null && !isPlainRecordId(recordId)) return null;
+  const ignoresId = resource === "scanner" || resource === "scan";
+  if (!ignoresId && recordId !== null && !isPlainRecordId(recordId)) {
+    return null;
+  }
 
   switch (resource) {
     case "assets":
@@ -190,6 +210,9 @@ export function nativeRouteForLink(url: string): string {
   // A resource path whose id is refused goes to the start screen: handing the
   // raw URL on would let the router match it to a detail screen anyway.
   if (!match) return isResourceName(segments[0]) ? "/" : url;
+  // Screens read ids from the query too (`?qrId=`, `?auditId=`), so those
+  // follow the same rule as path ids.
+  if (!queryIdsArePlain(query)) return "/";
   const { resource, id } = match;
   const withQuery = (route: string) => (query ? `${route}?${query}` : route);
 

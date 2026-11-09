@@ -88,29 +88,23 @@ export const assetsApi = {
     orgId?: string,
     coordinates?: { latitude: number; longitude: number } | null
   ) => {
-    const searchParams = new URLSearchParams();
-    if (orgId) searchParams.set("orgId", orgId);
-    const query = searchParams.toString();
     // Coordinates ride as HEADERS, never query params: URLs are captured by
     // access logs and Sentry request breadcrumbs, and precise user GPS must
     // stay out of every URL-shaped capture surface.
-    return apiFetch<QrResponse>(
-      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`,
-      {
-        // why: this resolve RECORDS a scan server-side — a timed-out-but-
-        // landed request must not be auto-retried, or the same physical
-        // scan is recorded twice (same rule as the quantity mutations).
-        retry: false,
-        ...(coordinates
-          ? {
-              headers: {
-                "X-Scan-Latitude": String(coordinates.latitude),
-                "X-Scan-Longitude": String(coordinates.longitude),
-              },
-            }
-          : {}),
-      }
-    );
+    return apiFetch<QrResponse>(mobilePaths.qr(codeId, orgId), {
+      // why: this resolve RECORDS a scan server-side: a timed-out-but-
+      // landed request must not be auto-retried, or the same physical
+      // scan is recorded twice (same rule as the quantity mutations).
+      retry: false,
+      ...(coordinates
+        ? {
+            headers: {
+              "X-Scan-Latitude": String(coordinates.latitude),
+              "X-Scan-Longitude": String(coordinates.longitude),
+            },
+          }
+        : {}),
+    });
   },
 
   /**
@@ -127,11 +121,7 @@ export const assetsApi = {
    * @param orgId - Caller's current workspace id; required for SAM lookups.
    */
   getScannedItem: (codeId: string, orgId?: string) =>
-    apiFetch<QrResponse>(
-      `/api/mobile/get-scanned-item/${encodeURIComponent(codeId)}${
-        orgId ? `?orgId=${orgId}` : ""
-      }`
-    ),
+    apiFetch<QrResponse>(mobilePaths.scannedItem(codeId, orgId)),
 
   /**
    * Claim an unclaimed QR code into the caller's CURRENT organization
@@ -204,10 +194,9 @@ export const assetsApi = {
    *   from the normal scanner.
    */
   barcode: (value: string, orgId: string, context?: ScanContext) =>
-    apiFetch<BarcodeResponse>(
-      `/api/mobile/barcode/${encodeURIComponent(value)}?orgId=${orgId}`,
-      { headers: scanContextHeaders(context) }
-    ),
+    apiFetch<BarcodeResponse>(mobilePaths.barcode(value, orgId), {
+      headers: scanContextHeaders(context),
+    }),
 
   /** Get team members for an organization (for custody picker) */
   teamMembers: (
@@ -284,13 +273,8 @@ export const assetsApi = {
     orgId: string,
     params: { page?: number; perPage?: number; signal?: AbortSignal } = {}
   ) => {
-    const qs = new URLSearchParams({ orgId });
-    if (params.page) qs.set("page", String(params.page));
-    if (params.perPage) qs.set("perPage", String(params.perPage));
     return apiFetch<AssetBookingsResponse>(
-      `/api/mobile/assets/${encodeURIComponent(
-        assetId
-      )}/bookings?${qs.toString()}`,
+      mobilePaths.assetBookings(assetId, orgId, params),
       { signal: params.signal }
     );
   },

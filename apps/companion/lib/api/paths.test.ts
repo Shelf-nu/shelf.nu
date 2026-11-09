@@ -55,6 +55,18 @@ describe("mobilePaths", () => {
       ["bookings"],
     ],
     ["kit", (id) => mobilePaths.kit(id, "org_1"), ["kits"]],
+    [
+      "assetBookings",
+      (id) => mobilePaths.assetBookings(id, "org_1"),
+      ["assets"],
+    ],
+    ["barcode", (id) => mobilePaths.barcode(id, "org_1"), ["barcode"]],
+    ["qr", (id) => mobilePaths.qr(id, "org_1"), ["qr"]],
+    [
+      "scannedItem",
+      (id) => mobilePaths.scannedItem(id, "org_1"),
+      ["get-scanned-item"],
+    ],
   ];
 
   for (const [name, build, prefix] of builders) {
@@ -96,6 +108,22 @@ describe("mobilePaths", () => {
     assert.equal(
       mobilePaths.kit("kt_1", "org_1"),
       "/api/mobile/kits/kt_1?orgId=org_1"
+    );
+  });
+
+  it("keeps today's paths for the scan resolves and asset bookings", () => {
+    assert.equal(mobilePaths.qr("qr_1"), "/api/mobile/qr/qr_1");
+    assert.equal(
+      mobilePaths.scannedItem("SAM-0001", "org_1"),
+      "/api/mobile/get-scanned-item/SAM-0001?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.barcode("ABC 123", "org_1"),
+      "/api/mobile/barcode/ABC%20123?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.assetBookings("as_1", "org_1", { page: 2, perPage: 20 }),
+      "/api/mobile/assets/as_1/bookings?orgId=org_1&page=2&perPage=20"
     );
   });
 
