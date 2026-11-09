@@ -58,6 +58,12 @@ describe("getAuditFindingsPage", () => {
       { notes: { some: noteScope } },
     ]);
     expect(query.select.images.where).toEqual(imageScope);
+    // Each photo tile reads its caption and "Old photo" flag from these.
+    expect(query.select.images.select).toMatchObject({
+      capturedAt: true,
+      captureSource: true,
+      createdAt: true,
+    });
     expect(query.select.notes.where).toEqual(noteScope);
     expect(query.skip).toBeUndefined();
     expect(query.orderBy).toEqual([{ asset: { title: "asc" } }, { id: "asc" }]);

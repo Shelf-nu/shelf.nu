@@ -3,6 +3,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
 import type { FieldLinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
@@ -1713,6 +1714,10 @@ export type AuditEvidenceImage = {
   /** Always populated — the server falls back to `imageUrl`. */
   thumbnailUrl: string;
   description: string | null;
+  /** When the photo was taken (from its EXIF), ISO; null when unknown. */
+  capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;

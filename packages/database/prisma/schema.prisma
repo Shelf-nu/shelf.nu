@@ -422,29 +422,32 @@ model AssetIndexSettings {
   @@index([organizationId])
 }
 
-/// The document a PdfDocument lays out. Only the booking PDF has saved
+/// The kind of PDF a PdfTemplate lays out. Only the booking PDF has saved
 /// layouts today; the check-in receipt and the audit receipt can join as new
 /// kinds.
-enum PdfDocumentKind {
+enum PdfTemplateKind {
   BOOKING
 }
 
-/// A saved layout for a generated PDF, kept per workspace under a name: which
-/// columns, rows and header lines print, and in what order the rows come. A
-/// row is a layout, not a generated file; the person generating a PDF picks a
-/// layout by name.
-model PdfDocument {
+/// A saved layout for a generated PDF, kept per team workspace under a name:
+/// which columns, rows and header lines print, and in what order the rows
+/// come. A row is a layout, not a generated file; the person generating a PDF
+/// picks a template by name.
+model PdfTemplate {
   id   String          @id @default(cuid())
   name String
-  kind PdfDocumentKind @default(BOOKING)
+  kind PdfTemplateKind @default(BOOKING)
 
-  /// The layout's switches. Read through `parseBookingDocumentConfig`, which
-  /// fills any key a stored row lacks from the Checklist document's values.
+  /// The layout's switches. Read through `parseBookingTemplateConfig`,
+  /// which fills any key a stored row lacks from the Checklist template's
+  /// values.
   config Json @default("{}")
 
-  /// The document the PDF dialog offers first. One per workspace and kind,
+  /// The template the PDF dialog offers first. One per workspace and kind,
   /// enforced by a partial unique index in raw SQL (migration
-  /// 20261028120000_add_pdf_documents).
+  /// 20261103120000_add_pdf_templates). Names are also unique per workspace
+  /// and kind ignoring case, through an expression index in the same
+  /// migration.
   isDefault Boolean @default(false)
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
@@ -1165,7 +1168,7 @@ model Organization {
   auditImages        AuditImage[]
   assetImports       AssetImport[]
   linkPreviews       LinkPreview[]
-  pdfDocuments       PdfDocument[]
+  pdfTemplates       PdfTemplate[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
@@ -1188,11 +1191,6 @@ model Organization {
   // Whether the booking checklist and audit receipt PDFs print the QR image.
   // Off means the sheet cannot be scanned in place of the label on the item.
   showQrCodesOnPdfs Boolean @default(true)
-
-  // When the workspace was given the PDF documents of a paid plan (the
-  // Check-out receipt). Null until its tier first includes PDF documents; set
-  // once, so a document an admin deleted is never seeded back.
-  paidPdfDocumentsSeededAt DateTime?
 
   // Custom footer text appended to workspace emails
   customEmailFooter String? @db.VarChar(500)
@@ -1368,7 +1366,6 @@ model TierLimit {
   canHideShelfBranding Boolean  @default(false)
   canUseReports        Boolean  @default(false)
   canUseRecurringReminders Boolean @default(false)
-  canCustomizePdfDocuments Boolean @default(false)
   canUsePushNotifications Boolean @default(false)
   maxCustomFields      Int      @default(0)
   maxOrganizations     Int      @default(1)
@@ -1387,7 +1384,6 @@ model CustomTierLimit {
   canHideShelfBranding Boolean  @default(true)
   canUseReports        Boolean  @default(true)
   canUseRecurringReminders Boolean @default(true)
-  canCustomizePdfDocuments Boolean @default(true)
   canUsePushNotifications Boolean @default(true)
   maxCustomFields      Int      @default(1000)
   maxOrganizations     Int      @default(1)
@@ -2943,6 +2939,15 @@ model AuditImage {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
+  /// When the photo was taken, from its EXIF data (or the phone app's copy of
+  /// it). Null when the photo carried no usable date. EXIF can be edited, so
+  /// this is the best signal available, not proof.
+  capturedAt DateTime?
+
+  /// How the photo reached Shelf. Null only for photos uploaded before this
+  /// field existed; a phone upload with no or an unknown source is PHONE.
+  captureSource AuditImageCaptureSource?
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2952,6 +2957,19 @@ model AuditImage {
   @@index([auditAssetId])
   @@index([organizationId])
   @@index([uploadedById])
+}
+
+/// How an audit photo reached Shelf, as reported by the client. The phone app
+/// reports CAMERA only for its own camera, which cannot hand back an old
+/// picture, so it is the strongest evidence short of a modified client; a
+/// library photo's date is only what its file claims; the web app cannot tell
+/// a camera shot from a file; PHONE is a phone app version that does not say
+/// which.
+enum AuditImageCaptureSource {
+  CAMERA
+  LIBRARY
+  WEB_UPLOAD
+  PHONE
 }
 
 /// How a membership's role came to change.

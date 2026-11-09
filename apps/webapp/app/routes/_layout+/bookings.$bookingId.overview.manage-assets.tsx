@@ -65,6 +65,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
+import { MoreLocationsChip } from "~/components/location/more-locations-chip";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -82,11 +83,11 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
-import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
@@ -354,11 +355,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // roster nobody renders.
             canSeeAllCustody: false,
             locationIdsOverride,
-            extraInclude: {
-              assetLocations: {
-                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-              },
-            },
           })
       ),
       getBooking({
@@ -1913,7 +1909,6 @@ const RowComponent = ({
   extraProps,
 }: {
   item: AssetsFromViewItem & {
-    location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
     availableQuantity?: number;
     modelReservedElsewhere?: boolean;
   };
@@ -1925,7 +1920,16 @@ const RowComponent = ({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const currentOrganization = useCurrentOrganization();
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
-  const { category, tags, location } = item;
+  const { category, tags } = item;
+  /**
+   * `Asset` has no location column. The Location column shows the oldest
+   * placement from `assetLocations` as the badge and counts the rest in a
+   * "+N" chip, as the assets index does.
+   */
+  const location = getPrimaryLocation(item);
+  const otherLocations = (item.assetLocations ?? [])
+    .slice(1)
+    .flatMap((placement) => (placement.location ? [placement.location] : []));
   const isPartOfKit = (item.assetKits ?? []).length > 0;
   const isAddedThroughKit = isPartOfKit && checked;
   const isQtyTracked = isQuantityTracked(item);
@@ -2063,14 +2067,24 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          // Clicks on the badge, its hierarchy hover card (portalled, but React
+          // events still bubble through it) or the chip must not toggle the
+          // row's selection: the row's click handler selects the asset.
+          <span
+            role="presentation"
+            onClick={(e) => e.stopPropagation()}
+            className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap"
+          >
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+            <MoreLocationsChip primary={location} others={otherLocations} />
+          </span>
         ) : null}
       </Td>
     </>

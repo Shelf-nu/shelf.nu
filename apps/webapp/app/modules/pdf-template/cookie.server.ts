@@ -1,26 +1,26 @@
 /**
- * Last Printed Document Cookie
+ * Last Printed Template Cookie
  *
- * Remembers which document a person last printed a booking with, per workspace,
+ * Remembers which template a person last printed a booking with, per workspace,
  * so the print dialog offers it first next time. One cookie per workspace;
  * its value names the user it belongs to, so a browser shared by two people
  * does not hand one person the other's pick.
  *
  * It is a preference, never a permission: the id it holds is checked against
- * the workspace's documents on every read (`resolvePdfDocumentForPrint`).
+ * the workspace's templates on every read (`resolvePdfTemplateForPrint`).
  *
  * @see {@link file://../../routes/api+/bookings.$bookingId.generate-pdf.tsx}
  */
 import { createCookie } from "react-router";
 import { z } from "zod";
 
-const lastDocumentSchema = z.object({
+const lastTemplateSchema = z.object({
   userId: z.string(),
-  documentId: z.string(),
+  templateId: z.string(),
 });
 
-function lastDocumentCookie(organizationId: string) {
-  return createCookie(`${organizationId}_pdf_document`, {
+function lastTemplateCookie(organizationId: string) {
+  return createCookie(`${organizationId}_pdf_template`, {
     // Only the booking PDF route reads it, so no other request carries it.
     path: "/api/bookings",
     httpOnly: true,
@@ -31,11 +31,11 @@ function lastDocumentCookie(organizationId: string) {
 }
 
 /**
- * The document this user last printed with in this workspace.
+ * The template this user last printed with in this workspace.
  *
- * @returns The document id, or `null` when there is none or it is someone else's
+ * @returns The template id, or `null` when there is none or it is someone else's
  */
-export async function readLastPdfDocumentId({
+export async function readLastPdfTemplateId({
   request,
   organizationId,
   userId,
@@ -44,28 +44,28 @@ export async function readLastPdfDocumentId({
   organizationId: string;
   userId: string;
 }): Promise<string | null> {
-  const value = await lastDocumentCookie(organizationId)
+  const value = await lastTemplateCookie(organizationId)
     .parse(request.headers.get("Cookie"))
     .catch(() => null);
-  const parsed = lastDocumentSchema.safeParse(value);
+  const parsed = lastTemplateSchema.safeParse(value);
   return parsed.success && parsed.data.userId === userId
-    ? parsed.data.documentId
+    ? parsed.data.templateId
     : null;
 }
 
 /**
- * Remembers a document as this user's last pick in this workspace.
+ * Remembers a template as this user's last pick in this workspace.
  *
  * @returns The `Set-Cookie` header value
  */
-export function rememberPdfDocument({
+export function rememberPdfTemplate({
   organizationId,
   userId,
-  documentId,
+  templateId,
 }: {
   organizationId: string;
   userId: string;
-  documentId: string;
+  templateId: string;
 }): Promise<string> {
-  return lastDocumentCookie(organizationId).serialize({ userId, documentId });
+  return lastTemplateCookie(organizationId).serialize({ userId, templateId });
 }
