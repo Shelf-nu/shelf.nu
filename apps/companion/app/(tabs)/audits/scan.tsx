@@ -46,8 +46,10 @@ import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { endScan, tryBeginScan } from "@/lib/scan-lock";
 import { useAuditInit } from "@/hooks/use-audit-init";
 import { useScanQueue } from "@/hooks/use-scan-queue";
+import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
 import {
   useToastNotification,
   type ScanResult,
@@ -129,11 +131,7 @@ function AuditScannerContent() {
 
   // ── Cooldown (shared hook) ───────────────────────────
 
-  const {
-    shouldSkip: shouldSkipScan,
-    startCooldown,
-    lastScanRef,
-  } = useScanCooldown();
+  const { startCooldown, lastScanRef } = useScanCooldown();
 
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
@@ -630,7 +628,7 @@ function AuditScannerContent() {
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = useCallback(() => {
-    isProcessingRef.current = false;
+    endScan(isProcessingRef);
     setIsProcessing(false);
     startCooldown();
   }, [startCooldown]);
@@ -639,11 +637,9 @@ function AuditScannerContent() {
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || shouldSkipScan(data)) return;
       if (!auditId || !currentOrg) return;
+      if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
-      isProcessingRef.current = true;
-      lastScanRef.current = data;
       setIsProcessing(true);
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -868,10 +864,12 @@ function AuditScannerContent() {
       debouncedSaverRef,
       scanQueueRef,
       failedQueueRef,
-      shouldSkipScan,
       lastScanRef,
     ]
   );
+
+  /** The camera's frame callback; the handler's processing lock drops frames during a lookup. */
+  const handleCameraScan = useCameraScanHandler(handleBarCodeScanned, false);
 
   // ── Complete audit ───────────────────────────────────
 
@@ -1231,7 +1229,10 @@ function AuditScannerContent() {
           barcodeScannerSettings={{
             barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
           }}
-          onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+          // Always a function: swapping it for undefined reconfigures the iOS
+          // capture session and switches the torch off. The handler's
+          // processing lock drops frames during a lookup instead.
+          onBarcodeScanned={handleCameraScan}
         />
       )}
 

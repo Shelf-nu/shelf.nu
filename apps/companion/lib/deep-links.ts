@@ -2,8 +2,12 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
+import {
+  resolveQrOutcome,
+  type QrLookups,
+  type QrOutcome,
+} from "./link-dispatch";
 import { matchResourcePath } from "./resource-path";
-import { isSameOrigin } from "./server/contract";
 
 /**
  * Supported deep link patterns:
@@ -124,53 +128,68 @@ export function parseDeepLink(url: string): ParsedLink {
 }
 
 /**
- * Resolves a QR code link the OS delivered and opens the matching screen: an
- * asset detail when the QR maps to an asset, or a kit detail when it maps to
- * a kit (kits live in the Assets stack).
+ * The lookup behind {@link resolveQrOutcome}. It records nothing: scans are
+ * recorded only by the in-app scanner.
+ */
+const QR_LOOKUPS: QrLookups = {
+  lookup: (qrId, orgId) => api.getScannedItem(qrId, orgId),
+};
+
+/**
+ * Resolves a QR code link the OS delivered and opens its asset or kit.
  *
  * An OS-delivered link is not proof of a camera scan: any app or web page can
  * open `shelf://qr/<id>`, and a shared https link looks the same as a label
  * scan. The code is therefore resolved WITHOUT recording (no scan, no
- * position, no note), and the person acts on the screen it opens. Scans are
- * recorded only by the in-app scanner.
+ * position, no note), and the person acts on the screen it opens.
  *
- * When the QR can't be resolved in-app (it belongs to another org, is
- * unclaimed, the user isn't authorized, or the lookup errors) we hand off to
- * the web QR resolver, which renders the correct flow (claim, link,
- * contact-owner, login). The hand-off uses an in-app browser via
- * {@link openShelfWebUrl} rather than `Linking.openURL`, because `/qr/*` is a
- * verified Android App Link and `Linking.openURL` would re-enter the app and
- * loop back here.
+ * A code that does not resolve in the app (another workspace, unclaimed,
+ * not authorized, or a failed lookup), or one from another Shelf server,
+ * opens the web QR page, which renders the right flow (claim, link,
+ * contact-owner, sign-in). It opens in the in-app browser via
+ * {@link openShelfWebUrl}, never `Linking.openURL`: `/qr/*` is a verified
+ * App Link, and `Linking.openURL` would re-enter the app and loop back here.
  *
- * A link from another origin is handed straight to the web without a lookup:
- * the id belongs to the instance that minted it, so resolving it against the
- * active server would report "not found" for a code that is valid where it
- * came from.
- *
- * @param qrId - The linked QR code id
- * @param origin - The origin the link carried, when it had one
+ * @param qrId - The linked QR code id.
+ * @param origin - The origin the link carried, when it had one.
  */
 export async function resolveQrAndNavigate(qrId: string, origin?: string) {
-  if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
-    void openShelfWebUrl(`${origin}/qr/${encodeURIComponent(qrId)}`);
+  const outcome = await resolveQrOutcome(
+    qrId,
+    origin,
+    getApiBaseUrl(),
+    { source: "os-link" },
+    QR_LOOKUPS
+  );
+  if (outcome.kind === "screen") {
+    pushIntoTab(outcome.tabRoot, outcome.href ?? undefined);
     return;
   }
+  void openShelfWebUrl(outcome.url);
+}
 
-  try {
-    const { data, error } = await api.getScannedItem(qrId);
-    if (!error && data?.qr?.asset?.id) {
-      pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
-      return;
-    }
-    // A kit's own QR opens the kit detail, in the Assets stack.
-    if (!error && data?.qr?.kitId) {
-      pushIntoTab("/(tabs)/assets", `/(tabs)/assets/kits/${data.qr.kitId}`);
-      return;
-    }
-  } catch {
-    // Fall through to the web resolver below.
-  }
-  void openShelfWebUrl(`${getApiBaseUrl()}/qr/${encodeURIComponent(qrId)}`);
+/**
+ * Looks up a QR link tapped in text someone wrote. It records nothing (no
+ * scan, location or note), and a code that does not resolve gets the
+ * web-only notice instead of the web login.
+ *
+ * @param qrId - The linked QR code id.
+ * @param origin - The origin of the link.
+ * @param orgId - The workspace on show, which the lookup needs for a SAM id.
+ * @returns Where the code leads.
+ */
+export function resolveTappedQr(
+  qrId: string,
+  origin: string,
+  orgId?: string
+): Promise<QrOutcome> {
+  return resolveQrOutcome(
+    qrId,
+    origin,
+    getApiBaseUrl(),
+    { source: "tapped", orgId },
+    QR_LOOKUPS
+  );
 }
 
 /**

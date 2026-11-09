@@ -1,7 +1,8 @@
 /**
  * TextWithLinks: a single-line text custom field value. A value that is
  * exactly one link renders as a `LinkChip`; any other text renders through
- * `LinkedText`, so a URL inside it is still tappable.
+ * `LinkedText`, so a URL inside it is still tappable. Only http(s) URLs
+ * link, as on the web.
  *
  * @see {@link file://../../lib/custom-field-links.ts} `linkChip`
  * @see {@link file://./link-chip.tsx}
@@ -38,6 +39,11 @@ export const TextWithLinks = memo(function TextWithLinks({
   const chip = useMemo(() => linkChip(value, title), [value, title]);
   if (chip) return <LinkChip chip={chip} />;
   return (
-    <LinkedText text={value} style={style} numberOfLines={numberOfLines} />
+    <LinkedText
+      text={value}
+      style={style}
+      numberOfLines={numberOfLines}
+      bareDomains={false}
+    />
   );
 });

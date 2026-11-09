@@ -56,7 +56,8 @@ export function linkChip(
 
 /**
  * Whether a text value has at least one http(s) URL in it, so its row needs
- * room for a chip or tappable links.
+ * room for a chip or tappable links. Bare domains do not count: a custom
+ * field value links exactly as it does on the web.
  *
  * @param value - The stored text value.
  * @returns True when the value holds a link anywhere.

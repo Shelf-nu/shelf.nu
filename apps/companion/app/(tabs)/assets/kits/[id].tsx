@@ -41,6 +41,7 @@ import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
 import { ImageZoomModal } from "@/components/shared/image-zoom-modal";
 import { CodeSection } from "@/components/shared/code-section";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import { KitActions } from "@/components/kit-detail/kit-actions";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
@@ -226,7 +227,11 @@ export default function KitDetailScreen() {
           </View>
 
           {kit.description ? (
-            <Text style={styles.description}>{kit.description}</Text>
+            <LinkedParagraph
+              text={kit.description}
+              style={styles.description}
+              containerStyle={styles.descriptionBlock}
+            />
           ) : null}
 
           {/* ── Actions — custody + location ───────────── */}
@@ -519,6 +524,8 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  descriptionBlock: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
