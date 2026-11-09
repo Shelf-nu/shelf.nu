@@ -31,6 +31,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
+  requireActiveMobileMembership,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
   MOBILE_ASSET_SELECT,
@@ -256,6 +257,8 @@ async function resolveSamShapedBarcode({
  * @param args.user - The authenticated caller (`requireMobileAuth` result).
  * @returns A {@link ResolveMobileCodeResult}. Never throws for the expected
  *   not-found / wrong-org cases; those come back as `{ ok: false }`.
+ * @throws {ShelfError} 403 when the code's workspace is inactive (see
+ *   `requireActiveMobileMembership`).
  */
 export async function resolveMobileScannedCode({
   request,
@@ -362,17 +365,16 @@ export async function resolveMobileScannedCode({
     };
   }
 
-  const membership = await db.userOrganization.findUnique({
-    where: {
-      userId_organizationId: {
-        userId: user.id,
-        organizationId: qr.organizationId,
-      },
-    },
-    select: { id: true },
+  // Membership of the code's workspace, which must also be active: a scan
+  // opens the item in the workspace that owns the code, whatever workspace
+  // the app is in.
+  const isMember = await requireActiveMobileMembership({
+    userId: user.id,
+    organizationId: qr.organizationId,
+    url: request.url,
   });
 
-  if (!membership) {
+  if (!isMember) {
     return {
       ok: false,
       status: 403,

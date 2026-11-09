@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
+  requireActiveMobileMembership,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
 } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { ShelfError } from "~/utils/error";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
@@ -49,6 +51,24 @@ vi.mock("~/utils/subscription.server", () => ({
 // heavy imports.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
+  // why: the lapse gate has its own tests in mobile-auth.server.test.ts. Here
+  // it answers membership from the mocked membership row, so the QR path's
+  // wrong-workspace branches stay driven by `userOrganization.findUnique`.
+  requireActiveMobileMembership: vi.fn(
+    async ({
+      userId,
+      organizationId,
+    }: {
+      userId: string;
+      organizationId: string;
+    }) => {
+      const { db: mockedDb } = await import("~/database/db.server");
+      const row = await mockedDb.userOrganization.findUnique({
+        where: { userId_organizationId: { userId, organizationId } },
+      });
+      return Boolean(row);
+    }
+  ),
   // why: custody visibility is read per owning workspace; the route tests pin
   // the filtering itself, so here every caller may see all custody and the
   // assertions check which workspace was asked.
@@ -474,5 +494,40 @@ describe("resolveMobileScannedCode owning workspace on the QR path", () => {
         asset: { id: "asset-7", title: "Asset seven" },
       },
     });
+  });
+});
+
+/**
+ * A scan opens the item in the workspace that owns the code, so that
+ * workspace must be active, whatever workspace the app is in.
+ */
+describe("resolveMobileScannedCode inactive owning workspace", () => {
+  it("refuses the scan and reads no linked data when the code's workspace is inactive", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-lapsed",
+      assetId: "asset-8",
+      kitId: null,
+      organizationId: "org-lapsed",
+    });
+    vi.mocked(requireActiveMobileMembership).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message:
+          "This workspace is inactive because its subscription has expired.",
+        label: "Auth",
+        status: 403,
+      })
+    );
+
+    await expect(
+      resolveMobileScannedCode(resolveArgs("qr-lapsed"))
+    ).rejects.toMatchObject({ status: 403 });
+    expect(requireActiveMobileMembership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        organizationId: "org-lapsed",
+      })
+    );
+    expect(assetFindFirst).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,8 @@
+import { Roles } from "@prisma/client";
 import type {
   AssetType,
   ConsumptionType,
+  Organization,
   OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
@@ -27,6 +29,7 @@ import {
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import { disabledTeamOrg } from "~/utils/stripe.server";
 import {
   assertCanUseBookings,
   canUseAudits,
@@ -272,11 +275,139 @@ export async function getUserOrganizations(userId: string) {
   };
 }
 
+/** The organization columns the mobile lapse gate reads. */
+const MOBILE_WORKSPACE_GATE_SELECT = {
+  id: true,
+  type: true,
+  name: true,
+  imageId: true,
+  userId: true,
+  workspaceDisabled: true,
+} as const;
+
 /**
- * Resolves the organizationId from the request and verifies
- * the user has access to it. Returns the organizationId.
+ * Message the companion shows when a workspace is inactive. It states the
+ * fact only: the phone app never points the user at a purchase.
+ */
+export const MOBILE_WORKSPACE_INACTIVE_MESSAGE =
+  "This workspace is inactive because its subscription has expired.";
+
+/**
+ * Refuses a workspace the web app shows as disabled. Mobile twin of the
+ * `disabledTeamOrg` loader flag in `routes/_layout+/_layout.tsx`, with the same
+ * three inputs:
+ *
+ * - `workspaceDisabled`, the switch a Shelf admin sets on the admin dashboard;
+ * - a TEAM workspace whose owner's tier is `free` or `tier_1` (the paid Team
+ *   plan has lapsed), decided by the shared `disabledTeamOrg`;
+ * - Shelf admins pass through, as they do on web.
+ *
+ * Personal workspaces are never refused for their tier. `disabledTeamOrg`
+ * returns false when premium features are off (self-hosted).
+ *
+ * @param args.userId - The signed-in caller.
+ * @param args.isShelfAdmin - Whether the caller holds the Shelf `ADMIN` role.
+ * @param args.organization - The workspace the request acts in.
+ * @param args.url - The request URL, passed through to `disabledTeamOrg`.
+ * @throws {ShelfError} 403 when the workspace is inactive.
+ */
+async function assertMobileWorkspaceActive({
+  userId,
+  isShelfAdmin,
+  organization,
+  url,
+}: {
+  userId: string;
+  isShelfAdmin: boolean;
+  organization: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId" | "workspaceDisabled"
+  >;
+  url: string;
+}) {
+  if (isShelfAdmin) return;
+
+  // Only a TEAM workspace depends on the owner's paid tier, so the tier lookup
+  // inside `disabledTeamOrg` runs for those alone.
+  const inactive =
+    organization.workspaceDisabled ||
+    (organization.type === "TEAM" &&
+      (await disabledTeamOrg({
+        currentOrganization: organization,
+        organizations: [organization],
+        url,
+      })));
+
+  if (!inactive) return;
+
+  // `organization.userId` is the workspace owner.
+  const isOwner = organization.userId === userId;
+  throw new ShelfError({
+    cause: null,
+    title: "Workspace inactive",
+    message: isOwner
+      ? MOBILE_WORKSPACE_INACTIVE_MESSAGE
+      : `${MOBILE_WORKSPACE_INACTIVE_MESSAGE} Contact the workspace owner for more information.`,
+    additionalData: { userId, organizationId: organization.id },
+    label: "Auth",
+    status: 403,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Loads the caller's membership of a workspace together with what the lapse
+ * gate needs, then refuses an inactive workspace.
+ *
+ * @param args.userId - The signed-in caller.
+ * @param args.organizationId - The workspace the request acts in.
+ * @param args.url - The request URL.
+ * @returns `false` when the caller is not a member; `true` when the caller is
+ *   a member of an active workspace.
+ * @throws {ShelfError} 403 when the workspace is inactive.
+ */
+export async function requireActiveMobileMembership({
+  userId,
+  organizationId,
+  url,
+}: {
+  userId: string;
+  organizationId: string;
+  url: string;
+}): Promise<boolean> {
+  const membership = await db.userOrganization.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: {
+      id: true,
+      organization: { select: MOBILE_WORKSPACE_GATE_SELECT },
+      user: { select: { roles: { select: { name: true } } } },
+    },
+  });
+
+  if (!membership) return false;
+
+  await assertMobileWorkspaceActive({
+    userId,
+    // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
+    isShelfAdmin: membership.user.roles.some(
+      (role) => role.name === Roles.ADMIN
+    ),
+    organization: membership.organization,
+    url,
+  });
+
+  return true;
+}
+
+/**
+ * Resolves the organizationId from the request and verifies the user has
+ * access to it: a membership, in a workspace that is active (see
+ * `assertMobileWorkspaceActive`). Returns the organizationId.
  *
  * Mobile clients send orgId as a query param or x-shelf-organization header.
+ *
+ * @throws {ShelfError} 400 without an org id, 403 when the caller is not a
+ *   member or the workspace is inactive.
  */
 export async function requireOrganizationAccess(
   request: Request,
@@ -297,12 +428,13 @@ export async function requireOrganizationAccess(
     });
   }
 
-  const membership = await db.userOrganization.findUnique({
-    where: { userId_organizationId: { userId, organizationId: orgId } },
-    select: { id: true },
+  const isMember = await requireActiveMobileMembership({
+    userId,
+    organizationId: orgId,
+    url: request.url,
   });
 
-  if (!membership) {
+  if (!isMember) {
     throw new ShelfError({
       cause: null,
       message: "You don't have access to this organization",
