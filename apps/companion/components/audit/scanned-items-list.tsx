@@ -24,6 +24,7 @@
 import React, { useCallback } from "react";
 import { View, Text, FlatList, TouchableOpacity, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { auditCountLabel } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -72,6 +73,21 @@ export function ScannedItemsList({
         .filter(Boolean)
         .join(", ");
       const syncFailed = item.syncFailed === true;
+      // Units on a quantity-tracked row ("8 of 14 pcs"); null otherwise.
+      const countLabel = auditCountLabel(
+        {
+          status: item.isExpected ? "FOUND" : "UNEXPECTED",
+          expectedQuantity: item.expectedQuantity,
+          foundQuantity: item.foundQuantity,
+        },
+        item.unitOfMeasure
+      );
+      // Only a listed asset has an expectation to fall short of.
+      const isShort =
+        item.isExpected &&
+        typeof item.foundQuantity === "number" &&
+        typeof item.expectedQuantity === "number" &&
+        item.foundQuantity < item.expectedQuantity;
 
       // A scan whose asset was deleted has nothing left to attach evidence to:
       // the AuditAsset row went with the asset, so the evidence sheet has no
@@ -100,11 +116,11 @@ export function ScannedItemsList({
           // in the spoken label along with the location.
           accessibilityLabel={`${item.name?.trim() || "Untitled asset"}, ${
             item.isExpected ? "found" : "unexpected, not on this audit"
-          }${item.locationName ? `, at ${item.locationName}` : ""}${
-            hasEvidence ? `, ${evidenceLabel}` : ""
-          }${syncFailed ? ", not synced" : ""}${
-            isDeleted ? "." : ". Tap to add notes or photos."
-          }`}
+          }${countLabel ? `, ${countLabel}` : ""}${
+            item.locationName ? `, at ${item.locationName}` : ""
+          }${hasEvidence ? `, ${evidenceLabel}` : ""}${
+            syncFailed ? ", not synced" : ""
+          }${isDeleted ? "." : ". Tap to add notes or photos."}`}
         >
           <Ionicons
             name={item.isExpected ? "checkmark-circle" : "alert-circle"}
@@ -127,8 +143,35 @@ export function ScannedItemsList({
             </Text>
             {/* The second line is the row's new job: WHERE, not "was it
                 scanned". Unexpected assets say so here, because for them that
-                IS the useful fact; expected ones show their location. */}
-            {item.isExpected ? (
+                IS the useful fact; expected ones show their location. A
+                quantity row leads it with its count rather than adding a third
+                line: the row has a fixed height (SCANNED_ITEM_HEIGHT). */}
+            {countLabel ? (
+              <View style={styles.scannedItemMetaRow}>
+                <Text
+                  style={
+                    isShort ? styles.scannedItemShort : styles.scannedItemCount
+                  }
+                  numberOfLines={1}
+                >
+                  {countLabel}
+                </Text>
+                {item.isExpected ? (
+                  item.locationName ? (
+                    <Text style={styles.scannedItemMeta} numberOfLines={1}>
+                      {`\u00b7 ${item.locationName}`}
+                    </Text>
+                  ) : null
+                ) : (
+                  <Text
+                    style={[styles.scannedItemUnexpected, styles.noShrink]}
+                    numberOfLines={1}
+                  >
+                    {"\u00b7 Not on this audit"}
+                  </Text>
+                )}
+              </View>
+            ) : item.isExpected ? (
               item.locationName ? (
                 <View style={styles.scannedItemMetaRow}>
                   <Ionicons
@@ -299,6 +342,26 @@ const useStyles = createStyles((colors) => ({
     // dark) — it misses 4.5:1 at this 12px size. `muted` keeps the second
     // line quieter than the name and still clears the bar in both themes.
     color: colors.muted,
+  },
+  // The count and the text after it share one line of fixed height: on a
+  // narrow phone or at a large font size both may truncate, so neither pushes
+  // the other out of the row.
+  scannedItemCount: {
+    flexShrink: 1,
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  // A count below the expectation: the pool was found, units are short.
+  scannedItemShort: {
+    flexShrink: 1,
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.warningText,
+  },
+  // A short marker the count truncates before: it carries the row's point.
+  noShrink: {
+    flexShrink: 0,
   },
   scannedItemUnexpected: {
     fontSize: fontSize.xs,

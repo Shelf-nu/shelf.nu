@@ -204,17 +204,40 @@ describe("audit scan drafts", () => {
 });
 
 describe("pruneStaleAuditDrafts", () => {
-  it("drops an ownerless draft and reports its unsynced scans", async () => {
+  it("keeps an ownerless draft with unsent scans and reports it once", async () => {
     store.set(
       `${prefix}au_1`,
       JSON.stringify({ version: 1, auditId: "au_1", pendingQueue: [ENTRY] })
     );
-    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
+    store.set(
+      `${prefix}au_2`,
+      JSON.stringify({ version: 1, auditId: "au_2", pendingQueue: [] })
+    );
 
     await persistence.pruneStaleAuditDrafts();
+    await persistence.pruneStaleAuditDrafts();
 
-    assert.deepEqual([...store.keys()], [`${prefix}user_a:au_1`]);
-    assert.deepEqual(reported, ["unowned_draft_dropped"]);
+    assert.deepEqual([...store.keys()], [`${prefix}au_1`]);
+    assert.deepEqual(reported, ["unowned_draft_kept"]);
+    assert.equal(await persistence.loadAuditScanState("user_a", "au_1"), null);
+  });
+
+  it("refuses a draft with a null or malformed entry", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
+    const [key] = [...store.keys()];
+    const good = JSON.parse(store.get(key)!);
+    for (const broken of [
+      { ...good, scannedItems: [null] },
+      { ...good, pendingQueue: [ENTRY, null] },
+      { ...good, failedQueue: [{ assetId: "as_1" }] },
+      { ...good, scannedItems: [{ ...ITEM, name: 5 }] },
+    ]) {
+      store.set(key, JSON.stringify(broken));
+      assert.equal(
+        await persistence.loadAuditScanState("user_a", "au_1"),
+        null
+      );
+    }
   });
 
   it("drops a synced draft of any account older than the maximum age", async () => {

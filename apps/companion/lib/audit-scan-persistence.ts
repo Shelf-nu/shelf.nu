@@ -25,6 +25,10 @@ type ScannedItem = {
   scannedAt: string;
   /** True when this scan exhausted its sync retries and is awaiting re-sync. */
   syncFailed?: boolean;
+  /** Units expected and counted, for a quantity-tracked asset. */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
 
 type ScanQueueEntry = {
@@ -32,6 +36,12 @@ type ScanQueueEntry = {
   qrId: string;
   assetId: string;
   isExpected: boolean;
+  /** Units counted, for a quantity-tracked asset. */
+  foundQuantity?: number;
+  /** When the entry was queued (ms). */
+  queuedAt?: number;
+  /** True for a recount of a scan already recorded. */
+  recount?: boolean;
 };
 
 /** A persisted draft, as stored under {@link storageKey}. */
@@ -157,9 +167,54 @@ function isDraftOf(
     draft.version === 2 &&
     draft.userId === userId &&
     draft.auditId === auditId &&
-    Array.isArray(draft.scannedItems) &&
-    Array.isArray(draft.pendingQueue) &&
-    (draft.failedQueue === undefined || Array.isArray(draft.failedQueue))
+    isListOf(draft.scannedItems, isScannedItem) &&
+    isListOf(draft.pendingQueue, isQueueEntry) &&
+    (draft.failedQueue === undefined ||
+      isListOf(draft.failedQueue, isQueueEntry))
+  );
+}
+
+/**
+ * Whether a value is an array whose every element passes `check`.
+ *
+ * @param value - The value to test
+ * @param check - The element test
+ * @returns True for an array of valid elements (an empty array included)
+ */
+function isListOf(value: unknown, check: (item: unknown) => boolean): boolean {
+  return Array.isArray(value) && value.every(check);
+}
+
+/**
+ * Whether a value has the fields recovery reads from a scanned row.
+ *
+ * @param item - A parsed list element
+ * @returns True when it can be shown and counted
+ */
+function isScannedItem(item: unknown): boolean {
+  if (typeof item !== "object" || item === null) return false;
+  const row = item as Partial<ScannedItem>;
+  return (
+    typeof row.assetId === "string" &&
+    typeof row.name === "string" &&
+    typeof row.isExpected === "boolean"
+  );
+}
+
+/**
+ * Whether a value has the fields recovery reads from a queued scan.
+ *
+ * @param item - A parsed list element
+ * @returns True when it can be re-sent
+ */
+function isQueueEntry(item: unknown): boolean {
+  if (typeof item !== "object" || item === null) return false;
+  const entry = item as Partial<ScanQueueEntry>;
+  return (
+    typeof entry.auditSessionId === "string" &&
+    typeof entry.qrId === "string" &&
+    typeof entry.assetId === "string" &&
+    typeof entry.isExpected === "boolean"
   );
 }
 
@@ -188,11 +243,12 @@ export async function clearAuditScanState(
 export const AUDIT_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /**
- * Removes drafts nobody can recover.
+ * Removes drafts nobody needs.
  *
  * - A draft with no owning account (saved under the audit id alone) is never
- *   offered, so it is removed; when it still held unsynced scans, the loss
- *   is reported to Sentry so it is visible.
+ *   offered. With nothing left to sync it is removed; while it still holds
+ *   unsent scans it is kept (reported to Sentry once), because it may be the
+ *   only copy of them.
  * - A draft of any account with nothing left to sync, saved more than
  *   {@link AUDIT_DRAFT_MAX_AGE_MS} ago, is removed, so a shared device does
  *   not keep finished drafts forever. A draft that still holds unsent scans
@@ -230,14 +286,25 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
         (Array.isArray(parsed.pendingQueue) ? parsed.pendingQueue.length : 0) +
         (Array.isArray(parsed.failedQueue) ? parsed.failedQueue.length : 0);
       if (parsed.version !== 2 || !parsed.userId) {
-        if (unsynced > 0) {
+        if (unsynced === 0) {
+          stale.push(key);
+          continue;
+        }
+        // Unsent scans with no recorded owner: nothing can say whose they
+        // are, so they are never offered, but they are not deleted either.
+        // Reported once, so the case is visible.
+        const record = parsed as typeof parsed & { unownedReported?: boolean };
+        if (!record.unownedReported) {
           reportAuditDurabilityEvent(
-            "unowned_draft_dropped",
+            "unowned_draft_kept",
             { auditId: parsed.auditId ?? "unknown", unsynced },
             "warning"
           );
+          await AsyncStorage.setItem(
+            key,
+            JSON.stringify({ ...record, unownedReported: true })
+          );
         }
-        stale.push(key);
         continue;
       }
       if (unsynced > 0) continue;

@@ -68,7 +68,12 @@ export type SessionEndOutcome =
   /** The revoke failed; supabase-js removed the session locally. */
   | "local"
   /** Both sign-outs failed; the stored session was deleted directly. */
-  | "forced";
+  | "forced"
+  /**
+   * Both sign-outs failed and the stored session was still there after every
+   * delete. The in-memory state is cleared regardless; the caller reports it.
+   */
+  | "incomplete";
 
 /**
  * Calls one sign-out and reports whether it succeeded.
@@ -120,19 +125,16 @@ export async function endSessionOnDevice(
       // The deletion happens outside supabase-js's auth lock, so a token
       // refresh that was already running can write the session back. Delete,
       // then check under the lock, and delete again if it came back.
-      for (let check = 0; check <= FORCED_TEARDOWN_CHECKS; check++) {
+      let stored = true;
+      for (let check = 0; check <= FORCED_TEARDOWN_CHECKS && stored; check++) {
         try {
           await removePersistedSession();
         } catch {
-          // Nothing more can be done; the in-memory teardown below still runs.
+          // Checked below; the in-memory teardown still runs either way.
         }
-        if (
-          check === FORCED_TEARDOWN_CHECKS ||
-          !(await sessionStillStored(client))
-        ) {
-          break;
-        }
+        stored = await sessionStillStored(client);
       }
+      if (stored) outcome = "incomplete";
     }
   }
   runAfterSessionEnd();

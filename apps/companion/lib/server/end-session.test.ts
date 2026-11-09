@@ -117,14 +117,17 @@ describe("endSessionOnDevice", () => {
     assert.equal(stopped, false);
   });
 
-  it("never rejects, even when deleting the stored session throws", async () => {
+  it("never rejects, and reports incomplete when every delete fails", async () => {
     const { client } = stubClient("throw", "throw");
+    let deletes = 0;
 
     const outcome = await endSessionOnDevice(client, async () => {
+      deletes += 1;
       throw new Error("keychain");
     });
 
-    assert.equal(outcome, "forced");
+    assert.equal(outcome, "incomplete");
+    assert.equal(deletes, 3);
   });
 
   it("runs the after-session-end tasks on every outcome", async () => {

@@ -167,10 +167,10 @@ export type AuditDurabilityEvent =
   /** Audit completion was blocked because scans were still unsynced. */
   | "completion_blocked_unsynced"
   /**
-   * A draft with no owning account held unsynced scans and was removed
-   * unrecovered, because nothing says which account made them.
+   * A draft with no owning account still holds unsynced scans. It is kept
+   * but never offered, because nothing says which account made them.
    */
-  | "unowned_draft_dropped";
+  | "unowned_draft_kept";
 
 /**
  * Report a durability event to Sentry. No-ops when Sentry isn't configured.
@@ -190,6 +190,27 @@ export function reportAuditDurabilityEvent(
     tags: { feature: "audit-scan-durability", durability_event: event },
     extra: context,
   });
+}
+
+/**
+ * Reports a sign-out that could not delete the stored session: both
+ * supabase-js sign-outs failed and the session was still stored after every
+ * delete. The app still shows the login screen; this makes the case visible.
+ *
+ * @param server - The Supabase project URL of the client being signed out
+ */
+export function reportSignOutIncomplete(server: string | null): void {
+  if (__DEV__) console.warn("[Auth] stored session survived sign-out");
+  if (!dsn || __DEV__) return;
+  try {
+    Sentry.captureMessage("sign-out: stored session not deleted", {
+      level: "error",
+      tags: { feature: "auth" },
+      extra: { server },
+    });
+  } catch {
+    // Telemetry must never throw into the sign-out path.
+  }
 }
 
 /**

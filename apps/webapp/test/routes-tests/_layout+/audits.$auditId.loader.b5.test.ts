@@ -12,7 +12,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 import { permissionContext } from "@helpers/role-access";
 
-import { getAuditSessionDetails } from "~/modules/audit/service.server";
+import {
+  getAuditSessionDetails,
+  getAuditUnitTotals,
+} from "~/modules/audit/service.server";
 import { loader } from "~/routes/_layout+/audits.$auditId";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -33,6 +36,9 @@ vi.mock("~/modules/audit/service.server", () => ({
   deleteAuditSession: vi.fn(),
   requireAuditAssignee: vi.fn(),
   getAuditSessionDetails: vi.fn(),
+  // why: the units line of the Complete Audit dialog is a database read; this
+  // audit has no quantity-tracked rows
+  getAuditUnitTotals: vi.fn(async () => null),
 }));
 
 // why: the route imports completeAuditWithImages for an action intent; stub
@@ -117,5 +123,38 @@ describe("audits.$auditId loader", () => {
     [["BASE", "SELF_SERVICE"]],
   ])("%j may not open an audit it is not assigned to", async (roles) => {
     expect((await load(roles)).status).toBe(403);
+  });
+});
+
+describe("audits.$auditId loader, unit totals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getAuditSessionDetails).mockResolvedValue({
+      session: SESSION,
+    } as unknown as Awaited<ReturnType<typeof getAuditSessionDetails>>);
+  });
+
+  it("hands the audit's unit totals to the page (the header dialog and the overview read them)", async () => {
+    const totals = {
+      quantityRows: 1,
+      expectedUnits: 14,
+      foundUnits: 8,
+      uncountedRows: 0,
+      unexpectedRows: 0,
+      unexpectedUnits: 0,
+      unexpectedUncountedRows: 0,
+    };
+    vi.mocked(getAuditUnitTotals).mockResolvedValue(totals);
+
+    const r = await load(["ADMIN"]);
+
+    expect(r.status).toBe(200);
+    expect(getAuditUnitTotals).toHaveBeenCalledWith("audit-1");
+    expect(r.data).toMatchObject({ unitTotals: totals });
+  });
+
+  it("does not read the totals for a caller refused the audit", async () => {
+    expect((await load(["BASE"])).status).toBe(403);
+    expect(getAuditUnitTotals).not.toHaveBeenCalled();
   });
 });

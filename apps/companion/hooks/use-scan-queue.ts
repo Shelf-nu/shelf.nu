@@ -2,6 +2,11 @@ import { useRef, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
+import {
+  carryFirstScan,
+  drainScanQueue,
+  dropSupersededCounts,
+} from "@/lib/audit-scan-queue";
 import { resolveQueueAccess } from "@/lib/scan-queue-owner";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
@@ -21,8 +26,24 @@ type UseScanQueueParams = {
    */
   userId: string | undefined;
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
-  /** Called when a scan is confirmed and auditAssetId is received from server */
-  onScanSynced?: (assetId: string, auditAssetId: string) => void;
+  /**
+   * Called when a scan is confirmed and auditAssetId is received from server.
+   * `storedCount` is the count the server stored for a counted scan, absent
+   * when the scan carried no count or a newer count for the asset is queued
+   * (see `storedCountFor`).
+   */
+  onScanSynced?: (
+    assetId: string,
+    /** Null when the server has no row left for the scan (it was removed). */
+    auditAssetId: string | null,
+    storedCount?: number | null,
+    /**
+     * True when the server kept another count than the one sent: the audit
+     * was finished or the scan removed first, or another device's first scan
+     * claimed the row. The row then shows the stored count.
+     */
+    countRefused?: boolean
+  ) => void;
   /**
    * Called when a scan exhausts its retries. The scan is moved to `failedQueueRef`
    * (never silently dropped) so the UI can surface it and completion can be blocked.
@@ -69,22 +90,6 @@ export function useScanQueue({
     return resolved;
   }, [userId]);
 
-  /** Saves the current queues as the owner's draft. */
-  const persist = useCallback(
-    (auditSessionId: string) => {
-      const { owner, maySave } = access();
-      if (!maySave || !owner) return;
-      void saveAuditScanState(
-        owner,
-        auditSessionId,
-        scannedItemsRef.current,
-        scanQueueRef.current,
-        failedQueueRef.current
-      );
-    },
-    [access, scannedItemsRef]
-  );
-
   // Record the owner as soon as an account is known, before the first scan, so
   // the queue never runs ownerless.
   useEffect(() => {
@@ -108,6 +113,22 @@ export function useScanQueue({
     []
   );
 
+  /** Saves the queues as the owner's draft; nothing while no owner is known. */
+  const saveDraft = useCallback(
+    (auditSessionId: string) => {
+      const { owner, maySave } = access();
+      if (!maySave || !owner) return;
+      void saveAuditScanState(
+        owner,
+        auditSessionId,
+        scannedItemsRef.current,
+        scanQueueRef.current,
+        failedQueueRef.current
+      );
+    },
+    [access, scannedItemsRef]
+  );
+
   const processQueue = useCallback(async () => {
     if (isProcessingQueueRef.current || !orgId) return;
     if (scanQueueRef.current.length === 0) return;
@@ -116,99 +137,50 @@ export function useScanQueue({
 
     isProcessingQueueRef.current = true;
 
-    while (scanQueueRef.current.length > 0) {
+    const persist = (entry: ScanQueueEntry) => saveDraft(entry.auditSessionId);
+
+    // The ordering rules live in `drainScanQueue`, where they are tested.
+    const { backoffAttempt } = await drainScanQueue({
+      queue: scanQueueRef,
+      failed: failedQueueRef,
+      items: scannedItemsRef,
+      recordScan: (entry) => api.recordAuditScan(orgId, entry),
+      maxRetries: MAX_QUEUE_RETRIES,
+      persist,
       // Each request goes out with the token of whoever is signed in when it
-      // is sent, so the loop stops (scans stay in the owner's draft) once the
+      // is sent, so the drain stops (scans stay in the owner's draft) once the
       // screen is gone or someone else is signed in.
-      if (!maySendNow()) break;
-      const entry = scanQueueRef.current[0];
-      try {
-        const { data, error } = await api.recordAuditScan(orgId, entry);
-        // Treat envelope errors as failures — keep item in queue for retry
-        if (error || !data) {
-          throw new Error(error ?? "Failed to sync audit scan");
-        }
-        // Success — remove from queue and persist immediately
-        scanQueueRef.current.shift();
+      mayContinue: maySendNow,
+      onSynced: onScanSynced,
+      onFailed: (entry) => {
+        onScanFailed?.(entry.assetId);
+        // Surface to Sentry: a scan the worker saw as Found has not reached
+        // the server after all retries. This is the field signal we'd
+        // otherwise only learn about from a "my audit is wrong" report.
+        reportAuditDurabilityEvent(
+          "scan_sync_failed",
+          {
+            auditSessionId: entry.auditSessionId,
+            assetId: entry.assetId,
+            retries: MAX_QUEUE_RETRIES,
+          },
+          "error"
+        );
+        if (__DEV__)
+          console.warn(
+            `[AuditQueue] Scan failed after ${MAX_QUEUE_RETRIES} retries; moved to failed queue:`,
+            entry.assetId
+          );
+      },
+    });
 
-        // Capture auditAssetId from response so notes/photos can be attached
-        if (data?.auditAssetId) {
-          const itemIndex = scannedItemsRef.current.findIndex(
-            (item) => item.assetId === entry.assetId
-          );
-          if (itemIndex !== -1) {
-            scannedItemsRef.current[itemIndex] = {
-              ...scannedItemsRef.current[itemIndex],
-              auditAssetId: data.auditAssetId,
-              // A successful (re)sync clears any prior failed marker.
-              syncFailed: false,
-            };
-          }
-          // Notify caller to update React state for re-render
-          onScanSynced?.(entry.assetId, data.auditAssetId);
-        }
-
-        persist(entry.auditSessionId);
-      } catch {
-        // Network error — retry with backoff
-        const retries = (entry.retryCount ?? 0) + 1;
-        if (retries >= MAX_QUEUE_RETRIES) {
-          // Max retries reached. CRITICAL: never silently drop the scan, or an
-          // asset the worker saw as "Found" is lost and later marked MISSING on
-          // completion. Move it to the failed queue (persisted, re-syncable) and
-          // mark the item so the UI surfaces it and completion can be blocked.
-          scanQueueRef.current.shift();
-          failedQueueRef.current.push({ ...entry, retryCount: undefined });
-          // Mark the scanned item directly on the ref (mirrors the success path)
-          // so the persisted snapshot captures the failed state on crash.
-          const failedIndex = scannedItemsRef.current.findIndex(
-            (item) => item.assetId === entry.assetId
-          );
-          if (failedIndex !== -1) {
-            scannedItemsRef.current[failedIndex] = {
-              ...scannedItemsRef.current[failedIndex],
-              syncFailed: true,
-            };
-          }
-          onScanFailed?.(entry.assetId);
-          persist(entry.auditSessionId);
-          // Surface to Sentry: a scan the worker saw as Found has not reached
-          // the server after all retries. This is the field signal we'd
-          // otherwise only learn about from a "my audit is wrong" report.
-          reportAuditDurabilityEvent(
-            "scan_sync_failed",
-            {
-              auditSessionId: entry.auditSessionId,
-              assetId: entry.assetId,
-              retries: MAX_QUEUE_RETRIES,
-            },
-            "error"
-          );
-          if (__DEV__)
-            console.warn(
-              `[AuditQueue] Scan failed after ${MAX_QUEUE_RETRIES} retries; moved to failed queue:`,
-              entry.assetId
-            );
-          continue;
-        } else {
-          // Move to end of queue with incremented retry count
-          scanQueueRef.current.shift();
-          scanQueueRef.current.push({ ...entry, retryCount: retries });
-          // Persist the requeued state NOW. The success and max-retry branches
-          // both persist; without this one, an app kill during the backoff —
-          // or a sub-2s scanning burst that perpetually resets the debounced
-          // saver — loses the in-memory queue entry, so a scan the worker saw
-          // as Found vanishes and is marked MISSING on completion.
-          persist(entry.auditSessionId);
-          // Clear any prior timer before scheduling a new one, so a rapid
-          // re-entry can't orphan a setTimeout that re-fires processQueue after
-          // unmount (post-unmount work / double-record).
-          if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-          const delay = RETRY_DELAYS[retries - 1] ?? 15_000;
-          retryTimerRef.current = setTimeout(() => processQueue(), delay);
-          break;
-        }
-      }
+    if (backoffAttempt !== null) {
+      // Clear any prior timer before scheduling a new one, so a rapid
+      // re-entry can't orphan a setTimeout that re-fires processQueue after
+      // unmount (post-unmount work / double-record).
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      const delay = RETRY_DELAYS[backoffAttempt - 1] ?? 15_000;
+      retryTimerRef.current = setTimeout(() => processQueue(), delay);
     }
 
     isProcessingQueueRef.current = false;
@@ -217,26 +189,51 @@ export function useScanQueue({
     scannedItemsRef,
     onScanSynced,
     onScanFailed,
-    persist,
     access,
+    saveDraft,
     maySendNow,
   ]);
 
   const enqueueScan = useCallback(
-    (entry: ScanQueueEntry) => {
+    (incoming: ScanQueueEntry) => {
       // A different account never adds to another account's queue.
       const { owner } = access();
       if (userId && owner && userId !== owner) return;
+      const queued = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
+      // A new count replaces any older count for the same asset still
+      // waiting. The request in flight (queue head while processing) stays:
+      // the queue removes it by position when it settles.
+      const keptQueue = dropSupersededCounts(
+        scanQueueRef.current,
+        queued,
+        isProcessingQueueRef.current
+      );
+      const keptFailed = dropSupersededCounts(
+        failedQueueRef.current,
+        queued,
+        false
+      );
+      // A first scan that never reached the server makes this one a first
+      // scan too.
+      const entry = carryFirstScan(queued, [
+        ...scanQueueRef.current.filter((old) => !keptQueue.includes(old)),
+        ...failedQueueRef.current.filter((old) => !keptFailed.includes(old)),
+      ]);
+      // Mutate in place: a pending debounced save holds these array references.
+      scanQueueRef.current.length = 0;
+      scanQueueRef.current.push(...keptQueue);
+      failedQueueRef.current.length = 0;
+      failedQueueRef.current.push(...keptFailed);
       scanQueueRef.current.push(entry);
       // Persist immediately (eager, not via the debounced saver): the scan must
       // hit disk the instant it is queued, so an app kill before the first
       // network attempt — or a sustained sub-2s scanning burst that keeps
       // resetting the debounce — can never lose it. Fire-and-forget; the
       // debounced saver remains for lower-priority UI snapshots.
-      persist(entry.auditSessionId);
+      saveDraft(entry.auditSessionId);
       processQueue();
     },
-    [processQueue, persist, access, userId]
+    [processQueue, saveDraft, access, userId]
   );
 
   const retryFailedScans = useCallback(() => {

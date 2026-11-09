@@ -15,7 +15,12 @@ import {
   runBeforeSessionEnd,
   subscribeToServerChange,
 } from "./server";
-import { getSupabase, persistedSessionRemover } from "./supabase";
+import { reportSignOutIncomplete } from "./sentry";
+import {
+  getSupabase,
+  getSupabaseClientUrl,
+  persistedSessionRemover,
+} from "./supabase";
 
 type AuthState = {
   session: Session | null;
@@ -120,12 +125,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // auth event, so the signed-in state is cleared here as well, which sends the
   // person to the login screen with nothing to explain.
   const signOut = useCallback(async () => {
-    await runBeforeSessionEnd();
+    // Bound to the session being signed out before anything awaits: a server
+    // switch while the before-session-end tasks run must not make this
+    // teardown act on the new server's client or session.
+    const client = getSupabase();
+    const removeStoredSession = persistedSessionRemover();
+    const serverAtStart = getServerVersion();
+    const serverUrlAtStart = getSupabaseClientUrl();
     const signInsAtStart = signInsRef.current;
-    await endSessionOnDevice(getSupabase(), persistedSessionRemover());
+
+    await runBeforeSessionEnd();
+    const outcome = await endSessionOnDevice(client, removeStoredSession);
+    if (outcome === "incomplete") reportSignOutIncomplete(serverUrlAtStart);
+
     // A forced sign-out emits no auth event, so the state is cleared here,
-    // unless someone signed in while the teardown was still running.
-    if (signInsRef.current === signInsAtStart) setSession(null);
+    // unless someone signed in or the server changed while it ran.
+    if (
+      signInsRef.current === signInsAtStart &&
+      getServerVersion() === serverAtStart
+    ) {
+      setSession(null);
+    }
   }, []);
 
   const value = useMemo(
