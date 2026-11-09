@@ -25,6 +25,10 @@ type ChipLocation = { id: string; name: string };
  * Renders "+N" for the locations beyond the primary one, with a tooltip
  * listing all of them. Renders nothing when there are no other locations.
  *
+ * Callers may pass one entry per placement: a quantity-tracked asset can hold
+ * a manual placement and kit-driven ones at the same location. The chip
+ * collapses them to distinct locations, so "+N" counts places, not rows.
+ *
  * @param props.primary - The location already shown as the badge
  * @param props.others - Every further placement, in placement order
  */
@@ -35,7 +39,8 @@ export function MoreLocationsChip({
   primary: ChipLocation;
   others: ChipLocation[];
 }) {
-  if (others.length === 0) return null;
+  const distinctOthers = distinctLocations(primary, others);
+  if (distinctOthers.length === 0) return null;
 
   return (
     <TooltipProvider>
@@ -45,11 +50,11 @@ export function MoreLocationsChip({
             type="button"
             className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
             data-testid="location-more-chip"
-            aria-label={`+${others.length} more location${
-              others.length === 1 ? "" : "s"
+            aria-label={`+${distinctOthers.length} more location${
+              distinctOthers.length === 1 ? "" : "s"
             }`}
           >
-            +{others.length}
+            +{distinctOthers.length}
           </button>
         </TooltipTrigger>
         <TooltipContent
@@ -57,14 +62,27 @@ export function MoreLocationsChip({
           data-testid="location-more-tooltip"
         >
           <ul className="flex flex-col gap-1 text-sm">
-            {[primary, ...others].map((entry, index) => (
-              // A pool can hold two placements at one location (a manual
-              // slice and a kit slice), so the id alone is not unique.
-              <li key={`${entry.id}-${index}`}>{entry.name}</li>
+            {[primary, ...distinctOthers].map((entry) => (
+              <li key={entry.id}>{entry.name}</li>
             ))}
           </ul>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
+}
+
+/**
+ * The locations in `others` that are not the primary, each once, in their
+ * first-seen order.
+ */
+function distinctLocations(primary: ChipLocation, others: ChipLocation[]) {
+  const seen = new Set([primary.id]);
+  const distinct: ChipLocation[] = [];
+  for (const location of others) {
+    if (seen.has(location.id)) continue;
+    seen.add(location.id);
+    distinct.push(location);
+  }
+  return distinct;
 }

@@ -2067,7 +2067,14 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {location ? (
-          <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
+          // Clicks on the badge, its hierarchy hover card (portalled, but React
+          // events still bubble through it) or the chip must not toggle the
+          // row's selection: the row's click handler selects the asset.
+          <span
+            role="presentation"
+            onClick={(e) => e.stopPropagation()}
+            className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap"
+          >
             <LocationBadge
               location={{
                 id: location.id,
@@ -2076,10 +2083,7 @@ const RowComponent = ({
                 childCount: location._count?.children ?? 0,
               }}
             />
-            {/* Opening the chip's tooltip must not toggle the row's selection. */}
-            <span role="presentation" onClick={(e) => e.stopPropagation()}>
-              <MoreLocationsChip primary={location} others={otherLocations} />
-            </span>
+            <MoreLocationsChip primary={location} others={otherLocations} />
           </span>
         ) : null}
       </Td>
