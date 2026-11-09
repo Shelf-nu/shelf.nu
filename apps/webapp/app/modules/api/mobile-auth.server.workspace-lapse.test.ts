@@ -127,6 +127,21 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
     }
   );
 
+  it("refuses a lapsed TEAM workspace even when the request URL names account-details", async () => {
+    givenMembership(membershipRow());
+    ownerTier("free");
+
+    // The web exempts its account-details pages by URL; a mobile request URL
+    // is caller-controlled and must not reach that exemption.
+    const request = new Request(
+      `http://localhost/api/mobile/account-details/assets?orgId=${ORG_ID}&x=account-details`
+    );
+
+    await expect(
+      requireOrganizationAccess(request, CALLER_ID)
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it("refuses the owner of a lapsed TEAM workspace without pointing them to themselves", async () => {
     givenMembership(membershipRow({ ownerId: CALLER_ID }));
     ownerTier("free");

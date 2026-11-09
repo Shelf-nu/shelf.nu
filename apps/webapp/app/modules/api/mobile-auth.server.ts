@@ -308,14 +308,12 @@ export const MOBILE_WORKSPACE_INACTIVE_MESSAGE =
  * @param args.userId - The signed-in caller.
  * @param args.isShelfAdmin - Whether the caller holds the Shelf `ADMIN` role.
  * @param args.organization - The workspace the request acts in.
- * @param args.url - The request URL, passed through to `disabledTeamOrg`.
  * @throws {ShelfError} 403 when the workspace is inactive.
  */
 async function assertMobileWorkspaceActive({
   userId,
   isShelfAdmin,
   organization,
-  url,
 }: {
   userId: string;
   isShelfAdmin: boolean;
@@ -323,7 +321,6 @@ async function assertMobileWorkspaceActive({
     Organization,
     "id" | "type" | "name" | "imageId" | "userId" | "workspaceDisabled"
   >;
-  url: string;
 }) {
   if (isShelfAdmin) return;
 
@@ -335,7 +332,11 @@ async function assertMobileWorkspaceActive({
       (await disabledTeamOrg({
         currentOrganization: organization,
         organizations: [organization],
-        url,
+        // why: `disabledTeamOrg` exempts any URL containing "account-details",
+        // a web page that stays open in a lapsed workspace. The phone app has
+        // no such page, and a request URL is caller-controlled, so the gate
+        // never hands one over.
+        url: "",
       })));
 
   if (!inactive) return;
@@ -361,7 +362,6 @@ async function assertMobileWorkspaceActive({
  *
  * @param args.userId - The signed-in caller.
  * @param args.organizationId - The workspace the request acts in.
- * @param args.url - The request URL.
  * @returns `false` when the caller is not a member; `true` when the caller is
  *   a member of an active workspace.
  * @throws {ShelfError} 403 when the workspace is inactive.
@@ -369,11 +369,9 @@ async function assertMobileWorkspaceActive({
 export async function requireActiveMobileMembership({
   userId,
   organizationId,
-  url,
 }: {
   userId: string;
   organizationId: string;
-  url: string;
 }): Promise<boolean> {
   const membership = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -393,7 +391,6 @@ export async function requireActiveMobileMembership({
       (role) => role.name === Roles.ADMIN
     ),
     organization: membership.organization,
-    url,
   });
 
   return true;
@@ -431,7 +428,6 @@ export async function requireOrganizationAccess(
   const isMember = await requireActiveMobileMembership({
     userId,
     organizationId: orgId,
-    url: request.url,
   });
 
   if (!isMember) {

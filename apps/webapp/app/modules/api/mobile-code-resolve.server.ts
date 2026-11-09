@@ -371,7 +371,6 @@ export async function resolveMobileScannedCode({
   const isMember = await requireActiveMobileMembership({
     userId: user.id,
     organizationId: qr.organizationId,
-    url: request.url,
   });
 
   if (!isMember) {
