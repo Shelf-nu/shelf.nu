@@ -1464,6 +1464,12 @@ export async function createAsset({
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
+      // A deliberate client error from a guard inside the transaction (a tag,
+      // category, kit or location outside this workspace) carries its own
+      // actionable message. The constraint wrapper below would replace it with
+      // a generic one, so pass it straight through.
+      rethrowIfClientError(cause);
+
       // Check for sequential ID unique constraint violation and retry
       if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
         const prismaError = cause as any;
@@ -1734,6 +1740,9 @@ export async function bulkCreateAssetsFromModel({
     await assertLocationBelongsToOrg({ locationId, organizationId });
   }
 
+  // createAsset proves tags again inside each create transaction. This check
+  // still runs first so a foreign tag refuses the whole batch with a thrown
+  // 400 before any asset is written, rather than as a failure at index 0.
   if (tags?.set && tags.set.length > 0) {
     await assertTagsBelongToOrg({
       tagIds: tags.set.map((t) => t.id),

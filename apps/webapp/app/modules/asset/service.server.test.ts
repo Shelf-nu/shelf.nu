@@ -2622,7 +2622,7 @@ describe("updateAsset cross-org guards", () => {
     expect.assertions(3);
     // why: an empty result is how the org-scoped lookup reports a tag that
     // belongs to another workspace.
-    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([]);
 
     await expect(
       updateAsset({
@@ -2638,6 +2638,34 @@ describe("updateAsset cross-org guards", () => {
       select: { id: true },
     });
     expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("replaces the asset's tags with tags that belong to the organization", async () => {
+    expect.assertions(2);
+    // why: one matching row is how the org-scoped lookup reports that every
+    // submitted tag belongs to this workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { id: "tag-in-org-A" },
+    ]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      tags: { set: [{ id: "tag-in-org-A" }] },
+    } as any);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-in-org-A"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { set: [{ id: "tag-in-org-A" }] },
+        }),
+      })
+    );
   });
 });
 
@@ -2717,8 +2745,10 @@ describe("createAsset cross-org guards", () => {
     expect.assertions(3);
     // why: an empty result is how the org-scoped lookup reports a tag that
     // belongs to another workspace.
-    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([]);
 
+    // The guard's own 400 and message reach the caller, so a stale tag tells
+    // the user what to fix instead of a generic "could not create".
     await expect(
       createAsset({
         title: "New asset",
@@ -2726,7 +2756,10 @@ describe("createAsset cross-org guards", () => {
         organizationId: "org-A",
         tags: { set: [{ id: "tag-from-org-B" }] },
       } as any)
-    ).rejects.toThrow(ShelfError);
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("selected tags"),
+    });
 
     expect(db.tag.findMany).toHaveBeenCalledWith({
       where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
@@ -2737,7 +2770,9 @@ describe("createAsset cross-org guards", () => {
 
   it("connects tags that belong to the organization", async () => {
     expect.assertions(2);
-    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+    // why: one matching row is how the org-scoped lookup reports that every
+    // submitted tag belongs to this workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
       { id: "tag-in-org-A" },
     ]);
 
