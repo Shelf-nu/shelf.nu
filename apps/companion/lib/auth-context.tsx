@@ -110,12 +110,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A session a past sign-out could not delete is refused on read; the new
     // one is written under the same key, so lift that block first.
     const restoreBlock = await allowStoredSession();
-    const { error } = await getSupabase().auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) await restoreBlock();
-    return { error: error?.message ?? null };
+    try {
+      const { error } = await getSupabase().auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) await restoreBlock();
+      return { error: error?.message ?? null };
+    } catch (cause) {
+      await restoreBlock();
+      throw cause;
+    }
   }, []);
 
   // Signing out deliberately KEEPS the active server: the user almost always

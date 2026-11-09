@@ -189,10 +189,16 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
       await restoreBlock();
       return { error: "The server changed during sign-in. Please try again." };
     }
-    const { error } = await getSupabase().auth.setSession({
-      access_token: payload.accessToken,
-      refresh_token: payload.refreshToken,
-    });
+    let error: { message: string } | null;
+    try {
+      ({ error } = await getSupabase().auth.setSession({
+        access_token: payload.accessToken,
+        refresh_token: payload.refreshToken,
+      }));
+    } catch (cause) {
+      await restoreBlock();
+      throw cause;
+    }
     if (error) {
       await restoreBlock();
       return { error: error.message };
