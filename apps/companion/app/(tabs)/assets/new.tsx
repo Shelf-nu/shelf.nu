@@ -50,6 +50,7 @@ import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CharacterCount } from "@/components/shared/character-count";
+import { LinkedText } from "@/components/links/linked-text";
 import {
   ASSET_DESCRIPTION_MAX_LENGTH,
   ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
@@ -976,7 +977,10 @@ export default function CreateAssetScreen() {
                     <Text style={styles.required}> *</Text>
                   ) : null}
                   {def.helpText ? (
-                    <Text style={styles.helpText}> — {def.helpText}</Text>
+                    <LinkedText
+                      text={` - ${def.helpText}`}
+                      style={styles.helpText}
+                    />
                   ) : null}
                 </Text>
                 <CustomFieldInput

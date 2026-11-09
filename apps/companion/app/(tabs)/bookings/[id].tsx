@@ -85,7 +85,7 @@ import {
 } from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
-import { ExpandableText } from "@/components/shared/expandable-text";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import {
   bookingRowKey,
   buildBookingRows,
@@ -1838,11 +1838,10 @@ function BookingDetailScreen({ id }: { id: string }) {
               </View>
 
               {booking.description ? (
-                <ExpandableText
+                <LinkedParagraph
                   key={booking.id}
                   text={booking.description}
-                  label="description"
-                  numberOfLines={3}
+                  expandable={{ label: "description", numberOfLines: 3 }}
                   style={styles.description}
                   testID="booking-description"
                 />
