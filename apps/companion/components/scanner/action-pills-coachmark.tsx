@@ -5,9 +5,9 @@
  * The scanner supports four actions (View / Assign / Release / Location)
  * switched by tapping the pills or swiping the camera area, but the
  * affordance is subtle enough that even power users have missed it. This
- * renders a small dismissible bubble under the pills on first use; it goes
- * away forever once dismissed or once the user switches actions on their
- * own (proof they found the feature).
+ * renders a small dismissible bubble beside the mode dots under the scan
+ * frame on first use; it goes away forever once dismissed or once the user
+ * switches actions on their own (proof they found the feature).
  *
  * Persistence: a single AsyncStorage flag via `useOneTimeHint`, versioned so
  * a future redesign can re-show the hint by bumping the key.
@@ -26,15 +26,24 @@ const STORAGE_KEY = "shelf.scanner.pills-coachmark-dismissed.v1";
 type Props = {
   /** Render only when the user actually has multiple actions to discover. */
   enabled: boolean;
-  /** Current scanner action — changing it counts as discovery and dismisses. */
+  /** Current scanner action; changing it counts as discovery and dismisses. */
   currentAction: string;
+  /**
+   * Hides the bubble without dismissing it, while something else needs the
+   * space under the frame (a lookup, a result card, an open drawer).
+   */
+  hidden?: boolean;
 };
 
 /**
  * One-time "Tap or swipe to switch actions" bubble. Returns null once
  * dismissed (persisted across sessions).
  */
-export function ActionPillsCoachmark({ enabled, currentAction }: Props) {
+export function ActionPillsCoachmark({
+  enabled,
+  currentAction,
+  hidden = false,
+}: Props) {
   const styles = useStyles();
   const { shouldShow, dismiss } = useOneTimeHint(STORAGE_KEY, enabled);
   const initialActionRef = useRef(currentAction);
@@ -46,7 +55,7 @@ export function ActionPillsCoachmark({ enabled, currentAction }: Props) {
     }
   }, [currentAction, shouldShow, dismiss]);
 
-  if (!shouldShow) return null;
+  if (!shouldShow || hidden) return null;
 
   return (
     <View
@@ -55,7 +64,8 @@ export function ActionPillsCoachmark({ enabled, currentAction }: Props) {
       pointerEvents="box-none"
     >
       <Text style={styles.text}>
-        Tap a pill or swipe the camera to switch between view and batch actions
+        Tap a pill above or swipe the camera to switch between view and batch
+        actions
       </Text>
       <TouchableOpacity
         onPress={dismiss}
