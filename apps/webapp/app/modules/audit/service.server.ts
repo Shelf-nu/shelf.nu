@@ -3118,18 +3118,33 @@ export async function cancelAuditSession({
 }
 
 /**
- * Fetches all pending audits for an organization.
+ * Fetches the pending audits a member may add assets to.
  * Used in the "Add to existing audit" bulk action selector.
+ *
+ * A member whose role sees only assigned audits (`access.audits.seeAll` is
+ * false) gets only the pending audits assigned to them, matching the audits
+ * index. The result carries audit names, creators and assignee names, so it
+ * must never be wider than what that member can see on the audits page.
+ *
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param params.userId - The caller, used as the assignee when `assignedOnly`
+ * @param params.assignedOnly - Restrict to audits assigned to `userId`
+ * @returns Pending audits, newest first
  */
 export async function getPendingAuditsForOrganization({
   organizationId,
+  userId,
+  assignedOnly,
 }: {
   organizationId: string;
+  userId: string;
+  assignedOnly: boolean;
 }) {
   return db.auditSession.findMany({
     where: {
       organizationId,
       status: AuditStatus.PENDING,
+      ...(assignedOnly ? { assignments: { some: { userId } } } : {}),
     },
     select: {
       id: true,
