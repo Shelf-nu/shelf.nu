@@ -8,7 +8,7 @@
  * @see {@link file://./searchable-select.tsx}
  */
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SearchableSelectOption } from "./searchable-select";
@@ -101,6 +101,25 @@ describe("SearchableSelect", () => {
     await user.keyboard("{ArrowDown}{Enter}");
 
     expect(posted()).toBe("serial");
+  });
+
+  it("leaves Enter and the arrow keys to the input method while text is being composed", async () => {
+    const user = userEvent.setup();
+    const { posted } = renderSelect();
+    await user.click(trigger());
+    const search = screen.getByRole("combobox");
+    const highlighted = () => search.getAttribute("aria-activedescendant");
+    const before = highlighted();
+
+    // An input method (Japanese, Chinese) uses these keys to pick a character.
+    fireEvent.keyDown(search, { key: "ArrowDown", isComposing: true });
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    // Safari reports a composing key as keyCode 229 instead.
+    fireEvent.keyDown(search, { key: "Enter", keyCode: 229 });
+
+    expect(highlighted()).toBe(before);
+    expect(posted()).toBe("");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
   });
 
   it("hides the search box when not searchable", async () => {

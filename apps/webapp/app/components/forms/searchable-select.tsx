@@ -165,6 +165,11 @@ export function SearchableSelect({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    // While an input method (Japanese, Chinese, Korean) composes text, Enter
+    // and the arrows pick its candidates; they must not move or pick an
+    // option. Safari reports those keys as keyCode 229 instead.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+
     if (event.key === "ArrowDown") {
       event.preventDefault();
       dispatch({ type: "moved", delta: 1, count: visible.length });
