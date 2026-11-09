@@ -54,7 +54,10 @@ type RolePolicyShape = {
     bypassTimeLimits: boolean;
     /** Which workspace explicit check-out/in switch applies; "none" = exempt or not covered. */
     explicitScanSetting: "admin" | "selfService" | "none";
-    /** Delete is limited to DRAFT bookings. */
+    /**
+     * Delete is limited to DRAFT bookings. Only narrows a `booking: delete`
+     * grant from the matrix; a role without that grant deletes nothing.
+     */
     deleteOnlyDrafts: boolean;
     /** The booking custodian picker is fixed to the user themself. */
     custodianPicker: "anyone" | "self";

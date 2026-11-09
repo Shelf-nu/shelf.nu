@@ -33,11 +33,14 @@ export const Role2PermissionMap: {
     // matches that. Empty = no access.
     [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
+    // No `delete`: a Base user's bookings stay in the workspace history for
+    // admins and owners. `archive` lets them tidy their own list instead
+    // (`bookings.write: "own"` scopes it to bookings they hold).
     [PermissionEntity.booking]: [
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
-      PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
+      PermissionAction.archive,
       PermissionAction.manageAssets,
       PermissionAction.manageKits,
       PermissionAction.export,

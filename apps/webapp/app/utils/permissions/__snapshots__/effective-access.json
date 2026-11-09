@@ -1289,8 +1289,8 @@
         "create",
         "read",
         "update",
-        "delete",
         "export",
+        "archive",
         "manage-assets",
         "manage-kits"
       ],
@@ -14326,9 +14326,9 @@
       "neither": "denied:owner"
     },
     "BASE": {
-      "custodianNotCreator": "denied:gate",
-      "creatorNotCustodian": "denied:gate",
-      "neither": "denied:gate"
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "denied:owner"
     },
     "OWNER+ADMIN": {
       "custodianNotCreator": "allowed",
@@ -14749,12 +14749,12 @@
       "neither|RESERVED": "denied:owner"
     },
     "BASE": {
-      "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
-      "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "custodianNotCreator|DRAFT": "denied:gate",
+      "custodianNotCreator|RESERVED": "denied:gate",
+      "creatorNotCustodian|DRAFT": "denied:gate",
+      "creatorNotCustodian|RESERVED": "denied:gate",
+      "neither|DRAFT": "denied:gate",
+      "neither|RESERVED": "denied:gate"
     },
     "OWNER+ADMIN": {
       "custodianNotCreator|DRAFT": "allowed",
@@ -20411,7 +20411,7 @@
       "RESERVED": false
     },
     "BASE": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     },
     "OWNER+ADMIN": {
@@ -20495,11 +20495,11 @@
       "RESERVED": false
     },
     "(none)": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     },
     "UNKNOWN_ROLE": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     }
   },

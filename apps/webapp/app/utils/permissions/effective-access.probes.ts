@@ -1159,12 +1159,14 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // ===================== Bookings: deletion =====================
 
   // B9:D-22: booking Delete menu item (actions-dropdown.tsx):
-  // `!useRoleAccess().policy.bookings.deleteOnlyDrafts || isDraft`.
+  // `booking:delete && (!policy.bookings.deleteOnlyDrafts || isDraft)`
+  // (resolveBookingActions in booking-actions.ts).
   snapshot["B9:D-22:web-delete-menu"] = perRoleSet((roles) => {
     const { deleteOnlyDrafts } = accessFor(roles).policy.bookings;
+    const canDelete = can(roles, E.booking, A.delete);
     return perCase(
       DRAFT_OR_NOT,
-      (status) => !deleteOnlyDrafts || status === "DRAFT"
+      (status) => canDelete && (!deleteOnlyDrafts || status === "DRAFT")
     );
   });
 

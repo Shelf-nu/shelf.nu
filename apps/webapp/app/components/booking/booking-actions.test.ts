@@ -276,7 +276,7 @@ describe("resolveBookingActions: who may act", () => {
     expect(actions.duplicate.visible).toBe(true);
   });
 
-  it("never offers Base check out, check in, extend, cancel or archive", () => {
+  it("never offers Base check out, check in, extend, cancel or delete", () => {
     const statuses = Object.values(BookingStatus);
     for (const status of statuses) {
       const actions = resolveFor(
@@ -294,11 +294,48 @@ describe("resolveBookingActions: who may act", () => {
         "checkIn",
         "extend",
         "cancel",
-        "archive",
+        "delete",
       ] as const) {
         expect(actions[key].visible, `${key} while ${status}`).toBe(false);
       }
     }
+  });
+
+  it("offers a Base custodian Archive on their own archivable booking only", () => {
+    const roles = [OrganizationRoles.BASE];
+    const past = new Date("2020-01-01T00:00:00Z");
+
+    expect(
+      resolveFor(
+        buildBooking({ custodianUserId: ME, status: BookingStatus.COMPLETE }),
+        { roles }
+      ).archive.visible
+    ).toBe(true);
+    expect(
+      resolveFor(
+        buildBooking({
+          custodianUserId: ME,
+          status: BookingStatus.RESERVED,
+          to: past,
+        }),
+        { roles }
+      ).archive.visible
+    ).toBe(true);
+    expect(
+      resolveFor(
+        buildBooking({ custodianUserId: ME, status: BookingStatus.DRAFT }),
+        { roles }
+      ).archive.visible
+    ).toBe(false);
+    expect(
+      resolveFor(
+        buildBooking({
+          custodianUserId: OTHER,
+          status: BookingStatus.COMPLETE,
+        }),
+        { roles }
+      ).archive.visible
+    ).toBe(false);
   });
 
   it("still offers a Base custodian Duplicate and the booking document", () => {
