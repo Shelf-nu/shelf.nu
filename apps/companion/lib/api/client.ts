@@ -58,6 +58,12 @@ const MAX_RETRIES = 1;
 const SESSION_CACHE_TTL_MS = 30_000; // 30 seconds
 let cachedAccessToken: string | null = null;
 let cachedAt = 0;
+/**
+ * Bumped on every reset. A session read that started before a reset belongs
+ * to the session that just ended, so it may neither fill the cache nor be
+ * used.
+ */
+let tokenGeneration = 0;
 
 /** Unsubscribe handle for the current client's auth listener. */
 let authSubscription: { unsubscribe: () => void } | null = null;
@@ -66,6 +72,7 @@ let authSubscription: { unsubscribe: () => void } | null = null;
 function resetAccessTokenCache(): void {
   cachedAccessToken = null;
   cachedAt = 0;
+  tokenGeneration += 1;
 }
 
 /**
@@ -156,11 +163,13 @@ export async function getAccessToken(): Promise<string | null> {
     return cachedAccessToken;
   }
   const versionAtStart = getServerVersion();
+  const generationAtStart = tokenGeneration;
   const {
     data: { session },
   } = await getSupabase().auth.getSession();
 
   if (getServerVersion() !== versionAtStart) return null;
+  if (tokenGeneration !== generationAtStart) return null;
 
   if (session?.access_token) {
     cachedAccessToken = session.access_token;

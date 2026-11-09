@@ -102,11 +102,11 @@ describe("endSessionOnDevice", () => {
 
   it("runs the after-session-end tasks on every outcome", async () => {
     let runs = 0;
-    const unregister = onAfterSessionEnd(() => {
-      runs += 1;
-    });
     const unregisterFailing = onAfterSessionEnd(() => {
       throw new Error("cleanup");
+    });
+    const unregister = onAfterSessionEnd(() => {
+      runs += 1;
     });
 
     for (const [global, local] of [

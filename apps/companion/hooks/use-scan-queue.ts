@@ -2,6 +2,7 @@ import { useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
+import { resolveQueueAccess } from "@/lib/scan-queue-owner";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
 // ── Constants ────────────────────────────────────────────
@@ -14,8 +15,9 @@ const RETRY_DELAYS = [2_000, 5_000, 15_000];
 type UseScanQueueParams = {
   orgId: string | undefined;
   /**
-   * The signed-in account. Drafts are saved under it, and nothing is saved
-   * while it is unknown.
+   * The signed-in account. The queue belongs to the first account seen here
+   * (`lib/scan-queue-owner.ts`): it is saved to that account's draft, and only
+   * used (scans added and sent) while that account is signed in.
    */
   userId: string | undefined;
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
@@ -53,25 +55,37 @@ export function useScanQueue({
   const failedQueueRef = useRef<ScanQueueEntry[]>([]);
   const isProcessingQueueRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The account this queue belongs to; set once, on first sight. */
+  const ownerRef = useRef<string | null>(null);
 
-  /** Saves the current queues as the signed-in account's draft. */
+  /** Records the owner and returns what the queue may do right now. */
+  const access = useCallback(() => {
+    const resolved = resolveQueueAccess(ownerRef.current, userId);
+    ownerRef.current = resolved.owner;
+    return resolved;
+  }, [userId]);
+
+  /** Saves the current queues as the owner's draft. */
   const persist = useCallback(
     (auditSessionId: string) => {
-      if (!userId) return;
+      const { owner, maySave } = access();
+      if (!maySave || !owner) return;
       void saveAuditScanState(
-        userId,
+        owner,
         auditSessionId,
         scannedItemsRef.current,
         scanQueueRef.current,
         failedQueueRef.current
       );
     },
-    [userId, scannedItemsRef]
+    [access, scannedItemsRef]
   );
 
   const processQueue = useCallback(async () => {
     if (isProcessingQueueRef.current || !orgId) return;
     if (scanQueueRef.current.length === 0) return;
+    // Another account's queue stays in its owner's draft, unsent.
+    if (!access().mayUse) return;
 
     isProcessingQueueRef.current = true;
 
@@ -167,10 +181,13 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, persist]);
+  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, persist, access]);
 
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {
+      // A different account never adds to another account's queue.
+      const { owner } = access();
+      if (userId && owner && userId !== owner) return;
       scanQueueRef.current.push(entry);
       // Persist immediately (eager, not via the debounced saver): the scan must
       // hit disk the instant it is queued, so an app kill before the first
@@ -180,7 +197,7 @@ export function useScanQueue({
       persist(entry.auditSessionId);
       processQueue();
     },
-    [processQueue, persist]
+    [processQueue, persist, access, userId]
   );
 
   const retryFailedScans = useCallback(() => {

@@ -18,8 +18,8 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  clearPersistedSession,
   getSupabase,
+  persistedSessionRemover,
   rebuildSupabase,
 } from "../supabase";
 import { endSessionOnDevice } from "./end-session";
@@ -224,7 +224,7 @@ async function clearServerScopedState(): Promise<void> {
  */
 async function endSessionOnOutgoingClient(): Promise<void> {
   await runBeforeSessionEnd();
-  await endSessionOnDevice(getSupabase(), clearPersistedSession);
+  await endSessionOnDevice(getSupabase(), persistedSessionRemover());
 }
 
 /**

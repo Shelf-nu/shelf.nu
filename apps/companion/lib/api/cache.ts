@@ -85,8 +85,13 @@ export async function cachedApiFetch<T>(
   const generationAtStart = responseCache.generation();
   const result = await apiFetch<T>(path);
   // A server switch during the request already flushed the cache, so this
-  // response belongs to the previous server and is not stored. The account
-  // generation check does the same for a sign-out or a change of user.
+  // response belongs to the previous server and is not stored. A sign-out or a
+  // change of user during the request discards the response entirely.
+  if (responseCache.generation() !== generationAtStart) {
+    // The account changed while the request was out: the response belongs to
+    // the previous account, so the caller gets an error and reloads instead.
+    return { data: null, error: "Your session changed. Please try again." };
+  }
   if (result.data && !result.error && getServerVersion() === versionAtStart) {
     responseCache.set(path, result.data, generationAtStart, Date.now());
   }

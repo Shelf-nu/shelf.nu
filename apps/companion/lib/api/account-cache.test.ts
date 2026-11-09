@@ -83,4 +83,13 @@ describe("createAccountScopedCache", () => {
     assert.deepEqual(cache.get(ROSTER_PATH, TTL, 1), ["roster"]);
     assert.equal(cache.generation(), generation);
   });
+
+  it("refuses a write that started before the first account was observed", () => {
+    const cache = createAccountScopedCache();
+    const startedIn = cache.generation();
+
+    cache.observeUser("user_b");
+
+    assert.equal(cache.set(ROSTER_PATH, ["roster"], startedIn, 0), false);
+  });
 });

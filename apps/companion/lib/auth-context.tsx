@@ -14,7 +14,7 @@ import {
   runBeforeSessionEnd,
   subscribeToServerChange,
 } from "./server";
-import { clearPersistedSession, getSupabase } from "./supabase";
+import { getSupabase, persistedSessionRemover } from "./supabase";
 
 type AuthState = {
   session: Session | null;
@@ -112,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // person to the login screen with nothing to explain.
   const signOut = useCallback(async () => {
     await runBeforeSessionEnd();
-    await endSessionOnDevice(getSupabase(), clearPersistedSession);
+    await endSessionOnDevice(getSupabase(), persistedSessionRemover());
     setSession(null);
   }, []);
 

@@ -208,20 +208,26 @@ export function getSupabase(): SupabaseClient {
 }
 
 /**
- * Deletes the live client's stored session straight from SecureStore.
+ * Returns a function that deletes the CURRENT client's stored session straight
+ * from SecureStore.
  *
- * The last step of `endSessionOnDevice` (`./server/end-session.ts`), for when
+ * The key is captured now, so a teardown that finishes after a server switch
+ * removes only the outgoing client's session, never the new server's. Used as
+ * the last step of `endSessionOnDevice` (`./server/end-session.ts`), for when
  * supabase-js could not sign out even locally. It emits no auth event, so the
  * caller updates its own signed-in state.
  *
- * @returns Resolves once the session and its companion keys are gone. Never
- *   rejects.
+ * @returns The remover. It resolves once the session and its companion keys
+ *   are gone, and never rejects.
  */
-export async function clearPersistedSession(): Promise<void> {
-  if (!clientStorageKey) return;
-  for (const key of sessionStorageKeys(clientStorageKey)) {
-    await secureStoreAdapter.removeItem(key);
-  }
+export function persistedSessionRemover(): () => Promise<void> {
+  const storageKey = clientStorageKey;
+  return async () => {
+    if (!storageKey) return;
+    for (const key of sessionStorageKeys(storageKey)) {
+      await secureStoreAdapter.removeItem(key);
+    }
+  };
 }
 
 /**
