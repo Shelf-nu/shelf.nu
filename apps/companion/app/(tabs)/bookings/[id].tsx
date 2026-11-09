@@ -933,7 +933,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             if (outcome === "unknown") {
               Alert.alert(
                 "Discard status unknown",
-                "We couldn't confirm whether the draft was discarded. Pull to refresh once you're back online."
+                "We couldn't confirm whether the draft was discarded. Pull to refresh to check its status."
               );
               return;
             }

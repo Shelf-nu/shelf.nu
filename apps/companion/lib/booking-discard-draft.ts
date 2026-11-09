@@ -32,7 +32,7 @@ export type DiscardOutcome = "landed" | "not-landed" | "unknown";
  * A request can archive the draft and still fail on the way back (a timeout),
  * so the screen re-reads the booking before reporting a failure. An ARCHIVED
  * booking means the discard went through; any other status means it did not.
- * When the re-read fails as well, usually because the connection dropped, the
+ * When the re-read fails as well (a network error or an error response), the
  * outcome is unknown and the screen must not claim either.
  *
  * @param reread - The booking as re-read after the error, or `null` when it
