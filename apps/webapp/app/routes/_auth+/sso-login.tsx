@@ -199,6 +199,17 @@ export default function SSOLogin() {
         {data?.error?.message && (
           <div className="text-sm text-error-500">{data.error.message}</div>
         )}
+        {/* Installed as an app (PWA) there is no browser back button, so the
+            page links back to password login itself. Hidden for the native
+            app: its sign-in sheet has its own Cancel, and /login inside that
+            sheet could not sign the app in. */}
+        {platform === "web" ? (
+          <div className="text-center">
+            <Button variant="link" to="/login">
+              Back to login
+            </Button>
+          </div>
+        ) : null}
         <div>
           Want to enable SSO for your organization?{" "}
           <Button
