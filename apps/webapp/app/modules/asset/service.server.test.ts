@@ -2617,6 +2617,28 @@ describe("updateAsset cross-org guards", () => {
       select: { id: true },
     });
   });
+
+  it("rejects a tag from a different organization before writing", async () => {
+    expect.assertions(3);
+    // why: an empty result is how the org-scoped lookup reports a tag that
+    // belongs to another workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        tags: { set: [{ id: "tag-from-org-B" }] },
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("createAsset cross-org guards", () => {
@@ -2689,6 +2711,51 @@ describe("createAsset cross-org guards", () => {
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tag from a different organization before writing", async () => {
+    expect.assertions(3);
+    // why: an empty result is how the org-scoped lookup reports a tag that
+    // belongs to another workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        tags: { set: [{ id: "tag-from-org-B" }] },
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("connects tags that belong to the organization", async () => {
+    expect.assertions(2);
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "tag-in-org-A" },
+    ]);
+
+    const created = await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      tags: { set: [{ id: "tag-in-org-A" }] },
+    } as any);
+
+    expect(created).toEqual({ id: "asset-new" });
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { connect: [{ id: "tag-in-org-A" }] },
+        }),
+      })
+    );
   });
 });
 

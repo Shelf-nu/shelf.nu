@@ -1373,6 +1373,17 @@ export async function createAsset({
           await assertLocationBelongsToOrg({ locationId, organizationId }, tx);
         }
 
+        // SECURITY (cross-org IDOR): the tag ids come from form/CSV input and
+        // are connected by the nested create above with no org scoping of
+        // their own. Prove they belong to this org before the write, so every
+        // caller of createAsset is covered, not only the ones that check first.
+        if (tags?.set?.length) {
+          await assertTagsBelongToOrg(
+            { tagIds: tags.set.map((tag) => tag.id), organizationId },
+            tx
+          );
+        }
+
         // The value already matches (that is how the orphan was found), so
         // only the type needs to follow the import. Org-scoped: the ids come
         // from an org-scoped lookup, and this keeps the write that way too.
@@ -2111,8 +2122,16 @@ export async function updateAsset({
     /** disconnecting location relation if a user clears locations */
     // (no-op here too; the pivot deleteMany happens in the tx below.)
 
-    /** If a tags is passed, link the category to the asset. */
+    /**
+     * If tags are passed, replace the asset's tags with them. SECURITY
+     * (cross-org IDOR): the ids come from form input and `set` connects them
+     * with no org scoping of its own, so prove they belong to this org first.
+     */
     if (isTagUpdate) {
+      await assertTagsBelongToOrg({
+        tagIds: (tags?.set ?? []).map((tag) => tag.id),
+        organizationId,
+      });
       Object.assign(data, {
         tags,
       });
