@@ -213,12 +213,16 @@ function isOptionalNumber(value: unknown): boolean {
 
 /**
  * Whether a value is absent or a unit count (a finite number, zero or more).
+ * Null is refused: the server takes the count as optional, not nullable.
  *
  * @param value - The field value
- * @returns True for undefined, null or a count
+ * @returns True for undefined or a count
  */
 function isOptionalCount(value: unknown): boolean {
-  return isOptionalNumber(value) && !(typeof value === "number" && value < 0);
+  return (
+    value === undefined ||
+    (typeof value === "number" && Number.isFinite(value) && value >= 0)
+  );
 }
 
 /**
@@ -238,6 +242,7 @@ function isQueueEntry(item: unknown): boolean {
     // Optional fields are replayed as they are, so a wrong type would make the
     // server refuse the scan on every retry.
     isOptionalCount(entry.foundQuantity) &&
+    (entry.recount === undefined || typeof entry.recount === "boolean") &&
     isOptionalNumber(entry.queuedAt) &&
     isOptionalNumber(entry.retryCount)
   );

@@ -109,11 +109,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     //
     // A session a past sign-out could not delete is refused on read; the new
     // one is written under the same key, so lift that block first.
-    await allowStoredSession();
+    const restoreBlock = await allowStoredSession();
     const { error } = await getSupabase().auth.signInWithPassword({
       email,
       password,
     });
+    if (error) await restoreBlock();
     return { error: error?.message ?? null };
   }, []);
 

@@ -267,9 +267,17 @@ export async function blockStoredSession(storageKey: string): Promise<void> {
 /**
  * Lifts the block on the live client's stored session. Call it before every
  * sign-in: the new session is written under the same key.
+ *
+ * @returns Puts the block back; call it when the sign-in fails, so the old
+ *   stored session stays refused. A no-op when nothing was blocked.
  */
-export async function allowStoredSession(): Promise<void> {
-  if (clientStorageKey) await sessionBlock.unblock(clientStorageKey);
+export async function allowStoredSession(): Promise<() => Promise<void>> {
+  const storageKey = clientStorageKey;
+  if (!storageKey || !(await sessionBlock.isBlocked(storageKey))) {
+    return async () => {};
+  }
+  await sessionBlock.unblock(storageKey);
+  return () => sessionBlock.block(storageKey);
 }
 
 /**

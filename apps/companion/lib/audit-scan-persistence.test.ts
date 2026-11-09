@@ -233,6 +233,8 @@ describe("pruneStaleAuditDrafts", () => {
       { ...good, scannedItems: [{ ...ITEM, name: 5 }] },
       { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: { n: 3 } }] },
       { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: -1 }] },
+      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: null }] },
+      { ...good, pendingQueue: [{ ...ENTRY, recount: "false" }] },
       { ...good, failedQueue: [{ ...ENTRY, queuedAt: "soon" }] },
     ]) {
       store.set(key, JSON.stringify(broken));

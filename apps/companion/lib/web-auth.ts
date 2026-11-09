@@ -184,12 +184,17 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
 
     // A session a past sign-out could not delete is refused on read; the new
     // one is written under the same key, so lift that block first.
-    await allowStoredSession();
+    const restoreBlock = await allowStoredSession();
+    if (getServerVersion() !== serverVersionAtStart) {
+      await restoreBlock();
+      return { error: "The server changed during sign-in. Please try again." };
+    }
     const { error } = await getSupabase().auth.setSession({
       access_token: payload.accessToken,
       refresh_token: payload.refreshToken,
     });
     if (error) {
+      await restoreBlock();
       return { error: error.message };
     }
 
