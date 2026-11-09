@@ -24,7 +24,10 @@ export type SessionEndingClient = {
     signOut: (options?: {
       scope?: "global" | "local" | "others";
     }) => Promise<{ error: unknown }>;
-    getSession: () => Promise<{ data: { session: unknown } }>;
+    getSession: () => Promise<{
+      data: { session: unknown };
+      error?: unknown;
+    }>;
     /**
      * Stops the client's background token refresh. The app restarts it on the
      * next sign-in (`lib/auth-context.tsx`).
@@ -40,6 +43,9 @@ export type SessionEndingClient = {
  */
 const FORCED_TEARDOWN_CHECKS = 2;
 
+/** The longest one session check may take before it counts as inconclusive. */
+export const SESSION_CHECK_TIMEOUT_MS = 5_000;
+
 /**
  * Whether the client still finds a stored session.
  *
@@ -51,13 +57,26 @@ const FORCED_TEARDOWN_CHECKS = 2;
  * @returns True when a session is still stored, or when the check failed
  */
 async function sessionStillStored(
-  client: SessionEndingClient
+  client: SessionEndingClient,
+  timeoutMs: number
 ): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // A stored session past its expiry makes `getSession` try a refresh, which
+  // can hang while offline: past the cap the check counts as inconclusive.
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
   try {
-    const { data } = await client.auth.getSession();
-    return Boolean(data.session);
+    const result = await Promise.race([client.auth.getSession(), timedOut]);
+    if (result === "timeout") return true;
+    // An error (a failed refresh) can come with a null session while the
+    // credentials stay on disk, so it proves nothing: inconclusive.
+    if (result.error) return true;
+    return Boolean(result.data.session);
   } catch {
     return true;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -103,12 +122,26 @@ async function trySignOut(
  *
  * @param client - The live Supabase client
  * @param removePersistedSession - Deletes the stored session for that client;
- *   must not throw
+ *   a throw counts as a failed delete
+ * @param options - `stillCurrent` (see its doc) and `checkTimeoutMs`, the cap
+ *   on each session check (tests shorten it)
  * @returns How far the teardown went. Never rejects.
  */
 export async function endSessionOnDevice(
   client: SessionEndingClient,
-  removePersistedSession: () => Promise<void>
+  removePersistedSession: () => Promise<void>,
+  {
+    stillCurrent = () => true,
+    checkTimeoutMs = SESSION_CHECK_TIMEOUT_MS,
+  }: {
+    /**
+     * False when another session replaced this one while the teardown ran (a
+     * server switch): the after-session-end tasks are then skipped, so they
+     * cannot reset the replacement account's state.
+     */
+    stillCurrent?: () => boolean;
+    checkTimeoutMs?: number;
+  } = {}
 ): Promise<SessionEndOutcome> {
   let outcome: SessionEndOutcome = "revoked";
   if (!(await trySignOut(client, "global"))) {
@@ -132,11 +165,11 @@ export async function endSessionOnDevice(
         } catch {
           // Checked below; the in-memory teardown still runs either way.
         }
-        stored = await sessionStillStored(client);
+        stored = await sessionStillStored(client, checkTimeoutMs);
       }
       if (stored) outcome = "incomplete";
     }
   }
-  runAfterSessionEnd();
+  if (stillCurrent()) runAfterSessionEnd();
   return outcome;
 }

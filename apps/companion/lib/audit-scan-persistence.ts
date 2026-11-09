@@ -202,6 +202,26 @@ function isScannedItem(item: unknown): boolean {
 }
 
 /**
+ * Whether a value is absent or a finite number.
+ *
+ * @param value - The field value
+ * @returns True for undefined, null or a finite number
+ */
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || value === null || Number.isFinite(value);
+}
+
+/**
+ * Whether a value is absent or a unit count (a finite number, zero or more).
+ *
+ * @param value - The field value
+ * @returns True for undefined, null or a count
+ */
+function isOptionalCount(value: unknown): boolean {
+  return isOptionalNumber(value) && !(typeof value === "number" && value < 0);
+}
+
+/**
  * Whether a value has the fields recovery reads from a queued scan.
  *
  * @param item - A parsed list element
@@ -209,12 +229,17 @@ function isScannedItem(item: unknown): boolean {
  */
 function isQueueEntry(item: unknown): boolean {
   if (typeof item !== "object" || item === null) return false;
-  const entry = item as Partial<ScanQueueEntry>;
+  const entry = item as Partial<ScanQueueEntry> & { retryCount?: unknown };
   return (
     typeof entry.auditSessionId === "string" &&
     typeof entry.qrId === "string" &&
     typeof entry.assetId === "string" &&
-    typeof entry.isExpected === "boolean"
+    typeof entry.isExpected === "boolean" &&
+    // Optional fields are replayed as they are, so a wrong type would make the
+    // server refuse the scan on every retry.
+    isOptionalCount(entry.foundQuantity) &&
+    isOptionalNumber(entry.queuedAt) &&
+    isOptionalNumber(entry.retryCount)
   );
 }
 

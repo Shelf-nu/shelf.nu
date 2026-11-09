@@ -20,7 +20,7 @@ import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { getApiBaseUrl } from "./api";
 import { getServerVersion } from "./server";
-import { getSupabase } from "./supabase";
+import { allowStoredSession, getSupabase } from "./supabase";
 
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
@@ -182,6 +182,9 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
       return { error: "The server changed during sign-in. Please try again." };
     }
 
+    // A session a past sign-out could not delete is refused on read; the new
+    // one is written under the same key, so lift that block first.
+    await allowStoredSession();
     const { error } = await getSupabase().auth.setSession({
       access_token: payload.accessToken,
       refresh_token: payload.refreshToken,

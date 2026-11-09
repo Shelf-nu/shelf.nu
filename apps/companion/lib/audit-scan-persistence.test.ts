@@ -231,6 +231,9 @@ describe("pruneStaleAuditDrafts", () => {
       { ...good, pendingQueue: [ENTRY, null] },
       { ...good, failedQueue: [{ assetId: "as_1" }] },
       { ...good, scannedItems: [{ ...ITEM, name: 5 }] },
+      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: { n: 3 } }] },
+      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: -1 }] },
+      { ...good, failedQueue: [{ ...ENTRY, queuedAt: "soon" }] },
     ]) {
       store.set(key, JSON.stringify(broken));
       assert.equal(
@@ -287,5 +290,24 @@ describe("pruneStaleAuditDrafts", () => {
     await persistence.pruneStaleAuditDrafts();
 
     assert.equal(store.get("shelf_theme"), "dark");
+  });
+});
+
+describe("draft queue fields", () => {
+  it("accepts a counted scan and absent optional fields", async () => {
+    await persistence.saveAuditScanState(
+      "user_a",
+      "au_1",
+      [ITEM],
+      [
+        { ...ENTRY, foundQuantity: 4 },
+        { ...ENTRY, assetId: "as_2" },
+      ]
+    );
+
+    assert.notEqual(
+      await persistence.loadAuditScanState("user_a", "au_1"),
+      null
+    );
   });
 });

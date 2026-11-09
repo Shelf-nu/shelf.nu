@@ -17,11 +17,19 @@
  *
  * @see ./server/active-server.ts — owns when the rebuild happens
  */
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import type { ServerConfig } from "./server/contract";
 import { sessionStorageKey, sessionStorageKeys } from "./session-storage-keys";
+import { createSessionBlock } from "./session-block";
+
+/**
+ * Sessions a sign-out could not delete. Reads of their keys answer "nothing
+ * stored" and delete them (see `./session-block.ts`).
+ */
+const sessionBlock = createSessionBlock(AsyncStorage);
 
 /**
  * Maximum bytes per SecureStore item on iOS.
@@ -39,6 +47,12 @@ const CHUNK_SIZE = 2000;
  */
 const secureStoreAdapter = {
   getItem: async (key: string): Promise<string | null> => {
+    if (await sessionBlock.isBlocked(key)) {
+      // A sign-out could not delete this session: refuse it, and try the
+      // delete again.
+      await secureStoreAdapter.removeItem(key);
+      return null;
+    }
     try {
       if (Platform.OS === "web") {
         return typeof localStorage !== "undefined"
@@ -228,6 +242,34 @@ export function persistedSessionRemover(): () => Promise<void> {
       await secureStoreAdapter.removeItem(key);
     }
   };
+}
+
+/**
+ * The session storage key of the live client, or null before one exists.
+ *
+ * @returns The key
+ */
+export function currentSessionStorageKey(): string | null {
+  return clientStorageKey;
+}
+
+/**
+ * Refuses a stored session from now on, across restarts, after a sign-out
+ * that could not delete it. Every later read of it answers "nothing stored"
+ * and retries the delete.
+ *
+ * @param storageKey - The signed-out client's session storage key
+ */
+export async function blockStoredSession(storageKey: string): Promise<void> {
+  await sessionBlock.block(storageKey);
+}
+
+/**
+ * Lifts the block on the live client's stored session. Call it before every
+ * sign-in: the new session is written under the same key.
+ */
+export async function allowStoredSession(): Promise<void> {
+  if (clientStorageKey) await sessionBlock.unblock(clientStorageKey);
 }
 
 /**

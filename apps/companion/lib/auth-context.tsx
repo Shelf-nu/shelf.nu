@@ -17,6 +17,9 @@ import {
 } from "./server";
 import { reportSignOutIncomplete } from "./sentry";
 import {
+  allowStoredSession,
+  blockStoredSession,
+  currentSessionStorageKey,
   getSupabase,
   getSupabaseClientUrl,
   persistedSessionRemover,
@@ -103,6 +106,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // server is a separate, explicit act (`resolveServerForDomain`), so nothing
     // here inspects the email — a login is only ever sent where the user
     // already connected the app.
+    //
+    // A session a past sign-out could not delete is refused on read; the new
+    // one is written under the same key, so lift that block first.
+    await allowStoredSession();
     const { error } = await getSupabase().auth.signInWithPassword({
       email,
       password,
@@ -132,11 +139,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const removeStoredSession = persistedSessionRemover();
     const serverAtStart = getServerVersion();
     const serverUrlAtStart = getSupabaseClientUrl();
+    const storageKeyAtStart = currentSessionStorageKey();
     const signInsAtStart = signInsRef.current;
 
     await runBeforeSessionEnd();
-    const outcome = await endSessionOnDevice(client, removeStoredSession);
-    if (outcome === "incomplete") reportSignOutIncomplete(serverUrlAtStart);
+    const outcome = await endSessionOnDevice(client, removeStoredSession, {
+      stillCurrent: () => getServerVersion() === serverAtStart,
+    });
+    if (outcome === "incomplete") {
+      // The stored session survived every delete: refuse it from now on, so
+      // a restart cannot restore the previous person.
+      if (storageKeyAtStart) await blockStoredSession(storageKeyAtStart);
+      reportSignOutIncomplete(serverUrlAtStart);
+    }
 
     // A forced sign-out emits no auth event, so the state is cleared here,
     // unless someone signed in or the server changed while it ran.

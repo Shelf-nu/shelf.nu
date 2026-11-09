@@ -18,6 +18,8 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
+  blockStoredSession,
+  currentSessionStorageKey,
   getSupabase,
   persistedSessionRemover,
   rebuildSupabase,
@@ -224,7 +226,16 @@ async function clearServerScopedState(): Promise<void> {
  */
 async function endSessionOnOutgoingClient(): Promise<void> {
   await runBeforeSessionEnd();
-  await endSessionOnDevice(getSupabase(), persistedSessionRemover());
+  const storageKey = currentSessionStorageKey();
+  const outcome = await endSessionOnDevice(
+    getSupabase(),
+    persistedSessionRemover()
+  );
+  // The stored session survived every delete: refuse it from now on, so
+  // reconnecting to this server later cannot restore it.
+  if (outcome === "incomplete" && storageKey) {
+    await blockStoredSession(storageKey);
+  }
 }
 
 /**

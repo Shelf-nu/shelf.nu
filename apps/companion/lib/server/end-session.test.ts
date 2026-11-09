@@ -117,6 +117,51 @@ describe("endSessionOnDevice", () => {
     assert.equal(stopped, false);
   });
 
+  it("treats a session check that errors as still stored", async () => {
+    const { client, removeStored } = stubClient("error", "error");
+    let deletes = 0;
+    client.auth.getSession = async () => ({
+      data: { session: null },
+      error: new Error("refresh failed"),
+    });
+
+    const outcome = await endSessionOnDevice(client, async () => {
+      deletes += 1;
+      await removeStored();
+    });
+
+    assert.equal(outcome, "incomplete");
+    assert.equal(deletes, 3);
+  });
+
+  it("caps a session check that hangs and counts it as still stored", async () => {
+    const { client, removeStored } = stubClient("error", "error");
+    client.auth.getSession = () => new Promise(() => {});
+
+    const started = Date.now();
+    const outcome = await endSessionOnDevice(client, removeStored, {
+      checkTimeoutMs: 10,
+    });
+
+    assert.equal(outcome, "incomplete");
+    assert.ok(Date.now() - started < 1_000);
+  });
+
+  it("skips the after-session-end tasks when another session replaced it", async () => {
+    const { client, removeStored } = stubClient("error", "ok");
+    let runs = 0;
+    const unregister = onAfterSessionEnd(() => {
+      runs += 1;
+    });
+
+    await endSessionOnDevice(client, removeStored, {
+      stillCurrent: () => false,
+    });
+    unregister();
+
+    assert.equal(runs, 0);
+  });
+
   it("never rejects, and reports incomplete when every delete fails", async () => {
     const { client } = stubClient("throw", "throw");
     let deletes = 0;
