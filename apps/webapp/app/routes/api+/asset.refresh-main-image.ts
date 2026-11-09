@@ -158,9 +158,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSesssion;
 
   try {
-    // Only `assetId` is read from the request, and only it reaches the
-    // parser: the file to sign always comes from the asset row below, so no
-    // query value can reach the service-role signer or a logged error.
+    // Only `assetId` is read from the query, and only it reaches the parser
+    // and the error log. The file to sign always comes from the asset row
+    // below, never from the request.
     const { assetId } = parseData(
       { assetId: url.searchParams.get("assetId") ?? undefined },
       z.object({ assetId: z.string() })
@@ -190,6 +190,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // This is an expected scenario when asset is deleted while page is still open
     if (!asset) {
       return data(payload({ asset: null }));
+    }
+
+    // Nothing stored means nothing to re-sign. Writing anyway would put `null`
+    // over an image uploaded since this row was read.
+    if (!asset.mainImage && !asset.thumbnailImage) {
+      return data(payload({ asset }));
     }
 
     // Sign the file the asset row names, scoped to the caller's organization

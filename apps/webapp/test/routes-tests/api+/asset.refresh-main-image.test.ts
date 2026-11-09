@@ -133,6 +133,8 @@ describe("asset main image refresh loader", () => {
     );
 
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    // An image uploaded since the row was read must not be overwritten.
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
   });
 
   it("signs nothing for an asset outside the caller's organization", async () => {
