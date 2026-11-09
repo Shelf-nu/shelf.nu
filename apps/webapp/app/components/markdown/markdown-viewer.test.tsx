@@ -1,7 +1,30 @@
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
+import type * as DateFormatModule from "~/utils/date-format";
 import { MarkdownViewer } from "./markdown-viewer";
+
+// why: the hook reads the user's prefs from the root route loader, which a
+// MemoryRouter does not have. The real pure formatter still runs, so an
+// invalid date throws here exactly as it does on the page.
+vi.mock("~/hooks/use-date-formatter", async () => {
+  const { formatDate } = await vi.importActual<typeof DateFormatModule>(
+    "~/utils/date-format"
+  );
+  const prefs = {
+    dateFormat: "MM_DD_YYYY",
+    timeFormat: "H12",
+    weekStartsOn: 0,
+    timeZone: "UTC",
+  } as const;
+  return {
+    useDateFormatter: () => ({
+      prefs,
+      formatDate: (value: string | Date, opts?: object) =>
+        formatDate(value, prefs as never, opts),
+    }),
+  };
+});
 
 // why: internal links render through `Button`, which is a react-router `Link`.
 const renderNote = (content: string, allowExternalLinks = false) =>
@@ -15,6 +38,27 @@ const renderNote = (content: string, allowExternalLinks = false) =>
   );
 
 describe("MarkdownViewer", () => {
+  describe("date tags", () => {
+    it("renders an unparseable date tag as its raw text instead of throwing", () => {
+      // A stored comment can carry any value in a `date` tag; formatting an
+      // invalid date throws, which would take down the page around the note.
+      const { getByText } = renderNote(
+        'Due {% date value="not-a-date" /%} please.'
+      );
+
+      expect(getByText("not-a-date")).toBeVisible();
+    });
+
+    it("still formats a valid date tag", () => {
+      const { queryByText, container } = renderNote(
+        '{% date value="2024-01-15T10:30:00.000Z" includeTime=false /%}'
+      );
+
+      expect(queryByText("2024-01-15T10:30:00.000Z")).toBeNull();
+      expect(container.textContent).toMatch(/2024/);
+    });
+  });
+
   describe("system note content (no external links)", () => {
     // These strings are shaped like real system notes: our own wrapper output
     // with a user-controlled entity name spliced into it. The name is the

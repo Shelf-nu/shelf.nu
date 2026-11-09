@@ -10,15 +10,26 @@ import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 
+/**
+ * Schema for a user-written note or comment.
+ *
+ * Notes render through Markdoc, so a `{%` / `%}` typed by a user would become
+ * a live tag for everyone who views the note (a forged status badge, or a
+ * `date` tag that breaks the page). The editor never produces those
+ * delimiters, so they are stripped before the length check and the stored
+ * content only ever carries markdown.
+ */
 export const MarkdownNoteSchema = z.object({
   content: z
     .string()
-    .min(3, "Content is required")
     .max(
       NOTE_MAX_CONTENT_LENGTH,
       `Note must be ${NOTE_MAX_CONTENT_LENGTH} characters or fewer`
-    ),
+    )
+    .transform(stripMarkdocDelimiters)
+    .pipe(z.string().min(3, "Content is required")),
 });
 
 interface MarkdownNoteFormProps {
