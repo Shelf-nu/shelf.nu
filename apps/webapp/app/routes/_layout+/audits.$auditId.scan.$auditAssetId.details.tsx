@@ -50,6 +50,7 @@ import {
   requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -179,6 +180,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: true,
         imageUrl: true,
         thumbnailUrl: true,
+        capturedAt: true,
+        captureSource: true,
+        createdAt: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -451,6 +455,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 
@@ -594,6 +601,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 

@@ -33,6 +33,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -173,7 +174,7 @@ export function QuantityInputSheet({
 
   const [value, setValue] = useState("1");
   const [secondaryValue, setSecondaryValue] = useState("0");
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   const hasSecondaryField = secondary != null;
 

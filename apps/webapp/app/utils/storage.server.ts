@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "./constants";
+import { createFileFromAsyncIterable } from "./create-buffer-from-async-iterable";
 import { cropImage } from "./crop-image";
 import { delay } from "./delay";
 import { SUPABASE_URL } from "./env";
@@ -283,15 +284,22 @@ export async function uploadFile(
     generateThumbnail = false,
     thumbnailSize = 108, // Default thumbnail size
     upsert = false,
+    inspectOriginal,
   }: UploadOptions & {
     generateThumbnail?: boolean;
     thumbnailSize?: number;
     upsert?: boolean;
+    inspectOriginal?: InspectOriginal;
   }
 ): Promise<string | { originalPath: string; thumbnailPath: string }> {
   try {
     // Process original image
-    const file = await cropImage(fileData, resizeOptions);
+    const file = await cropImage(
+      inspectOriginal
+        ? await withOriginalInspected(fileData, inspectOriginal)
+        : fileData,
+      resizeOptions
+    );
 
     // Upload original file
     const { data, error } = await getSupabaseAdmin()
@@ -307,19 +315,12 @@ export async function uploadFile(
       const thumbFilename = getThumbnailStoragePath(filename);
 
       // Create thumbnail version with Sharp
-      const thumbnailFile = await cropImage(
-        // Convert Buffer back to AsyncIterable for consistency
-        (async function* () {
-          await Promise.resolve(); // Satisfy eslint requirement
-          yield new Uint8Array(file);
-        })(),
-        {
-          width: thumbnailSize,
-          height: thumbnailSize,
-          fit: "cover",
-          withoutEnlargement: true,
-        }
-      );
+      const thumbnailFile = await cropImage(file, {
+        width: thumbnailSize,
+        height: thumbnailSize,
+        fit: "cover",
+        withoutEnlargement: true,
+      });
 
       // Upload thumbnail
       const { data: thumbData, error: thumbError } = await getSupabaseAdmin()
@@ -353,6 +354,50 @@ export async function uploadFile(
   }
 }
 
+/**
+ * Reads the uploaded file exactly as it arrived, before `cropImage` rotates,
+ * resizes and re-encodes it (which drops metadata such as EXIF).
+ */
+export type InspectOriginal = (original: Buffer) => Promise<void> | void;
+
+/**
+ * {@link InspectOriginal} for a multipart upload: also told which form field
+ * the file came in, so a caller can read only the part it stores.
+ */
+export type InspectUploadedOriginal = (
+  original: Buffer,
+  upload: { fieldName: string | undefined }
+) => Promise<void> | void;
+
+/**
+ * Buffers an upload, hands the bytes to `inspect`, and returns the same
+ * buffer for `cropImage`, so the upload is held in memory once.
+ *
+ * @param fileData - The upload as it streams in
+ * @param inspect - Reads the original bytes; a failure here is the caller's to
+ *   handle and never stops the upload
+ * @returns The bytes as uploaded
+ */
+async function withOriginalInspected(
+  fileData: AsyncIterable<Uint8Array>,
+  inspect: InspectOriginal
+): Promise<Buffer> {
+  const original = await createFileFromAsyncIterable(fileData);
+
+  // why: only a format `cropImage` accepts reaches an inspector. The upload
+  // handler admits any image/* type, and the image libraries behind an
+  // inspector must not parse bytes the upload is about to refuse.
+  if (detectImageFormat(original)) {
+    try {
+      await inspect(original);
+    } catch (cause) {
+      Logger.warn({ message: "Could not inspect an uploaded file", cause });
+    }
+  }
+
+  return original;
+}
+
 export interface UploadOptions {
   bucketName: string;
   filename: string;
@@ -369,6 +414,7 @@ export async function parseFileFormData({
   generateThumbnail = false,
   thumbnailSize = 108,
   maxFileSize = DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  inspectOriginal,
 }: {
   request: Request;
   newFileName: string;
@@ -377,6 +423,8 @@ export async function parseFileFormData({
   generateThumbnail?: boolean;
   thumbnailSize?: number;
   maxFileSize?: number;
+  /** Reads each image file as uploaded, before it is resized and re-encoded */
+  inspectOriginal?: InspectUploadedOriginal;
 }) {
   try {
     const uploadHandler = async (upload: any) => {
@@ -418,6 +466,10 @@ export async function parseFileFormData({
         resizeOptions,
         generateThumbnail,
         thumbnailSize,
+        inspectOriginal: inspectOriginal
+          ? (original) =>
+              inspectOriginal(original, { fieldName: upload?.fieldName })
+          : undefined,
       });
 
       // For profile pictures and other cases that don't need thumbnails,

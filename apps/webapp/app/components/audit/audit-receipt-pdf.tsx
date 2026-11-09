@@ -7,6 +7,7 @@ import {
   auditCountLabel,
   isAuditCompleted,
 } from "@shelf/labels";
+import { AUDIT_PHOTO_KEY } from "@shelf/labels";
 import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
@@ -17,6 +18,7 @@ import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
+import { AuditPhotoPrintCaption } from "./audit-photo";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
 import { AssetCodePrintImage } from "../assets/asset-code-print-image";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
@@ -481,6 +483,9 @@ export const AuditPDFContent = ({
       <When truthy={hasFindings}>
         <section className="mb-5">
           <h2 className="mb-2 text-lg font-medium">Findings</h2>
+          <When truthy={generalImages.length + assetImages.length > 0}>
+            <p className="mb-2 text-[10px] text-gray-600">{AUDIT_PHOTO_KEY}</p>
+          </When>
 
           {/* About the audit as a whole — completion note and its photos. */}
           <When truthy={generalNotes.length > 0 || generalImages.length > 0}>
@@ -515,6 +520,9 @@ export const AuditPDFContent = ({
                         alt={img.description || "Audit image"}
                         className="h-24 w-full object-cover"
                       />
+                      <div className="mt-1 text-[10px] leading-tight text-gray-700">
+                        <AuditPhotoPrintCaption image={img} />
+                      </div>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">
                           {img.description}
@@ -562,6 +570,9 @@ export const AuditPDFContent = ({
                         alt={img.description || `Photo of ${assetName}`}
                         className="h-24 w-full object-cover"
                       />
+                      <div className="mt-1 text-[10px] leading-tight text-gray-700">
+                        <AuditPhotoPrintCaption image={img} />
+                      </div>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">
                           {img.description}

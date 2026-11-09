@@ -1,6 +1,5 @@
 import type { Location } from "@prisma/client";
 import {
-  wrapAssetsWithDataForNote,
   wrapKitsWithDataForNote,
   wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -58,18 +57,6 @@ export function safeDisplay(value?: string | null) {
 export function formatLocationLink(location: Pick<Location, "id" | "name">) {
   const name = safeDisplay(location.name);
   return wrapLinkForNote(`/locations/${location.id}`, name);
-}
-
-/** Builds a formatted list of assets for activity notes */
-export function buildAssetListMarkup(
-  assets: Array<{ id: string; title: string }>,
-  action: "added" | "removed"
-) {
-  const sanitized = assets.map((a) => ({
-    id: a.id,
-    title: safeDisplay(a.title),
-  }));
-  return wrapAssetsWithDataForNote(sanitized, action);
 }
 
 /** Builds a formatted list of kits for activity notes */

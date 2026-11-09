@@ -127,6 +127,7 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
                     text={value}
                     style={styles.customFieldStackedValue}
                     numberOfLines={3}
+                    bareDomains={false}
                   />
                 )}
               </View>

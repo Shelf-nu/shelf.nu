@@ -30,8 +30,12 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
+import { useCentredSheetSpan } from "@/lib/use-safe-edges";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
+import { AuditPhotoCaption } from "@/components/audit/audit-photo-caption";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
+import { describeAuditPhotoForUser } from "@/lib/audit-photo-description";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -68,15 +72,23 @@ export function EvidenceViewer({
 }: EvidenceViewerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  // Held to the column and centred between the side insets, so a Duo's rail
+  // or a turned foldable's camera cutout never covers the sheet.
+  const sheetSpan = useCentredSheetSpan(CONTENT_MAX_WIDTH);
   // why: the workspace's own date format — the same hook every other audit
   // surface uses, so a completed audit does not suddenly render dates
   // differently from the screen that opened it.
-  const { formatDateTime } = useDateFormatter();
+  const formatter = useDateFormatter();
+  const { formatDateTime } = formatter;
 
   const renderNote = useCallback(
     (note: AuditEvidenceNote) => (
       <View key={note.id} style={styles.note}>
-        <Text style={styles.noteContent}>{note.content}</Text>
+        <LinkedParagraph
+          text={note.content}
+          style={styles.noteContent}
+          onLeave={onClose}
+        />
         <Text style={styles.noteMeta}>
           {/* why: the account can be deleted while its evidence survives, so
               the author is nullable. Naming the gap beats an empty gap. */}
@@ -84,7 +96,7 @@ export function EvidenceViewer({
         </Text>
       </View>
     ),
-    [styles, formatDateTime]
+    [styles, formatDateTime, onClose]
   );
 
   const isEmpty =
@@ -98,7 +110,7 @@ export function EvidenceViewer({
       onRequestClose={onClose}
     >
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, sheetSpan]}>
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
               {title}
@@ -150,32 +162,38 @@ export function EvidenceViewer({
                       : `${images.length} photos`}
                   </Text>
                   <View style={styles.grid}>
-                    {images.map((image) => (
-                      <TouchableOpacity
-                        key={image.id}
-                        activeOpacity={onImagePress ? 0.7 : 1}
-                        onPress={
-                          onImagePress ? () => onImagePress(image) : undefined
-                        }
-                        accessibilityRole={onImagePress ? "button" : "image"}
-                        accessibilityLabel={
-                          image.description
-                            ? `Photo: ${image.description}`
-                            : `Photo by ${image.authorName ?? "Unknown"}`
-                        }
-                      >
-                        <Image
-                          source={{ uri: image.thumbnailUrl }}
-                          style={styles.thumb}
-                          contentFit="cover"
-                        />
-                        {image.description ? (
-                          <Text style={styles.caption} numberOfLines={2}>
-                            {image.description}
-                          </Text>
-                        ) : null}
-                      </TouchableOpacity>
-                    ))}
+                    {images.map((image) => {
+                      const photo = describeAuditPhotoForUser(image, formatter);
+                      return (
+                        <TouchableOpacity
+                          key={image.id}
+                          activeOpacity={onImagePress ? 0.7 : 1}
+                          onPress={
+                            onImagePress ? () => onImagePress(image) : undefined
+                          }
+                          accessibilityRole={onImagePress ? "button" : "image"}
+                          accessibilityLabel={`${
+                            image.description
+                              ? `Photo: ${image.description}`
+                              : `Photo by ${image.authorName ?? "Unknown"}`
+                          }. ${photo.detail}${
+                            photo.flagLabel ? `. ${photo.flagLabel}` : ""
+                          }`}
+                        >
+                          <Image
+                            source={{ uri: image.thumbnailUrl }}
+                            style={styles.thumb}
+                            contentFit="cover"
+                          />
+                          <AuditPhotoCaption description={photo} width={104} />
+                          {image.description ? (
+                            <Text style={styles.caption} numberOfLines={2}>
+                              {image.description}
+                            </Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 </>
               ) : null}
@@ -211,9 +229,7 @@ const useStyles = createStyles((colors) => ({
     // The modal covers the whole window, outside any navigator's content
     // column, so the sheet holds itself to the column: on a tablet it lines
     // up with the screen behind it instead of spanning the window.
-    width: "100%",
-    maxWidth: CONTENT_MAX_WIDTH,
-    alignSelf: "center",
+    // Width and position come from `useCentredSheetSpan` at render time.
   },
   header: {
     flexDirection: "row",

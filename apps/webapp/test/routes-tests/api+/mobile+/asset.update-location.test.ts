@@ -28,6 +28,9 @@ vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findUnique: vi.fn() },
     location: { findFirst: vi.fn() },
+    // why: the location activity log lines are this route's output under
+    // test, asserted from the rows handed to `createMany`.
+    locationNote: { createMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -644,5 +647,166 @@ describe("POST /api/mobile/asset/update-location", () => {
       "nothing moved, so the note must not describe a journey"
     ).not.toMatch(/moved .* from .* to /);
     expect(note).toContain("changed the quantity");
+  });
+});
+
+describe("location activity log", () => {
+  const actor =
+    '{% link to="/settings/team/users/user-1" text="Carla Tester" /%}';
+  const cords = '{% link to="/assets/asset-1" text="Cords" /%}';
+  const storage = '{% link to="/locations/loc-storage" text="Storage" /%}';
+  const van = '{% link to="/locations/loc-van" text="Van" /%}';
+
+  /** Every LocationNote row the action wrote, in write order. */
+  function locationNoteRows() {
+    return vi
+      .mocked(db.locationNote.createMany)
+      .mock.calls.flatMap(([args]) => args?.data ?? []);
+  }
+
+  /** Builds the row the route hands to `createMany`. */
+  const row = (locationId: string, content: string) => ({
+    locationId,
+    type: "UPDATE",
+    userId: "user-1",
+    content,
+  });
+
+  /** Seeds the asset's manual placements, as read under the lock. */
+  function placedAt(rows: Array<[string, string, number]>) {
+    const placements = rows.map(([id, name, quantity]) => ({
+      quantity,
+      location: { id, name },
+    }));
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({ assetLocations: placements }) as never
+    );
+    tx.assetLocation.findMany.mockResolvedValue(placements);
+  }
+
+  it("names the units that moved and the units left unplaced", async () => {
+    // 10 at Storage, 4 placed at the Van: 4 moved, 6 are now unplaced.
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(locationNoteRows()).toEqual([
+      row(
+        "loc-van",
+        `${actor} added 4 pcs of ${cords} to ${van}. Moved from ${storage}.`
+      ),
+      row(
+        "loc-storage",
+        `${actor} removed 4 pcs of ${cords} from ${storage}. Moved to ${van}.`
+      ),
+      row("loc-storage", `${actor} removed 6 pcs of ${cords} from ${storage}.`),
+    ]);
+  });
+
+  it("leaves a location out when its amount does not change", async () => {
+    // 6 at Storage and 4 at the Van; 4 placed at the Van. The Van keeps its 4.
+    placedAt([
+      ["loc-storage", "Storage", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(locationNoteRows()).toEqual([
+      row("loc-storage", `${actor} removed 6 pcs of ${cords} from ${storage}.`),
+    ]);
+  });
+
+  it("takes the units added to a location from the unplaced pool", async () => {
+    // Only 4 at the Van; the full pool of 10 is placed there.
+    placedAt([["loc-van", "Van", 4]]);
+
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(locationNoteRows()).toEqual([
+      row("loc-van", `${actor} added 6 pcs of ${cords} to ${van}.`),
+    ]);
+  });
+
+  it("reads the placements oldest first, so the result does not depend on row order", async () => {
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(tx.assetLocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      })
+    );
+  });
+
+  it("logs a removal on every placement the replace collapsed", async () => {
+    const placements = [
+      { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+      { quantity: 4, location: { id: "loc-van", name: "Van" } },
+    ];
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({ assetLocations: placements }) as never
+    );
+    tx.assetLocation.findMany.mockResolvedValue(placements);
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+      quantity: 6,
+    });
+
+    expect(locationNoteRows()).toEqual([
+      {
+        locationId: "loc-van",
+        type: "UPDATE",
+        userId: "user-1",
+        content: `${actor} removed 4 pcs of ${cords} from ${van}.`,
+      },
+    ]);
+  });
+
+  it("does not log a removal from the location the asset is moved to", async () => {
+    // 6 at Storage and 4 at the Van; the full pool of 10 goes to the Van.
+    placedAt([
+      ["loc-storage", "Storage", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(locationNoteRows()).toEqual([
+      row(
+        "loc-van",
+        `${actor} added 6 pcs of ${cords} to ${van}. Moved from ${storage}.`
+      ),
+      row(
+        "loc-storage",
+        `${actor} removed 6 pcs of ${cords} from ${storage}. Moved to ${van}.`
+      ),
+    ]);
+  });
+
+  it("writes nothing when the request moves nothing", async () => {
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+      quantity: 10,
+    });
+
+    expect(locationNoteRows()).toEqual([]);
   });
 });

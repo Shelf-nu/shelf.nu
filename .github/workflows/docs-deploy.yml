@@ -1,11 +1,13 @@
 name: 📚 Deploy Docs
 
 on:
+  # CONTRIBUTING.md is included into apps/docs/contributing.md, so a change to
+  # it alone must rebuild the docs too.
   push:
     branches: [main]
-    paths: [apps/docs/**]
+    paths: [apps/docs/**, CONTRIBUTING.md]
   pull_request:
-    paths: [apps/docs/**]
+    paths: [apps/docs/**, CONTRIBUTING.md]
 
 jobs:
   deploy:

@@ -2,7 +2,7 @@
  * The Code column of the booking checklist PDF.
  *
  * The checklist is printed and carried around a warehouse, so each row has to
- * carry the identifier the picker reads off the shelf. A document of QR images
+ * carry the identifier the picker reads off the shelf. A template of QR images
  * alone leaves a SAM ID workspace translating every row by hand.
  *
  * These tests are about what ends up ON PAPER: that the code is printed, that
@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ASSET_IMAGE_PLACEHOLDER } from "~/modules/asset/image-resolution";
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
-import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-document/config";
+import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-template/config";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -143,7 +143,7 @@ function renderPreview(args: Parameters<typeof pdfMetaWith>[0]) {
     <BookingPDFPreview
       componentRef={{ current: null }}
       pdfMeta={pdfMetaWith(args)}
-      pdfDocument={CHECKLIST}
+      pdfTemplate={CHECKLIST}
     />
   );
 }
@@ -177,7 +177,7 @@ describe("booking checklist PDF — Code column", () => {
     });
 
     // why: `getByText` alone would pass if the code were printed in the Name
-    // column, or anywhere else on the document. The column is the claim.
+    // column, or anywhere else on the PDF. The column is the claim.
     expect(codeCell()).toHaveTextContent("SAM-0001");
   });
 
@@ -246,9 +246,9 @@ describe("booking checklist PDF — Code column", () => {
   });
 
   it("prints no QR image when the workspace turned them off", () => {
-    // why: the document carries the same codes as the labels on the equipment, so
+    // why: the template carries the same codes as the labels on the equipment, so
     // a workspace that wants people scanning the item itself has to be able to
-    // stop the document being scannable. The code stays: the row still has to be
+    // stop the template being scannable. The code stays: the row still has to be
     // matchable by eye, which is the whole point of turning the image off.
     renderPreview({
       displayCode: {
@@ -266,7 +266,7 @@ describe("booking checklist PDF — Code column", () => {
   });
 
   it("keeps the pick-off checkbox when the QR image is off", () => {
-    // why: the tick box is how a picker works the document; hiding the image must
+    // why: the tick box is how a picker works the template; hiding the image must
     // not take it with it.
     renderPreview({
       displayCode: {
@@ -285,7 +285,7 @@ describe("booking checklist PDF — Code column", () => {
   });
 
   it("keeps a named pick-off checkbox in the code cell", () => {
-    // why: one document carries a checkbox per row, so the name has to say WHICH
+    // why: one template carries a checkbox per row, so the name has to say WHICH
     // asset is being ticked or a screen reader reads a column of bare boxes.
     renderPreview({
       displayCode: {
@@ -353,7 +353,7 @@ describe("booking checklist PDF: the code picture", () => {
 
   it("prints the Shelf QR square, clear of the code text under it", () => {
     // why: the Shelf QR has no quiet zone of its own, so the space under it
-    // has to come from the document or the code text sits in the scanner's way.
+    // has to come from the template or the code text sits in the scanner's way.
     renderPreview({
       displayCode: {
         value: "SAM-0001",
@@ -438,7 +438,7 @@ describe("booking checklist PDF: the code picture", () => {
 
 describe("booking checklist PDF: photos", () => {
   it("never lazy-loads a photo", () => {
-    // why: the document is printed from a copy of the page, and a lazy photo
+    // why: the template is printed from a copy of the page, and a lazy photo
     // below the fold has not loaded when the copy is taken.
     const { container } = renderPreview({
       displayCode: CODE128_CODE,
@@ -532,7 +532,7 @@ describe("booking checklist PDF: layout", () => {
       <BookingPDFPreview
         componentRef={{ current: null }}
         pdfMeta={pdfMeta}
-        pdfDocument={CHECKLIST}
+        pdfTemplate={CHECKLIST}
       />
     );
 

@@ -13,8 +13,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -44,7 +43,7 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { ExpandableText } from "@/components/shared/expandable-text";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import { AuditDetailSkeleton } from "@/components/skeleton-loader";
 import { useReducedMotion, announce } from "@/lib/a11y";
 import { isArchivedAsset } from "@/lib/archived-assets";
@@ -1032,11 +1031,10 @@ function AuditDetailContent({ id }: { id: string }) {
               </View>
 
               {audit.description ? (
-                <ExpandableText
+                <LinkedParagraph
                   key={audit.id}
                   text={audit.description}
-                  label="description"
-                  numberOfLines={3}
+                  expandable={{ label: "description", numberOfLines: 3 }}
                   style={styles.description}
                   testID="audit-description"
                 />
@@ -1418,7 +1416,7 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: spacing.md,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.overlayDark,
     justifyContent: "center",
     alignItems: "center",
