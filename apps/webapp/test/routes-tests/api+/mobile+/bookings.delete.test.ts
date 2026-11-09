@@ -83,12 +83,9 @@ function post() {
  * Acts as a member holding `roles`: the context carries them and the
  * permission gate answers with the real matrix (403 when the grant is missing).
  */
-function actAs(
-  roles: OrganizationRoles[],
-  workspace: Parameters<typeof mobileUserContext>[0]["workspace"] = {}
-) {
+function actAs(roles: OrganizationRoles[]) {
   vi.mocked(getMobileUserContext).mockResolvedValue(
-    mobileUserContext({ roles, workspace }) as never
+    mobileUserContext({ roles }) as never
   );
   vi.mocked(requireMobilePermission).mockImplementation((async ({
     entity,
