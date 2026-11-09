@@ -388,6 +388,17 @@ describe("getAssetModels", () => {
     expect(result.totalAssetModels).toBe(150);
   });
 
+  it("does not look up a model for an asset without one", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(0);
+
+    await getAssetModels({ organizationId: "org-123", includeId: null });
+
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+  });
+
   it("does not fetch the included model again when it is on the page", async () => {
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue([
