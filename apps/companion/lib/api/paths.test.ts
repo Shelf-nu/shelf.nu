@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { mobilePaths, pathSegment } from "./paths";
+import { INVALID_ID_SEGMENT, mobilePaths, pathSegment } from "./paths";
 
 /** Ids that would reshape a path or query if spliced in raw. */
 const RESHAPING_IDS = [
@@ -32,6 +32,27 @@ function parse(path: string) {
 describe("pathSegment", () => {
   it("leaves a plain id unchanged", () => {
     assert.equal(pathSegment("clx1abc_DEF-2"), "clx1abc_DEF-2");
+  });
+
+  it("never lets an empty or dot id leave its segment", () => {
+    for (const id of ["", ".", ".."]) {
+      assert.equal(pathSegment(id), INVALID_ID_SEGMENT, JSON.stringify(id));
+      const { segments } = parse(mobilePaths.audit(id, "org_1"));
+      assert.deepEqual(segments, [
+        "api",
+        "mobile",
+        "audits",
+        INVALID_ID_SEGMENT,
+      ]);
+      const evidence = parse(mobilePaths.auditEvidence(id, "org_1"));
+      assert.deepEqual(evidence.segments, [
+        "api",
+        "mobile",
+        "audits",
+        INVALID_ID_SEGMENT,
+        "evidence",
+      ]);
+    }
   });
 
   it("encodes every reserved character", () => {
@@ -80,6 +101,17 @@ describe("mobilePaths", () => {
       });
     }
   }
+
+  it("leaves an omitted evidence filter out of the query", () => {
+    assert.equal(
+      mobilePaths.auditEvidence("au_1", "org_1"),
+      "/api/mobile/audits/au_1/evidence?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.auditEvidence("au_1", "org_1", null),
+      "/api/mobile/audits/au_1/evidence?orgId=org_1"
+    );
+  });
 
   it("keeps the endpoint suffix after the id", () => {
     assert.equal(

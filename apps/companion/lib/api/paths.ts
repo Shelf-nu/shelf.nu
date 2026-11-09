@@ -20,13 +20,26 @@
  */
 
 /**
+ * The segment sent in place of an id that cannot be one: it names no record,
+ * so the request comes back "not found".
+ */
+export const INVALID_ID_SEGMENT = "invalid-id";
+
+/**
  * Encodes one value as a single path segment.
+ *
+ * An empty id, `.` or `..` would not stay a segment: URL parsing drops or
+ * resolves them (percent-encoded dots included), so the request would reach
+ * the parent path. Those are sent as {@link INVALID_ID_SEGMENT} instead.
  *
  * @param value - A record id
  * @returns The id with every reserved character (`/`, `?`, `#`, `&`, `%`)
- *   percent-encoded
+ *   percent-encoded, or {@link INVALID_ID_SEGMENT}
  */
 export function pathSegment(value: string): string {
+  if (value === "" || value === "." || value === "..") {
+    return INVALID_ID_SEGMENT;
+  }
   return encodeURIComponent(value);
 }
 
