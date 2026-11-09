@@ -100,11 +100,12 @@ export default function BulkAddToAuditDialog() {
                 </div>
               </>
             ) : !isLoading && data?.audits?.length === 0 ? (
-              // Empty state - no pending audits
+              // Empty state. Members limited to assigned audits only get
+              // their own, so the copy must hold for them too.
               <>
                 <div className="mb-6 rounded-md border border-gray-200 bg-gray-50 p-4">
                   <p className="text-sm text-gray-600">
-                    There are no pending audits.
+                    There are no pending audits you can add assets to.
                   </p>
                 </div>
                 <div className="flex gap-3">
