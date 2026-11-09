@@ -140,6 +140,7 @@ vitest.mock("~/utils/error", () => ({
 
 import {
   getMobileUserContext,
+  requireActiveMobileMembership,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -477,6 +478,24 @@ describe("GET /api/mobile/qr/:qrId", () => {
     expect((result as unknown as Response).status).toBe(200);
     const body = await (result as unknown as Response).json();
     expect(body.qr.asset.id).toBe("asset-1");
+  });
+
+  it("refuses a code whose workspace is inactive with a 403 and its message, recording nothing", async () => {
+    const message =
+      "This workspace is inactive because its subscription has expired.";
+    const inactiveError = Object.assign(new Error(message), { status: 403 });
+    (requireActiveMobileMembership as any).mockRejectedValueOnce(inactiveError);
+    (makeShelfError as any).mockReturnValue({ message, status: 403 });
+
+    const result = await run(createQrRequest());
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(await (result as unknown as Response).json()).toEqual({
+      error: { message },
+    });
+    expect(makeShelfError).toHaveBeenCalledWith(inactiveError);
+    expect(db.asset.findFirst).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
   it("handles auth errors from requireMobileAuth", async () => {
