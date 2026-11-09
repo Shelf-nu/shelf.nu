@@ -8,7 +8,7 @@
  * @see POST /api/mobile/audits/image - Upload photo with optional note
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -39,6 +39,8 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useCentredSheetSpan } from "@/lib/use-safe-edges";
 import type { ScannedItem } from "@/hooks/use-audit-init";
+import { LinkedText } from "@/components/links/linked-text";
+import { hasUnsentEvidence } from "@/lib/audit-evidence-draft";
 
 // Lazy-load native image modules below all imports (keeps import/first happy)
 // to avoid a crash when the native module isn't present in the current build.
@@ -259,6 +261,71 @@ export function EvidenceModal({
     resetState();
     onClose();
   }, [onClose, resetState]);
+
+  /**
+   * Leaving for a link's app screen closes this sheet and drops what is
+   * being added, so a note or photo not yet sent asks first: "Keep editing"
+   * stays here with the draft as it was. While a note or photo is saving,
+   * the link waits: the sheet stays until the save has answered.
+   */
+  /**
+   * The draft and saving state as of the last render, read by
+   * `leaveForLink` so the handler keeps one identity while the auditor types
+   * (every link in the sheet's notes would re-render otherwise).
+   */
+  const draftRef = useRef({
+    noteText,
+    selectedImageUri,
+    saving: isSubmittingNote || isSubmittingImage,
+  });
+  useEffect(() => {
+    draftRef.current = {
+      noteText,
+      selectedImageUri,
+      saving: isSubmittingNote || isSubmittingImage,
+    };
+  }, [noteText, selectedImageUri, isSubmittingNote, isSubmittingImage]);
+
+  const leaveForLink = useCallback((): Promise<boolean> => {
+    const draft = draftRef.current;
+    if (draft.saving) {
+      // why: the save carries on after the sheet closes, so leaving now
+      // would add evidence the auditor could no longer see or undo here.
+      Alert.alert(
+        "Still saving",
+        "Wait until your note or photo is added, then open the link."
+      );
+      return Promise.resolve(false);
+    }
+    if (!hasUnsentEvidence(draft.noteText, draft.selectedImageUri)) {
+      handleClose();
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      Alert.alert(
+        "Discard your note?",
+        "Opening this link closes the audit sheet. The note or photo you have not added yet will be lost.",
+        [
+          {
+            text: "Keep editing",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Discard and open",
+            style: "destructive",
+            onPress: () => {
+              handleClose();
+              resolve(true);
+            },
+          },
+        ],
+        // why: Android dismisses the alert on a tap outside it without
+        // calling any button; that counts as staying.
+        { cancelable: true, onDismiss: () => resolve(false) }
+      );
+    });
+  }, [handleClose]);
 
   const handleSubmitNote = useCallback(async () => {
     if (!item?.auditAssetId || !currentOrg || !noteText.trim()) return;
@@ -547,7 +614,11 @@ export function EvidenceModal({
 
                 {existing.notes.map((note) => (
                   <View key={note.id} style={styles.existingNote}>
-                    <Text style={styles.existingNoteText}>{note.content}</Text>
+                    <LinkedText
+                      text={note.content}
+                      style={styles.existingNoteText}
+                      onLeave={leaveForLink}
+                    />
                     <Text style={styles.existingNoteMeta}>
                       {note.authorName ?? "Unknown"}
                     </Text>

@@ -42,7 +42,7 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { ExpandableText } from "@/components/shared/expandable-text";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import { AuditDetailSkeleton } from "@/components/skeleton-loader";
 import { useReducedMotion, announce } from "@/lib/a11y";
 import { isArchivedAsset } from "@/lib/archived-assets";
@@ -1003,11 +1003,10 @@ function AuditDetailContent({ id }: { id: string }) {
               </View>
 
               {audit.description ? (
-                <ExpandableText
+                <LinkedParagraph
                   key={audit.id}
                   text={audit.description}
-                  label="description"
-                  numberOfLines={3}
+                  expandable={{ label: "description", numberOfLines: 3 }}
                   style={styles.description}
                   testID="audit-description"
                 />

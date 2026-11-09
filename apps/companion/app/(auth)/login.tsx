@@ -12,7 +12,6 @@ import {
   ScrollView,
   type TextInputInstance,
 } from "react-native";
-import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
@@ -22,6 +21,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
 import { getApiBaseUrl } from "@/lib/api";
+import { openShelfWebUrl } from "@/lib/navigation";
 import {
   disconnectFromServer,
   getActiveServer,
@@ -169,10 +169,10 @@ export default function LoginScreen() {
   };
 
   /**
-   * Opens the web password-reset flow in an in-app browser — the same
-   * `WebBrowser` session the SSO button uses, so the web takes over *inside* the
-   * app (SFSafariViewController on iOS / Custom Tab on Android) instead of
-   * kicking the user out to the external browser. The web `/forgot-password` OTP
+   * Opens the web password-reset flow in the in-app browser every link uses
+   * (`openShelfWebUrl`), so the web takes over inside the app
+   * (SFSafariViewController on iOS, a Custom Tab on Android) instead of
+   * sending the user out to the external browser. The web `/forgot-password` OTP
    * flow is the source of truth and rejects SSO users server-side; the in-app
    * sheet survives the user switching to their mail app for the code and back.
    */
@@ -196,7 +196,7 @@ export default function LoginScreen() {
       // Awaited inside the lock so it spans the presentation: releasing while
       // the sheet is still opening would let a second tap hit expo-web-browser's
       // "already presenting" rejection and paint a misleading error.
-      await WebBrowser.openBrowserAsync(`${getApiBaseUrl()}/forgot-password`);
+      await openShelfWebUrl(`${getApiBaseUrl()}/forgot-password`);
     } catch {
       setError("Couldn't open the password reset page. Please try again.");
     } finally {
