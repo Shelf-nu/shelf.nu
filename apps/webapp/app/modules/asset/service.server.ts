@@ -2123,15 +2123,10 @@ export async function updateAsset({
     // (no-op here too; the pivot deleteMany happens in the tx below.)
 
     /**
-     * If tags are passed, replace the asset's tags with them. SECURITY
-     * (cross-org IDOR): the ids come from form input and `set` connects them
-     * with no org scoping of its own, so prove they belong to this org first.
+     * If tags are passed, replace the asset's tags with them. Their org
+     * ownership is asserted at the top of the write transaction below.
      */
     if (isTagUpdate) {
-      await assertTagsBelongToOrg({
-        tagIds: (tags?.set ?? []).map((tag) => tag.id),
-        organizationId,
-      });
       Object.assign(data, {
         tags,
       });
@@ -2377,6 +2372,16 @@ export async function updateAsset({
       ReturnType<typeof rehomeCustodyForPlacementChange>
     > | null = null;
     const asset = await db.$transaction(async (tx) => {
+      // SECURITY (cross-org IDOR): the tag ids come from form input and the
+      // `tags.set` in the update below connects them with no org scoping of
+      // its own. Prove they belong to this org inside the write transaction.
+      if (isTagUpdate) {
+        await assertTagsBelongToOrg(
+          { tagIds: (tags?.set ?? []).map((tag) => tag.id), organizationId },
+          tx
+        );
+      }
+
       /** Custody sources before a placement rewrite, for the re-home. */
       let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
         null;
