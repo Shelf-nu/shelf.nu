@@ -10610,12 +10610,40 @@ describe("revertBookingToDraft", () => {
       hints: mockClientHints,
     });
 
+    // Guarded on the status read: a concurrent archive or check-out makes
+    // the write match nothing.
     expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
+      where: { id: "booking-1", status: BookingStatus.RESERVED },
       data: { status: BookingStatus.DRAFT },
       include: expect.any(Object),
     });
     expect(result).toEqual(draftBooking);
+  });
+
+  it("refuses the revert when the booking left RESERVED before the write", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+    });
+    // Archived (or checked out) between the read and the guarded write.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockRejectedValueOnce(
+      Object.assign(new Error("Record to update not found."), {
+        code: "P2025",
+      })
+    );
+
+    await expect(
+      revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("status changed"),
+    });
   });
 
   it("rejects a revert from a non-RESERVED state as a handled 400, not a captured 500 (SHELF-WEBAPP-23W)", async () => {

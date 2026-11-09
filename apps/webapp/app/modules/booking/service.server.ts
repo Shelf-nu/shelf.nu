@@ -10599,6 +10599,33 @@ export async function partialCheckoutBooking({
 
     const result = await db.$transaction(
       async (tx) => {
+        // Authoritative status check, under a row lock held until this
+        // transaction commits. The status read above happens outside it, so a
+        // concurrent archive, cancellation or revert to draft could otherwise
+        // commit in between and this write would land assets out on a closed
+        // booking (or overwrite an ARCHIVED one back to ONGOING/OVERDUE).
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
+        assertBookingIsOpen({
+          status: lockedStatus,
+          operation: "check out",
+          bookingId: id,
+        });
+        if (lockedStatus === BookingStatus.DRAFT) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it out. Reload it and try again.",
+            additionalData: { bookingId: id },
+          });
+        }
+
         /**
          * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
          * row-lock pattern — lock → re-read remaining inside tx → enforce cap →
@@ -11450,8 +11477,10 @@ export async function partialCheckoutBooking({
         }
 
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
+        // Decided on the locked status: a concurrent first scan may already
+        // have moved it on.
         let bookingStatusChanged = false;
-        if (bookingFound.status === BookingStatus.RESERVED) {
+        if (lockedStatus === BookingStatus.RESERVED) {
           // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
           const transitionData: Prisma.BookingUpdateInput = {
             status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
@@ -13254,14 +13283,37 @@ export async function revertBookingToDraft({
       });
     }
 
-    const draftBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
-      where: { id: booking.id },
-      data: { status: BookingStatus.DRAFT },
-      // The custodian (and other notification recipients) are emailed below,
-      // so pull the same payload the other lifecycle emails use.
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    });
+    /**
+     * Guard the write on the RESERVED status just read. If a concurrent archive
+     * or check-out moved the booking on in between, the update matches no row
+     * and the revert is refused, instead of pulling an archived or checked-out
+     * booking back to DRAFT (where its `archivedWithoutCheckin` flag would
+     * linger on a booking that later goes out).
+     */
+    const draftBooking = await db.booking
+      .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id, status: BookingStatus.RESERVED },
+        data: { status: BookingStatus.DRAFT },
+        // The custodian (and other notification recipients) are emailed below,
+        // so pull the same payload the other lifecycle emails use.
+        include: BOOKING_INCLUDE_FOR_EMAIL,
+      })
+      .catch((cause: unknown) => {
+        if (isNotFoundError(cause)) {
+          // `cause: null`: a not-found cause would set the status to 404.
+          throw new ShelfError({
+            cause: null,
+            label,
+            message:
+              "This booking's status changed before it could be reverted to draft. Please refresh and try again.",
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: { id, organizationId },
+          });
+        }
+        throw cause;
+      });
 
     // Add activity log for booking revert to draft
     if (userId) {
