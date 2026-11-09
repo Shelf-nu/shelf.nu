@@ -645,6 +645,16 @@ const AssetFormInner = ({
     };
   }, []);
 
+  /**
+   * The router's navigation, read by a late model lookup: it must not start a
+   * navigation of its own while the form is being saved or the user is
+   * leaving (Cancel, a link), or it would cancel theirs.
+   */
+  const navigationRef = useRef(navigation);
+  useEffect(() => {
+    navigationRef.current = navigation;
+  }, [navigation]);
+
   /** The chosen model's row, used for the inherited-image preview + copy. */
   const selectedAssetModel = findModel(selectedAssetModelId);
 
@@ -723,7 +733,16 @@ const AssetFormInner = ({
       // Picked from search results outside the loaded page: read its defaults
       // first. If they cannot be loaded, continue as for a model without any.
       void loadModel(modelId).then((loaded) => {
-        if (unmountedRef.current || latestModelPickRef.current !== modelId) {
+        const pending = navigationRef.current;
+        const isLeavingOrSaving =
+          pending.state === "submitting" ||
+          (pending.state === "loading" &&
+            pending.location.pathname !== window.location.pathname);
+        if (
+          unmountedRef.current ||
+          isLeavingOrSaving ||
+          latestModelPickRef.current !== modelId
+        ) {
           return;
         }
         applyAssetModelChange(initialModel, loaded);
