@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -629,6 +629,22 @@ const AssetFormInner = ({
   /** The model most recently picked, so a slow fetch for an older pick is dropped. */
   const latestModelPickRef = useRef<string | undefined>(undefined);
 
+  /**
+   * The model whose defaults the form holds now, so the next pick takes back
+   * exactly what it put there, even when a pick in between was still loading.
+   * `null` until the first pick applies.
+   */
+  const appliedModelRef = useRef<FormAssetModel | undefined | null>(null);
+
+  /** Set when the form unmounts, so a late model lookup does not navigate. */
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
   /** The chosen model's row, used for the inherited-image preview + copy. */
   const selectedAssetModel = findModel(selectedAssetModelId);
 
@@ -696,7 +712,9 @@ const AssetFormInner = ({
     // hasn't committed the hidden input update yet) so it would
     // wrongly flash the error.
     setHasPickedAssetModel(Boolean(modelId));
-    const previousModel = findModel(selectedAssetModelId);
+    // Before the first pick, the asset's saved model (edit form) is the one
+    // whose defaults the form reflects.
+    const initialModel = findModel(selectedAssetModelId);
     setSelectedAssetModelId(modelId);
     latestModelPickRef.current = modelId;
 
@@ -705,26 +723,34 @@ const AssetFormInner = ({
       // Picked from search results outside the loaded page: read its defaults
       // first. If they cannot be loaded, continue as for a model without any.
       void loadModel(modelId).then((loaded) => {
-        if (latestModelPickRef.current !== modelId) return;
-        applyAssetModelChange(previousModel, loaded);
+        if (unmountedRef.current || latestModelPickRef.current !== modelId) {
+          return;
+        }
+        applyAssetModelChange(initialModel, loaded);
       });
       return;
     }
-    applyAssetModelChange(previousModel, model);
+    applyAssetModelChange(initialModel, model);
   };
 
   /**
    * Applies a model pick to the form: the pre-fill and the default category.
    *
-   * @param previousModel - The model picked before, whose untouched pre-fill
-   *   and category are taken back.
+   * Reads the URL when it runs, not when the pick happened: a pick that waited
+   * for its model to load must not undo a category chosen in the meantime.
+   *
+   * @param initialModel - The asset's saved model, used as the previous model
+   *   before any pick has applied.
    * @param model - The picked model's row, or `undefined` when cleared.
    */
   const applyAssetModelChange = (
-    previousModel: FormAssetModel | undefined,
+    initialModel: FormAssetModel | undefined,
     model: FormAssetModel | undefined
   ) => {
-    const params = new URLSearchParams(location.search);
+    const previousModel =
+      appliedModelRef.current === null ? initialModel : appliedModelRef.current;
+    appliedModelRef.current = model;
+    const params = new URLSearchParams(window.location.search);
     if (
       previousModel?.defaultCategoryId &&
       params.get("category") === previousModel.defaultCategoryId
@@ -774,7 +800,7 @@ const AssetFormInner = ({
       params.set("category", model.defaultCategoryId);
     }
 
-    void navigate(`${location.pathname}?${params.toString()}`, {
+    void navigate(`${window.location.pathname}?${params.toString()}`, {
       preventScrollReset: true,
       replace: true,
     });
