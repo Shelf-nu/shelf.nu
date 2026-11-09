@@ -9,11 +9,12 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import {
+  endSessionOnDevice,
   getServerVersion,
   runBeforeSessionEnd,
   subscribeToServerChange,
 } from "./server";
-import { getSupabase } from "./supabase";
+import { clearPersistedSession, getSupabase } from "./supabase";
 
 type AuthState = {
   session: Session | null;
@@ -103,9 +104,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // The before-session-end tasks run first, while the token still works: they
   // forget this device for push, so a shared phone stops receiving the
   // previous person's notifications.
+  //
+  // Sign-out always ends the session on the phone, even when the server cannot
+  // be reached: `endSessionOnDevice` falls back to a local teardown and, if
+  // that fails too, deletes the stored session itself. That last step emits no
+  // auth event, so the signed-in state is cleared here as well, which sends the
+  // person to the login screen with nothing to explain.
   const signOut = useCallback(async () => {
     await runBeforeSessionEnd();
-    await getSupabase().auth.signOut();
+    await endSessionOnDevice(getSupabase(), clearPersistedSession);
+    setSession(null);
   }, []);
 
   const value = useMemo(

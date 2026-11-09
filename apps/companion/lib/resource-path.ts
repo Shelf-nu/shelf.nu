@@ -38,6 +38,47 @@ export type ResourceName =
  */
 export type ResourcePath = { resource: ResourceName; id: string | null };
 
+/** Every first segment {@link matchResourcePath} knows. */
+const RESOURCE_SEGMENTS = new Set([
+  "assets",
+  "kits",
+  "bookings",
+  "audits",
+  "qr",
+  "scanner",
+  "scan",
+]);
+
+/**
+ * Whether a first path segment names a resource the app has a screen for.
+ *
+ * @param segment - The first path segment of a link
+ * @returns True for a resource {@link matchResourcePath} matches
+ */
+function isResourceName(segment: string | undefined): boolean {
+  return segment !== undefined && RESOURCE_SEGMENTS.has(segment);
+}
+
+/**
+ * The shape every record id in a link must have: letters, digits, `_` and
+ * `-`, at most 128 characters. Shelf ids (cuids), QR ids and SAM ids all fit.
+ *
+ * A link opened outside the app chooses its own id, and screens hand route
+ * ids to API calls and routes, so anything else (an encoded `/`, `?`, `#` or
+ * `&`, or a dot segment) is refused before it becomes a route.
+ */
+const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * Whether a link segment is a plain record id.
+ *
+ * @param id - A raw path segment, still percent-encoded as the link carried it
+ * @returns True when the segment can only name a record
+ */
+export function isPlainRecordId(id: string): boolean {
+  return RECORD_ID_PATTERN.test(id);
+}
+
 /**
  * Splits a raw link into path segments and its query string.
  *
@@ -90,6 +131,8 @@ export function splitLinkUrl(url: string): {
  * - `qr/:id` names a scanned code, which only an API call can resolve
  * - `scanner` and `scan` name the scanner
  * - a resource without an id names its list
+ * - an id that is not a plain record id ({@link isPlainRecordId}) matches
+ *   nothing
  *
  * @param segments - Path segments, as {@link splitLinkUrl} returns them
  * @returns The resource and id, or null when the path is not on the allowlist
@@ -98,6 +141,8 @@ export function matchResourcePath(
   segments: readonly string[]
 ): ResourcePath | null {
   const [resource, id = null, nestedId = null] = segments;
+  const recordId = resource === "assets" && id === "kits" ? nestedId : id;
+  if (recordId !== null && !isPlainRecordId(recordId)) return null;
 
   switch (resource) {
     case "assets":
@@ -142,7 +187,9 @@ export function nativeRouteForLink(url: string): string {
   if (segments.length === 0) return "/";
 
   const match = matchResourcePath(segments);
-  if (!match) return url;
+  // A resource path whose id is refused goes to the start screen: handing the
+  // raw URL on would let the router match it to a detail screen anyway.
+  if (!match) return isResourceName(segments[0]) ? "/" : url;
   const { resource, id } = match;
   const withQuery = (route: string) => (query ? `${route}?${query}` : route);
 

@@ -1,5 +1,7 @@
 /**
- * Work that runs just before any session ends, while its token still works.
+ * Work that runs around the end of any session: just before it ends, while
+ * its token still works ({@link onBeforeSessionEnd}), and once it has ended
+ * ({@link onAfterSessionEnd}).
  *
  * Both paths that end a session call {@link runBeforeSessionEnd} immediately
  * before `auth.signOut()`: the app's own sign-out (`lib/auth-context.tsx`)
@@ -55,4 +57,44 @@ export function onBeforeSessionEnd(task: () => Promise<void>): () => void {
  */
 export function runBeforeSessionEnd(): Promise<void> {
   return settleWithin(beforeSessionEndTasks, BEFORE_SESSION_END_CAP_MS);
+}
+
+/** Work that drops state tied to an account once its session has ended. */
+const afterSessionEndTasks = new Set<() => void>();
+
+/**
+ * Registers work to run once any session has ended on this device: a
+ * sign-out from the app, or the sign-out a server switch performs.
+ *
+ * Use it for in-memory state that belongs to the account that just left
+ * (cached tokens, cached API responses). It runs even when the server could
+ * not be reached, so it must not need the network. A task that throws is
+ * ignored.
+ *
+ * @param task - Synchronous cleanup
+ * @returns An unregister function
+ */
+export function onAfterSessionEnd(task: () => void): () => void {
+  afterSessionEndTasks.add(task);
+  return () => {
+    afterSessionEndTasks.delete(task);
+  };
+}
+
+/**
+ * Runs every task registered with {@link onAfterSessionEnd}.
+ *
+ * Called by `endSessionOnDevice` (`./end-session.ts`) once the stored session
+ * is gone.
+ *
+ * @returns Resolves once every task has run. Never rejects.
+ */
+export async function runAfterSessionEnd(): Promise<void> {
+  for (const task of afterSessionEndTasks) {
+    try {
+      task();
+    } catch {
+      // One failing cleanup must not stop the others.
+    }
+  }
 }

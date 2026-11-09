@@ -69,6 +69,11 @@ export type ScanQueueEntry = {
 type UseAuditInitParams = {
   auditId: string | undefined;
   orgId: string | undefined;
+  /**
+   * The signed-in account. Only its own draft is offered for recovery, and
+   * the audit waits for it before loading.
+   */
+  userId: string | undefined;
   progressAnim: Animated.Value;
   animateProgress: (newFound: number) => void;
   processQueue: () => void;
@@ -98,6 +103,7 @@ export type AuditInitResult = {
 export function useAuditInit({
   auditId,
   orgId,
+  userId,
   progressAnim,
   animateProgress,
   processQueue,
@@ -127,7 +133,7 @@ export function useAuditInit({
   > | null>(null);
 
   useEffect(() => {
-    if (!auditId || !orgId) return;
+    if (!auditId || !orgId || !userId) return;
 
     (async () => {
       setIsInitializing(true);
@@ -199,10 +205,10 @@ export function useAuditInit({
       progressAnim.setValue(Math.min(progress, 1));
 
       // Initialize debounced saver
-      debouncedSaverRef.current = createDebouncedSaver(auditId);
+      debouncedSaverRef.current = createDebouncedSaver(userId, auditId);
 
       // ── Crash recovery ───────────────────────────────
-      const persisted = await loadAuditScanState(auditId);
+      const persisted = await loadAuditScanState(userId, auditId);
       // why: gate on whether there is ANYTHING to recover (the inner check
       // below decides recover-vs-clear from scanned items OR a non-empty
       // queue), not on scannedItems alone. The eager queue-persist can write a
@@ -258,7 +264,7 @@ export function useAuditInit({
               {
                 text: "Discard",
                 style: "destructive",
-                onPress: () => clearAuditScanState(auditId),
+                onPress: () => clearAuditScanState(userId, auditId),
               },
               {
                 text: "Resume",
@@ -340,14 +346,14 @@ export function useAuditInit({
           return; // Skip the setIsInitializing below
         } else {
           // Server already has everything — clear stale state
-          clearAuditScanState(auditId);
+          clearAuditScanState(userId, auditId);
         }
       }
 
       setIsInitializing(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auditId, orgId, progressAnim]);
+  }, [auditId, orgId, userId, progressAnim]);
 
   return {
     auditName,

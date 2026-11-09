@@ -13,6 +13,11 @@ const RETRY_DELAYS = [2_000, 5_000, 15_000];
 
 type UseScanQueueParams = {
   orgId: string | undefined;
+  /**
+   * The signed-in account. Drafts are saved under it, and nothing is saved
+   * while it is unknown.
+   */
+  userId: string | undefined;
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
   /** Called when a scan is confirmed and auditAssetId is received from server */
   onScanSynced?: (assetId: string, auditAssetId: string) => void;
@@ -39,6 +44,7 @@ export type ScanQueueResult = {
 
 export function useScanQueue({
   orgId,
+  userId,
   scannedItemsRef,
   onScanSynced,
   onScanFailed,
@@ -47,6 +53,21 @@ export function useScanQueue({
   const failedQueueRef = useRef<ScanQueueEntry[]>([]);
   const isProcessingQueueRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Saves the current queues as the signed-in account's draft. */
+  const persist = useCallback(
+    (auditSessionId: string) => {
+      if (!userId) return;
+      void saveAuditScanState(
+        userId,
+        auditSessionId,
+        scannedItemsRef.current,
+        scanQueueRef.current,
+        failedQueueRef.current
+      );
+    },
+    [userId, scannedItemsRef]
+  );
 
   const processQueue = useCallback(async () => {
     if (isProcessingQueueRef.current || !orgId) return;
@@ -82,12 +103,7 @@ export function useScanQueue({
           onScanSynced?.(entry.assetId, data.auditAssetId);
         }
 
-        saveAuditScanState(
-          entry.auditSessionId,
-          scannedItemsRef.current,
-          scanQueueRef.current,
-          failedQueueRef.current
-        );
+        persist(entry.auditSessionId);
       } catch {
         // Network error — retry with backoff
         const retries = (entry.retryCount ?? 0) + 1;
@@ -110,12 +126,7 @@ export function useScanQueue({
             };
           }
           onScanFailed?.(entry.assetId);
-          saveAuditScanState(
-            entry.auditSessionId,
-            scannedItemsRef.current,
-            scanQueueRef.current,
-            failedQueueRef.current
-          );
+          persist(entry.auditSessionId);
           // Surface to Sentry: a scan the worker saw as Found has not reached
           // the server after all retries. This is the field signal we'd
           // otherwise only learn about from a "my audit is wrong" report.
@@ -143,12 +154,7 @@ export function useScanQueue({
           // or a sub-2s scanning burst that perpetually resets the debounced
           // saver — loses the in-memory queue entry, so a scan the worker saw
           // as Found vanishes and is marked MISSING on completion.
-          saveAuditScanState(
-            entry.auditSessionId,
-            scannedItemsRef.current,
-            scanQueueRef.current,
-            failedQueueRef.current
-          );
+          persist(entry.auditSessionId);
           // Clear any prior timer before scheduling a new one, so a rapid
           // re-entry can't orphan a setTimeout that re-fires processQueue after
           // unmount (post-unmount work / double-record).
@@ -161,7 +167,7 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed]);
+  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, persist]);
 
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {
@@ -171,15 +177,10 @@ export function useScanQueue({
       // network attempt — or a sustained sub-2s scanning burst that keeps
       // resetting the debounce — can never lose it. Fire-and-forget; the
       // debounced saver remains for lower-priority UI snapshots.
-      saveAuditScanState(
-        entry.auditSessionId,
-        scannedItemsRef.current,
-        scanQueueRef.current,
-        failedQueueRef.current
-      );
+      persist(entry.auditSessionId);
       processQueue();
     },
-    [processQueue, scannedItemsRef]
+    [processQueue, persist]
   );
 
   const retryFailedScans = useCallback(() => {

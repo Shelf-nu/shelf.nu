@@ -3,6 +3,7 @@ import {
   getServerVersion,
   subscribeToServerChange,
 } from "../server/active-server";
+import { onAfterSessionEnd } from "../server/session-end";
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
@@ -96,6 +97,10 @@ subscribeToServerChange(() => {
   resetAccessTokenCache();
   attachAuthListener();
 });
+
+// A sign-out that had to delete the stored session itself emits no auth
+// event, so the token cache also listens for the end of every session.
+onAfterSessionEnd(resetAccessTokenCache);
 
 /**
  * Refuses the request when the live Supabase client belongs to a different

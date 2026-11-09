@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import { mobilePaths } from "./paths";
 import { cachedApiFetch } from "./cache";
 import { scanContextHeaders, type ScanContext } from "../scan-context";
 import type {
@@ -56,9 +57,7 @@ export const assetsApi = {
    *   `apiFetch`'s envelope).
    */
   asset: (assetId: string, orgId: string) =>
-    apiFetch<{ asset: AssetDetail }>(
-      `/api/mobile/assets/${assetId}?orgId=${orgId}`
-    ),
+    apiFetch<{ asset: AssetDetail }>(mobilePaths.asset(assetId, orgId)),
 
   /**
    * Resolve a scanned code to an asset or kit, **recording** scan provenance
@@ -70,7 +69,7 @@ export const assetsApi = {
    * ignores it on the QR path).
    *
    * Recording is an endpoint property here, NOT a flag: use this from genuine
-   * field-scan contexts (scanner tab, deep links). To resolve a code WITHOUT
+   * in-app camera scans (the scanner tab). To resolve a code WITHOUT
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
    * Wire contract for coordinates (matches the route's Zod schema): optional

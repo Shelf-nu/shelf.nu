@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  isPlainRecordId,
   matchResourcePath,
   nativeRouteForLink,
   splitLinkUrl,
@@ -151,5 +152,36 @@ test("a link outside the allowlist is returned unchanged", () => {
     "https://app.shelf.nu/locations/lc_1",
   ]) {
     assert.equal(nativeRouteForLink(url), url);
+  }
+});
+
+test("an id that is not a plain record id matches nothing", () => {
+  for (const id of [
+    "as_1%3ForgId%3Dother",
+    "as_1%2Fbookings",
+    "as_1%23frag",
+    "as_1%26orgId%3Dother",
+    "..",
+    "as 1",
+    "a".repeat(129),
+  ]) {
+    assert.equal(matchResourcePath(["assets", id]), null, id);
+    assert.equal(matchResourcePath(["assets", "kits", id]), null, id);
+    assert.equal(matchResourcePath(["bookings", id]), null, id);
+    assert.equal(matchResourcePath(["audits", id]), null, id);
+    assert.equal(matchResourcePath(["qr", id]), null, id);
+  }
+  assert.equal(isPlainRecordId("clx9abc_DEF-12"), true);
+  assert.equal(isPlainRecordId("SAM-0001"), true);
+});
+
+test("a resource link with a refused id lands on the start screen", () => {
+  for (const url of [
+    "shelf://assets/as_1%3ForgId%3Dother",
+    "https://app.shelf.nu/bookings/bk_1%2Fmodel-requests",
+    "shelf://audits/..",
+    "https://app.shelf.nu/qr/qr_1%26x",
+  ]) {
+    assert.equal(nativeRouteForLink(url), "/", url);
   }
 });

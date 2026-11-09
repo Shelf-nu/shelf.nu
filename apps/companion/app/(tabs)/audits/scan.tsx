@@ -26,6 +26,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
+import { useAuth } from "@/lib/auth-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
@@ -84,6 +85,8 @@ function AuditScannerContent() {
   const { auditId } = useLocalSearchParams<{ auditId: string }>();
   const isFocused = useIsFocused();
   const { currentOrg } = useOrg();
+  // Unsynced scan drafts are saved and recovered per account.
+  const userId = useAuth().user?.id;
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
@@ -226,6 +229,7 @@ function AuditScannerContent() {
     retryTimerRef,
   } = useScanQueue({
     orgId: currentOrg?.id,
+    userId,
     scannedItemsRef: stableScannedItemsRef,
     onScanSynced: handleScanSynced,
     onScanFailed: handleScanFailed,
@@ -252,6 +256,7 @@ function AuditScannerContent() {
   } = useAuditInit({
     auditId,
     orgId: currentOrg?.id,
+    userId,
     progressAnim,
     animateProgress,
     processQueue,
@@ -379,7 +384,7 @@ function AuditScannerContent() {
         );
       } else {
         debouncedSaverRef.current?.cancel();
-        void clearAuditScanState(auditId);
+        if (userId) void clearAuditScanState(userId, auditId);
       }
       // The totals describe rows the server holds — recomputed when it deleted
       // a scan, the session's own counters when it had none left to delete —
@@ -416,6 +421,7 @@ function AuditScannerContent() {
     [
       currentOrg,
       auditId,
+      userId,
       setScannedItems,
       scannedItemsRef,
       scannedAssetIdsRef,
@@ -560,12 +566,13 @@ function AuditScannerContent() {
         );
       } else {
         debouncedSaverRef.current?.cancel();
-        if (auditId) clearAuditScanState(auditId);
+        if (auditId && userId) clearAuditScanState(userId, auditId);
       }
       /* eslint-enable react-hooks/exhaustive-deps */
     };
   }, [
     auditId,
+    userId,
     toastTimerRef,
     retryTimerRef,
     debouncedSaverRef,
@@ -926,7 +933,7 @@ function AuditScannerContent() {
       debouncedSaverRef.current?.cancel();
       scanQueueRef.current.length = 0;
       failedQueueRef.current.length = 0;
-      await clearAuditScanState(auditId);
+      if (userId) await clearAuditScanState(userId, auditId);
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
@@ -949,6 +956,7 @@ function AuditScannerContent() {
     },
     [
       auditId,
+      userId,
       currentOrg,
       auditName,
       router,

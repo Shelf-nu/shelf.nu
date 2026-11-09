@@ -1,6 +1,7 @@
 import type { BookingMethod } from "../booking-method";
 import { withBookingMethod } from "../booking-method";
 import { apiFetch } from "./client";
+import { mobilePaths } from "./paths";
 import type {
   BookingsResponse,
   BookingDetailResponse,
@@ -68,9 +69,7 @@ export const bookingsApi = {
 
   /** Get full booking details with assets */
   booking: (bookingId: string, orgId: string) =>
-    apiFetch<BookingDetailResponse>(
-      `/api/mobile/bookings/${bookingId}?orgId=${orgId}`
-    ),
+    apiFetch<BookingDetailResponse>(mobilePaths.booking(bookingId, orgId)),
 
   /**
    * Add scanned assets and/or kits to a booking (scan-to-build flow).
@@ -516,7 +515,7 @@ export const bookingsApi = {
     quantity: number
   ) =>
     apiFetch<ModelRequestMutationResponse>(
-      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      mobilePaths.bookingModelRequests(bookingId, orgId),
       {
         method: "POST",
         body: JSON.stringify({ assetModelId, quantity }),
@@ -534,7 +533,7 @@ export const bookingsApi = {
     assetModelId: string
   ) =>
     apiFetch<ModelRequestMutationResponse>(
-      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      mobilePaths.bookingModelRequests(bookingId, orgId),
       {
         method: "DELETE",
         body: JSON.stringify({ assetModelId }),

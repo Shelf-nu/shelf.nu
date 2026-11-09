@@ -1,3 +1,17 @@
+/**
+ * Crash-recovery drafts for audit scans that have not reached the server yet.
+ *
+ * A draft belongs to the account that made the scans: its key and its record
+ * both carry that account's user id, so on a shared device one member can
+ * never load, replay or discard another member's unsynced scans. A draft for
+ * another account is left in place, not deleted; its owner gets it back on
+ * their next sign-in. The server-switch teardown still clears every draft by
+ * the shared key prefix.
+ *
+ * @see {@link file://./audit-scan-persistence.test.ts}
+ * @see {@link file://./../hooks/use-audit-init.ts}
+ * @see {@link file://./../hooks/use-scan-queue.ts}
+ */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { reportAuditDurabilityEvent } from "./sentry";
 import { AUDIT_SCAN_KEY_PREFIX } from "./server/contract";
@@ -20,16 +34,19 @@ type ScanQueueEntry = {
   isExpected: boolean;
 };
 
+/** A persisted draft, as stored under {@link storageKey}. */
 export type PersistedScanState = {
-  version: 1;
+  version: 2;
   auditId: string;
+  /** Supabase user id of the account that made these scans. */
+  userId: string;
   savedAt: string;
   scannedItems: ScannedItem[];
   pendingQueue: ScanQueueEntry[];
   /**
    * Scans that exhausted their retries and must NOT be silently dropped.
    * Persisted so they survive app kills and are re-queued on resume.
-   * Optional for backward-compat with sessions saved before this field existed.
+   * Optional: a draft with nothing failed may omit it.
    */
   failedQueue?: ScanQueueEntry[];
 };
@@ -40,15 +57,26 @@ export type PersistedScanState = {
 // server-switch teardown must clear these drafts by prefix and cannot import
 // this module (that would be a require cycle via ./sentry). Importing the
 // single definition keeps the writer and the teardown from ever drifting.
-const storageKey = (auditId: string) => `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
+// The prefix stays first so the teardown's prefix match still finds every
+// draft, whoever owns it.
+const storageKey = (userId: string, auditId: string) =>
+  `${AUDIT_SCAN_KEY_PREFIX}${userId}:${auditId}`;
 
 // ── Public API ───────────────────────────────────────────
 
 /**
  * Persist the current scan session so it survives app kills.
- * Fire-and-forget — errors are logged in dev, never thrown.
+ * Fire-and-forget: errors are logged and reported, never thrown.
+ *
+ * @param userId - The signed-in account that made the scans
+ * @param auditId - The audit session the scans belong to
+ * @param scannedItems - The scanned rows on screen
+ * @param pendingQueue - Scans still waiting to sync
+ * @param failedQueue - Scans that exhausted their retries
+ * @returns True when the draft was written
  */
 export async function saveAuditScanState(
+  userId: string,
   auditId: string,
   scannedItems: ScannedItem[],
   pendingQueue: ScanQueueEntry[],
@@ -56,14 +84,18 @@ export async function saveAuditScanState(
 ): Promise<boolean> {
   try {
     const state: PersistedScanState = {
-      version: 1,
+      version: 2,
       auditId,
+      userId,
       savedAt: new Date().toISOString(),
       scannedItems,
       pendingQueue,
       failedQueue,
     };
-    await AsyncStorage.setItem(storageKey(auditId), JSON.stringify(state));
+    await AsyncStorage.setItem(
+      storageKey(userId, auditId),
+      JSON.stringify(state)
+    );
     return true;
   } catch (e) {
     // why: log ALWAYS, not just in __DEV__. A swallowed setItem rejection
@@ -82,18 +114,30 @@ export async function saveAuditScanState(
 }
 
 /**
- * Load a previously persisted scan session.
- * Returns null if nothing exists, data is corrupt, or schema version doesn't match.
+ * Load the signed-in account's draft for an audit.
+ *
+ * @param userId - The signed-in account
+ * @param auditId - The audit session to recover
+ * @returns The draft, or null when nothing exists, the data is corrupt, the
+ *   schema version does not match, or the draft names another account or
+ *   audit. A draft that names someone else is left in place.
  */
 export async function loadAuditScanState(
+  userId: string,
   auditId: string
 ): Promise<PersistedScanState | null> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(auditId));
+    const raw = await AsyncStorage.getItem(storageKey(userId, auditId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedScanState;
-    if (parsed.version !== 1) return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<PersistedScanState>;
+    if (
+      parsed.version !== 2 ||
+      parsed.userId !== userId ||
+      parsed.auditId !== auditId
+    ) {
+      return null;
+    }
+    return parsed as PersistedScanState;
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] load failed:", e);
     return null;
@@ -101,11 +145,18 @@ export async function loadAuditScanState(
 }
 
 /**
- * Remove persisted state for an audit (normal exit or completion).
+ * Remove the signed-in account's draft for an audit (normal exit or
+ * completion). Other accounts' drafts are untouched.
+ *
+ * @param userId - The signed-in account
+ * @param auditId - The audit session whose draft is removed
  */
-export async function clearAuditScanState(auditId: string): Promise<void> {
+export async function clearAuditScanState(
+  userId: string,
+  auditId: string
+): Promise<void> {
   try {
-    await AsyncStorage.removeItem(storageKey(auditId));
+    await AsyncStorage.removeItem(storageKey(userId, auditId));
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] clear failed:", e);
   }
@@ -117,8 +168,17 @@ export async function clearAuditScanState(auditId: string): Promise<void> {
  * Returns a debounced writer that batches AsyncStorage writes.
  * During rapid scanning (~1 scan every 3-5s), writes are coalesced
  * so at most one AsyncStorage write happens per `delayMs`.
+ *
+ * @param userId - The signed-in account the drafts belong to
+ * @param auditId - The audit session being scanned
+ * @param delayMs - The debounce window
+ * @returns `save`, `flush` and `cancel`
  */
-export function createDebouncedSaver(auditId: string, delayMs = 2000) {
+export function createDebouncedSaver(
+  userId: string,
+  auditId: string,
+  delayMs = 2000
+) {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   return {
@@ -130,7 +190,13 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
     ) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        saveAuditScanState(auditId, scannedItems, pendingQueue, failedQueue);
+        saveAuditScanState(
+          userId,
+          auditId,
+          scannedItems,
+          pendingQueue,
+          failedQueue
+        );
         timer = null;
       }, delayMs);
     },
@@ -144,6 +210,7 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
       if (timer) clearTimeout(timer);
       timer = null;
       return saveAuditScanState(
+        userId,
         auditId,
         scannedItems,
         pendingQueue,

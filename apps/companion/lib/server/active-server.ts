@@ -17,7 +17,12 @@
  * @see ./discovery.ts — decides WHICH server to switch to
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getSupabase, rebuildSupabase } from "../supabase";
+import {
+  clearPersistedSession,
+  getSupabase,
+  rebuildSupabase,
+} from "../supabase";
+import { endSessionOnDevice } from "./end-session";
 import { runBeforeSessionEnd } from "./session-end";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
@@ -209,32 +214,17 @@ async function clearServerScopedState(): Promise<void> {
  * Ends the current session on the outgoing client.
  *
  * The before-session-end tasks (`./session-end.ts`) run first, while the
- * session is still live.
- *
- * A network failure does NOT throw — supabase-js returns the error and, for a
- * non-4xx failure, skips removing the local session. Left at that, the previous
- * server's refresh token stays in SecureStore under its own project key and is
- * silently restored the next time the app reconnects there: the UI would show a
- * signed-out user while a live session waited on disk. So a failed revoke falls
- * back to a local teardown, which cannot fail for network reasons.
+ * session is still live. The teardown then goes through
+ * {@link endSessionOnDevice}, which removes the stored session even when the
+ * revoke cannot reach the server: otherwise the previous server's refresh
+ * token would stay in SecureStore under its own project key and be restored
+ * the next time the app reconnects there.
  *
  * @returns Resolves once the session is gone locally, whatever the server said.
  */
 async function endSessionOnOutgoingClient(): Promise<void> {
   await runBeforeSessionEnd();
-
-  try {
-    const { error } = await getSupabase().auth.signOut();
-    if (!error) return;
-  } catch {
-    // Fall through to the local teardown below.
-  }
-
-  try {
-    await getSupabase().auth.signOut({ scope: "local" });
-  } catch (e) {
-    if (__DEV__) console.error("[Server] local sign-out failed:", e);
-  }
+  await endSessionOnDevice(getSupabase(), clearPersistedSession);
 }
 
 /**

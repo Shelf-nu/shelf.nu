@@ -145,6 +145,24 @@ let client: SupabaseClient | null = null;
 let clientUrl: string | null = null;
 
 /**
+ * SecureStore key the live client keeps its session under. Set together with
+ * {@link clientUrl}.
+ */
+let clientStorageKey: string | null = null;
+
+/**
+ * The session storage key for a Supabase project: `sb-<project-ref>-auth-token`,
+ * the same name supabase-js derives by default, so passing it explicitly keeps
+ * every stored session readable.
+ *
+ * @param supabaseUrl - The project's URL
+ * @returns The storage key
+ */
+function sessionStorageKey(supabaseUrl: string): string {
+  return `sb-${new URL(supabaseUrl).hostname.split(".")[0]}-auth-token`;
+}
+
+/**
  * Creates a client for one server, with the shared secure-storage adapter.
  *
  * @param supabaseUrl - The server's Supabase project URL.
@@ -155,9 +173,11 @@ function createForServer(
   supabaseUrl: string,
   supabaseAnonKey: string
 ): SupabaseClient {
+  const storageKey = sessionStorageKey(supabaseUrl);
   const created = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       storage: secureStoreAdapter,
+      storageKey,
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
@@ -170,6 +190,7 @@ function createForServer(
   // `guardSessionServerMatch` — which compares exactly these two values — would
   // then agree with itself and wave the previous server's token through.
   clientUrl = supabaseUrl;
+  clientStorageKey = storageKey;
   return created;
 }
 
@@ -195,6 +216,27 @@ export function getSupabase(): SupabaseClient {
     );
   }
   return client;
+}
+
+/**
+ * Deletes the live client's stored session straight from SecureStore.
+ *
+ * The last step of `endSessionOnDevice` (`./server/end-session.ts`), for when
+ * supabase-js could not sign out even locally. It emits no auth event, so the
+ * caller updates its own signed-in state.
+ *
+ * @returns Resolves once the session and its companion keys are gone. Never
+ *   rejects.
+ */
+export async function clearPersistedSession(): Promise<void> {
+  if (!clientStorageKey) return;
+  for (const key of [
+    clientStorageKey,
+    `${clientStorageKey}-code-verifier`,
+    `${clientStorageKey}-user`,
+  ]) {
+    await secureStoreAdapter.removeItem(key);
+  }
 }
 
 /**
