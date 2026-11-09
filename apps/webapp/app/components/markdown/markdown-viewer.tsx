@@ -63,6 +63,8 @@ interface Props {
    * Turn off for free text a member typed outside the note editor, such as a
    * description: it is Markdown only, so any tag in it is dropped instead of
    * rendering a forged badge or a component fed values it does not expect.
+   * Applies to string `content` only; a pre-parsed tree was already
+   * transformed by its caller, so pass free text as a string.
    */
   withTags?: boolean;
 }
