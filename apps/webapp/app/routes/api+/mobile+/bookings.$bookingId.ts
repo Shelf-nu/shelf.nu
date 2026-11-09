@@ -835,6 +835,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         isBookingArchivable({ status: booking.status, to: booking.to }) &&
         writesBooking &&
         canArchivePerm,
+      // Discard draft: archive a DRAFT, for a caller who may archive but not
+      // delete (web `discardDraft` in booking-actions.ts). Served by
+      // `bookings/discard-draft`.
+      canDiscardDraft:
+        booking.status === "DRAFT" &&
+        writesBooking &&
+        canArchivePerm &&
+        !canDeletePerm,
       // Duplicate: any status; gated by create permission and by writing this
       // booking, the two checks the duplicate endpoint makes.
       canDuplicate: writesBooking && canCreatePerm,

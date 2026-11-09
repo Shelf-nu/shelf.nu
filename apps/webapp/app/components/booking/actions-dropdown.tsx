@@ -29,7 +29,8 @@ import RevertToDraftDialog from "./revert-to-draft-dialog";
 
 /**
  * Renders the booking page's Actions menu, in this order: revert to draft,
- * cancel, extend, archive, duplicate, manage notifications, delete, a divider,
+ * cancel, extend, archive, discard draft, duplicate, manage notifications,
+ * delete, a divider,
  * the booking document and the check-in receipt.
  */
 export const ActionsDropdown = () => {
@@ -80,14 +81,15 @@ export const ActionsDropdown = () => {
       {actions.archive.visible ? (
         <ArchiveBookingAction booking={{ id: booking.id }} />
       ) : null}
+      {actions.discardDraft.visible ? (
+        <ArchiveBookingAction booking={{ id: booking.id }} discardDraft />
+      ) : null}
       {actions.duplicate.visible ? (
         <DuplicateBookingAction booking={{ id: booking.id }} />
       ) : null}
       {actions.manageNotifications.visible ? (
         <ManageNotificationsDialog />
       ) : null}
-      {/* Members whose policy limits delete to drafts see Delete only on a
-            draft; the server applies the same rule (`assertCanDeleteBooking`). */}
       {actions.delete.visible ? <DeleteBooking booking={booking} /> : null}
 
       <BookingDocumentEntries

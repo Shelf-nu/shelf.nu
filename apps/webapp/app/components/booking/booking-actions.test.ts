@@ -48,6 +48,7 @@ const ALL_KEYS: BookingActionKey[] = [
   "extend",
   "cancel",
   "archive",
+  "discardDraft",
   "duplicate",
   "bookingDocument",
   "checkinReceipt",
@@ -347,20 +348,40 @@ describe("resolveBookingActions: who may act", () => {
     expect(actions.bookingDocument.visible).toBe(true);
   });
 
-  it("limits a Self Service custodian's Delete to drafts", () => {
-    const own = { custodianUserId: ME };
-    const roles = [OrganizationRoles.SELF_SERVICE];
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "never offers a %s custodian Delete, and offers Discard draft on a draft instead",
+    (role) => {
+      const own = { custodianUserId: ME };
+      for (const status of Object.values(BookingStatus)) {
+        const actions = resolveFor(buildBooking({ ...own, status }), {
+          roles: [role],
+        });
+        expect(actions.delete.visible, `delete while ${status}`).toBe(false);
+        expect(
+          actions.discardDraft.visible,
+          `discardDraft while ${status}`
+        ).toBe(status === BookingStatus.DRAFT);
+      }
+    }
+  );
 
-    expect(
-      resolveFor(buildBooking({ ...own, status: BookingStatus.DRAFT }), {
-        roles,
-      }).delete.visible
-    ).toBe(true);
-    expect(
-      resolveFor(buildBooking({ ...own, status: BookingStatus.RESERVED }), {
-        roles,
-      }).delete.visible
-    ).toBe(false);
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "keeps Discard draft off a %s viewer's view of someone else's draft",
+    (role) => {
+      const actions = resolveFor(
+        buildBooking({ custodianUserId: OTHER, status: BookingStatus.DRAFT }),
+        { roles: [role] }
+      );
+      expect(actions.discardDraft.visible).toBe(false);
+    }
+  );
+
+  it("offers a role that may delete Delete on a draft, not Discard draft", () => {
+    const actions = resolveFor(buildBooking({ status: BookingStatus.DRAFT }), {
+      roles: [OrganizationRoles.MANAGER],
+    });
+    expect(actions.delete.visible).toBe(true);
+    expect(actions.discardDraft.visible).toBe(false);
   });
 
   it("offers the PDFs to a role that writes every booking on someone else's booking", () => {

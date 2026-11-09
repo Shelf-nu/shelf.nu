@@ -379,13 +379,29 @@ export const bookingsApi = {
       }
     ),
 
-  /** Archive a COMPLETE booking (-> ARCHIVED). COMPLETE-only, enforced server-side. */
+  /**
+   * Archive a finished booking (-> ARCHIVED): COMPLETE, or RESERVED past its
+   * end. The status rule is enforced server-side.
+   */
   archiveBooking: (orgId: string, bookingId: string) =>
     apiFetch<BookingMutationResponse>(
       `/api/mobile/bookings/archive?orgId=${orgId}`,
       {
         method: "POST",
         body: JSON.stringify({ bookingId }),
+      }
+    ),
+
+  /**
+   * Discard a draft: archive a DRAFT booking (-> ARCHIVED). The record stays
+   * in the workspace history; the server refuses any other status.
+   */
+  discardDraftBooking: (orgId: string, bookingId: string) =>
+    apiFetch<BookingMutationResponse>(
+      `/api/mobile/bookings/archive?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, discardDraft: true }),
       }
     ),
 

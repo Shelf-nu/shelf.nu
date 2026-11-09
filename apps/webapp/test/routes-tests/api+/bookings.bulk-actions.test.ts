@@ -3,8 +3,8 @@
  * the real matrix, and the services receive the caller's access.
  *
  * Archive and cancel need `booking:archive` / `booking:cancel`. BASE holds
- * archive but not cancel, and holds no `booking:delete`, so it is refused
- * bulk delete outright. Check-out and check-in need `booking:checkout` /
+ * archive but not cancel, and neither BASE nor SELF_SERVICE holds
+ * `booking:delete`, so both are refused bulk delete outright. Check-out and check-in need `booking:checkout` /
  * `booking:checkin`, the grants the booking page's one-click buttons ask for.
  * Delete and archive pass the caller's access to their service, which scopes
  * them (drafts-only delete, own bookings only).
@@ -197,12 +197,19 @@ describe("POST /api/bookings/bulk-actions", () => {
     );
   });
 
-  it("passes access to bulk delete, which applies the draft rule", async () => {
+  it("refuses SELF_SERVICE bulk delete, which it holds no grant for", async () => {
     asRole(OrganizationRoles.SELF_SERVICE);
+    const response = await post("bulk-delete");
+    expect(response.status).toBe(403);
+    expect(bulkDeleteBookings).not.toHaveBeenCalled();
+  });
+
+  it("passes access to bulk delete", async () => {
+    asRole(OrganizationRoles.MANAGER);
     await post("bulk-delete");
     expect(bulkDeleteBookings).toHaveBeenCalledWith(
       expect.objectContaining({
-        access: expect.objectContaining({ role: "SELF_SERVICE" }),
+        access: expect.objectContaining({ role: "MANAGER" }),
       })
     );
   });

@@ -8587,6 +8587,70 @@ describe("archiveBooking", () => {
       archiveBooking({ id: "booking-1", organizationId: "org-1" })
     ).rejects.toThrow(ShelfError);
   });
+
+  it("refuses a DRAFT on a plain archive", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+    });
+
+    await expect(
+      archiveBooking({ id: "booking-1", organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("discards a DRAFT by archiving it, guarded on the DRAFT status", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.ARCHIVED,
+    });
+
+    await archiveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      discardDraft: true,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1", status: BookingStatus.DRAFT },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+  ])("refuses to discard a %s booking", async (status) => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status,
+      to: new Date("2020-01-01T00:00:00Z"),
+    });
+
+    await expect(
+      archiveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        discardDraft: true,
+      })
+    ).rejects.toThrow("Only draft bookings can be discarded.");
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("cancelBooking", () => {

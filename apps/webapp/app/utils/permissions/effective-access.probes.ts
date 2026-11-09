@@ -1170,6 +1170,14 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     );
   });
 
+  // Discard draft (booking-actions.ts `discardDraft`): offered on a DRAFT to a
+  // member holding `booking:archive` but not `booking:delete`.
+  snapshot["B9:D-22:web-discard-draft-menu"] = perRoleSet((roles) => {
+    const offered =
+      can(roles, E.booking, A.archive) && !can(roles, E.booking, A.delete);
+    return perCase(DRAFT_OR_NOT, (status) => offered && status === "DRAFT");
+  });
+
   // B9:D-17/D-22: bookings bulk delete: the menu renders only when
   // `policy.bookings.showBulkActions` (bookings._index.tsx), and its Delete is
   // disabled by `policy.bookings.deleteOnlyDrafts && !everyBookingInDraft`

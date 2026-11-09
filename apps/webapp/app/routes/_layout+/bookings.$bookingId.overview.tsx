@@ -1484,6 +1484,7 @@ const INTENT_VERB = {
   checkOutRemaining: "check out",
   checkIn: "check in",
   archive: "archive",
+  "discard-draft": "discard",
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
@@ -1526,6 +1527,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkOutRemaining",
           "checkIn",
           "archive",
+          "discard-draft",
           "cancel",
           "removeKit",
           "revert-to-draft",
@@ -1563,10 +1565,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      // archive/cancel have dedicated permissions, and BASE deliberately holds
-      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
-      // user archive or cancel bookings the role was never granted.
+      // archive/cancel have dedicated permissions. `update` is not their gate:
+      // every role that writes bookings holds it, including roles without
+      // archive or cancel. Discarding a draft archives it, so it asks for
+      // archive too.
       archive: PermissionAction.archive,
+      "discard-draft": PermissionAction.archive,
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
@@ -2099,6 +2103,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         sendNotification({
           title: "Booking archived",
           message: "Your booking has been archived successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }), { headers });
+      }
+      case "discard-draft": {
+        await archiveBooking({
+          id,
+          organizationId,
+          userId: user.id,
+          discardDraft: true,
+        });
+
+        sendNotification({
+          title: "Draft discarded",
+          message:
+            "Your draft has been archived. You can still find it under archived bookings.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

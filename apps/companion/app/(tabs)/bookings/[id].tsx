@@ -197,6 +197,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   >({
     canCancel: false,
     canArchive: false,
+    canDiscardDraft: false,
     canDuplicate: false,
     canDelete: false,
   });
@@ -895,6 +896,39 @@ function BookingDetailScreen({ id }: { id: string }) {
     );
   };
 
+  // Discarding a draft archives it: it leaves the caller's list but stays in
+  // the workspace history, so a plain confirm is enough.
+  const handleDiscardDraft = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Discard Draft",
+      `Discard "${booking.name}"? It moves to your archived bookings.`,
+      [
+        { text: "Keep draft", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.discardDraftBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't discard", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking: force the list to refetch.
+            markBookingsListDirty();
+            fetchBooking();
+          },
+        },
+      ]
+    );
+  };
+
   // A permanent delete asks for the booking's name to be typed first, the
   // same rule as the webapp's delete dialog.
   const handleDelete = () => {
@@ -1019,6 +1053,14 @@ function BookingDetailScreen({ id }: { id: string }) {
       icon: "archive-outline",
       destructive: false,
       onPress: handleArchive,
+    });
+  if (bookingActions.canDiscardDraft)
+    lifecycleActions.push({
+      key: "discardDraft",
+      label: "Discard draft",
+      icon: "archive-outline",
+      destructive: true,
+      onPress: handleDiscardDraft,
     });
   if (bookingActions.canCancel)
     lifecycleActions.push({

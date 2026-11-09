@@ -34,8 +34,9 @@ export const Role2PermissionMap: {
     [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     // No `delete`: a Base user's bookings stay in the workspace history for
-    // admins and owners. `archive` lets them tidy their own list instead
-    // (`bookings.write: "own"` scopes it to bookings they hold).
+    // admins and owners. `archive` (and "Discard draft", which archives a
+    // DRAFT) lets them tidy their own list instead; `bookings.write: "own"`
+    // scopes both to bookings they hold or created.
     [PermissionEntity.booking]: [
       PermissionAction.create,
       PermissionAction.read,
@@ -93,7 +94,8 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.checkout,
       PermissionAction.checkin,
-      PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
+      // No `delete`, as for Base: archive and "Discard draft" tidy the list
+      // without erasing workspace booking history.
       PermissionAction.archive,
       PermissionAction.manageAssets,
       PermissionAction.manageKits,

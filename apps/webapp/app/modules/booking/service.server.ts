@@ -12849,12 +12849,31 @@ export async function createKitBookingNote({
   }
 }
 
+/**
+ * Moves a booking to ARCHIVED.
+ *
+ * Two entry points share this write. A plain archive takes a booking that is
+ * done ({@link isBookingArchivable}). "Discard draft" (`discardDraft: true`)
+ * takes only a DRAFT: it is how members without `booking:delete` drop a draft
+ * from their list while the record stays in the workspace history. Either way
+ * the caller has already checked `booking:archive` and ownership.
+ *
+ * @param args.id - The booking to archive
+ * @param args.organizationId - The caller's workspace; the booking must be in it
+ * @param args.userId - The actor, for the activity note and event
+ * @param args.discardDraft - Accept a DRAFT and nothing else
+ * @returns The archived booking
+ * @throws {ShelfError} 404 when the booking is not in the workspace, 400 when
+ *   its status cannot be archived through this entry point
+ */
 export async function archiveBooking({
   id,
   organizationId,
   userId,
+  discardDraft = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId?: string;
+  discardDraft?: boolean;
 }) {
   try {
     const booking = await db.booking
@@ -12884,7 +12903,19 @@ export async function archiveBooking({
      * ONGOING/OVERDUE are rejected — their assets are still CHECKED_OUT.
      * @see {@link isBookingArchivable}
      */
-    if (!isBookingArchivable({ status: booking.status, to: booking.to })) {
+    if (discardDraft) {
+      if (booking.status !== BookingStatus.DRAFT) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          message: "Only draft bookings can be discarded.",
+        });
+      }
+    } else if (
+      !isBookingArchivable({ status: booking.status, to: booking.to })
+    ) {
       throw new ShelfError({
         cause: null,
         label,
