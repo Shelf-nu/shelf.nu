@@ -10,6 +10,7 @@ import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
+import type { AuditUnitScopeMeta } from "~/modules/audit/context-helpers.server";
 import {
   resolveAssetIdsForAudit,
   resolveAssetIdsForKitSelection,
@@ -140,6 +141,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
       directAssetIds && directAssetIds.includes(ALL_SELECTED_KEY);
 
     let assetIds: string[];
+    // Unit scope kept in the audit's `scopeMeta`; none for an audit of the index.
+    let unitScope: AuditUnitScopeMeta = null;
 
     // Resolve the acting user's timezone AT MOST ONCE. Both the select-all id
     // resolution and the due-date parse below can need it on the same submit;
@@ -158,20 +161,27 @@ export async function action({ request, context }: ActionFunctionArgs) {
       // Bulk "Create audit" from the Locations index (multi-select). Resolve
       // the union of assets across the selected locations server-side — handles
       // "select all" (honoring the list filter) and asserts explicit IDs.
-      assetIds = await resolveAssetIdsForLocationSelection({
+      const selection = await resolveAssetIdsForLocationSelection({
         organizationId,
         locationIds,
         currentSearchParams,
       });
+      assetIds = selection.assetIds;
+      // A location audit keeps its scope: quantity-tracked assets then expect
+      // only the units placed in the selected locations.
+      unitScope = { locationIds: selection.locationIds };
     } else if (contextType === "kit" && kitIds && kitIds.length > 0) {
       // Bulk "Create audit" from the Kits index (multi-select). Resolve the
       // union of assets across the selected kits server-side — handles "select
       // all" (honoring the list filter) and asserts explicit IDs.
-      assetIds = await resolveAssetIdsForKitSelection({
+      const selection = await resolveAssetIdsForKitSelection({
         organizationId,
         kitIds,
         currentSearchParams,
       });
+      assetIds = selection.assetIds;
+      // A kit audit expects only the units inside the selected kits.
+      unitScope = { kitIds: selection.kitIds };
     } else if (isSelectingAllAssets) {
       // When "Select All" is used, resolve IDs using bulk operation helper
       // which handles both simple and advanced filter modes
@@ -204,14 +214,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     } else {
       // Resolve asset IDs from either direct input or context
-      assetIds = await resolveAssetIdsForAudit({
+      // A location, kit or custody page gives the audit its unit scope.
+      ({ assetIds, unitScope } = await resolveAssetIdsForAudit({
         organizationId,
         directAssetIds,
         contextType,
         contextId,
         contextName,
         includeChildLocations,
-      });
+      }));
     }
 
     const sanitizedDescription = description?.trim() || undefined;
@@ -249,6 +260,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       createdById: userId,
       assignee,
       dueDate: dueDateUTC,
+      scopeMeta: unitScope,
     });
 
     // Send email notification if audit is assigned to someone other than the creator

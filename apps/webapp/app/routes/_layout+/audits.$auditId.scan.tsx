@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSetAtom, useAtomValue, useStore } from "jotai";
 import type {
   LoaderFunctionArgs,
@@ -13,11 +13,23 @@ import { z } from "zod";
 import { showNotificationAtom } from "~/atoms/notifications";
 import {
   addScannedItemAtom,
+  auditCountPromptAtom,
+  auditCountsAtom,
   auditSessionAtom,
   lastDuplicateScanAtom,
+  mergeAuditCountsAtom,
+  removeScannedItemAtom,
   type AuditScannedItem,
+  type DuplicateScanInfo,
 } from "~/atoms/qr-scanner";
 import { scannedItemsAtom } from "~/atoms/qr-scanner";
+import { AuditCountDialog } from "~/components/audit/audit-count-dialog";
+import {
+  cancelDiscardsScan,
+  countScansToSave,
+  nextFirstCountPrompt,
+  recountPromptFor,
+} from "~/components/audit/audit-count-flow";
 import AuditDrawer from "~/components/audit/audit-drawer";
 import { ErrorContent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -248,6 +260,11 @@ export default function AuditSessionRoute() {
   // Track the last handled duplicate timestamp so the handler only fires a toast
   // for each newly-detected duplicate (not for repeated reads of the same event).
   const lastHandledDuplicateTimestampRef = useRef<number | null>(null);
+  const auditCounts = useAtomValue(auditCountsAtom);
+  const countPrompt = useAtomValue(auditCountPromptAtom);
+  const setCountPrompt = useSetAtom(auditCountPromptAtom);
+  const mergeAuditCounts = useSetAtom(mergeAuditCountsAtom);
+  const removeScannedItem = useSetAtom(removeScannedItemAtom);
 
   // Track which items have been persisted to avoid duplicate API calls
   const persistedItemsRef = useRef<Set<string>>(new Set());
@@ -258,6 +275,12 @@ export default function AuditSessionRoute() {
   // than subtracted, so the page itself never scrolls behind the drawer.
   const { ref: scannerContainerRef, height } =
     useFillViewportHeight<HTMLDivElement>();
+
+  // Assets on the audit's list: only they count against an expectation.
+  const expectedAssetIds = useMemo(
+    () => new Set(expectedAssets.map((asset) => asset.id)),
+    [expectedAssets]
+  );
 
   const expectedItems: AuditScannedItem[] = useMemo(
     () =>
@@ -274,6 +297,10 @@ export default function AuditSessionRoute() {
             mainImage: asset.mainImage,
             thumbnailImage: asset.thumbnailImage,
             locationName: asset.locationName,
+            expectedQuantity: asset.expectedQuantity,
+            foundQuantity: asset.foundQuantity,
+            unitOfMeasure: asset.unitOfMeasure,
+            rowStatus: asset.status,
           }) as AuditScannedItem
       ),
     [expectedAssets]
@@ -300,6 +327,89 @@ export default function AuditSessionRoute() {
     }
   }, [existingScans.length]);
 
+  /** A count was saved: show the stored count and stop preferring ours. */
+  const handleCountSaved = useCallback(
+    (assetId: string, foundQuantity: number | null, refused: boolean) => {
+      const count = store.get(auditCountsAtom)[assetId];
+      if (!count) return;
+      mergeAuditCounts({
+        [assetId]: { ...count, foundQuantity, unsaved: false },
+      });
+      // The count the auditor entered did not stick; the row has just
+      // changed back, so say why.
+      if (refused) {
+        showNotification({
+          title: "Count not saved",
+          message:
+            foundQuantity === null
+              ? "This scan is no longer in the audit."
+              : `The audit kept ${foundQuantity}.`,
+          icon: { name: "x", variant: "error" },
+          senderId: null,
+        });
+      }
+    },
+    [store, mergeAuditCounts, showNotification]
+  );
+
+  /**
+   * The server refused to save these counts (no permission any more, or the
+   * audit was archived): stop holding "Complete audit" for them and say why.
+   */
+  const handleCountFailed = useCallback(
+    (assetIds: string[], message: string) => {
+      const counts = store.get(auditCountsAtom);
+      mergeAuditCounts(
+        Object.fromEntries(
+          assetIds
+            .filter((assetId) => counts[assetId])
+            .map((assetId) => [assetId, { ...counts[assetId], unsaved: false }])
+        )
+      );
+      showNotification({
+        title: "Count not saved",
+        message,
+        icon: { name: "x", variant: "error" },
+        senderId: null,
+      });
+    },
+    [store, mergeAuditCounts, showNotification]
+  );
+
+  /** The server refused a scan for want of a count: ask for one. */
+  const handleCountRequired = useCallback(
+    (request: {
+      assetId: string;
+      assetTitle: string;
+      expectedQuantity: number;
+      foundQuantity: number | null;
+      unitOfMeasure: string | null;
+    }) => {
+      const qrId = Object.entries(store.get(scannedItemsAtom)).find(
+        ([, item]) => item?.data?.id === request.assetId
+      )?.[0];
+      if (!qrId) return;
+      mergeAuditCounts({
+        [request.assetId]: {
+          expectedQuantity: request.expectedQuantity,
+          foundQuantity: null,
+          unitOfMeasure: request.unitOfMeasure,
+        },
+      });
+      setCountPrompt({
+        assetId: request.assetId,
+        qrId,
+        assetTitle: request.assetTitle,
+        expectedQuantity: request.expectedQuantity,
+        foundQuantity: request.foundQuantity,
+        unitOfMeasure: request.unitOfMeasure,
+        isExpected: expectedAssetIds.has(request.assetId),
+        mode: "first",
+      });
+    },
+    [store, mergeAuditCounts, setCountPrompt, expectedAssetIds]
+  );
+
   // Persist scans to database as they are resolved
   useAuditScanPersistence({
     auditSession,
@@ -309,15 +419,69 @@ export default function AuditSessionRoute() {
     persistedItemsRef,
     pendingPersistsRef,
     isRestoringRef,
+    auditCounts,
+    onCountRequired: handleCountRequired,
+    onCountSaved: handleCountSaved,
+    onCountFailed: handleCountFailed,
   });
 
-  // Count resolved items that haven't been persisted yet
-  const pendingScanCount = Object.values(scannedItems).filter(
-    (item) =>
-      item?.data?.id &&
-      !item.error &&
-      !persistedItemsRef.current.has(item.data.id)
-  ).length;
+  /**
+   * Ask for a count as soon as a quantity-tracked scan resolves. One dialog at
+   * a time: further scans wait their turn, unsaved.
+   */
+  useEffect(() => {
+    if (countPrompt || !auditSession) return;
+    const next = nextFirstCountPrompt({
+      scannedItems,
+      auditCounts,
+      savedAssetIds: persistedItemsRef.current,
+      expectedAssetIds,
+    });
+    if (next) setCountPrompt(next);
+  }, [
+    countPrompt,
+    auditSession,
+    scannedItems,
+    auditCounts,
+    expectedAssetIds,
+    setCountPrompt,
+  ]);
+
+  /** Saves a count; the persistence hook sends it (again, for a recount). */
+  const handleCountSave = useCallback(
+    (foundQuantity: number) => {
+      const prompt = store.get(auditCountPromptAtom);
+      if (!prompt) return;
+      mergeAuditCounts({
+        [prompt.assetId]: {
+          expectedQuantity: prompt.expectedQuantity,
+          foundQuantity,
+          unitOfMeasure: prompt.unitOfMeasure,
+          unsaved: true,
+        },
+      });
+      // A saved scan sent again with a count replaces its count.
+      persistedItemsRef.current.delete(prompt.assetId);
+      setCountPrompt(null);
+    },
+    [store, mergeAuditCounts, setCountPrompt]
+  );
+
+  /** Closing a first count discards the scan; a recount keeps the old count. */
+  const handleCountCancel = useCallback(() => {
+    const prompt = store.get(auditCountPromptAtom);
+    if (prompt && cancelDiscardsScan(prompt)) {
+      removeScannedItem(prompt.qrId);
+    }
+    setCountPrompt(null);
+  }, [store, removeScannedItem, setCountPrompt]);
+
+  // Resolved scans not saved yet. One waiting for its count is not "saving".
+  const pendingScanCount = countScansToSave(
+    scannedItems,
+    auditCounts,
+    persistedItemsRef.current
+  );
 
   const scopeMeta =
     typeof session.scopeMeta === "object" && session.scopeMeta
@@ -352,28 +516,71 @@ export default function AuditSessionRoute() {
   }: OnCodeDetectionSuccessProps) {
     addItem(qrId, error, type);
 
-    // After adding, inspect the duplicate-scan atom directly. If the most recent
-    // duplicate event is new (timestamp not yet handled), surface a toast. Handled
-    // here instead of in a useEffect so the side effect is triggered by user input.
-    const duplicate = store.get(lastDuplicateScanAtom);
-    if (
-      duplicate &&
-      duplicate.timestamp !== lastHandledDuplicateTimestampRef.current
-    ) {
-      lastHandledDuplicateTimestampRef.current = duplicate.timestamp;
-      showNotification({
-        title: "Already scanned",
-        message: `Asset "${duplicate.assetTitle}" has already been scanned`,
-        icon: { name: "scan", variant: "gray" },
-        senderId: null,
-      });
-    }
+    // After adding, inspect the duplicate-scan atom directly, so the side
+    // effect is triggered by user input.
+    handleDuplicateScan(store.get(lastDuplicateScanAtom));
   }
+
+  /**
+   * Answers a duplicate scan once per event: a counted quantity-tracked asset
+   * opens its count to correct it, anything else gets an "Already scanned"
+   * toast. Same-code duplicates arrive from `handleCodeDetectionSuccess`; a
+   * second code of an asset already listed (a barcode after its QR) is only
+   * known once it resolves, and arrives through the effect below.
+   */
+  function handleDuplicateScan(duplicate: DuplicateScanInfo | null) {
+    if (
+      !duplicate ||
+      duplicate.timestamp === lastHandledDuplicateTimestampRef.current
+    ) {
+      return;
+    }
+    lastHandledDuplicateTimestampRef.current = duplicate.timestamp;
+
+    const duplicateAssetId =
+      store.get(scannedItemsAtom)[duplicate.qrId]?.data?.id;
+    const recount = duplicateAssetId
+      ? recountPromptFor({
+          assetId: duplicateAssetId,
+          qrId: duplicate.qrId,
+          assetTitle: duplicate.assetTitle,
+          auditCounts: store.get(auditCountsAtom),
+          expectedAssetIds,
+        })
+      : null;
+    if (recount && !store.get(auditCountPromptAtom)) {
+      setCountPrompt(recount);
+      return;
+    }
+
+    showNotification({
+      title: "Already scanned",
+      message: `Asset "${duplicate.assetTitle}" has already been scanned`,
+      icon: { name: "scan", variant: "gray" },
+      senderId: null,
+    });
+  }
+
+  // A second code of an asset already listed is detected only after it
+  // resolves, so it is answered here rather than in the scan handler.
+  // The atom outlives this page, so an event from before it opened is ignored.
+  const latestDuplicate = useAtomValue(lastDuplicateScanAtom);
+  const openedAtRef = useRef(Date.now());
+  const handleDuplicateRef = useRef(handleDuplicateScan);
+  handleDuplicateRef.current = handleDuplicateScan;
+  useEffect(() => {
+    if (latestDuplicate && latestDuplicate.timestamp < openedAtRef.current) {
+      return;
+    }
+    handleDuplicateRef.current(latestDuplicate);
+  }, [latestDuplicate]);
 
   return (
     <>
       <ContextualSidebar className="md:w-[45vw] md:max-w-[40vw]" />
       <Header hidePageDescription />
+
+      <AuditCountDialog onSave={handleCountSave} onCancel={handleCountCancel} />
 
       <AuditDrawer
         contextLabel={contextLabel}

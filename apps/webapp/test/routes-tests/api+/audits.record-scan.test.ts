@@ -78,6 +78,9 @@ describe("POST /api/audits/record-scan", () => {
     vi.clearAllMocks();
     requireAuditAssignee.mockResolvedValue(undefined);
     recordAuditScan.mockResolvedValue({
+      status: "recorded",
+      expectedQuantity: null,
+      foundQuantity: null,
       scanId: "scan-1",
       auditAssetId: "audit-asset-1",
       foundAssetCount: 5,
@@ -165,6 +168,178 @@ describe("POST /api/audits/record-scan", () => {
       userId: expect.any(String),
       organizationId: "org-1",
       userAgent: null,
+      foundQuantity: undefined,
+      // No countAware marker: a page loaded before audits counted units.
+      acceptUncounted: true,
+    });
+  });
+
+  it("forwards a count above the expectation (a surplus)", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-abc",
+        assetId: "pool-1",
+        countAware: "1",
+        foundQuantity: "16",
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 16 })
+    );
+  });
+
+  it("asks for a count only from scanners that send the countAware marker", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-abc",
+        assetId: "pool-1",
+        countAware: "1",
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ acceptUncounted: false })
+    );
+  });
+
+  it("forwards a typed count, and keeps zero as a count", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-abc",
+        assetId: "pool-1",
+        foundQuantity: "0",
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 0 })
+    );
+  });
+
+  it("answers count-required without success so the scanner asks for a count", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+    recordAuditScan.mockResolvedValue({
+      status: "count-required",
+      assetId: "pool-1",
+      assetTitle: "Sandbag",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    });
+
+    const response = await callAction();
+
+    // Top level, as use-audit-scan-persistence reads it.
+    expect(responseBody(response)).toMatchObject({
+      success: false,
+      status: "count-required",
+      assetId: "pool-1",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    });
+  });
+
+  it("answers a counted scan with the count the server stored, at the top level", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+    recordAuditScan.mockResolvedValue({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-pool",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+      expectedQuantity: 14,
+      foundQuantity: 6,
+    });
+
+    const response = await callAction(
+      createRecordScanRequest({
+        auditSessionId: "audit-1",
+        qrId: "qr-pool",
+        assetId: "pool-1",
+        countAware: "1",
+        foundQuantity: "8",
+      })
+    );
+
+    // The hook compares this `foundQuantity` with the count it sent to tell
+    // whether the server kept another one (here 6, not 8).
+    expect(responseBody(response)).toMatchObject({
+      success: true,
+      expectedQuantity: 14,
+      foundQuantity: 6,
+    });
+  });
+
+  it("marks a 4xx refusal as final and a 5xx failure as retryable", async () => {
+    requirePermission.mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    recordAuditScan.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "This audit is archived.",
+        status: 400,
+        label: "Audit",
+      })
+    );
+    expect(responseBody(await callAction())).toMatchObject({
+      refused: true,
+    });
+
+    recordAuditScan.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "Failed to record audit scan",
+        status: 500,
+        label: "Audit",
+      })
+    );
+    expect(responseBody(await callAction())).toMatchObject({
+      refused: false,
     });
   });
 });
+
+/** The payload of an action result, whether wrapped by `data()` or not. */
+function responseBody(response: unknown): Record<string, unknown> {
+  const wrapped = response as { data?: unknown };
+  return (
+    wrapped && typeof wrapped === "object" && "data" in wrapped
+      ? wrapped.data
+      : response
+  ) as Record<string, unknown>;
+}
