@@ -18,12 +18,14 @@ import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import {
+  requireActiveMobileMembership,
   requireMobileAuth,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
+import { ShelfError } from "~/utils/error";
 
 import { loader } from "~/routes/api+/mobile+/barcode.$value";
 
@@ -47,6 +49,10 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  // why: the workspace lapse gate has its own tests
+  // (mobile-auth.server.workspace-lapse.test.ts); here the sibling workspace
+  // is active unless a test says otherwise.
+  requireActiveMobileMembership: vi.fn(async () => true),
   // why: custody visibility is pinned in mobile.barcode.test.ts; here every
   // caller may see all custody, so the photo step is all that shapes the row.
   // An Administrator's context: sees every holder's custody.
@@ -214,6 +220,44 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
     expect(recordScanNonFatal).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: "org-2" })
     );
+  });
+
+  it("refuses a barcode owned by an inactive sibling workspace, reading and recording nothing", async () => {
+    vi.mocked(getBarcodeByValue).mockResolvedValueOnce(null as never);
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+    ] as never);
+    vi.mocked(db.barcode.findMany).mockResolvedValue([
+      { organizationId: "org-2" },
+    ] as never);
+    vi.mocked(requireActiveMobileMembership).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message:
+          "This workspace is inactive because its subscription has expired.",
+        label: "Auth",
+        status: 403,
+      })
+    );
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/barcode/TRIPOD01?orgId=org-1"
+        ),
+        params: { value: "TRIPOD01" },
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(403);
+    expect(requireActiveMobileMembership).toHaveBeenCalledWith({
+      userId: "user-1",
+      organizationId: "org-2",
+    });
+    // Only the current-workspace lookup ran; the sibling's payload was never read.
+    expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
   it("records nothing for a barcode in none of the caller's workspaces", async () => {

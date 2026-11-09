@@ -41,6 +41,10 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     requireOrganizationAccess: vitest.fn(),
     // why: reads the caller's membership; the tests set custody visibility
     getMobileUserContext: vitest.fn(),
+    // why: the workspace lapse gate has its own tests
+    // (mobile-auth.server.workspace-lapse.test.ts); sibling workspaces here
+    // are active.
+    requireActiveMobileMembership: vitest.fn(async () => true),
   };
 });
 

@@ -19,6 +19,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireActiveMobileMembership,
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
@@ -165,6 +166,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         }
 
         if (owningOrgIds.length === 1) {
+          // The code opens in the sibling workspace, so that workspace must
+          // be active too; an inactive one refuses with a 403.
+          await requireActiveMobileMembership({
+            userId: user.id,
+            organizationId: owningOrgIds[0].organizationId,
+          });
+
           // Phase 2: the full payload, once, for the winner. Routed back
           // through `getBarcodeByValue` so the original-case-then-uppercase
           // preference stays identical to the current-workspace path.
