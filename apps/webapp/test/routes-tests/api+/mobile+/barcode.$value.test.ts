@@ -251,11 +251,42 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
 
     assertIsDataWithResponseInit(response);
     expect(response.init?.status).toBe(403);
+    expect(response.data).toEqual({
+      error: {
+        message:
+          "This workspace is inactive because its subscription has expired.",
+      },
+    });
     expect(requireActiveMobileMembership).toHaveBeenCalledWith({
       userId: "user-1",
       organizationId: "org-2",
     });
     // Only the current-workspace lookup ran; the sibling's payload was never read.
+    expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 and reads nothing when the sibling membership is gone by the time it is checked", async () => {
+    vi.mocked(getBarcodeByValue).mockResolvedValueOnce(null as never);
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+    ] as never);
+    vi.mocked(db.barcode.findMany).mockResolvedValue([
+      { organizationId: "org-2" },
+    ] as never);
+    vi.mocked(requireActiveMobileMembership).mockResolvedValueOnce(false);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/barcode/TRIPOD01?orgId=org-1"
+        ),
+        params: { value: "TRIPOD01" },
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(404);
     expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
     expect(recordScanNonFatal).not.toHaveBeenCalled();
   });

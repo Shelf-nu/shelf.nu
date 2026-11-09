@@ -166,9 +166,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         }
 
         if (owningOrgIds.length === 1) {
-          // The code opens in the sibling workspace, so that workspace must
-          // be active too; an inactive one refuses with a 403.
-          await requireActiveMobileMembership({
+          // The code opens in the sibling workspace, so the caller must still
+          // be a member and that workspace must be active: an inactive one
+          // refuses with a 403, a membership gone since the list above falls
+          // through to the 404 below.
+          const isSiblingMember = await requireActiveMobileMembership({
             userId: user.id,
             organizationId: owningOrgIds[0].organizationId,
           });
@@ -176,14 +178,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           // Phase 2: the full payload, once, for the winner. Routed back
           // through `getBarcodeByValue` so the original-case-then-uppercase
           // preference stays identical to the current-workspace path.
-          const candidate = await getBarcodeByValue({
-            value,
-            organizationId: owningOrgIds[0].organizationId,
-            include: {
-              asset: { select: MOBILE_ASSET_SELECT },
-              kit: { select: MOBILE_KIT_SELECT },
-            },
-          });
+          const candidate = isSiblingMember
+            ? await getBarcodeByValue({
+                value,
+                organizationId: owningOrgIds[0].organizationId,
+                include: {
+                  asset: { select: MOBILE_ASSET_SELECT },
+                  kit: { select: MOBILE_KIT_SELECT },
+                },
+              })
+            : null;
 
           if (candidate) {
             foundOrganizationId = owningOrgIds[0].organizationId;
