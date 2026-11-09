@@ -9,6 +9,7 @@ import {
   createAssetModel,
   createAssetModelsIfNotExists,
   resolveImportedAssetModel,
+  getAssetModelFormDefaults,
   getAssetModels,
   getAssetModel,
   updateAssetModel,
@@ -232,6 +233,53 @@ describe("createAssetModel", () => {
         organizationId: "org-123",
       })
     ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("getAssetModelFormDefaults", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reads the model only inside the caller's workspace", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce({
+      id: "model-1",
+      name: "LED Light 300W class",
+      image: null,
+      thumbnailImage: null,
+      defaultCategoryId: "cat-1",
+      defaultValuation: 199,
+      customFieldDefaults: [{ customFieldId: "cf-1", value: { raw: "x" } }],
+    });
+
+    const result = await getAssetModelFormDefaults({
+      organizationId: "org-123",
+      assetModelId: "model-1",
+    });
+
+    expect(db.assetModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "model-1", organizationId: "org-123" },
+      })
+    );
+    expect(result).toMatchObject({
+      defaultCategoryId: "cat-1",
+      defaultValuation: 199,
+      customFieldDefaults: [{ customFieldId: "cf-1", value: { raw: "x" } }],
+    });
+  });
+
+  it("returns null for a model outside the workspace", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      getAssetModelFormDefaults({
+        organizationId: "org-123",
+        assetModelId: "other-org-model",
+      })
+    ).resolves.toBeNull();
   });
 });
 

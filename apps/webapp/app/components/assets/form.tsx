@@ -72,6 +72,10 @@ import {
   prefillVersion,
 } from "./model-default-prefill";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
+import {
+  type FormAssetModel,
+  useAssetModelLookup,
+} from "./use-asset-model-lookup";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -616,10 +620,17 @@ const AssetFormInner = ({
   const [modelPrefill, setModelPrefill] =
     useState<ModelPrefill>(EMPTY_MODEL_PREFILL);
 
+  /**
+   * Model rows by id: the loader's page, plus any model picked from search
+   * results outside it, fetched on pick.
+   */
+  const { findModel, loadModel } = useAssetModelLookup(assetModelsData);
+
+  /** The model most recently picked, so a slow fetch for an older pick is dropped. */
+  const latestModelPickRef = useRef<string | undefined>(undefined);
+
   /** The chosen model's row, used for the inherited-image preview + copy. */
-  const selectedAssetModel = selectedAssetModelId
-    ? assetModelsData?.find((m) => m.id === selectedAssetModelId)
-    : undefined;
+  const selectedAssetModel = findModel(selectedAssetModelId);
 
   /**
    * Intent to drop this asset's own image so it falls back down the cascade —
@@ -685,21 +696,41 @@ const AssetFormInner = ({
     // hasn't committed the hidden input update yet) so it would
     // wrongly flash the error.
     setHasPickedAssetModel(Boolean(modelId));
+    const previousModel = findModel(selectedAssetModelId);
     setSelectedAssetModelId(modelId);
+    latestModelPickRef.current = modelId;
+
+    const model = findModel(modelId);
+    if (modelId && !model) {
+      // Picked from search results outside the loaded page: read its defaults
+      // first. If they cannot be loaded, continue as for a model without any.
+      void loadModel(modelId).then((loaded) => {
+        if (latestModelPickRef.current !== modelId) return;
+        applyAssetModelChange(previousModel, loaded);
+      });
+      return;
+    }
+    applyAssetModelChange(previousModel, model);
+  };
+
+  /**
+   * Applies a model pick to the form: the pre-fill and the default category.
+   *
+   * @param previousModel - The model picked before, whose untouched pre-fill
+   *   and category are taken back.
+   * @param model - The picked model's row, or `undefined` when cleared.
+   */
+  const applyAssetModelChange = (
+    previousModel: FormAssetModel | undefined,
+    model: FormAssetModel | undefined
+  ) => {
     const params = new URLSearchParams(location.search);
-    const previousModel = assetModelsData?.find(
-      (m) => m.id === selectedAssetModelId
-    );
     if (
       previousModel?.defaultCategoryId &&
       params.get("category") === previousModel.defaultCategoryId
     ) {
       params.delete("category");
     }
-
-    const model = modelId
-      ? assetModelsData?.find((m) => m.id === modelId)
-      : undefined;
 
     // Fill the empty valuation and custom field inputs with the model's
     // defaults, and take back the untouched ones the previous model filled.
@@ -711,9 +742,9 @@ const AssetFormInner = ({
     if (valuation !== null && valuation !== undefined) {
       savedKeys.add(VALUATION_PREFILL_KEY);
     }
-    setModelPrefill(
+    setModelPrefill((previous) =>
       planModelPrefill({
-        previous: modelPrefill,
+        previous,
         model,
         readCurrent: (key) => {
           const entry = formData?.get(
