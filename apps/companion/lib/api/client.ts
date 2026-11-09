@@ -4,6 +4,7 @@ import {
   subscribeToServerChange,
 } from "../server/active-server";
 import { onAfterSessionEnd } from "../server/session-end";
+import { createAuthGeneration } from "./auth-generation";
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
@@ -59,11 +60,12 @@ const SESSION_CACHE_TTL_MS = 30_000; // 30 seconds
 let cachedAccessToken: string | null = null;
 let cachedAt = 0;
 /**
- * Bumped on every reset. A session read that started before a reset belongs
- * to the session that just ended, so it may neither fill the cache nor be
- * used.
+ * Bumped when a session ends or the signed-in account changes, never on a
+ * token refresh (a refresh keeps the same session, and `getSession` itself can
+ * trigger one). A session read that started before a bump belongs to the
+ * session that ended, so it may neither fill the cache nor be used.
  */
-let tokenGeneration = 0;
+const tokenGeneration = createAuthGeneration();
 
 /** Unsubscribe handle for the current client's auth listener. */
 let authSubscription: { unsubscribe: () => void } | null = null;
@@ -72,7 +74,12 @@ let authSubscription: { unsubscribe: () => void } | null = null;
 function resetAccessTokenCache(): void {
   cachedAccessToken = null;
   cachedAt = 0;
-  tokenGeneration += 1;
+}
+
+/** Clears the cache and invalidates every session read still in flight. */
+function endTokenGeneration(): void {
+  resetAccessTokenCache();
+  tokenGeneration.bump();
 }
 
 /**
@@ -87,8 +94,11 @@ function attachAuthListener(): void {
   authSubscription?.unsubscribe();
   const {
     data: { subscription },
-  } = getSupabase().auth.onAuthStateChange(() => {
+  } = getSupabase().auth.onAuthStateChange((_event, session) => {
+    // A refresh only clears the cached token; a sign-out or another account
+    // also invalidates the session reads still in flight.
     resetAccessTokenCache();
+    tokenGeneration.observe(session?.user?.id ?? null);
   });
   authSubscription = subscription;
 }
@@ -101,13 +111,14 @@ attachAuthListener();
 // active-server.ts would create a require cycle, which Metro resolves to
 // `undefined` at module-eval time and surfaces far from the cause.
 subscribeToServerChange(() => {
-  resetAccessTokenCache();
+  endTokenGeneration();
+  tokenGeneration.forgetUser();
   attachAuthListener();
 });
 
 // A sign-out that had to delete the stored session itself emits no auth
 // event, so the token cache also listens for the end of every session.
-onAfterSessionEnd(resetAccessTokenCache);
+onAfterSessionEnd(endTokenGeneration);
 
 /**
  * Refuses the request when the live Supabase client belongs to a different
@@ -163,13 +174,13 @@ export async function getAccessToken(): Promise<string | null> {
     return cachedAccessToken;
   }
   const versionAtStart = getServerVersion();
-  const generationAtStart = tokenGeneration;
+  const generationAtStart = tokenGeneration.current();
   const {
     data: { session },
   } = await getSupabase().auth.getSession();
 
   if (getServerVersion() !== versionAtStart) return null;
-  if (tokenGeneration !== generationAtStart) return null;
+  if (tokenGeneration.current() !== generationAtStart) return null;
 
   if (session?.access_token) {
     cachedAccessToken = session.access_token;

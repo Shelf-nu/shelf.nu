@@ -17,6 +17,7 @@ let lookupResult: {
 } = { data: null, error: null };
 const calls = {
   recordingResolve: 0,
+  recordingCoordinates: [] as unknown[],
   lookup: [] as string[],
   coordinates: 0,
   pushed: [] as Array<[string, string | undefined]>,
@@ -28,8 +29,9 @@ const calls = {
 mock.module(pathToFileURL(join(__dirname, "api.ts")).href, {
   namedExports: {
     api: {
-      qr: async () => {
+      qr: async (...args: unknown[]) => {
         calls.recordingResolve += 1;
+        calls.recordingCoordinates.push(args[2]);
         return lookupResult;
       },
       getScannedItem: async (qrId: string) => {
@@ -90,6 +92,7 @@ before(async () => {
 beforeEach(() => {
   lookupResult = { data: null, error: null };
   calls.recordingResolve = 0;
+  calls.recordingCoordinates.length = 0;
   calls.lookup.length = 0;
   calls.coordinates = 0;
   calls.pushed.length = 0;
@@ -115,6 +118,9 @@ describe("resolveQrAndNavigate", () => {
 
     assert.equal(calls.recordingResolve, 1);
     assert.equal(calls.coordinates, 1);
+    assert.deepEqual(calls.recordingCoordinates, [
+      { latitude: 1, longitude: 2 },
+    ]);
     assert.deepEqual(calls.lookup, []);
     assert.deepEqual(calls.pushed, [
       ["/(tabs)/assets", "/(tabs)/assets/kits/kt_1"],
@@ -173,8 +179,23 @@ describe("parseDeepLink", () => {
       "shelf://audits/au_1%23x",
       "shelf://assets/kits/kt_1%26orgId%3Dother",
       "shelf://qr/qr_1%2F..",
+      "shelf://assets/as_1?orgId=other%2Fworkspace",
     ]) {
       assert.deepEqual(deepLinks.parseDeepLink(url), { type: "unknown" }, url);
     }
+  });
+});
+
+describe("resolveQrAndNavigate across a sign-out", () => {
+  it("opens nothing when the session ends during the lookup", async () => {
+    lookupResult = { data: { qr: { asset: { id: "as_1" } } }, error: null };
+    const { runAfterSessionEnd } = await import("./server/session-end");
+
+    const pending = deepLinks.resolveQrAndNavigate("qr_1");
+    runAfterSessionEnd();
+    await pending;
+
+    assert.deepEqual(calls.pushed, []);
+    assert.deepEqual(calls.web, []);
   });
 });

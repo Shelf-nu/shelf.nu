@@ -109,6 +109,25 @@ describe("audit scan drafts", () => {
     assert.equal(await persistence.loadAuditScanState("user_a", "au_1"), null);
   });
 
+  it("refuses a draft whose lists are missing or malformed", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
+    const [key] = [...store.keys()];
+    const good = JSON.parse(store.get(key)!);
+    for (const broken of [
+      { ...good, scannedItems: undefined },
+      { ...good, pendingQueue: "x" },
+      { ...good, failedQueue: {} },
+    ]) {
+      store.set(key, JSON.stringify(broken));
+      assert.equal(
+        await persistence.loadAuditScanState("user_a", "au_1"),
+        null
+      );
+    }
+    store.set(key, "null");
+    assert.equal(await persistence.loadAuditScanState("user_a", "au_1"), null);
+  });
+
   it("ignores drafts saved without an owner", async () => {
     store.set(
       `${prefix}au_1`,
@@ -198,9 +217,9 @@ describe("pruneStaleAuditDrafts", () => {
     assert.deepEqual(reported, ["unowned_draft_dropped"]);
   });
 
-  it("drops any account's draft older than the maximum age", async () => {
-    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
-    await persistence.saveAuditScanState("user_b", "au_2", [ITEM], [ENTRY]);
+  it("drops a synced draft of any account older than the maximum age", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    await persistence.saveAuditScanState("user_b", "au_2", [ITEM], []);
     const savedAt = Date.parse(
       JSON.parse(store.get(`${prefix}user_a:au_1`)!).savedAt
     );
@@ -213,6 +232,29 @@ describe("pruneStaleAuditDrafts", () => {
     await persistence.pruneStaleAuditDrafts(
       savedAt + persistence.AUDIT_DRAFT_MAX_AGE_MS + 60_000
     );
+    assert.equal(store.size, 0);
+  });
+
+  it("keeps a draft with unsent scans however old it is", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
+    await persistence.saveAuditScanState("user_b", "au_2", [ITEM], [], [ENTRY]);
+
+    await persistence.pruneStaleAuditDrafts(
+      Date.now() + persistence.AUDIT_DRAFT_MAX_AGE_MS * 10
+    );
+
+    assert.equal(store.size, 2);
+  });
+
+  it("removes a null record and still prunes the drafts around it", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    store.set(`${prefix}user_b:au_2`, "null");
+    await persistence.saveAuditScanState("user_c", "au_3", [ITEM], []);
+
+    await persistence.pruneStaleAuditDrafts(
+      Date.now() + persistence.AUDIT_DRAFT_MAX_AGE_MS * 2
+    );
+
     assert.equal(store.size, 0);
   });
 

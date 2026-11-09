@@ -43,9 +43,9 @@ export type AccountScopedCache = {
   /** The current account generation; it changes on every account change. */
   generation: () => number;
   /**
-   * Reports the signed-in user, as auth events arrive. The first report, a
-   * different user, or none empties the cache; the same user again (a token
-   * refresh) keeps it.
+   * Reports the signed-in user, as auth events arrive. A different user, or
+   * none, empties the cache; the first report and the same user again (a
+   * token refresh) keep it.
    *
    * @param userId - The signed-in user's id, or null when signed out
    */
@@ -70,8 +70,8 @@ export function createAccountScopedCache(): AccountScopedCache {
   const entries = new Map<string, Entry>();
   let generation = 0;
   /**
-   * undefined until the first auth event. The first event also counts as a
-   * change: a request that started before it may belong to another account.
+   * undefined until the first auth event. That event is not a change: it
+   * reports the stored session, which is the one any earlier request used.
    */
   let currentUserId: string | null | undefined;
 
@@ -93,7 +93,9 @@ export function createAccountScopedCache(): AccountScopedCache {
     },
     generation: () => generation,
     observeUser(userId) {
-      if (userId !== currentUserId) resetAccount();
+      if (currentUserId !== undefined && userId !== currentUserId) {
+        resetAccount();
+      }
       currentUserId = userId;
     },
     resetAccount,

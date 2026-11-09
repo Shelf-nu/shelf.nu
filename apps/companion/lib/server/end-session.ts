@@ -25,6 +25,11 @@ export type SessionEndingClient = {
       scope?: "global" | "local" | "others";
     }) => Promise<{ error: unknown }>;
     getSession: () => Promise<{ data: { session: unknown } }>;
+    /**
+     * Stops the client's background token refresh. The app restarts it on the
+     * next sign-in (`lib/auth-context.tsx`).
+     */
+    stopAutoRefresh?: () => Promise<void>;
   };
 };
 
@@ -105,6 +110,13 @@ export async function endSessionOnDevice(
     outcome = "local";
     if (!(await trySignOut(client, "local"))) {
       outcome = "forced";
+      // No new background refresh may start from here on, so none can read
+      // the session before it is deleted and write it back afterwards.
+      try {
+        await client.auth.stopAutoRefresh?.();
+      } catch {
+        // Best-effort; the re-checks below still catch a write-back.
+      }
       // The deletion happens outside supabase-js's auth lock, so a token
       // refresh that was already running can write the session back. Delete,
       // then check under the lock, and delete again if it came back.

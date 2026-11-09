@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
@@ -57,6 +57,10 @@ export function useScanQueue({
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The account this queue belongs to; set once, on first sight. */
   const ownerRef = useRef<string | null>(null);
+  /** The account signed in right now, read by the send loop between requests. */
+  const signedInRef = useRef(userId);
+  /** True once the screen is gone: a send loop still running stops. */
+  const stoppedRef = useRef(false);
 
   /** Records the owner and returns what the queue may do right now. */
   const access = useCallback(() => {
@@ -81,6 +85,29 @@ export function useScanQueue({
     [access, scannedItemsRef]
   );
 
+  // Record the owner as soon as an account is known, before the first scan, so
+  // the queue never runs ownerless.
+  useEffect(() => {
+    signedInRef.current = userId;
+    access();
+  }, [userId, access]);
+
+  useEffect(() => {
+    stoppedRef.current = false;
+    return () => {
+      stoppedRef.current = true;
+    };
+  }, []);
+
+  /** Whether the loop may send the next request for the owner. */
+  const maySendNow = useCallback(
+    () =>
+      !stoppedRef.current &&
+      ownerRef.current !== null &&
+      signedInRef.current === ownerRef.current,
+    []
+  );
+
   const processQueue = useCallback(async () => {
     if (isProcessingQueueRef.current || !orgId) return;
     if (scanQueueRef.current.length === 0) return;
@@ -90,6 +117,10 @@ export function useScanQueue({
     isProcessingQueueRef.current = true;
 
     while (scanQueueRef.current.length > 0) {
+      // Each request goes out with the token of whoever is signed in when it
+      // is sent, so the loop stops (scans stay in the owner's draft) once the
+      // screen is gone or someone else is signed in.
+      if (!maySendNow()) break;
       const entry = scanQueueRef.current[0];
       try {
         const { data, error } = await api.recordAuditScan(orgId, entry);
@@ -181,7 +212,15 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, persist, access]);
+  }, [
+    orgId,
+    scannedItemsRef,
+    onScanSynced,
+    onScanFailed,
+    persist,
+    access,
+    maySendNow,
+  ]);
 
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {

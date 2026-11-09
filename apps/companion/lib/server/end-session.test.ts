@@ -90,6 +90,33 @@ describe("endSessionOnDevice", () => {
     assert.equal(state.stored, false);
   });
 
+  it("stops background refresh before a forced delete", async () => {
+    const { client, state, removeStored } = stubClient("error", "error");
+    const order: string[] = [];
+    client.auth.stopAutoRefresh = async () => {
+      order.push(`stop:stored=${state.stored}`);
+    };
+
+    await endSessionOnDevice(client, async () => {
+      order.push("delete");
+      await removeStored();
+    });
+
+    assert.deepEqual(order.slice(0, 2), ["stop:stored=true", "delete"]);
+  });
+
+  it("does not stop background refresh when a sign-out succeeded", async () => {
+    const { client, removeStored } = stubClient("error", "ok");
+    let stopped = false;
+    client.auth.stopAutoRefresh = async () => {
+      stopped = true;
+    };
+
+    await endSessionOnDevice(client, removeStored);
+
+    assert.equal(stopped, false);
+  });
+
   it("never rejects, even when deleting the stored session throws", async () => {
     const { client } = stubClient("throw", "throw");
 

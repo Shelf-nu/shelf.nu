@@ -7,7 +7,12 @@ import {
   type QrLookups,
   type QrOutcome,
 } from "./link-dispatch";
-import { matchResourcePath } from "./resource-path";
+import {
+  matchResourcePath,
+  queryIdsArePlain,
+  splitLinkUrl,
+} from "./resource-path";
+import { sessionEndCount } from "./server/session-end";
 import { getScanCoordinates } from "./scan-location";
 
 /**
@@ -96,6 +101,9 @@ export function parseDeepLink(url: string): ParsedLink {
     // what the tapper wants.
     const match = matchResourcePath(segments);
     if (!match) return { type: "unknown" };
+    // Same rule as the native rewrite: an id-named query value that is not a
+    // plain record id makes the whole link name nothing.
+    if (!queryIdsArePlain(splitLinkUrl(url).query)) return { type: "unknown" };
     const { resource, id } = match;
 
     if (resource === "scanner") return { type: "scanner" };
@@ -159,6 +167,7 @@ const QR_LOOKUPS: QrLookups = {
  * @param origin - The origin the link carried, when it had one.
  */
 export async function resolveQrAndNavigate(qrId: string, origin?: string) {
+  const sessionsEndedAtStart = sessionEndCount();
   const outcome = await resolveQrOutcome(
     qrId,
     origin,
@@ -166,6 +175,9 @@ export async function resolveQrAndNavigate(qrId: string, origin?: string) {
     { source: "os-link" },
     QR_LOOKUPS
   );
+  // A sign-out or server switch during the lookup ends the session the link
+  // was resolved for: open nothing over the login screen.
+  if (sessionEndCount() !== sessionsEndedAtStart) return;
   if (outcome.kind === "screen") {
     pushIntoTab(outcome.tabRoot, outcome.href ?? undefined);
     return;

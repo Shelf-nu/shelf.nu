@@ -136,11 +136,16 @@ export function useAuditInit({
   useEffect(() => {
     if (!auditId || !orgId || !userId) return;
 
+    // A load that finishes after the audit, workspace or account changed
+    // belongs to the old ones: it must not install its saver or state.
+    let cancelled = false;
+
     (async () => {
       setIsInitializing(true);
       setInitError(null);
 
       const { data, error } = await api.audit(auditId, orgId);
+      if (cancelled) return;
       if (error || !data) {
         setInitError(error || "Failed to load audit");
         setIsInitializing(false);
@@ -211,6 +216,7 @@ export function useAuditInit({
       // ── Crash recovery ───────────────────────────────
       await pruneStaleAuditDrafts();
       const persisted = await loadAuditScanState(userId, auditId);
+      if (cancelled) return;
       // why: gate on whether there is ANYTHING to recover (the inner check
       // below decides recover-vs-clear from scanned items OR a non-empty
       // queue), not on scannedItems alone. The eager queue-persist can write a
@@ -354,6 +360,9 @@ export function useAuditInit({
 
       setIsInitializing(false);
     })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auditId, orgId, userId, progressAnim]);
 

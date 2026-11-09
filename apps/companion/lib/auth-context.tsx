@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -38,6 +39,8 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  /** Counts sign-ins, so a sign-out can tell whether one happened meanwhile. */
+  const signInsRef = useRef(0);
 
   // Changes whenever the app switches servers. The session effect below keys
   // off it so it re-reads and re-subscribes against the REBUILT Supabase
@@ -74,7 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = client.auth.onAuthStateChange((_event, session) => {
+    } = client.auth.onAuthStateChange((event, session) => {
+      // A forced sign-out stops background token refresh; every sign-in
+      // starts it again.
+      if (event === "SIGNED_IN") {
+        signInsRef.current += 1;
+        void client.auth.startAutoRefresh();
+      }
       setSession(session);
     });
 
@@ -112,8 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // person to the login screen with nothing to explain.
   const signOut = useCallback(async () => {
     await runBeforeSessionEnd();
+    const signInsAtStart = signInsRef.current;
     await endSessionOnDevice(getSupabase(), persistedSessionRemover());
-    setSession(null);
+    // A forced sign-out emits no auth event, so the state is cleared here,
+    // unless someone signed in while the teardown was still running.
+    if (signInsRef.current === signInsAtStart) setSession(null);
   }, []);
 
   const value = useMemo(

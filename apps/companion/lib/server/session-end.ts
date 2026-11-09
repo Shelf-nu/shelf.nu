@@ -62,6 +62,20 @@ export function runBeforeSessionEnd(): Promise<void> {
 /** Work that drops state tied to an account once its session has ended. */
 const afterSessionEndTasks = new Set<() => void>();
 
+/** How many sessions have ended in this app process. */
+let sessionsEnded = 0;
+
+/**
+ * How many sessions have ended in this app process (sign-outs and server
+ * switches). Work that awaits across a sign-out compares this before and
+ * after: a different count means the session it started under is gone.
+ *
+ * @returns The count
+ */
+export function sessionEndCount(): number {
+  return sessionsEnded;
+}
+
 /**
  * Registers work to run once any session has ended on this device: a
  * sign-out from the app, or the sign-out a server switch performs.
@@ -90,6 +104,7 @@ export function onAfterSessionEnd(task: () => void): () => void {
  * Never throws.
  */
 export function runAfterSessionEnd(): void {
+  sessionsEnded += 1;
   for (const task of afterSessionEndTasks) {
     try {
       task();

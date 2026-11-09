@@ -129,19 +129,38 @@ export async function loadAuditScanState(
   try {
     const raw = await AsyncStorage.getItem(storageKey(userId, auditId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PersistedScanState>;
-    if (
-      parsed.version !== 2 ||
-      parsed.userId !== userId ||
-      parsed.auditId !== auditId
-    ) {
-      return null;
-    }
-    return parsed as PersistedScanState;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isDraftOf(parsed, userId, auditId)) return null;
+    return parsed;
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] load failed:", e);
     return null;
   }
+}
+
+/**
+ * Whether a parsed value is a well-formed draft of this account and audit.
+ *
+ * @param value - The parsed JSON
+ * @param userId - The account it must belong to
+ * @param auditId - The audit it must be for
+ * @returns True when every field recovery reads has the right shape
+ */
+function isDraftOf(
+  value: unknown,
+  userId: string,
+  auditId: string
+): value is PersistedScanState {
+  if (typeof value !== "object" || value === null) return false;
+  const draft = value as Partial<PersistedScanState>;
+  return (
+    draft.version === 2 &&
+    draft.userId === userId &&
+    draft.auditId === auditId &&
+    Array.isArray(draft.scannedItems) &&
+    Array.isArray(draft.pendingQueue) &&
+    (draft.failedQueue === undefined || Array.isArray(draft.failedQueue))
+  );
 }
 
 /**
@@ -162,7 +181,10 @@ export async function clearAuditScanState(
   }
 }
 
-/** How long a draft is kept before {@link pruneStaleAuditDrafts} drops it. */
+/**
+ * How long a draft with nothing left to sync is kept before
+ * {@link pruneStaleAuditDrafts} drops it.
+ */
 export const AUDIT_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /**
@@ -171,9 +193,11 @@ export const AUDIT_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
  * - A draft with no owning account (saved under the audit id alone) is never
  *   offered, so it is removed; when it still held unsynced scans, the loss
  *   is reported to Sentry so it is visible.
- * - A draft of any account saved more than {@link AUDIT_DRAFT_MAX_AGE_MS} ago
- *   is removed, so a shared device does not keep other members' scans
- *   forever.
+ * - A draft of any account with nothing left to sync, saved more than
+ *   {@link AUDIT_DRAFT_MAX_AGE_MS} ago, is removed, so a shared device does
+ *   not keep finished drafts forever. A draft that still holds unsent scans
+ *   is kept however old it is: it stays until its owner resumes or discards
+ *   it (or a server switch clears every draft).
  *
  * Best-effort: errors are logged in dev, never thrown.
  *
@@ -187,17 +211,25 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
     const stale: string[] = [];
     for (const key of keys) {
       const raw = await AsyncStorage.getItem(key);
-      let parsed: Partial<PersistedScanState> & { version?: number } = {};
+      let value: unknown = null;
       try {
-        parsed = raw ? JSON.parse(raw) : {};
+        value = raw ? JSON.parse(raw) : null;
       } catch {
         stale.push(key);
         continue;
       }
+      // JSON `null`, a number or an array is no draft at all.
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        stale.push(key);
+        continue;
+      }
+      const parsed = value as Partial<PersistedScanState> & {
+        version?: number;
+      };
+      const unsynced =
+        (Array.isArray(parsed.pendingQueue) ? parsed.pendingQueue.length : 0) +
+        (Array.isArray(parsed.failedQueue) ? parsed.failedQueue.length : 0);
       if (parsed.version !== 2 || !parsed.userId) {
-        const unsynced =
-          (parsed.pendingQueue?.length ?? 0) +
-          (parsed.failedQueue?.length ?? 0);
         if (unsynced > 0) {
           reportAuditDurabilityEvent(
             "unowned_draft_dropped",
@@ -208,6 +240,7 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
         stale.push(key);
         continue;
       }
+      if (unsynced > 0) continue;
       const savedAt = Date.parse(parsed.savedAt ?? "");
       if (!Number.isFinite(savedAt) || now - savedAt > AUDIT_DRAFT_MAX_AGE_MS) {
         stale.push(key);

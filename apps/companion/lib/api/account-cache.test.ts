@@ -84,12 +84,12 @@ describe("createAccountScopedCache", () => {
     assert.equal(cache.generation(), generation);
   });
 
-  it("refuses a write that started before the first account was observed", () => {
+  it("keeps a write that started before the first auth event", () => {
     const cache = createAccountScopedCache();
     const startedIn = cache.generation();
 
-    cache.observeUser("user_b");
+    cache.observeUser("user_a");
 
-    assert.equal(cache.set(ROSTER_PATH, ["roster"], startedIn, 0), false);
+    assert.equal(cache.set(ROSTER_PATH, ["roster"], startedIn, 0), true);
   });
 });
