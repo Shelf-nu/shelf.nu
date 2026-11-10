@@ -91,7 +91,13 @@ type Props = ModelFilterProps & {
   resetSearchOnClose?: boolean;
   excludeItems?: string[];
   /** Allow undefined for deselection cases */
-  onChange?: ((value: string | undefined) => void) | null /**
+  /**
+   * Called with the picked id, and the picked item (from the loader's list or
+   * search results), or `undefined` for both on deselection.
+   */
+  onChange?:
+    | ((value: string | undefined, item?: ModelFilterItem) => void)
+    | null /**
    * Allow item to unselect on clicking again
    */;
   allowClear?: boolean;
@@ -290,17 +296,16 @@ export default function DynamicSelect({
     // item object (e.g. inline creation) pass it as `knownItem`; the freshly
     // created item is not yet in `allItemsToRender` in this tick, so the
     // lookup would miss it.
-    setSelectedItemCache(
-      isDeselecting
-        ? undefined
-        : knownItem ?? allItemsToRender.find((i) => i.id === id)
-    );
+    const pickedItem = isDeselecting
+      ? undefined
+      : knownItem ?? allItemsToRender.find((i) => i.id === id);
+    setSelectedItemCache(pickedItem);
 
     // Always update URL params and parent state
     handleSelectItemChange(id);
 
     // Notify parent with the new value
-    onChange?.(isDeselecting ? undefined : id);
+    onChange?.(isDeselecting ? undefined : id, pickedItem);
 
     if (closeOnSelect) {
       setIsPopoverOpen(false);

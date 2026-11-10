@@ -159,7 +159,10 @@ describe("DynamicSelect", () => {
       await waitFor(() => {
         expect(trigger).toHaveTextContent("Item 2");
       });
-      expect(onChange).toHaveBeenCalledWith("item-2");
+      expect(onChange).toHaveBeenCalledWith(
+        "item-2",
+        expect.objectContaining({ id: "item-2" })
+      );
     });
 
     it("shows placeholder when nothing is selected", () => {
@@ -376,7 +379,10 @@ describe("DynamicSelect", () => {
 
       // Wait for the click to be processed
       await waitFor(() => {
-        expect(onChange).toHaveBeenCalledWith("uncategorized");
+        expect(onChange).toHaveBeenCalledWith(
+          "uncategorized",
+          expect.objectContaining({ id: "uncategorized" })
+        );
       });
     });
 
@@ -674,7 +680,10 @@ describe("DynamicSelect", () => {
 
       // Should now show the regular item
       expect(screen.getByRole("button")).toHaveTextContent("Item 1");
-      expect(onChange).toHaveBeenCalledWith("item-1");
+      expect(onChange).toHaveBeenCalledWith(
+        "item-1",
+        expect.objectContaining({ id: "item-1" })
+      );
     });
 
     it("can switch from regular item to withoutValueItem", async () => {
@@ -729,7 +738,10 @@ describe("DynamicSelect", () => {
 
       // Should now show withoutValueItem
       expect(screen.getByRole("button")).toHaveTextContent("Without custody");
-      expect(onChange).toHaveBeenCalledWith("without-custody");
+      expect(onChange).toHaveBeenCalledWith(
+        "without-custody",
+        expect.objectContaining({ id: "without-custody" })
+      );
     });
   });
 

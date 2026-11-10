@@ -118,59 +118,6 @@ function getAssetModelsWhereInput({
 }
 
 /**
- * One asset model with the defaults the asset form pre-fills from it.
- *
- * The asset form loads a page of models with their defaults. A model the user
- * finds by searching may be outside that page, so the form asks for it here
- * when it is picked. Same fields as a {@link getAssetModels} row needs for the
- * pre-fill and the inherited-image preview.
- *
- * @param organizationId - The caller's workspace, never from the request.
- * @param assetModelId - The picked model, from the request.
- * @returns The model, or `null` when it is not in this workspace.
- */
-export async function getAssetModelFormDefaults({
-  organizationId,
-  assetModelId,
-}: {
-  organizationId: Organization["id"];
-  assetModelId: AssetModel["id"];
-}) {
-  try {
-    const model = await db.assetModel.findFirst({
-      where: { id: assetModelId, organizationId },
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        thumbnailImage: true,
-        defaultCategoryId: true,
-        defaultValuation: true,
-        customFieldDefaults: {
-          select: { customFieldId: true, value: true },
-        },
-      },
-    });
-    if (!model) return null;
-
-    return {
-      ...model,
-      customFieldDefaults: model.customFieldDefaults.map((fieldDefault) => ({
-        customFieldId: fieldDefault.customFieldId,
-        value: fieldDefault.value as unknown as ICustomFieldValueJson,
-      })),
-    };
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while fetching the asset model",
-      additionalData: { organizationId, assetModelId },
-      label,
-    });
-  }
-}
-
-/**
  * Fetches a paginated list of asset models for the given organization.
  *
  * Each model carries two counts. `_count.assets` is every asset linked to it,

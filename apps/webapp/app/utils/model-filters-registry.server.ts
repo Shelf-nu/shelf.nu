@@ -73,7 +73,17 @@ export const MODEL_FILTER_REGISTRY: Record<
   },
   assetModel: {
     searchable: ["name"],
-    select: { id: true, name: true, image: true },
+    // The defaults let the asset form pre-fill from a model picked from search
+    // results, exactly as from one in the loader's page (`picked-asset-model.ts`).
+    select: {
+      id: true,
+      name: true,
+      image: true,
+      thumbnailImage: true,
+      defaultCategoryId: true,
+      defaultValuation: true,
+      customFieldDefaults: { select: { customFieldId: true, value: true } },
+    },
   },
   booking: {
     searchable: ["name"],

@@ -27,12 +27,34 @@ const AUDITED_FIELDS: Array<[RegisteredModelName, string[]]> = [
   ["category", ["id", "name", "color"]],
   ["location", ["id", "name", "thumbnailUrl"]],
   ["kit", ["id", "name", "status"]],
-  ["assetModel", ["id", "name", "image"]],
+  [
+    "assetModel",
+    [
+      "id",
+      "name",
+      "image",
+      "thumbnailImage",
+      "defaultCategoryId",
+      "defaultValuation",
+    ],
+  ],
   ["booking", ["id", "name", "status", "from", "to"]],
   ["teamMember", ["id", "name", "userId"]],
 ];
 
 describe("MODEL_FILTER_REGISTRY", () => {
+  it("sends asset model custom field defaults with search results", () => {
+    // The asset form pre-fills from a model picked from search results.
+    const select = getModelFilterConfig("assetModel").select as Record<
+      string,
+      unknown
+    >;
+
+    expect(select.customFieldDefaults).toEqual({
+      select: { customFieldId: true, value: true },
+    });
+  });
+
   it.each(AUDITED_FIELDS)(
     "%s selects every field its consumers read",
     (model, fields) => {

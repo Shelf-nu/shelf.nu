@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -64,18 +64,16 @@ import {
   type BulkCreateSuccess,
 } from "./bulk-create-success-modal";
 import AssetCustomFields from "./custom-fields-inputs";
-import type { ModelPrefill, PrefillModel } from "./model-default-prefill";
+import type { ModelPrefill } from "./model-default-prefill";
 import {
   EMPTY_MODEL_PREFILL,
   VALUATION_PREFILL_KEY,
   planModelPrefill,
   prefillVersion,
 } from "./model-default-prefill";
+import type { FormAssetModel } from "./picked-asset-model";
+import { findFormModel } from "./picked-asset-model";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
-import {
-  type FormAssetModel,
-  useAssetModelLookup,
-} from "./use-asset-model-lookup";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -601,16 +599,16 @@ const AssetFormInner = ({
 
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<
-      PrefillModel & {
-        id: string;
-        name?: string;
-        defaultCategoryId?: string | null;
-        image?: string | null;
-        thumbnailImage?: string | null;
-      }
-    >;
+    assetModels?: FormAssetModel[];
   }>()?.assetModels;
+
+  /**
+   * Rows of models picked from search results outside the loader's page. The
+   * picker hands over the row (with its defaults) at the moment of the pick.
+   */
+  const [pickedModels, setPickedModels] = useState<
+    Record<string, FormAssetModel>
+  >({});
 
   /**
    * Valuation and custom field values the picked model filled into empty
@@ -620,43 +618,12 @@ const AssetFormInner = ({
   const [modelPrefill, setModelPrefill] =
     useState<ModelPrefill>(EMPTY_MODEL_PREFILL);
 
-  /**
-   * Model rows by id: the loader's page, plus any model picked from search
-   * results outside it, fetched on pick.
-   */
-  const { findModel, loadModel } = useAssetModelLookup(assetModelsData);
-
-  /** The model most recently picked, so a slow fetch for an older pick is dropped. */
-  const latestModelPickRef = useRef<string | undefined>(undefined);
-
-  /**
-   * The model whose defaults the form holds now, so the next pick takes back
-   * exactly what it put there, even when a pick in between was still loading.
-   * `null` until the first pick applies.
-   */
-  const appliedModelRef = useRef<FormAssetModel | undefined | null>(null);
-
-  /** Set when the form unmounts, so a late model lookup does not navigate. */
-  const unmountedRef = useRef(false);
-  useEffect(() => {
-    unmountedRef.current = false;
-    return () => {
-      unmountedRef.current = true;
-    };
-  }, []);
-
-  /**
-   * The router's navigation, read by a late model lookup: it must not start a
-   * navigation of its own while the form is being saved or the user is
-   * leaving (Cancel, a link), or it would cancel theirs.
-   */
-  const navigationRef = useRef(navigation);
-  useEffect(() => {
-    navigationRef.current = navigation;
-  }, [navigation]);
-
   /** The chosen model's row, used for the inherited-image preview + copy. */
-  const selectedAssetModel = findModel(selectedAssetModelId);
+  const selectedAssetModel = findFormModel(
+    selectedAssetModelId,
+    assetModelsData,
+    pickedModels
+  );
 
   /**
    * Intent to drop this asset's own image so it falls back down the cascade —
@@ -714,7 +681,10 @@ const AssetFormInner = ({
    * there. The server fills every empty field the same way on save (see
    * `fillAssetFormDataFromModel`).
    */
-  const handleAssetModelChange = (modelId: string | undefined) => {
+  const handleAssetModelChange = (
+    modelId: string | undefined,
+    picked?: FormAssetModel
+  ) => {
     // Mirror the DynamicSelect's current selection so the row's error
     // display can suppress the Zorm "required" message once the user
     // picks something. Zorm only re-validates on submit by default,
@@ -722,59 +692,24 @@ const AssetFormInner = ({
     // hasn't committed the hidden input update yet) so it would
     // wrongly flash the error.
     setHasPickedAssetModel(Boolean(modelId));
-    // Before the first pick, the asset's saved model (edit form) is the one
-    // whose defaults the form reflects.
-    const initialModel = findModel(selectedAssetModelId);
     setSelectedAssetModelId(modelId);
-    latestModelPickRef.current = modelId;
-
-    const model = findModel(modelId);
-    if (modelId && !model) {
-      // Picked from search results outside the loaded page: read its defaults
-      // first. If they cannot be loaded, continue as for a model without any.
-      void loadModel(modelId).then((loaded) => {
-        const pending = navigationRef.current;
-        const isLeavingOrSaving =
-          pending.state === "submitting" ||
-          (pending.state === "loading" &&
-            pending.location.pathname !== window.location.pathname);
-        if (
-          unmountedRef.current ||
-          isLeavingOrSaving ||
-          latestModelPickRef.current !== modelId
-        ) {
-          return;
-        }
-        applyAssetModelChange(initialModel, loaded);
-      });
-      return;
-    }
-    applyAssetModelChange(initialModel, model);
-  };
-
-  /**
-   * Applies a model pick to the form: the pre-fill and the default category.
-   *
-   * Reads the URL when it runs, not when the pick happened: a pick that waited
-   * for its model to load must not undo a category chosen in the meantime.
-   *
-   * @param initialModel - The asset's saved model, used as the previous model
-   *   before any pick has applied.
-   * @param model - The picked model's row, or `undefined` when cleared.
-   */
-  const applyAssetModelChange = (
-    initialModel: FormAssetModel | undefined,
-    model: FormAssetModel | undefined
-  ) => {
-    const previousModel =
-      appliedModelRef.current === null ? initialModel : appliedModelRef.current;
-    appliedModelRef.current = model;
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
+    const previousModel = findFormModel(
+      selectedAssetModelId,
+      assetModelsData,
+      pickedModels
+    );
     if (
       previousModel?.defaultCategoryId &&
       params.get("category") === previousModel.defaultCategoryId
     ) {
       params.delete("category");
+    }
+
+    const model =
+      findFormModel(modelId, assetModelsData, pickedModels) ?? picked;
+    if (picked && !pickedModels[picked.id]) {
+      setPickedModels((prev) => ({ ...prev, [picked.id]: picked }));
     }
 
     // Fill the empty valuation and custom field inputs with the model's
@@ -787,9 +722,9 @@ const AssetFormInner = ({
     if (valuation !== null && valuation !== undefined) {
       savedKeys.add(VALUATION_PREFILL_KEY);
     }
-    setModelPrefill((previous) =>
+    setModelPrefill(
       planModelPrefill({
-        previous,
+        previous: modelPrefill,
         model,
         readCurrent: (key) => {
           const entry = formData?.get(
@@ -819,7 +754,7 @@ const AssetFormInner = ({
       params.set("category", model.defaultCategoryId);
     }
 
-    void navigate(`${window.location.pathname}?${params.toString()}`, {
+    void navigate(`${location.pathname}?${params.toString()}`, {
       preventScrollReset: true,
       replace: true,
     });
