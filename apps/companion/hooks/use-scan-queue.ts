@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect } from "react";
-import { api } from "@/lib/api";
+import { accountGeneration, api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import {
@@ -7,7 +7,11 @@ import {
   drainScanQueue,
   dropSupersededCounts,
 } from "@/lib/audit-scan-queue";
-import { createQueueGate, type QueueGate } from "@/lib/scan-queue-owner";
+import {
+  createQueueGate,
+  drainMayContinue,
+  type QueueGate,
+} from "@/lib/scan-queue-owner";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
 // ── Constants ────────────────────────────────────────────
@@ -58,7 +62,14 @@ export type ScanQueueResult = {
    * can be re-synced and so audit completion can be blocked until empty.
    */
   failedQueueRef: React.MutableRefObject<ScanQueueEntry[]>;
-  enqueueScan: (entry: ScanQueueEntry) => void;
+  /**
+   * Queues a scan, saves it to the owner's draft and starts sending it.
+   *
+   * @returns True when the scan was queued; false when the queue refused it
+   *   (nobody, or another account than the owner, is signed in). The scan
+   *   screen counts a scan as recorded only on true.
+   */
+  enqueueScan: (entry: ScanQueueEntry) => boolean;
   processQueue: () => Promise<void>;
   /** Move all failed scans back into the live queue and re-attempt sync. */
   retryFailedScans: () => void;
@@ -79,16 +90,12 @@ export function useScanQueue({
   /**
    * The queue's ownership rules (`lib/scan-queue-owner.ts`, tested): the first
    * account seen owns it; scans are added and sent only while that account is
-   * signed in and the screen is open; drafts always go to the owner.
+   * signed in; drafts always go to the owner. A drain keeps sending after the
+   * screen closes and stops when the account changes (`drainMayContinue`).
    */
   const gateRef = useRef<QueueGate | null>(null);
   if (!gateRef.current) gateRef.current = createQueueGate();
   const gate = gateRef.current;
-
-  useEffect(() => {
-    gate.start();
-    return () => gate.stop();
-  }, [gate]);
 
   /** Saves the queues as the owner's draft; nothing while no owner is known. */
   const saveDraft = useCallback(
@@ -127,7 +134,7 @@ export function useScanQueue({
       // Each request goes out with the token of whoever is signed in when it
       // is sent, so the drain stops (scans stay in the owner's draft) once the
       // screen is gone or someone else is signed in.
-      mayContinue: gate.mayUse,
+      mayContinue: drainMayContinue(gate, accountGeneration),
       onSynced: onScanSynced,
       onFailed: (entry) => {
         onScanFailed?.(entry.assetId);
@@ -167,15 +174,25 @@ export function useScanQueue({
   // When the owner is signed in again after a pause (the drain stops while
   // nobody or someone else is signed in), resume sending the queue.
   useEffect(() => {
+    const wasAllowed = gate.mayUse();
     gate.observe(userId);
-    if (gate.mayUse() && scanQueueRef.current.length > 0) void processQueue();
+    // Only a change from refused to allowed restarts sending; a retry backoff
+    // already scheduled keeps its own timing.
+    if (
+      !wasAllowed &&
+      gate.mayUse() &&
+      !retryTimerRef.current &&
+      scanQueueRef.current.length > 0
+    ) {
+      void processQueue();
+    }
   }, [gate, userId, processQueue]);
 
   const enqueueScan = useCallback(
     (incoming: ScanQueueEntry) => {
       // Only the owner, signed in, adds scans: never another account, and
       // never a signed-out scanner into the previous owner's draft.
-      if (!gate.mayUse()) return;
+      if (!gate.mayUse()) return false;
       const queued = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
       // A new count replaces any older count for the same asset still
       // waiting. The request in flight (queue head while processing) stays:
@@ -209,6 +226,7 @@ export function useScanQueue({
       // debounced saver remains for lower-priority UI snapshots.
       saveDraft(entry.auditSessionId);
       processQueue();
+      return true;
     },
     [processQueue, saveDraft, gate]
   );

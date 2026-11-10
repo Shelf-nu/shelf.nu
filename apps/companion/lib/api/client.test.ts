@@ -135,3 +135,22 @@ describe("getAccessToken", () => {
     assert.equal(await pending, "token-a2");
   });
 });
+
+describe("apiFetch when the account changes during the token read", () => {
+  it("returns a session-changed error and does not report an expired session", async () => {
+    let authErrors = 0;
+    const unregister = client.onAuthError(() => {
+      authErrors += 1;
+    });
+
+    const request = client.apiFetch("/api/mobile/dashboard?orgId=org_1");
+    emit("SIGNED_IN", "user_b"); // another person signed in meanwhile
+    answerRead("token-a");
+    const result = await request;
+    unregister();
+
+    assert.equal(result.data, null);
+    assert.equal(result.error, "Your session changed. Please try again.");
+    assert.equal(authErrors, 0);
+  });
+});

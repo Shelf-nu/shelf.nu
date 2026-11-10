@@ -1,6 +1,7 @@
 /**
- * Tests for the account-scoped response cache: a different account never
- * reads the previous account's responses.
+ * Tests for the account-scoped response cache: a different account, a
+ * session end or a server switch never lets the previous account's responses
+ * through.
  *
  * @see ./account-cache.ts
  */
@@ -9,159 +10,104 @@ import { describe, it } from "node:test";
 
 import {
   createAccountCachedFetch,
-  createAccountScopedCache,
   SESSION_CHANGED_ERROR,
 } from "./account-cache";
+import { createAccountGeneration } from "./account-generation";
 
 const TTL = 60_000;
 const ROSTER_PATH = "/api/mobile/team-members?orgId=org_1&page=1&perPage=50";
 
-describe("createAccountScopedCache", () => {
-  it("serves a fresh response to the same account", () => {
-    const cache = createAccountScopedCache();
-    cache.observeUser("user_a");
-    cache.set(ROSTER_PATH, ["roster"], cache.generation(), 0);
-
-    assert.deepEqual(cache.get(ROSTER_PATH, TTL, 1_000), ["roster"]);
-    assert.equal(cache.get(ROSTER_PATH, TTL, TTL), undefined);
+/** A fake app: account counter wiring plus a fetch answered by hand. */
+function harness() {
+  const listeners: Array<(userId: string | null) => void> = [];
+  const sessionEndTasks: Array<() => void> = [];
+  const serverChangeTasks: Array<() => void> = [];
+  const account = createAccountGeneration({
+    subscribeAuth: (listener) => {
+      listeners.push(listener);
+      return () => {};
+    },
+    onSessionEnd: (task) => sessionEndTasks.push(task),
+    onServerChange: (task) => serverChangeTasks.push(task),
   });
-
-  it("keeps entries across a token refresh for the same user", () => {
-    const cache = createAccountScopedCache();
-    cache.observeUser("user_a");
-    cache.set(ROSTER_PATH, ["roster"], cache.generation(), 0);
-
-    cache.observeUser("user_a");
-
-    assert.deepEqual(cache.get(ROSTER_PATH, TTL, 1), ["roster"]);
+  const pending: Array<(data: unknown) => void> = [];
+  let fetches = 0;
+  let clock = 0;
+  const cached = createAccountCachedFetch({
+    account,
+    fetch: <T>() => {
+      fetches += 1;
+      return new Promise<{ data: T | null; error: string | null }>((resolve) =>
+        pending.push((data) => resolve({ data: data as T, error: null }))
+      );
+    },
+    now: () => clock,
   });
+  return {
+    cached,
+    emit: (userId: string | null) => listeners[listeners.length - 1](userId),
+    endSession: () => sessionEndTasks.forEach((task) => task()),
+    switchServer: () => serverChangeTasks.forEach((task) => task()),
+    answer: (data: unknown) => pending.shift()!(data),
+    advance: (ms: number) => {
+      clock += ms;
+    },
+    get fetches() {
+      return fetches;
+    },
+  };
+}
 
-  it("empties on sign-out and when another user signs in", () => {
-    const cache = createAccountScopedCache();
-    cache.observeUser("user_a");
-    cache.set(ROSTER_PATH, ["full roster"], cache.generation(), 0);
-
-    cache.observeUser(null);
-    assert.equal(cache.get(ROSTER_PATH, TTL, 1), undefined);
-
-    cache.observeUser("user_b");
-    cache.set(ROSTER_PATH, ["own row"], cache.generation(), 0);
-    cache.observeUser("user_a");
-    assert.equal(cache.get(ROSTER_PATH, TTL, 1), undefined);
-  });
-
-  it("drops a response whose request began before the account changed", () => {
-    const cache = createAccountScopedCache();
-    cache.observeUser("user_a");
-    const startedIn = cache.generation();
-
-    cache.observeUser(null);
-
-    assert.equal(cache.set(ROSTER_PATH, ["roster"], startedIn, 0), false);
-    assert.equal(cache.get(ROSTER_PATH, TTL, 1), undefined);
-  });
-
-  it("resetAccount empties the cache and rejects in-flight writes", () => {
-    const cache = createAccountScopedCache();
-    cache.set(ROSTER_PATH, ["roster"], cache.generation(), 0);
-    const startedIn = cache.generation();
-
-    cache.resetAccount();
-
-    assert.equal(cache.get(ROSTER_PATH, TTL, 1), undefined);
-    assert.equal(cache.set(ROSTER_PATH, ["late"], startedIn, 0), false);
-  });
-
-  it("invalidate removes by prefix without touching the generation", () => {
-    const cache = createAccountScopedCache();
-    const generation = cache.generation();
-    cache.set("/api/mobile/locations?orgId=org_1", ["loc"], generation, 0);
-    cache.set(ROSTER_PATH, ["roster"], generation, 0);
-
-    cache.invalidate("/api/mobile/locations");
-
-    assert.equal(
-      cache.get("/api/mobile/locations?orgId=org_1", TTL, 1),
-      undefined
-    );
-    assert.deepEqual(cache.get(ROSTER_PATH, TTL, 1), ["roster"]);
-    assert.equal(cache.generation(), generation);
-  });
-
-  it("keeps a write that started before the first auth event", () => {
-    const cache = createAccountScopedCache();
-    const startedIn = cache.generation();
-
-    cache.observeUser("user_a");
-
-    assert.equal(cache.set(ROSTER_PATH, ["roster"], startedIn, 0), true);
-  });
-});
+/** Fetches a path and answers it with `data` at once. */
+async function load(app: ReturnType<typeof harness>, data: unknown) {
+  const request = app.cached.cachedFetch(ROSTER_PATH, TTL);
+  app.answer(data);
+  return request;
+}
 
 describe("createAccountCachedFetch", () => {
-  /** A fake app: auth listeners per client, session-end and switch hooks. */
-  function harness() {
-    const listeners: Array<(userId: string | null) => void> = [];
-    let unsubscribed = 0;
-    const sessionEndTasks: Array<() => void> = [];
-    const serverChangeTasks: Array<() => void> = [];
-    const pending: Array<{
-      path: string;
-      resolve: (r: { data: unknown; error: null }) => void;
-    }> = [];
-    let fetches = 0;
+  it("serves a fresh response to the same account, across a token refresh", async () => {
+    const app = harness();
+    app.emit("user_a");
+    await load(app, ["roster"]);
 
-    const cached = createAccountCachedFetch({
-      subscribeAuth: (listener) => {
-        listeners.push(listener);
-        return () => {
-          unsubscribed += 1;
-        };
-      },
-      onSessionEnd: (task) => sessionEndTasks.push(task),
-      onServerChange: (task) => serverChangeTasks.push(task),
-      fetch: <T>(path: string) => {
-        fetches += 1;
-        return new Promise<{ data: T | null; error: string | null }>(
-          (resolve) => pending.push({ path, resolve: resolve as never })
-        );
-      },
-      now: () => 0,
-    });
+    app.emit("user_a"); // refresh
+    assert.deepEqual((await app.cached.cachedFetch(ROSTER_PATH, TTL)).data, [
+      "roster",
+    ]);
+    assert.equal(app.fetches, 1);
 
-    return {
-      cached,
-      /** Emits an auth event on the live (latest) client. */
-      emit: (userId: string | null) => listeners[listeners.length - 1](userId),
-      endSession: () => sessionEndTasks.forEach((t) => t()),
-      switchServer: () => serverChangeTasks.forEach((t) => t()),
-      answer: (data: unknown) =>
-        pending.shift()!.resolve({ data, error: null }),
-      get listenerCount() {
-        return listeners.length;
-      },
-      get unsubscribed() {
-        return unsubscribed;
-      },
-      get fetches() {
-        return fetches;
-      },
-    };
-  }
+    app.advance(TTL);
+    const stale = app.cached.cachedFetch(ROSTER_PATH, TTL);
+    assert.equal(app.fetches, 2);
+    app.answer(["fresh"]);
+    await stale;
+  });
 
   it("a session end empties the cache", async () => {
     const app = harness();
     app.emit("user_a");
-    const first = app.cached.cachedFetch(ROSTER_PATH, TTL);
-    app.answer(["roster"]);
-    await first;
+    await load(app, ["roster"]);
 
     app.endSession();
     const second = app.cached.cachedFetch(ROSTER_PATH, TTL);
-    app.answer(["fresh"]);
-
-    assert.deepEqual((await second).data, ["fresh"]);
     assert.equal(app.fetches, 2);
+    app.answer(["fresh"]);
+    assert.deepEqual((await second).data, ["fresh"]);
+  });
+
+  it("another user signing in empties the cache", async () => {
+    const app = harness();
+    app.emit("user_a");
+    await load(app, ["full roster"]);
+
+    app.emit(null);
+    app.emit("user_b");
+    const next = app.cached.cachedFetch(ROSTER_PATH, TTL);
+
+    assert.equal(app.fetches, 2);
+    app.answer(["own row"]);
+    assert.deepEqual((await next).data, ["own row"]);
   });
 
   it("a response that arrives after a user change is neither stored nor returned", async () => {
@@ -182,9 +128,7 @@ describe("createAccountCachedFetch", () => {
   it("a server switch empties the cache", async () => {
     const app = harness();
     app.emit("user_a");
-    const first = app.cached.cachedFetch(ROSTER_PATH, TTL);
-    app.answer(["old server roster"]);
-    await first;
+    await load(app, ["old server roster"]);
 
     app.switchServer();
     const second = app.cached.cachedFetch(ROSTER_PATH, TTL);
@@ -206,19 +150,6 @@ describe("createAccountCachedFetch", () => {
       data: null,
       error: SESSION_CHANGED_ERROR,
     });
-    const next = app.cached.cachedFetch(ROSTER_PATH, TTL);
-    assert.equal(app.fetches, 2);
-    app.answer(["new server roster"]);
-    await next;
-  });
-
-  it("attaches the listener to the new client after a server switch", () => {
-    const app = harness();
-
-    app.switchServer();
-
-    assert.equal(app.listenerCount, 2);
-    assert.equal(app.unsubscribed, 1);
   });
 
   it("a fetch started right after a server switch resolves with data", async () => {
@@ -234,5 +165,21 @@ describe("createAccountCachedFetch", () => {
       data: ["new server roster"],
       error: null,
     });
+  });
+
+  it("invalidate removes by prefix", async () => {
+    const app = harness();
+    app.emit("user_a");
+    await load(app, ["roster"]);
+
+    app.cached.invalidate("/api/mobile/locations");
+    await app.cached.cachedFetch(ROSTER_PATH, TTL);
+    assert.equal(app.fetches, 1);
+
+    app.cached.invalidate("/api/mobile/team-members");
+    const again = app.cached.cachedFetch(ROSTER_PATH, TTL);
+    assert.equal(app.fetches, 2);
+    app.answer(["roster"]);
+    await again;
   });
 });

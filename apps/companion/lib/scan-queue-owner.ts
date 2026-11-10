@@ -59,25 +59,20 @@ export type QueueGate = {
   /** Saving to the owner's draft is allowed (an owner is known). */
   maySave: () => boolean;
   /**
-   * Adding a scan, or sending one, is allowed: the screen is open and the
-   * owner is the account signed in now. Refused while nobody is signed in.
+   * Adding a scan, or sending one, is allowed: the owner is the account
+   * signed in now. Refused while nobody or someone else is signed in.
    */
   mayUse: () => boolean;
-  /** The scan screen closed: sending stops. */
-  stop: () => void;
-  /** The scan screen opened (again). */
-  start: () => void;
 };
 
 /**
  * Creates the ownership controller for one scan queue.
  *
- * @returns The gate, with no owner, nobody signed in, and started
+ * @returns The gate, with no owner and nobody signed in
  */
 export function createQueueGate(): QueueGate {
   let owner: string | null = null;
   let signedIn: string | undefined;
-  let stopped = false;
   return {
     observe(userId) {
       signedIn = userId;
@@ -85,12 +80,28 @@ export function createQueueGate(): QueueGate {
     },
     owner: () => owner,
     maySave: () => owner !== null,
-    mayUse: () => !stopped && resolveQueueAccess(owner, signedIn).mayUse,
-    stop() {
-      stopped = true;
-    },
-    start() {
-      stopped = false;
-    },
+    mayUse: () => resolveQueueAccess(owner, signedIn).mayUse,
   };
+}
+
+/** The slice of the app's account counter a drain needs. */
+export type AccountCounter = { current: () => number };
+
+/**
+ * The check a drain runs before every send. A drain started for the owner
+ * keeps sending after the scan screen closes, so leaving the screen never
+ * strands queued scans; it stops as soon as the account changes, which the
+ * app's account counter reports even after the screen (and its view of the
+ * signed-in user) is gone.
+ *
+ * @param gate - The queue's gate, as of when the drain starts
+ * @param account - The app's account counter
+ * @returns The check for `drainScanQueue`'s `mayContinue`
+ */
+export function drainMayContinue(
+  gate: QueueGate,
+  account: AccountCounter
+): () => boolean {
+  const generationAtStart = account.current();
+  return () => gate.mayUse() && account.current() === generationAtStart;
 }

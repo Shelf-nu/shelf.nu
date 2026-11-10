@@ -6,7 +6,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { BLOCKED_SESSION_KEYS, createSessionBlock } from "./session-block";
+import {
+  BLOCKED_SESSION_KEYS,
+  BLOCKED_SESSION_KEYS_PENDING,
+  createSessionBlock,
+} from "./session-block";
 
 /** A Map-backed store, standing in for AsyncStorage. */
 function mapStore(initial: Record<string, string> = {}) {
@@ -108,5 +112,53 @@ describe("createSessionBlock", () => {
 
     assert.equal(await block.isBlocked("sb-abcd-auth-token"), true);
     assert.equal(await block.isBlocked("sb-other-auth-token"), true);
+  });
+
+  it("keeps a block made while the list could not be read across a restart", async () => {
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: JSON.stringify(["sb-old-auth-token"]),
+    });
+    let failMainReads = true;
+    const flaky = {
+      getItem: async (key: string) => {
+        if (failMainReads && key === BLOCKED_SESSION_KEYS) {
+          throw new Error("disk");
+        }
+        return store.getItem(key);
+      },
+      setItem: store.setItem,
+    };
+
+    await createSessionBlock(flaky).block("sb-abcd-auth-token");
+    assert.ok(store.data.get(BLOCKED_SESSION_KEYS_PENDING));
+
+    failMainReads = false; // the app restarts and storage works again
+    const afterRestart = createSessionBlock(flaky);
+    assert.equal(await afterRestart.isBlocked("sb-abcd-auth-token"), true);
+    assert.equal(await afterRestart.isBlocked("sb-old-auth-token"), true);
+    assert.deepEqual(JSON.parse(store.data.get(BLOCKED_SESSION_KEYS)!).sort(), [
+      "sb-abcd-auth-token",
+      "sb-old-auth-token",
+    ]);
+  });
+
+  it("saves a block when the read only failed once", async () => {
+    const store = mapStore();
+    let failures = 1;
+    const block = createSessionBlock({
+      getItem: async (key) => {
+        if (key === BLOCKED_SESSION_KEYS && failures-- > 0) {
+          throw new Error("disk");
+        }
+        return store.getItem(key);
+      },
+      setItem: store.setItem,
+    });
+
+    await block.block("sb-abcd-auth-token");
+
+    assert.deepEqual(JSON.parse(store.data.get(BLOCKED_SESSION_KEYS)!), [
+      "sb-abcd-auth-token",
+    ]);
   });
 });

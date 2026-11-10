@@ -20,6 +20,14 @@
 /** Key, in the injected store, of the list of blocked session keys. */
 export const BLOCKED_SESSION_KEYS = "shelf_blocked_session_keys";
 
+/**
+ * Key of a second, write-only-when-needed list: keys blocked while the main
+ * list could not be read. Merged into the main list on the next good read, so
+ * such a block still survives a restart.
+ */
+export const BLOCKED_SESSION_KEYS_PENDING =
+  "shelf_blocked_session_keys_pending";
+
 /** The slice of a key-value store this module needs (AsyncStorage). */
 export type BlockStore = {
   getItem: (key: string) => Promise<string | null>;
@@ -61,6 +69,18 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
   /** Keys blocked or unblocked before the store could be read. */
   const pending = new Set<string>();
 
+  /** Parses a stored key list; anything malformed reads as empty. */
+  function parseKeys(raw: string | null): string[] {
+    try {
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((k): k is string => typeof k === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
   async function load(): Promise<Set<string>> {
     if (blocked) return blocked;
     let raw: string | null;
@@ -71,18 +91,22 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
       // app session stay in `pending` meanwhile.
       return new Set(pending);
     }
-    let parsed: unknown = [];
+    let parked: string[] = [];
     try {
-      parsed = raw ? JSON.parse(raw) : [];
+      parked = parseKeys(await store.getItem(BLOCKED_SESSION_KEYS_PENDING));
     } catch {
-      parsed = [];
+      parked = [];
     }
-    blocked = new Set([
-      ...(Array.isArray(parsed)
-        ? parsed.filter((k): k is string => typeof k === "string")
-        : []),
-      ...pending,
-    ]);
+    blocked = new Set([...parseKeys(raw), ...parked, ...pending]);
+    if (parked.length > 0) {
+      // Fold the keys parked during a failed read into the main list.
+      await save(blocked);
+      try {
+        await store.setItem(BLOCKED_SESSION_KEYS_PENDING, "[]");
+      } catch {
+        // Harmless: the parked keys are in the main list now.
+      }
+    }
     return blocked;
   }
 
@@ -97,16 +121,42 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
   return {
     async block(storageKey) {
       pending.add(storageKey);
-      const keys = await load();
+      // Retry the read once when it failed.
+      let keys = await load();
+      if (!blocked) keys = await load();
       keys.add(storageKey);
-      // Only a list read from the store is written back, so a failed read
-      // can never overwrite the stored list with a partial one.
-      if (blocked) await save(keys);
+      // Only a list read from the store is written back, so a failed read can
+      // never overwrite the stored list with a partial one. When the read
+      // still fails, the block is parked in a separate list that the next
+      // good read merges in, so it survives a restart.
+      if (blocked) {
+        await save(keys);
+        return;
+      }
+      try {
+        await store.setItem(
+          BLOCKED_SESSION_KEYS_PENDING,
+          JSON.stringify([...pending])
+        );
+      } catch {
+        // The in-memory block still holds for this app session.
+      }
     },
     async unblock(storageKey) {
       pending.delete(storageKey);
       const keys = await load();
       if (keys.delete(storageKey) && blocked) await save(keys);
+      if (!blocked) {
+        // A parked block for this key must not come back on the next read.
+        try {
+          await store.setItem(
+            BLOCKED_SESSION_KEYS_PENDING,
+            JSON.stringify([...pending])
+          );
+        } catch {
+          // Nothing more to do; the key is unblocked for this app session.
+        }
+      }
     },
     async isBlocked(key) {
       const keys = await load();

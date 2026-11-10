@@ -200,6 +200,29 @@ describe("endSessionOnDevice", () => {
     assert.ok(Date.now() - started < 1_000);
   });
 
+  it("stops re-checking after the first timeout", async () => {
+    const { client, removeStored } = stubClient("error", "error");
+    let checks = 0;
+    let deletes = 0;
+    client.auth.getSession = () => {
+      checks += 1;
+      return new Promise(() => {});
+    };
+
+    const outcome = await endSessionOnDevice(
+      client,
+      async () => {
+        deletes += 1;
+        await removeStored();
+      },
+      { checkTimeoutMs: 10 }
+    );
+
+    assert.equal(outcome, "incomplete");
+    assert.equal(checks, 1);
+    assert.equal(deletes, 1);
+  });
+
   it("skips the after-session-end tasks when another session replaced it", async () => {
     const { client, removeStored } = stubClient("error", "ok");
     let runs = 0;

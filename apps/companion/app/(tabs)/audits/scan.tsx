@@ -95,6 +95,13 @@ type AuditCountRequest = {
   unitOfMeasure: string | null;
 };
 
+/**
+ * Shown when the scan queue refuses a scan (nobody, or another account than
+ * the one this audit session started with, is signed in): the scan was not
+ * recorded and must be scanned again once signed in.
+ */
+const SCAN_NOT_RECORDED = "Not recorded. Sign in again, then rescan.";
+
 export default function AuditScanScreen() {
   return (
     <ScannerErrorBoundary label="AuditScanner">
@@ -746,7 +753,26 @@ function AuditScannerContent() {
     }) => {
       if (!auditId) return;
       try {
-        // 4. Optimistic update: instant feedback
+        // 4. Queue the server write first: the scan counts as recorded only
+        // once the queue has taken it. A refused scan (nobody, or another
+        // account than the queue's owner, is signed in) is not counted, and
+        // the operator is told so.
+        const queued = enqueueScan({
+          auditSessionId: auditId,
+          qrId: codeId,
+          assetId: asset.id,
+          isExpected,
+          ...(count ? { foundQuantity: count.foundQuantity } : {}),
+        });
+        if (!queued) {
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          showToast("error", asset.title, SCAN_NOT_RECORDED);
+          finalizeScan();
+          return;
+        }
+
+        // 5. Optimistic update: instant feedback
         scannedAssetIdsRef.current.add(asset.id);
 
         // why: an expected asset's full record is already in memory, so the
@@ -792,15 +818,6 @@ function AuditScannerContent() {
           announce("Asset not in audit");
           showToast("unexpected", asset.title, "Unexpected asset");
         }
-
-        // 5. Background persistence: submit to server
-        enqueueScan({
-          auditSessionId: auditId,
-          qrId: codeId,
-          assetId: asset.id,
-          isExpected,
-          ...(count ? { foundQuantity: count.foundQuantity } : {}),
-        });
 
         // 6. Persist to disk for crash recovery (debounced)
         debouncedSaverRef.current?.save(
@@ -852,6 +869,23 @@ function AuditScannerContent() {
         return;
       }
 
+      // The server replaces the count of a scan it already has. The row shows
+      // the new count only once the queue has taken it.
+      const queued = enqueueScan(
+        recountQueueEntry({
+          auditSessionId: auditId,
+          qrId: request.codeId,
+          assetId: request.assetId,
+          isExpected: request.isExpected,
+          foundQuantity,
+        })
+      );
+      if (!queued) {
+        showToast("error", request.assetTitle, SCAN_NOT_RECORDED);
+        finalizeScan();
+        return;
+      }
+
       setScannedItems((prev) => {
         const next = prev.map((item) =>
           item.assetId === request.assetId
@@ -866,16 +900,6 @@ function AuditScannerContent() {
         scannedItemsRef.current = next;
         return next;
       });
-      // The server replaces the count of a scan it already has.
-      enqueueScan(
-        recountQueueEntry({
-          auditSessionId: auditId,
-          qrId: request.codeId,
-          assetId: request.assetId,
-          isExpected: request.isExpected,
-          foundQuantity,
-        })
-      );
       // The result toast waits for the server's answer (handleScanSynced).
       pendingRecountsRef.current.set(request.assetId, {
         assetTitle: request.assetTitle,

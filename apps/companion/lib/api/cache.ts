@@ -12,31 +12,15 @@
  *
  * @see {@link file://./account-cache.ts}
  */
-import { subscribeToServerChange } from "../server/active-server";
-import { onAfterSessionEnd } from "../server/session-end";
-import { getSupabase } from "../supabase";
 import { createAccountCachedFetch } from "./account-cache";
-import { apiFetch } from "./client";
+import { accountGeneration, apiFetch } from "./client";
 
 const RESPONSE_CACHE_TTL_MS = 5 * 60_000; // 5 minutes
 
-// why: wiring through subscriptions rather than being called from
-// active-server.ts keeps the dependency one-way (api -> server).
+// Bound to the app's one account counter, which the token cache and the audit
+// scan queue read too, so all three agree on when the account changed.
 const responseCache = createAccountCachedFetch({
-  subscribeAuth: (listener) => {
-    const {
-      data: { subscription },
-    } = getSupabase().auth.onAuthStateChange((_event, session) =>
-      listener(session?.user?.id ?? null)
-    );
-    return () => subscription.unsubscribe();
-  },
-  onSessionEnd: (task) => {
-    onAfterSessionEnd(task);
-  },
-  onServerChange: (task) => {
-    subscribeToServerChange(task);
-  },
+  account: accountGeneration,
   fetch: apiFetch,
 });
 

@@ -4,7 +4,8 @@ import {
   subscribeToServerChange,
 } from "../server/active-server";
 import { onAfterSessionEnd } from "../server/session-end";
-import { createAuthGeneration } from "./auth-generation";
+import { createAccountGeneration } from "./account-generation";
+import { SESSION_CHANGED_ERROR } from "./account-cache";
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
@@ -59,66 +60,47 @@ const MAX_RETRIES = 1;
 const SESSION_CACHE_TTL_MS = 30_000; // 30 seconds
 let cachedAccessToken: string | null = null;
 let cachedAt = 0;
-/**
- * Bumped when a session ends or the signed-in account changes, never on a
- * token refresh (a refresh keeps the same session, and `getSession` itself can
- * trigger one). A session read that started before a bump belongs to the
- * session that ended, so it may neither fill the cache nor be used.
- */
-const tokenGeneration = createAuthGeneration();
-
-/** Unsubscribe handle for the current client's auth listener. */
-let authSubscription: { unsubscribe: () => void } | null = null;
-
 /** Clears the in-memory access-token cache. */
 function resetAccessTokenCache(): void {
   cachedAccessToken = null;
   cachedAt = 0;
 }
 
-/** Clears the cache and invalidates every session read still in flight. */
-function endTokenGeneration(): void {
-  resetAccessTokenCache();
-  tokenGeneration.bump();
-}
-
 /**
- * Subscribes the token cache to the CURRENT Supabase client's auth events
- * (login, logout, token refresh).
+ * The app's one account-change counter (`./account-generation.ts`), shared by
+ * the token cache here, the response cache and the audit scan queue.
  *
- * Re-called after every server switch: otherwise the cache keeps listening to
- * the discarded client, silently stops invalidating, and hands the previous
- * server's access token to the new one.
+ * It follows the CURRENT Supabase client's auth events and re-attaches after
+ * every server switch: otherwise it keeps listening to the discarded client.
+ * Every auth event, a token refresh included, also clears the cached token.
+ *
+ * why: this module owns the auth subscription, so it (not active-server.ts)
+ * rearms it after a switch. Wiring it as a subscription keeps the dependency
+ * one-way (api -> server); importing these functions INTO active-server.ts
+ * would create a require cycle, which Metro resolves to `undefined` at
+ * module-eval time and surfaces far from the cause.
  */
-function attachAuthListener(): void {
-  authSubscription?.unsubscribe();
-  const {
-    data: { subscription },
-  } = getSupabase().auth.onAuthStateChange((_event, session) => {
-    // A refresh only clears the cached token; a sign-out or another account
-    // also invalidates the session reads still in flight.
-    resetAccessTokenCache();
-    tokenGeneration.observe(session?.user?.id ?? null);
-  });
-  authSubscription = subscription;
-}
-
-attachAuthListener();
-
-// why: this module owns the token cache and the auth subscription, so it — not
-// active-server.ts — rearms them after a switch. Wiring it as a subscription
-// keeps the dependency one-way (api → server); importing these functions INTO
-// active-server.ts would create a require cycle, which Metro resolves to
-// `undefined` at module-eval time and surfaces far from the cause.
-subscribeToServerChange(() => {
-  endTokenGeneration();
-  tokenGeneration.forgetUser();
-  attachAuthListener();
+export const accountGeneration = createAccountGeneration({
+  subscribeAuth: (listener) => {
+    const {
+      data: { subscription },
+    } = getSupabase().auth.onAuthStateChange((_event, session) => {
+      resetAccessTokenCache();
+      listener(session?.user?.id ?? null);
+    });
+    return () => subscription.unsubscribe();
+  },
+  onSessionEnd: (task) => {
+    onAfterSessionEnd(task);
+  },
+  onServerChange: (task) => {
+    subscribeToServerChange(task);
+  },
 });
 
-// A sign-out that had to delete the stored session itself emits no auth
-// event, so the token cache also listens for the end of every session.
-onAfterSessionEnd(endTokenGeneration);
+// A session read that started before the account changed belongs to the
+// session that ended: it may neither fill the cache nor be used.
+accountGeneration.onChange(resetAccessTokenCache);
 
 /**
  * Refuses the request when the live Supabase client belongs to a different
@@ -169,27 +151,43 @@ function guardSessionServerMatch(): { data: null; error: string } | null {
  *   changed while it was being read.
  */
 export async function getAccessToken(): Promise<string | null> {
+  const read = await readAccessToken();
+  return "token" in read ? read.token : null;
+}
+
+/**
+ * Reads the access token, telling "no session" apart from "the account
+ * changed while it was being read".
+ *
+ * @returns `{ token }` (null when there is no session), or `{ changed: true }`
+ *   when the server or the account changed during the read
+ */
+async function readAccessToken(): Promise<
+  { token: string | null } | { changed: true }
+> {
   const now = Date.now();
   if (cachedAccessToken && now - cachedAt < SESSION_CACHE_TTL_MS) {
-    return cachedAccessToken;
+    return { token: cachedAccessToken };
   }
   const versionAtStart = getServerVersion();
-  const generationAtStart = tokenGeneration.current();
+  const generationAtStart = accountGeneration.current();
   const {
     data: { session },
   } = await getSupabase().auth.getSession();
 
-  if (getServerVersion() !== versionAtStart) return null;
-  if (tokenGeneration.current() !== generationAtStart) return null;
+  if (getServerVersion() !== versionAtStart) return { changed: true };
+  if (accountGeneration.current() !== generationAtStart) {
+    return { changed: true };
+  }
 
   if (session?.access_token) {
     cachedAccessToken = session.access_token;
     cachedAt = now;
-    return cachedAccessToken;
+    return { token: cachedAccessToken };
   }
   cachedAccessToken = null;
   cachedAt = 0;
-  return null;
+  return { token: null };
 }
 
 /**
@@ -217,7 +215,14 @@ async function resolveRequestTarget(): Promise<
   const server = getActiveServer();
   const versionAtStart = getServerVersion();
 
-  const accessToken = await getAccessToken();
+  const read = await readAccessToken();
+
+  // The account changed during the read (another person signed in, or a
+  // sign-out landed): not an expired session, so no sign-out prompt.
+  if ("changed" in read) {
+    return { ok: false, result: { data: null, error: SESSION_CHANGED_ERROR } };
+  }
+  const accessToken = read.token;
 
   if (!accessToken || getServerVersion() !== versionAtStart) {
     notifyAuthError();

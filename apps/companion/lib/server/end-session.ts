@@ -54,12 +54,13 @@ export const SESSION_CHECK_TIMEOUT_MS = 5_000;
  * session back).
  *
  * @param client - The live Supabase client
- * @returns True when a session is still stored, or when the check failed
+ * @returns "gone" when no session is stored; "stored" when one is, or when
+ *   the check failed (inconclusive); "timeout" when it did not answer in time
  */
 async function sessionStillStored(
   client: SessionEndingClient,
   timeoutMs: number
-): Promise<boolean> {
+): Promise<"stored" | "gone" | "timeout"> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // A stored session past its expiry makes `getSession` try a refresh, which
   // can hang while offline: past the cap the check counts as inconclusive.
@@ -68,13 +69,13 @@ async function sessionStillStored(
   });
   try {
     const result = await Promise.race([client.auth.getSession(), timedOut]);
-    if (result === "timeout") return true;
+    if (result === "timeout") return "timeout";
     // An error (a failed refresh) can come with a null session while the
     // credentials stay on disk, so it proves nothing: inconclusive.
-    if (result.error) return true;
-    return Boolean(result.data.session);
+    if (result.error) return "stored";
+    return result.data.session ? "stored" : "gone";
   } catch {
-    return true;
+    return "stored";
   } finally {
     clearTimeout(timer);
   }
@@ -177,8 +178,12 @@ export async function endSessionOnDevice(
           // reads a failing store as "nothing stored").
           removed = false;
         }
-        const checkedStored = await sessionStillStored(client, checkTimeoutMs);
-        stored = !removed || checkedStored;
+        const found = await sessionStillStored(client, checkTimeoutMs);
+        stored = !removed || found !== "gone";
+        // A check that timed out will time out again (a refresh hanging
+        // offline): stop re-checking, so a sign-out waits one timeout, not
+        // three, and report it incomplete.
+        if (found === "timeout") break;
       }
       if (stored) {
         outcome = "incomplete";
