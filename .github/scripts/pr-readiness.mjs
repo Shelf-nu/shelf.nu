@@ -3,7 +3,8 @@
  *
  * Runs when a review is requested on a pull request (the "this is ready"
  * signal in CONTRIBUTING.md, "The pull request process"). If the PR still has
- * unresolved review threads, the request is premature: the gate removes every
+ * blocking review threads (see {@link collectOpenThreads}), the request is
+ * premature: the gate removes every
  * pending review request, so the PR leaves the maintainer review queue, posts a
  * comment review that mentions the author and lists the open threads, and
  * marks the `PR readiness` commit status as failed. When every thread is
@@ -40,7 +41,7 @@ export const RESOLVED_MARKER = "<!-- pr-readiness-gate:resolved -->";
 export const RESOLVED_BODY = [
   REVIEW_MARKER,
   RESOLVED_MARKER,
-  "✅ All review threads are resolved. The PR is ready for review.",
+  "✅ No open review threads left to handle. The PR is ready for review.",
 ].join("\n");
 
 /**
@@ -61,7 +62,8 @@ const REVIEWER_NAMES = {
  * @property {boolean} isResolved
  * @property {boolean} isOutdated
  * @property {string | null} path
- * @property {{ nodes: Array<{ author: { login: string } | null, url: string }> }} comments
+ * @property {{ nodes: Array<{ author: { login: string, __typename: string } | null, url: string }> }} comments - The first comment
+ * @property {{ nodes: Array<{ author: { login: string } | null }> }} lastComment - The most recent comment
  */
 
 /**
@@ -72,6 +74,8 @@ const REVIEWER_NAMES = {
  * @property {string} reviewer - Display name of whoever opened the thread
  * @property {string} url - Link to the thread's first comment
  * @property {boolean} outdated - The commented code has changed since
+ * @property {boolean} awaitingReply - A human reviewer's thread the PR author
+ *   has not answered yet (bot threads are always false)
  */
 
 /**
@@ -86,25 +90,61 @@ export function reviewerLabel(login) {
 }
 
 /**
- * Picks the unresolved threads out of a PR's review threads. Outdated threads
- * count: the process asks for every thread to be fixed or answered and then
- * resolved, and an outdated thread that is still open has not been.
+ * Picks the threads that block a review request, following CONTRIBUTING.md:
+ *
+ * - A thread opened by a bot (CodeRabbit, Codex, Copilot) blocks until it is
+ *   resolved: bot threads are always resolved once fixed or answered.
+ * - A thread opened by a person blocks only while the PR author has not
+ *   replied to it, i.e. while the latest comment is not the author's. A
+ *   contributor may leave a reviewer's thread open after replying with a
+ *   question or a disagreement, and then re-request the review.
+ *
+ * Outdated threads count like any other: an outdated thread that is still
+ * open has not been answered.
  *
  * @param {ReviewThreadNode[]} nodes - Every review thread on the PR
- * @returns {OpenThread[]} The unresolved ones, in GitHub's order
+ * @param {string} prAuthor - Login of the PR author
+ * @returns {OpenThread[]} The blocking threads, in GitHub's order
  */
-export function collectOpenThreads(nodes) {
+export function collectOpenThreads(nodes, prAuthor) {
   return nodes
     .filter((thread) => !thread.isResolved)
     .map((thread) => {
       const first = thread.comments.nodes[0];
+      const openedByBot = first?.author?.__typename === "Bot";
+      const lastAuthor = thread.lastComment?.nodes[0]?.author?.login;
       return {
         path: thread.path ?? "",
         reviewer: reviewerLabel(first?.author?.login),
         url: first?.url ?? "",
         outdated: thread.isOutdated,
+        awaitingReply: !openedByBot && lastAuthor !== prAuthor,
+        blocking: openedByBot || lastAuthor !== prAuthor,
       };
-    });
+    })
+    .filter(({ blocking }) => blocking)
+    .map(({ blocking: _blocking, ...thread }) => thread);
+}
+
+/**
+ * Renders a file path as a Markdown code span that nothing in the path can
+ * break out of. Paths come from the PR, so a name containing backticks or line
+ * breaks could otherwise close the span and inject Markdown (including
+ * `@mentions`) into a review posted by the Actions bot. The fence is one
+ * backtick longer than the longest run inside the path, and line breaks become
+ * spaces, since a code span cannot hold them.
+ *
+ * @param {string} path - Repo-relative file path, untrusted
+ * @returns {string} A Markdown code span showing the path literally
+ */
+export function codeSpan(path) {
+  const flat = path.replace(/[\r\n]+/g, " ");
+  const longestRun = Math.max(
+    0,
+    ...(flat.match(/`+/g) ?? []).map((run) => run.length)
+  );
+  const fence = "`".repeat(longestRun + 1);
+  return `${fence} ${flat} ${fence}`;
 }
 
 /**
@@ -120,19 +160,25 @@ export function buildReviewBody({ author, threads, repoUrl }) {
   const count = threads.length;
   const noun = count === 1 ? "thread" : "threads";
   const lines = threads.map((thread) => {
-    const where = thread.path ? `\`${thread.path}\`` : "General comment";
-    const outdated = thread.outdated ? " (outdated)" : "";
+    const where = thread.path ? codeSpan(thread.path) : "General comment";
+    const notes = [
+      thread.outdated && "outdated",
+      thread.awaitingReply && "awaiting your reply",
+    ].filter(Boolean);
+    const note = notes.length > 0 ? ` (${notes.join(", ")})` : "";
     const link = thread.url ? `: [view thread](${thread.url})` : "";
-    return `- ${where}, from ${thread.reviewer}${outdated}${link}`;
+    return `- ${where}, from ${thread.reviewer}${note}${link}`;
   });
 
   return [
     REVIEW_MARKER,
-    `@${author} this PR still has ${count} unresolved review ${noun}, so the review request was removed.`,
+    `@${author} this PR still has ${count} open review ${noun} to handle, so the review request was removed.`,
     "",
     ...lines,
     "",
-    "Fix or answer each one and resolve it, then request a review again. " +
+    "Fix or answer each bot thread and resolve it. Reply to each reviewer's " +
+      "thread: fix it and resolve it, or answer with a question or a " +
+      "disagreement and leave it open. Then request a review again. " +
       "Requesting the review runs this check again. See " +
       `[The pull request process](${repoUrl}/blob/main/CONTRIBUTING.md#the-pull-request-process).`,
   ].join("\n");
@@ -167,7 +213,8 @@ const THREADS_QUERY = `
             isResolved
             isOutdated
             path
-            comments(first: 1) { nodes { author { login } url } }
+            comments(first: 1) { nodes { author { login __typename } url } }
+            lastComment: comments(last: 1) { nodes { author { login } } }
           }
         }
       }
@@ -221,7 +268,8 @@ export async function run({ github, context, core }) {
   }
 
   const threads = collectOpenThreads(
-    await fetchReviewThreads(github, { owner, repo, number })
+    await fetchReviewThreads(github, { owner, repo, number }),
+    pr.user.login
   );
 
   if (threads.length === 0) {
@@ -246,7 +294,7 @@ export async function run({ github, context, core }) {
       sha: headSha,
       state: "success",
       context: STATUS_CONTEXT,
-      description: "All review threads are resolved",
+      description: "No open review threads to handle",
     });
     core.info("All review threads are resolved.");
     return;
@@ -263,7 +311,7 @@ export async function run({ github, context, core }) {
     sha: headSha,
     state: "failure",
     context: STATUS_CONTEXT,
-    description: `${threads.length} unresolved review ${noun}`,
+    description: `${threads.length} open review ${noun} to handle`,
   });
 
   // Every pending request (people and teams) is removed, not only the one that
@@ -303,5 +351,5 @@ export async function run({ github, context, core }) {
     });
   }
 
-  core.setFailed(`${threads.length} unresolved review ${noun}.`);
+  core.setFailed(`${threads.length} open review ${noun} to handle.`);
 }

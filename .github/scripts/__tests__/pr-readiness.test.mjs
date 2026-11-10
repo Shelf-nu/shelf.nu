@@ -18,25 +18,45 @@ import {
   REVIEW_MARKER,
   STATUS_CONTEXT,
   buildReviewBody,
+  codeSpan,
   collectOpenThreads,
   findOpenGateReviews,
   reviewerLabel,
   run,
 } from "../pr-readiness.mjs";
 
-/** Builds a GraphQL review thread node. */
+/** Login of the PR author in every fixture. */
+const PR_AUTHOR = "contributor";
+
+/**
+ * Builds a GraphQL review thread node. `bot` says whether the thread's opener
+ * is a bot; `lastLogin` is who wrote the latest comment (the opener when
+ * nobody has replied).
+ */
 function thread({
   resolved = false,
   outdated = false,
   path = "apps/webapp/app/components/assets/form.tsx",
   login = "coderabbitai",
+  bot = true,
+  lastLogin = login,
   url = "https://github.com/o/r/pull/1#discussion_r1",
 } = {}) {
   return {
     isResolved: resolved,
     isOutdated: outdated,
     path,
-    comments: { nodes: [{ author: login ? { login } : null, url }] },
+    comments: {
+      nodes: [
+        {
+          author: login ? { login, __typename: bot ? "Bot" : "User" } : null,
+          url,
+        },
+      ],
+    },
+    lastComment: {
+      nodes: [{ author: lastLogin ? { login: lastLogin } : null }],
+    },
   };
 }
 
@@ -121,25 +141,75 @@ describe("reviewerLabel", () => {
 
 describe("collectOpenThreads", () => {
   it("keeps unresolved threads, including outdated ones", () => {
-    const open = collectOpenThreads([
-      thread({ resolved: true }),
-      thread({ login: "chatgpt-codex-connector" }),
-      thread({ outdated: true, path: null }),
-    ]);
+    const open = collectOpenThreads(
+      [
+        thread({ resolved: true }),
+        thread({ login: "chatgpt-codex-connector" }),
+        thread({ outdated: true, path: null }),
+      ],
+      PR_AUTHOR
+    );
     assert.deepEqual(open, [
       {
         path: "apps/webapp/app/components/assets/form.tsx",
         reviewer: "Codex",
         url: "https://github.com/o/r/pull/1#discussion_r1",
         outdated: false,
+        awaitingReply: false,
       },
       {
         path: "",
         reviewer: "CodeRabbit",
         url: "https://github.com/o/r/pull/1#discussion_r1",
         outdated: true,
+        awaitingReply: false,
       },
     ]);
+  });
+
+  it("blocks on a bot thread even after the author replied", () => {
+    const open = collectOpenThreads(
+      [thread({ lastLogin: PR_AUTHOR })],
+      PR_AUTHOR
+    );
+    assert.equal(open.length, 1);
+  });
+
+  it("blocks on a reviewer's thread only until the author replies", () => {
+    const unanswered = thread({ login: "DonKoko", bot: false });
+    const answered = thread({
+      login: "DonKoko",
+      bot: false,
+      lastLogin: PR_AUTHOR,
+    });
+    const reopened = thread({
+      login: "DonKoko",
+      bot: false,
+      lastLogin: "DonKoko",
+    });
+    const open = collectOpenThreads(
+      [unanswered, answered, reopened],
+      PR_AUTHOR
+    );
+    assert.equal(open.length, 2);
+    assert.ok(open.every((t) => t.awaitingReply && t.reviewer === "DonKoko"));
+  });
+});
+
+describe("codeSpan", () => {
+  it("wraps a plain path in a single-backtick span", () => {
+    assert.equal(codeSpan("apps/x.ts"), "` apps/x.ts `");
+  });
+
+  it("cannot be broken out of by backticks or line breaks in the path", () => {
+    const hostile = "a`b``\n@someone [x](http://e)";
+    const span = codeSpan(hostile);
+    assert.ok(span.startsWith("``` ") && span.endsWith(" ```"));
+    assert.ok(!span.includes("\n"));
+    // The fence is longer than any backtick run inside, so the span only
+    // closes at its own end.
+    const inner = span.slice(4, -4);
+    assert.ok(!inner.includes("```"));
   });
 });
 
@@ -148,21 +218,26 @@ describe("buildReviewBody", () => {
     const body = buildReviewBody({
       author: "contributor",
       repoUrl: "https://github.com/Shelf-nu/shelf.nu",
-      threads: collectOpenThreads([
-        thread({ login: "chatgpt-codex-connector" }),
-        thread({ outdated: true, path: null }),
-      ]),
+      threads: collectOpenThreads(
+        [
+          thread({ login: "chatgpt-codex-connector" }),
+          thread({ outdated: true, path: null }),
+          thread({ login: "DonKoko", bot: false, path: "README.md" }),
+        ],
+        PR_AUTHOR
+      ),
     });
     assert.ok(body.startsWith(REVIEW_MARKER));
     assert.match(
       body,
-      /@contributor this PR still has 2 unresolved review threads/
+      /@contributor this PR still has 3 open review threads to handle/
     );
     assert.match(
       body,
-      /- `apps\/webapp\/app\/components\/assets\/form.tsx`, from Codex: \[view thread\]/
+      /- ` apps\/webapp\/app\/components\/assets\/form.tsx `, from Codex: \[view thread\]/
     );
     assert.match(body, /- General comment, from CodeRabbit \(outdated\)/);
+    assert.match(body, /- ` README.md `, from DonKoko \(awaiting your reply\)/);
     assert.match(
       body,
       /https:\/\/github.com\/Shelf-nu\/shelf.nu\/blob\/main\/CONTRIBUTING.md#the-pull-request-process/
@@ -175,9 +250,9 @@ describe("buildReviewBody", () => {
     const body = buildReviewBody({
       author: "a",
       repoUrl: "https://github.com/o/r",
-      threads: collectOpenThreads([thread()]),
+      threads: collectOpenThreads([thread()], PR_AUTHOR),
     });
-    assert.match(body, /1 unresolved review thread,/);
+    assert.match(body, /1 open review thread to handle,/);
   });
 });
 
