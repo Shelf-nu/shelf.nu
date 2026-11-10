@@ -75,9 +75,9 @@ vi.mock("../location/form", () => ({
   ),
 }));
 
-// why: the asset model form pulls in the markdown editor, slow to compile on
-// the first lazy load; its own tests cover it.
-vi.mock("../asset-model/form", () => ({
+// why: Mock InlineAssetModelForm to avoid router dependencies (it submits
+// through a fetcher) and test dialog behavior in isolation
+vi.mock("../asset-model/inline-form", () => ({
   default: () => <div data-testid="asset-model-form" />,
 }));
 

@@ -13,7 +13,7 @@
  * @see {@link file://./inline-entity-creation-dialog.tsx}
  */
 import type { InlineEntityCreated } from "./inline-entity-creation-dialog";
-import AssetModelForm from "../asset-model/form";
+import InlineAssetModelForm from "../asset-model/inline-form";
 import NewCategoryForm from "../category/new-category-form";
 import { LocationForm } from "../location/form";
 import When from "../when/when";
@@ -70,7 +70,7 @@ export default function InlineEntityCreationForms({
 
       {/* Asset model creation form */}
       <When truthy={type === "assetModel"}>
-        <AssetModelForm
+        <InlineAssetModelForm
           onSuccess={(data) => {
             if (data?.assetModel) {
               onCreated?.({
