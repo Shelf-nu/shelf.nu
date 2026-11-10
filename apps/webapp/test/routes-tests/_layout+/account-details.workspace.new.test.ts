@@ -5,8 +5,8 @@
  * Add-ons are linked when the creation link asks for them
  * (`includesAudits`, `includesBarcodes`) and also when
  * `findAddonsAwaitingWorkspace` finds them waiting on the user's subscription
- * for this workspace. A failed lookup links nothing and never blocks the
- * workspace.
+ * for this workspace. A failed lookup adds nothing to what the creation link
+ * asks for and never blocks the workspace.
  *
  * @see {@link file://./../../../app/routes/_layout+/account-details.workspace.new.tsx}
  */
@@ -129,7 +129,7 @@ describe("new workspace action", () => {
     expect(linkAuditAddonToOrganization).not.toHaveBeenCalled();
   });
 
-  it("still creates the workspace when the lookup fails, and links nothing", async () => {
+  it("still creates the workspace when the lookup fails, and links nothing unasked", async () => {
     vi.mocked(findAddonsAwaitingWorkspace).mockRejectedValue(
       new Error("Stripe unavailable")
     );

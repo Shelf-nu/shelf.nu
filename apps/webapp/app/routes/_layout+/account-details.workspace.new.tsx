@@ -149,7 +149,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // Add-ons the user's subscriptions carry without a workspace go to this
     // one when it is the only Team workspace they could belong to (an
     // invoice-billed subscription created in Stripe, for instance). A failed
-    // lookup links nothing and never blocks workspace creation.
+    // lookup adds nothing to the creation-link params below and never blocks
+    // workspace creation.
     const awaitingAddons = await findAddonsAwaitingWorkspace({
       userId,
       organizationId: newOrg.id,
