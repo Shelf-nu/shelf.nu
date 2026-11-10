@@ -13,12 +13,13 @@ import { describe, it } from "node:test";
 
 import {
   BOT_LOGIN,
-  DISMISS_MESSAGE,
+  RESOLVED_BODY,
+  RESOLVED_MARKER,
   REVIEW_MARKER,
   STATUS_CONTEXT,
   buildReviewBody,
   collectOpenThreads,
-  findActiveGateReviews,
+  findOpenGateReviews,
   reviewerLabel,
   run,
 } from "../pr-readiness.mjs";
@@ -75,7 +76,6 @@ function fakeTools({
         removeRequestedReviewers: record("removeRequestedReviewers"),
         createReview: record("createReview"),
         updateReview: record("updateReview"),
-        dismissReview: record("dismissReview"),
       },
       repos: { createCommitStatus: record("createCommitStatus") },
     },
@@ -97,10 +97,10 @@ function fakeTools({
   return { tools: { github, context, core }, calls, failures };
 }
 
-/** An active gate review, as listReviews returns it. */
+/** A gate review that still lists open threads, as listReviews returns it. */
 const gateReview = {
   id: 7,
-  state: "CHANGES_REQUESTED",
+  state: "COMMENTED",
   body: `${REVIEW_MARKER}\nold body`,
   user: { login: BOT_LOGIN },
 };
@@ -177,16 +177,16 @@ describe("buildReviewBody", () => {
   });
 });
 
-describe("findActiveGateReviews", () => {
-  it("returns only the bot's own reviews that still request changes", () => {
+describe("findOpenGateReviews", () => {
+  it("returns only the bot's own gate reviews not yet marked resolved", () => {
     const reviews = [
       gateReview,
-      { ...gateReview, id: 8, state: "DISMISSED" },
+      { ...gateReview, id: 8, body: RESOLVED_BODY },
       { ...gateReview, id: 9, body: "no marker" },
       { ...gateReview, id: 10, user: { login: "DonKoko" } },
     ];
     assert.deepEqual(
-      findActiveGateReviews(reviews).map((r) => r.id),
+      findOpenGateReviews(reviews).map((r) => r.id),
       [7]
     );
   });
@@ -203,7 +203,7 @@ describe("run", () => {
     assert.deepEqual(failures, []);
   });
 
-  it("with open threads: removes requests, requests changes, fails the status", async () => {
+  it("with open threads: removes requests, posts a comment review, fails the status", async () => {
     const { tools, calls, failures } = fakeTools({
       threads: [thread(), thread({ resolved: true })],
       requested: { users: [{ login: "DonKoko" }], teams: [{ slug: "core" }] },
@@ -216,7 +216,9 @@ describe("run", () => {
     );
     assert.deepEqual(calls[0][1].reviewers, ["DonKoko"]);
     assert.deepEqual(calls[0][1].team_reviewers, ["core"]);
-    assert.equal(calls[1][1].event, "REQUEST_CHANGES");
+    // A comment review, never REQUEST_CHANGES: the bot cannot dismiss a
+    // verdict on main, so one would block the merge for good.
+    assert.equal(calls[1][1].event, "COMMENT");
     assert.match(calls[1][1].body, /@contributor/);
     assert.equal(calls[2][1].state, "failure");
     assert.equal(calls[2][1].sha, "abc123");
@@ -224,40 +226,44 @@ describe("run", () => {
     assert.equal(failures.length, 1);
   });
 
-  it("with open threads and an earlier gate review: updates it instead of adding one", async () => {
+  it("with open threads and an earlier gate review: posts a new one so the author is notified", async () => {
     const { tools, calls } = fakeTools({
       threads: [thread()],
       reviews: [gateReview],
     });
     await run(tools);
     const names = calls.map(([name]) => name);
-    assert.ok(names.includes("updateReview"));
-    assert.ok(!names.includes("createReview"));
-    assert.equal(calls.find(([n]) => n === "updateReview")[1].review_id, 7);
+    assert.ok(names.includes("createReview"));
+    assert.ok(!names.includes("updateReview"));
   });
 
-  it("with open threads and no pending requests: skips the removal call", async () => {
-    const { tools, calls } = fakeTools({
+  it("with open threads and no pending requests left: fails without a duplicate review", async () => {
+    const { tools, calls, failures } = fakeTools({
       threads: [thread()],
       requested: { users: [], teams: [] },
     });
     await run(tools);
-    assert.ok(!calls.some(([name]) => name === "removeRequestedReviewers"));
+    assert.deepEqual(
+      calls.map(([name]) => name),
+      ["createCommitStatus"]
+    );
+    assert.equal(calls[0][1].state, "failure");
+    assert.equal(failures.length, 1);
   });
 
-  it("with every thread resolved: dismisses its review, passes, keeps the request", async () => {
+  it("with every thread resolved: marks its open reviews resolved, passes, keeps the request", async () => {
     const { tools, calls, failures } = fakeTools({
       threads: [thread({ resolved: true })],
-      reviews: [gateReview],
+      reviews: [gateReview, { ...gateReview, id: 8, body: RESOLVED_BODY }],
     });
     await run(tools);
 
     assert.deepEqual(
       calls.map(([name]) => name),
-      ["dismissReview", "createCommitStatus"]
+      ["updateReview", "createCommitStatus"]
     );
     assert.equal(calls[0][1].review_id, 7);
-    assert.equal(calls[0][1].message, DISMISS_MESSAGE);
+    assert.match(calls[0][1].body, new RegExp(RESOLVED_MARKER));
     assert.equal(calls[1][1].state, "success");
     assert.deepEqual(failures, []);
   });

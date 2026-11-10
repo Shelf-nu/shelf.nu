@@ -5,10 +5,15 @@
  * signal in CONTRIBUTING.md, "The pull request process"). If the PR still has
  * unresolved review threads, the request is premature: the gate removes every
  * pending review request, so the PR leaves the maintainer review queue, posts a
- * "Changes requested" review that mentions the author and lists the open
- * threads, and marks the `PR readiness` commit status as failed. When every
- * thread is resolved, it marks the status as passed and dismisses its own
- * earlier review, leaving the review request in place.
+ * comment review that mentions the author and lists the open threads, and
+ * marks the `PR readiness` commit status as failed. When every thread is
+ * resolved, it marks the status as passed and edits its own earlier reviews to
+ * say so, leaving the review request in place.
+ *
+ * The gate's reviews are comment reviews, never "Changes requested": a
+ * requested-changes verdict from the bot would block the merge, and branch
+ * protection on `main` lets only admins dismiss reviews, so the bot could never
+ * clear it. A comment review carries no verdict and the bot may edit its own.
  *
  * Invoked from `.github/workflows/pr-readiness.yml` through
  * `actions/github-script`, which supplies the authenticated `github` client,
@@ -28,9 +33,15 @@ export const STATUS_CONTEXT = "PR readiness";
 /** Login of the account that `GITHUB_TOKEN` acts as. */
 export const BOT_LOGIN = "github-actions[bot]";
 
-/** Message used when dismissing the gate's review once threads are resolved. */
-export const DISMISS_MESSAGE =
-  "All review threads are resolved. The PR is ready for review.";
+/** Second marker, present once a gate review has been edited to "resolved". */
+export const RESOLVED_MARKER = "<!-- pr-readiness-gate:resolved -->";
+
+/** Body a gate review is edited to once every review thread is resolved. */
+export const RESOLVED_BODY = [
+  REVIEW_MARKER,
+  RESOLVED_MARKER,
+  "✅ All review threads are resolved. The PR is ready for review.",
+].join("\n");
 
 /**
  * Display names for the review bots. Logins are as GraphQL reports them
@@ -97,7 +108,7 @@ export function collectOpenThreads(nodes) {
 }
 
 /**
- * Builds the body of the "Changes requested" review.
+ * Builds the body of the comment review posted when threads are still open.
  *
  * @param {object} args
  * @param {string} args.author - Login of the PR author, mentioned so they are notified
@@ -128,19 +139,21 @@ export function buildReviewBody({ author, threads, repoUrl }) {
 }
 
 /**
- * Finds the gate's own reviews that still request changes. Dismissed reviews
- * have state `DISMISSED`, so they drop out here.
+ * Finds the gate's own reviews that still list open threads, that is, those
+ * not yet edited to {@link RESOLVED_BODY}.
  *
- * @param {Array<{ id: number, state: string, body?: string | null, user?: { login: string } | null }>} reviews
- * @returns {Array<{ id: number }>} The active gate reviews, oldest first
+ * @param {Array<{ id: number, body?: string | null, user?: { login: string } | null }>} reviews
+ * @returns {Array<{ id: number }>} The unresolved gate reviews, oldest first
  */
-export function findActiveGateReviews(reviews) {
-  return reviews.filter(
-    (review) =>
+export function findOpenGateReviews(reviews) {
+  return reviews.filter((review) => {
+    const body = review.body ?? "";
+    return (
       review.user?.login === BOT_LOGIN &&
-      review.state === "CHANGES_REQUESTED" &&
-      (review.body ?? "").includes(REVIEW_MARKER)
-  );
+      body.includes(REVIEW_MARKER) &&
+      !body.includes(RESOLVED_MARKER)
+    );
+  });
 }
 
 /** GraphQL query for one page of a PR's review threads. */
@@ -210,22 +223,21 @@ export async function run({ github, context, core }) {
   const threads = collectOpenThreads(
     await fetchReviewThreads(github, { owner, repo, number })
   );
-  const reviews = await github.paginate(github.rest.pulls.listReviews, {
-    owner,
-    repo,
-    pull_number: number,
-    per_page: 100,
-  });
-  const gateReviews = findActiveGateReviews(reviews);
 
   if (threads.length === 0) {
-    for (const review of gateReviews) {
-      await github.rest.pulls.dismissReview({
+    const reviews = await github.paginate(github.rest.pulls.listReviews, {
+      owner,
+      repo,
+      pull_number: number,
+      per_page: 100,
+    });
+    for (const review of findOpenGateReviews(reviews)) {
+      await github.rest.pulls.updateReview({
         owner,
         repo,
         pull_number: number,
         review_id: review.id,
-        message: DISMISS_MESSAGE,
+        body: RESOLVED_BODY,
       });
     }
     await github.rest.repos.createCommitStatus({
@@ -249,6 +261,9 @@ export async function run({ github, context, core }) {
   });
   const reviewers = requested.users.map((user) => user.login);
   const teamReviewers = requested.teams.map((team) => team.slug);
+  // No pending request left means an earlier run for this same request (several
+  // reviewers requested at once fire one event each) already removed them and
+  // posted the review; posting again would only duplicate it.
   if (reviewers.length > 0 || teamReviewers.length > 0) {
     await github.rest.pulls.removeRequestedReviewers({
       owner,
@@ -257,31 +272,20 @@ export async function run({ github, context, core }) {
       reviewers,
       team_reviewers: teamReviewers,
     });
-  }
 
-  const body = buildReviewBody({
-    author: pr.user.login,
-    threads,
-    repoUrl: `${context.serverUrl}/${owner}/${repo}`,
-  });
-  const latest = gateReviews.at(-1);
-  if (latest) {
-    // One gate review per PR: refresh the existing one instead of stacking a
-    // new review on every premature request.
-    await github.rest.pulls.updateReview({
-      owner,
-      repo,
-      pull_number: number,
-      review_id: latest.id,
-      body,
-    });
-  } else {
+    // A new review on every premature request, never an edit of an old one:
+    // GitHub notifies the author of a mention only when the text is posted,
+    // not when an existing review is edited to include it.
     await github.rest.pulls.createReview({
       owner,
       repo,
       pull_number: number,
-      event: "REQUEST_CHANGES",
-      body,
+      event: "COMMENT",
+      body: buildReviewBody({
+        author: pr.user.login,
+        threads,
+        repoUrl: `${context.serverUrl}/${owner}/${repo}`,
+      }),
     });
   }
 
@@ -294,7 +298,5 @@ export async function run({ github, context, core }) {
     context: STATUS_CONTEXT,
     description: `${threads.length} unresolved review ${noun}`,
   });
-  core.setFailed(
-    `${threads.length} unresolved review ${noun}; the review request was removed.`
-  );
+  core.setFailed(`${threads.length} unresolved review ${noun}.`);
 }

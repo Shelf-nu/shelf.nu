@@ -7,10 +7,10 @@ name: 🚦 PR readiness
 # reviews do not run it: work in progress stays quiet.
 #
 # If the PR has unresolved review threads, the gate removes every pending review
-# request (so the PR leaves the review queue), posts a "Changes requested"
-# review mentioning the author, and sets the `PR readiness` commit status to
-# failed. With no open threads it sets the status to passed and dismisses its
-# own earlier review. Logic: .github/scripts/pr-readiness.mjs
+# request (so the PR leaves the review queue), posts a comment review
+# mentioning the author, and sets the `PR readiness` commit status to failed.
+# With no open threads it sets the status to passed and edits its earlier
+# reviews to say so. Logic: .github/scripts/pr-readiness.mjs
 #
 # Security: `pull_request_target` runs the workflow and script from the BASE
 # branch with a write token, which is what lets it act on fork PRs. It never
@@ -20,8 +20,8 @@ on:
   pull_request_target:
     types: [review_requested]
 
-# Several reviewers requested at once fire one event each. Queue them so the
-# second run sees the first run's review and updates it instead of adding one.
+# Several reviewers requested at once fire one event each. Queue them so they
+# never run side by side on the same PR.
 concurrency:
   group: pr-readiness-${{ github.event.pull_request.number }}
   cancel-in-progress: false
