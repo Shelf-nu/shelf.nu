@@ -1454,6 +1454,8 @@ describe("assetQueryFragment", () => {
       // back from a live booking ends at its check-in, not the booking's end.
       expect(sql).toContain(`'checkedOutAt', atb."checkedOutAt"`);
       expect(sql).toContain(`'checkedInAt', atb."checkedInAt"`);
+      // The upcoming-bookings popover marks a pending request from this.
+      expect(sql).toContain(`'approvedAt', bk."approvedAt"`);
       // Kit name resolved through org-scoped AssetKit -> Kit joins, using
       // aliases (bk_ak/bk_kit) distinct from the outer query's own-kit ak/k.
       expect(sql).toContain("'kitName', bk_kit.name");

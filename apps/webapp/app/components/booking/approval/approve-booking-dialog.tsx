@@ -23,9 +23,10 @@ type ApproveBookingDialogProps = {
 /**
  * Renders the approval trigger and its confirmation dialog.
  *
- * The built-in trigger only renders for a RESERVED booking, since nothing else
- * can be approved. Callers that need a different affordance (a dropdown row
- * rather than a header button) pass `trigger` and own that gating themselves.
+ * The built-in trigger is disabled unless the booking is RESERVED, since
+ * nothing else can be approved. Callers that need a different affordance (a
+ * dropdown row rather than a header button) pass `trigger` and own that gating
+ * themselves.
  *
  * @param props.booking - The booking being approved; its name is shown for
  *   confirmation and its status gates the default trigger.

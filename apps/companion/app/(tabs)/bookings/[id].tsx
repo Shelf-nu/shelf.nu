@@ -1,5 +1,6 @@
 import {
   archivedAssetsRefusal,
+  BOOKING_PSEUDO_STATUS_LABELS,
   BOOKING_RESERVE_BLOCKED_LABELS,
   DELETE_CONSEQUENCE_LABELS,
   EXPLICIT_REQUIREMENT_LABELS,
@@ -23,6 +24,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { bookingApprovalView } from "@/lib/booking-approval-view";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatPersonName } from "@/lib/person-name";
 import { TagChip } from "@/components/tag-chip";
@@ -758,7 +760,8 @@ function BookingDetailScreen({ id }: { id: string }) {
   // A reservation that will wait for approval is a request, and the prompt,
   // the button and the success message must say so; otherwise the pending
   // state that follows reads as a failure.
-  const reservationIsRequest = booking?.reservationNeedsApproval === true;
+  const approvalView = bookingApprovalView(booking);
+  const { reservationIsRequest } = approvalView;
 
   const handleReserve = () => {
     if (!booking || !currentOrg) return;
@@ -1817,7 +1820,9 @@ function BookingDetailScreen({ id }: { id: string }) {
    * the server will accept: the `booking:checkout` permission, and — for a
    * restricted role, whose writes are scoped to their own bookings — being the
    * booking's creator or its custodian. Offering either to someone the server
-   * would reject just trades a visible button for a 403.
+   * would reject just trades a visible button for a 403. A pending request is
+   * checked out only by someone who may approve it (their first scan approves
+   * it), as on the web.
    */
   const canUseProgressiveCheckout =
     canPartialCheckout &&
@@ -1827,7 +1832,8 @@ function BookingDetailScreen({ id }: { id: string }) {
       entity: "booking",
       action: "checkout",
     }) &&
-    mayWriteThisBooking;
+    mayWriteThisBooking &&
+    (!approvalView.isPending || approvalView.canApprove);
 
   /**
    * Whether the server accepts this member changing this booking's items. A
@@ -1939,7 +1945,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                     {formatStatus(booking.status)}
                   </Text>
                 </View>
-                {booking.isPendingApproval ? (
+                {approvalView.isPending ? (
                   // Approval pill: web parity for the derived pending state.
                   // The server also refuses checkout while pending and sends
                   // `canCheckout: false`, so this is display-only.
@@ -1955,7 +1961,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                         { color: colors.warningText },
                       ]}
                     >
-                      Pending approval
+                      {BOOKING_PSEUDO_STATUS_LABELS.PENDING_APPROVAL}
                     </Text>
                   </View>
                 ) : null}
@@ -2334,7 +2340,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                 check-out paths: the server refuses check-out until it is
                 approved, and `canApprove` is the server's own answer on who
                 may decide it. */}
-            {booking.canApprove === true && (
+            {approvalView.canApprove && (
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleApprove}

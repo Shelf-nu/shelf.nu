@@ -15,12 +15,3 @@ ALTER TABLE "BookingSettings" DROP COLUMN "requireBookingApproval";
 -- decision would only live in a free-text note. Nothing in this migration
 -- uses the new value.
 ALTER TYPE "ActivityAction" ADD VALUE IF NOT EXISTS 'BOOKING_APPROVED';
-
--- Every booking that exists before approval can be required has not been
--- held back by anyone: stamp it approved so no old reservation reads as
--- pending. From here on `reserveBooking` writes the stamp itself (now, or
--- NULL for a request), so this only needs re-running for rows the previous
--- app version reserved between this migration and the deploy.
-UPDATE "Booking"
-SET "approvedAt" = COALESCE("updatedAt", "createdAt", NOW())
-WHERE "approvedAt" IS NULL;

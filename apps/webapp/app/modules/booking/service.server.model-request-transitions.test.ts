@@ -280,6 +280,7 @@ const reserveParams = {
   description: "Reserved booking description",
   hints: hints as never,
   alertsOrgOnReservation: false,
+  actorApprovalSetting: "none" as const,
   tags: [],
 };
 

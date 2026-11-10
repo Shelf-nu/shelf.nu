@@ -333,14 +333,27 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       activeAssetImportPromise,
       // Reservation requests waiting for a decision, counted on the Bookings
       // menu for the people who can decide them.
-      bookingSettingsPromise.then((settings) =>
-        getPendingApprovalCount({
-          organizationId,
-          userId,
-          roles: currentOrganizationUserRoles ?? [],
-          settings,
-        })
-      ),
+      // A failed count costs the badge, never the page.
+      bookingSettingsPromise
+        .then((settings) =>
+          getPendingApprovalCount({
+            organizationId,
+            userId,
+            roles: currentOrganizationUserRoles ?? [],
+            settings,
+          })
+        )
+        .catch((cause: unknown) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Could not count the booking requests waiting.",
+              label: "Booking",
+              shouldBeCaptured: true,
+            })
+          );
+          return 0;
+        }),
     ]);
 
     return data(

@@ -250,8 +250,8 @@ function EditBookingFormInner({
    * Self-service custodians see only the "Pending approval" badge in the
    * header. Derived client-side from the same helper the server guard uses.
    */
-  const approvalSwitches = useBookingSettings();
-  const isPendingApprovalRequired = isBookingApprovalEnabled(approvalSwitches);
+  const bookingSettings = useBookingSettings();
+  const isPendingApprovalRequired = isBookingApprovalEnabled(bookingSettings);
   const isPendingApproval = isBookingPendingApproval({
     status,
     approvedAt: loaderBooking.approvedAt ?? null,
@@ -308,7 +308,6 @@ function EditBookingFormInner({
         bookingStatus?.isOverdue ||
         bookingStatus?.isCancelled
     );
-  const bookingSettings = useBookingSettings();
 
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
@@ -585,7 +584,7 @@ function EditBookingFormInner({
                 {reservationIsRequest ||
                 roleReservesAsRequest({
                   approvalSetting: roleAccess.policy.bookings.approvalSetting,
-                  settings: approvalSwitches,
+                  settings: bookingSettings,
                 })
                   ? "Request reservation"
                   : "Reserve"}

@@ -47,7 +47,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
   kitsWithoutActiveAssetsRefusal,
 } from "@shelf/labels";
-import type { RolePolicy } from "@shelf/permissions";
+import { ROLE_POLICIES, type RolePolicy } from "@shelf/permissions";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
@@ -2288,8 +2288,9 @@ export async function reserveBooking({
      * The reserving member's `access.policy.bookings.approvalSetting`. Decides
      * whether this reservation lands as a request: Base and Self service each
      * have their own approval switch, everyone else reserves approved.
+     * Required so that no caller reserves approved by leaving it out.
      */
-    actorApprovalSetting?: RolePolicy["bookings"]["approvalSetting"] | null;
+    actorApprovalSetting: RolePolicy["bookings"]["approvalSetting"] | null;
     tags: { id: string }[];
     userId?: User["id"];
     /**
@@ -3251,8 +3252,72 @@ async function recordApprovalOnCheckout(
   );
 }
 
+/**
+ * Whether the acting user's own reservation in this workspace would be a
+ * request, read from their roles in the database rather than from the caller.
+ *
+ * @param args.actorUserId - The acting user
+ * @param args.organizationId - The workspace
+ * @param args.settings - The workspace's approval switches
+ */
+async function actorReservesAsRequest({
+  actorUserId,
+  organizationId,
+  settings,
+}: {
+  actorUserId: User["id"];
+  organizationId: Organization["id"];
+  settings: Partial<BookingApprovalSwitches> | null | undefined;
+}): Promise<boolean> {
+  const membership = await db.userOrganization.findUnique({
+    where: { userId_organizationId: { userId: actorUserId, organizationId } },
+    select: { roles: true },
+  });
+  return (membership?.roles ?? []).some((role) =>
+    roleReservesAsRequest({
+      approvalSetting: ROLE_POLICIES[role].bookings.approvalSetting,
+      settings,
+    })
+  );
+}
+
 /** What {@link approvalOnCheckout} resolved for the acting user. */
 type CheckoutApproval = Awaited<ReturnType<typeof approvalOnCheckout>>;
+
+/**
+ * Resolves the actor's approval before a check-out transaction opens, when the
+ * booking already reads as a pending request, so the permission and user
+ * lookups do not run while the booking row lock is held.
+ *
+ * @param args.booking - The pre-transaction snapshot's status and approval
+ * @param args.organizationId - The booking's organization
+ * @param args.actorUserId - The acting user
+ * @returns The actor's approval (or `null` when they may not approve), or
+ *   `undefined` when the snapshot is not pending and the transaction decides
+ */
+async function resolveApprovalBeforeTx({
+  booking,
+  organizationId,
+  actorUserId,
+}: {
+  booking: Pick<Booking, "status" | "approvedAt">;
+  organizationId: Organization["id"];
+  actorUserId: User["id"] | null | undefined;
+}): Promise<CheckoutApproval | undefined> {
+  if (!actorUserId) return undefined;
+  if (
+    booking.status !== BookingStatus.RESERVED ||
+    booking.approvedAt !== null
+  ) {
+    return undefined;
+  }
+  const switches = await db.bookingSettings.findUnique({
+    where: { organizationId },
+    select: BOOKING_APPROVAL_SWITCHES_SELECT,
+  });
+  if (!isBookingApprovalEnabled(switches)) return undefined;
+  return approvalOnCheckout({ actorUserId, organizationId });
+}
 
 /**
  * The approval gate every check-out runs inside its transaction, after the
@@ -3270,7 +3335,8 @@ type CheckoutApproval = Awaited<ReturnType<typeof approvalOnCheckout>>;
  * @returns The approval fields to write with the status change; empty when the
  *   booking needs no approval
  * @throws {ShelfError} 404 when the booking is gone
- * @throws {ShelfError} 403 when the booking is pending and the actor may not approve
+ * @throws {ShelfError} 400 when the booking is pending, or a draft the actor
+ *   would have to request, and the actor may not approve
  */
 async function settleApprovalWithinTx(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3306,6 +3372,37 @@ async function settleApprovalWithinTx(
       status: 404,
     });
   }
+  // A draft checked out straight away skips the reservation, and with it the
+  // request: refused for a member whose own reservation would be one.
+  if (approvalRow.status === BookingStatus.DRAFT) {
+    if (
+      actorUserId &&
+      (await actorReservesAsRequest({
+        actorUserId,
+        organizationId,
+        settings: approvalSwitches,
+      }))
+    ) {
+      const approval =
+        resolvedApproval !== undefined
+          ? resolvedApproval
+          : await approvalOnCheckout({ actorUserId, organizationId });
+      if (!approval) {
+        throw new ShelfError({
+          cause: null,
+          title: "Approval required",
+          message:
+            "Reserve this booking first: your reservation is sent as a request, and an administrator or manager needs to approve it before the equipment can be checked out.",
+          additionalData: { bookingId, status: approvalRow.status },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+    return {};
+  }
+
   if (
     !isBookingPendingApproval({
       status: approvalRow.status,
@@ -3384,7 +3481,7 @@ async function settleApprovalWithinTx(
  *   slices an earlier batch sent out. Callers name these assets in the
  *   post-commit "checked out" line.
  * @throws {ShelfError} 400 when the booking holds no items to check out
- * @throws {ShelfError} 403 when the booking is a pending request and the actor may not approve
+ * @throws {ShelfError} 400 when the booking is a pending request and the actor may not approve
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
@@ -5220,6 +5317,14 @@ export async function fulfilModelRequestsAndCheckout({
     let unscannedSliceIds = new Set<string>();
     /** The slices this check-out sent out, set inside the transaction. */
     let departedSlices: Array<{ id: string; assetId: string }> = [];
+    // Resolved here, outside the row lock; the transaction re-checks the
+    // pending state on the locked row.
+    const resolvedApproval = await resolveApprovalBeforeTx({
+      booking: bookingFound,
+      organizationId,
+      actorUserId: userId,
+    });
+
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
@@ -5331,6 +5436,7 @@ export async function fulfilModelRequestsAndCheckout({
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
+          resolvedApproval,
         }));
 
         /**
@@ -10873,6 +10979,14 @@ export async function partialCheckoutBooking({
       });
     }
 
+    // Resolved here, outside the row lock; the transaction re-checks the
+    // pending state on the locked row.
+    const resolvedApproval = await resolveApprovalBeforeTx({
+      booking: bookingFound,
+      organizationId,
+      actorUserId: userId,
+    });
+
     const result = await db.$transaction(
       async (tx) => {
         // Authoritative status check, under a row lock held until this
@@ -11766,6 +11880,7 @@ export async function partialCheckoutBooking({
               bookingId: id,
               organizationId,
               actorUserId: userId,
+              resolvedApproval,
             })),
           };
 
@@ -13608,7 +13723,7 @@ export async function approveBooking({
       db.booking
         .findUniqueOrThrow({
           where: { id, organizationId },
-          select: { id: true, status: true, approvedAt: true },
+          select: { id: true, status: true, approvedAt: true, to: true },
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -13650,6 +13765,20 @@ export async function approveBooking({
         status: 400,
         shouldBeCaptured: false,
         message: "This booking request has already been approved.",
+        additionalData: { bookingId: id },
+      });
+    }
+
+    // A request whose end date passed is over, not waiting: approving it would
+    // tell the custodian the gear can go out for a period already gone.
+    if (bookingFound.to < new Date()) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message:
+          "This booking request ended before it was approved. Cancel it, or send it back to draft so new dates can be picked.",
         additionalData: { bookingId: id },
       });
     }
@@ -16687,8 +16816,8 @@ export async function getBookingsForCalendar(params: {
         skipCount: true,
         extraInclude: {
           // Narrow selects: the mapping reads `name` off the team member and
-          // the display-name fields + picture off the two users. `true` pulled
-          // whole `User` rows (every column, per booking, per request).
+          // the display-name fields + picture off the two users, so nothing
+          // else of either `User` row is loaded.
           custodianTeamMember: { select: { id: true, name: true } },
           custodianUser: {
             select: {
@@ -16711,7 +16840,7 @@ export async function getBookingsForCalendar(params: {
           tags: TAG_WITH_COLOR_SELECT,
         },
         // Every booking in the window, not a page of them. `takeAll` ignores
-        // `perPage`, which is why the old `perPage: 1000` was already dead.
+        // `perPage`.
         takeAll: true,
       }),
       db.bookingSettings.findUnique({

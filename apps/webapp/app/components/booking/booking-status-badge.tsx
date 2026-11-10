@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
+import { BOOKING_PSEUDO_STATUS_LABELS } from "@shelf/labels";
 import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useUserData } from "~/hooks/use-user-data";
@@ -97,7 +98,9 @@ export function BookingStatusBadge({
               textColor={BADGE_COLORS.orange.text}
               withDot={false}
             >
-              <span className="block whitespace-nowrap">Pending approval</span>
+              <span className="block whitespace-nowrap">
+                {BOOKING_PSEUDO_STATUS_LABELS.PENDING_APPROVAL}
+              </span>
             </Badge>
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-72">

@@ -77,9 +77,11 @@ vi.mock("~/modules/user/service.server", () => ({
     displayName: null,
   }),
 }));
+// why: the action toasts its outcome; the toast itself is not under test.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
+// why: the action sets the workspace cookie on its response; no real cookie.
 vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn().mockResolvedValue("org=org-1"),
 }));

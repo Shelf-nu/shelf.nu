@@ -49,6 +49,7 @@ import {
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { approveBooking } from "~/modules/booking/service.server";
+import { ShelfError } from "~/utils/error";
 import { action } from "~/routes/api+/mobile+/bookings.approve";
 import { PermissionAction } from "~/utils/permissions/permission.data";
 
@@ -120,6 +121,26 @@ describe("POST /api/mobile/bookings/approve", () => {
     const response = await post();
 
     expect(response.status).toBe(404);
+    expect(approveBooking).not.toHaveBeenCalled();
+  });
+
+  it("refuses a caller without booking:approve before reading the booking", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
+    vi.mocked(requireMobilePermission).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "You do not have permission to approve bookings.",
+        label: "Permission",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const response = await post();
+
+    expect(response.status).toBe(403);
     expect(approveBooking).not.toHaveBeenCalled();
   });
 

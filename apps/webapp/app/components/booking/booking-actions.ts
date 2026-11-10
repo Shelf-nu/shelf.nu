@@ -291,7 +291,7 @@ export function resolveBookingActions({
   // who may, so only an approver keeps the button.
   const isPendingApproval = isBookingPendingApproval({
     status,
-    approvedAt: booking.approvedAt ?? null,
+    approvedAt: booking.approvedAt,
     requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
   });
   const mayCheckOutNow = !isPendingApproval || can(PermissionAction.approve);

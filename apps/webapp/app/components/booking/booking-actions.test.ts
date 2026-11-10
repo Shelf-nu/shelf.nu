@@ -464,6 +464,15 @@ describe("resolveBookingActions: a request waiting for approval", () => {
     expect(actions.checkOut.visible).toBe(true);
   });
 
+  it("reads a booking loaded without approvedAt as settled", () => {
+    // `buildBooking` sets no `approvedAt`, as a surface that never loads it.
+    const actions = resolveFor(buildBooking({ custodianUserId: ME }), {
+      roles: [OrganizationRoles.SELF_SERVICE],
+      settings: APPROVAL_ON,
+    });
+    expect(actions.checkOut.visible).toBe(true);
+  });
+
   it("reads nothing as pending while both approval switches are off", () => {
     const actions = resolveFor(pending, {
       roles: [OrganizationRoles.SELF_SERVICE],

@@ -93,6 +93,7 @@ import {
   computeBookingKitDrift,
   revertBookingToDraft,
   approveBooking,
+  getBookingsForCalendar,
   getPendingApprovalCount,
   extendBooking,
   removeAssets,
@@ -330,6 +331,9 @@ vitest.mock("~/database/db.server", () => ({
     // tests that exercise the foreign-user rejection override with null.
     userOrganization: {
       findFirst: vitest.fn().mockResolvedValue({ id: "user-org-1" }),
+      // why: the draft check-out gate reads the actor's roles. Default: an
+      // administrator, whose reservations are never requests.
+      findUnique: vitest.fn().mockResolvedValue({ roles: ["ADMIN"] }),
     },
     bookingAsset: {
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -4171,6 +4175,7 @@ describe("reserveBooking", () => {
     description: "Reserved booking description",
     hints: mockClientHints,
     alertsOrgOnReservation: false,
+    actorApprovalSetting: "none" as const,
     tags: [],
   };
 
@@ -4342,7 +4347,7 @@ describe("reserveBooking", () => {
         await reserveBooking({
           ...mockReserveParams,
           alertsOrgOnReservation: false,
-          actorApprovalSetting: "none",
+          actorApprovalSetting: "none" as const,
           userId: "admin-1",
         });
 
@@ -5174,6 +5179,23 @@ describe("checkoutBooking", () => {
     );
   });
 
+  // why: the approval tests grant `approve`, switch approval on and change the
+  // actor's roles; put the suite defaults back even when one of them fails.
+  afterEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest
+      .mocked(hasPermission)
+      .mockImplementation(({ action }: { action: string }) =>
+        Promise.resolve(action !== "approve")
+      );
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({ roles: ["ADMIN"] });
+  });
+
   const mockCheckoutParams = {
     id: "booking-1",
     organizationId: "org-1",
@@ -5322,13 +5344,59 @@ describe("checkoutBooking", () => {
       expect.objectContaining({ action: "BOOKING_APPROVED" }),
       expect.anything()
     );
+  });
+
+  it("refuses a straight check-out of a draft by a member whose reservation is a request", async () => {
+    // why: checking a draft out skips the reservation, so without this a
+    // Self service member could take gear without ever sending the request.
     //@ts-expect-error missing vitest type
-    db.bookingSettings.findUnique.mockResolvedValue(null);
-    vitest
-      .mocked(hasPermission)
-      .mockImplementation(({ action }: { action: string }) =>
-        Promise.resolve(action !== "approve")
-      );
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: ["SELF_SERVICE"],
+    });
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-draft",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+
+    await expect(
+      checkoutBooking({ ...mockCheckoutParams, userId: "user-1" })
+    ).rejects.toThrow(/Reserve this booking first/);
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
   });
 
   it("should checkout booking successfully with no conflicts", async () => {
@@ -6938,6 +7006,86 @@ describe("fulfilModelRequestsAndCheckout", () => {
       _count: { bookingAssets: overrides?.bookingAssets?.length ?? 0 },
     };
   }
+
+  it("refuses a pending reservation request for a caller who may not approve", async () => {
+    // why: this path reaches ONGOING without `checkoutBooking`, so only the
+    // gate inside `checkoutBookingWritesWithinTx` stops a request nobody
+    // approved from going out with its model reservations.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    const pending = {
+      ...buildPreTxBooking({
+        bookingAssets: [
+          {
+            asset: {
+              id: "hp-1",
+              assetKits: [],
+              title: "HP LaserJet 2020",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            },
+            assetId: "hp-1",
+            quantity: 1,
+            id: "ba-hp",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      }),
+      approvedAt: null,
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(pending);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    try {
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+        })
+      ).rejects.toThrow(/not been approved yet/);
+      expect(hasStatusUpdate()).toBe(false);
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(null);
+    }
+  });
 
   it("should create BookingAssets + drain all requests + transition to ONGOING on happy path", async () => {
     expect.assertions(3);
@@ -11073,6 +11221,15 @@ describe("revertBookingToDraft", () => {
         ),
       })
     );
+    // And the HTML body, which most readers see.
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        html: expect.stringContaining(
+          "Pick a shorter slot, the camera is booked after 15:00"
+        ),
+      })
+    );
   });
 });
 
@@ -11125,10 +11282,12 @@ describe("approveBooking", () => {
     requireBookingApproval = true,
     status = BookingStatus.RESERVED,
     approvedAt = null,
+    to = new Date("2099-01-01T00:00:00.000Z"),
   }: {
     requireBookingApproval?: boolean;
     status?: BookingStatus;
     approvedAt?: Date | null;
+    to?: Date;
   }) {
     //@ts-expect-error missing vitest type
     db.bookingSettings.findUnique.mockResolvedValue({
@@ -11140,6 +11299,7 @@ describe("approveBooking", () => {
       id: "booking-1",
       status,
       approvedAt,
+      to,
     });
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({
@@ -11158,6 +11318,20 @@ describe("approveBooking", () => {
       _count: { bookingAssets: 1 },
     });
   }
+
+  it("refuses a request whose end date has passed", async () => {
+    mockApprovalContext({ to: new Date("2020-01-01T00:00:00.000Z") });
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/ended before it was approved/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
 
   it("stamps approvedAt/approvedBy and emails the resolved recipients", async () => {
     mockApprovalContext({});
@@ -22293,6 +22467,7 @@ describe("model reservation guard — write paths", () => {
       description: "Reserved booking description",
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
     };
 
@@ -24985,6 +25160,7 @@ describe("booking emails name who acted", () => {
       to: futureToDate,
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-1",
     });
@@ -25359,6 +25535,7 @@ describe("booking emails name who acted", () => {
       to: futureToDate,
       hints: mockClientHints,
       alertsOrgOnReservation: true,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-1",
     });
@@ -25455,6 +25632,7 @@ describe("booking emails name who acted", () => {
       to: new Date("2027-03-06T15:00:00.000Z"),
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-3",
     });
@@ -25535,6 +25713,7 @@ describe("booking emails name who acted", () => {
       to: futureToDate,
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-1",
     });
@@ -25600,6 +25779,7 @@ describe("booking emails name who acted", () => {
         to: futureToDate,
         hints: mockClientHints,
         alertsOrgOnReservation: false,
+        actorApprovalSetting: "none" as const,
         tags: [],
         userId: "user-2",
       });
@@ -25983,5 +26163,83 @@ describe("getPendingApprovalCount", () => {
     ).resolves.toBe(0);
     await expect(getPendingApprovalCount(args(null))).resolves.toBe(0);
     expect(db.booking.count).not.toHaveBeenCalled();
+  });
+});
+
+describe("getBookingsForCalendar approval styling", () => {
+  /** A RESERVED booking in the visible window. */
+  function reservation(id: string, approvedAt: Date | null) {
+    return {
+      ...mockBookingData,
+      id,
+      name: `Booking ${id}`,
+      status: BookingStatus.RESERVED,
+      from: new Date("2026-11-12T09:00:00.000Z"),
+      to: new Date("2026-11-13T17:00:00.000Z"),
+      approvedAt,
+      custodianUser: null,
+      custodianTeamMember: { id: "tm-1", name: "Custodian" },
+      creator: null,
+      tags: [],
+    };
+  }
+
+  async function loadCalendar() {
+    return getBookingsForCalendar({
+      request: new Request(
+        "https://app.shelf.nu/calendar?start=2026-11-01&end=2026-11-30"
+      ),
+      organizationId: "org-1",
+      userId: "user-1",
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+    });
+  }
+
+  beforeEach(() => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      reservation("pending", null),
+      reservation("approved", new Date("2026-11-01T08:00:00.000Z")),
+    ]);
+  });
+
+  afterEach(() => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+  });
+
+  it("marks only the undecided request while approval is on", async () => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    const events = await loadCalendar();
+    const byId = Object.fromEntries(
+      events.map((event) => [event.extendedProps.id, event])
+    );
+
+    expect(byId.pending.extendedProps.isPendingApproval).toBe(true);
+    expect(byId.pending.classNames.join(" ")).toContain("border-dashed");
+    expect(byId.approved.extendedProps.isPendingApproval).toBe(false);
+    expect(byId.approved.classNames.join(" ")).not.toContain("border-dashed");
+  });
+
+  it("marks nothing while both switches are off", async () => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    });
+
+    const events = await loadCalendar();
+
+    expect(events.some((event) => event.extendedProps.isPendingApproval)).toBe(
+      false
+    );
   });
 });

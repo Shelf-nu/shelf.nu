@@ -81,6 +81,9 @@ export function roleReservesAsRequest({
  * `isBookingApprovalEnabled`). Client-safe; the
  * server-side checkout guard (`assertBookingIsApproved`) derives from this
  * same function so UI and service can never disagree.
+ *
+ * @param args.approvedAt - `null` is an undecided request; `undefined` means
+ *   the caller did not load the field, which reads as settled
  */
 export function isBookingPendingApproval({
   status,
@@ -88,7 +91,7 @@ export function isBookingPendingApproval({
   requireBookingApproval,
 }: {
   status: BookingStatus;
-  approvedAt: Date | string | null;
+  approvedAt: Date | string | null | undefined;
   requireBookingApproval: boolean;
 }): boolean {
   return (

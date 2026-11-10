@@ -67,14 +67,14 @@ vi.mock("./checkout-source-location.server", () => ({
   getCheckoutSourceQuestions: vi.fn().mockResolvedValue([]),
 }));
 
-// why: asserted never called. The one-click services write the asset notes,
-// so a note from the batch itself would be a second copy on every asset.
 // why: a caller who may approve is not refused for pending requests; their
 // check-out approves each one. Default: may not.
 vi.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vi.fn().mockResolvedValue(false),
 }));
 
+// why: asserted never called. The one-click services write the asset notes,
+// so a note from the batch itself would be a second copy on every asset.
 vi.mock("~/modules/note/service.server", () => ({
   createNotes: vi.fn(),
 }));

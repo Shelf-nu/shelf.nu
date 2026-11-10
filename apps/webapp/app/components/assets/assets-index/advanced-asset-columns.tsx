@@ -1167,7 +1167,7 @@ function UpcomingBookingsColumn({
               }
               const isPendingApproval = isBookingPendingApproval({
                 status: booking.status,
-                approvedAt: booking.approvedAt ?? null,
+                approvedAt: booking.approvedAt,
                 requireBookingApproval,
               });
 

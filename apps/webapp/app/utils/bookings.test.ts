@@ -13,6 +13,7 @@ import { accessFor } from "@helpers/role-access";
 import {
   bookingCustodianIsSelf,
   canUserRemoveBookingAssets,
+  isBookingPendingApproval,
   mayRemoveBookingItems,
   roleReservesAsRequest,
 } from "./bookings";
@@ -184,5 +185,41 @@ describe("roleReservesAsRequest", () => {
     expect(settingFor(OrganizationRoles.SELF_SERVICE)).toBe("selfService");
     expect(settingFor(OrganizationRoles.ADMIN)).toBe("none");
     expect(settingFor(OrganizationRoles.OWNER)).toBe("none");
+  });
+});
+
+describe("isBookingPendingApproval", () => {
+  const reserved = {
+    status: BookingStatus.RESERVED,
+    requireBookingApproval: true,
+  };
+
+  it("is pending only for an undecided reservation while approval is on", () => {
+    expect(isBookingPendingApproval({ ...reserved, approvedAt: null })).toBe(
+      true
+    );
+    expect(
+      isBookingPendingApproval({ ...reserved, approvedAt: new Date() })
+    ).toBe(false);
+    expect(
+      isBookingPendingApproval({
+        ...reserved,
+        approvedAt: null,
+        requireBookingApproval: false,
+      })
+    ).toBe(false);
+    expect(
+      isBookingPendingApproval({
+        ...reserved,
+        status: BookingStatus.ONGOING,
+        approvedAt: null,
+      })
+    ).toBe(false);
+  });
+
+  it("reads a field the caller did not load as settled", () => {
+    expect(
+      isBookingPendingApproval({ ...reserved, approvedAt: undefined })
+    ).toBe(false);
   });
 });

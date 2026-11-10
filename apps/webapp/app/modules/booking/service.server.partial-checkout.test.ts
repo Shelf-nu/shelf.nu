@@ -23,6 +23,7 @@ import {
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import {
   buildOverriddenReservationNotes,
   computeBookingAssetRemainingToCheckOut,
@@ -344,13 +345,13 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
-// why: testing the service without writing real asset notes.
 // why: the first-scan gate asks whether the acting user may approve a pending
 // request (an approver's scan approves it). Default: may not.
 vitest.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vitest.fn().mockResolvedValue(false),
 }));
 
+// why: testing the service without writing real asset notes.
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn().mockResolvedValue(undefined),
 }));
@@ -528,6 +529,8 @@ describe("partialCheckoutBooking", () => {
     (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       status: BookingStatus.RESERVED,
     });
+    // An approver test grants `approve`; take it back even when it failed.
+    vitest.mocked(hasPermission).mockResolvedValue(false);
 
     // why: clearAllMocks resets call history but not mockResolvedValue overrides
     // set by a prior test. Restore the default "echo requested ids, no conflicts"
@@ -672,9 +675,6 @@ describe("partialCheckoutBooking", () => {
       { status: BookingStatus.RESERVED },
     ]);
 
-    const { hasPermission } = await import(
-      "~/utils/permissions/permission.validator.server"
-    );
     vitest.mocked(hasPermission).mockResolvedValue(true);
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
@@ -704,7 +704,6 @@ describe("partialCheckoutBooking", () => {
         }),
       })
     );
-    vitest.mocked(hasPermission).mockResolvedValue(false);
   });
 
   it("uses the locked row's approval, not the pre-transaction snapshot", async () => {

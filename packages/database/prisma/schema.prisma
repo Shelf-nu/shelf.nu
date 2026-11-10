@@ -2046,7 +2046,7 @@ model Booking {
   // booking whose org requires approval = pending approval (derived, there
   // is no PENDING status). Cleared when the booking is reverted to draft.
   // Bookings that predate the feature were stamped once by migration
-  // 20261110120000_booking_approval_per_role; `approvedById` is empty there.
+  // 20261110120100_backfill_booking_approval; `approvedById` is empty there.
   approvedAt   DateTime? @db.Timestamptz(3)
   approvedBy   User?     @relation("bookingApprover", fields: [approvedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   approvedById String?
