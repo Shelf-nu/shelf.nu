@@ -4,8 +4,9 @@ Paste **one section**: the App Store text into App Store Connect (4000
 characters allowed), the Google Play text into Play (500). The last section is
 internal and must not reach a store listing.
 
-Items marked **(pending)** are open PRs. Keep a line only if its PR is an
-ancestor of the build commit (see STORE-RELEASE.md, step 2); delete it otherwise.
+Every line below is an ancestor of the 1.8.0 build commit `e49568afa` (checked
+with `git merge-base --is-ancestor`, STORE-RELEASE.md step 2). Work still in
+review when the build was cut is left out and ships later.
 
 ---
 
@@ -19,14 +20,18 @@ Made for bigger and folding screens, and quicker at the desk.
   of the screen edges and the camera cutout
 - Descriptions: the box grows as you type, so you can read and edit a long
   description without scrolling a three-line window
-- Bookings: Check In All and Check Out come first on a booking, right under the
-  progress bar (pending)
 - Scanner: the flashlight stays on for the whole batch, and the Enter code,
   pause and flashlight buttons can no longer be covered by the list of scanned
-  items, which you can now fold away (pending)
+  items, which you can now fold away
 - Links: links in notes, descriptions and custom fields are tappable. Websites
   and files open inside Shelf, and links to a Shelf asset, kit or booking open
-  that screen in the app (pending)
+  that screen in the app
+- Audits: scanning an item counted in units asks how many you found, and the
+  audit shows the count, such as "8 of 14 pcs"
+- Audit photos: each photo shows how it was added and when it was taken, and a
+  photo taken long before the audit is marked "Old photo"
+- Bookings: members who cannot delete bookings can discard a draft they no
+  longer need
 
 Shelf Companion now needs iOS 16.4 or later.
 
@@ -35,10 +40,11 @@ Shelf Companion now needs iOS 16.4 or later.
 ## Google Play: What's New (under 500 characters)
 
 Better on foldable phones and wide screens: buttons, lists and the scanner stay
-clear of the edges. Description boxes grow as you type. Check in and check out
-come first on a booking (pending). The scanner's flashlight stays on for the
-whole batch, and its buttons are never covered (pending). Links in notes and
-descriptions are tappable and open inside Shelf (pending).
+clear of the edges. Description boxes grow as you type. The scanner's
+flashlight stays on and its buttons are never covered. Links in notes and
+descriptions open inside Shelf. Audits count units for items tracked by
+quantity, and audit photos show when they were taken. Members can discard a
+draft booking.
 
 ---
 
@@ -75,8 +81,8 @@ commit), and tick each one with the device and date:
 - [ ] **Universal links / app links:** an `app.shelf.nu` asset, kit and booking
       URL tapped in Mail or Notes opens the app on that screen, from a cold
       start too.
-- [ ] **Android compile:** a clean Android build of the release commit
-      succeeds (not checked since the SDK 58 upgrade commit).
+- [x] **Android compile:** a clean Android build of the release commit
+      succeeds. (EAS production build of `e49568afa`, 2026-11-10.)
 - [ ] **iOS release archive:** the production build archives, installs and
       launches. Check the scan sound, camera, push registration and sign-in.
 - [ ] **Android release build with R8:** the production AAB installs (bundletool
