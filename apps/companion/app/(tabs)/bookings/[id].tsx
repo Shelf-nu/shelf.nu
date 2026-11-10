@@ -1833,7 +1833,7 @@ function BookingDetailScreen({ id }: { id: string }) {
       action: "checkout",
     }) &&
     mayWriteThisBooking &&
-    (!approvalView.isPending || approvalView.canApprove);
+    approvalView.mayCheckOutNow;
 
   /**
    * Whether the server accepts this member changing this booking's items. A
@@ -2340,7 +2340,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                 check-out paths: the server refuses check-out until it is
                 approved, and `canApprove` is the server's own answer on who
                 may decide it. */}
-            {approvalView.canApprove && (
+            {approvalView.showApprove && (
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleApprove}

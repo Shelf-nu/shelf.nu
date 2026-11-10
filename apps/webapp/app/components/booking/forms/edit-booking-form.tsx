@@ -21,6 +21,7 @@ import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { useWorkingHours } from "~/hooks/use-working-hours";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import type { UnavailableAssetRow } from "~/modules/booking/unavailable-assets";
 import type {
   BookingPageActionData,
@@ -606,7 +607,14 @@ function EditBookingFormInner({
               through the dropdown's "Scan to check out", like any other
               booking; unassigned units stay open for "Scan to assign".
             */}
-            <When truthy={isPendingApproval && canApproveBooking}>
+            {/* An ended request is refused by the server, so it gets no Approve. */}
+            <When
+              truthy={
+                isPendingApproval &&
+                canApproveBooking &&
+                !isReservationExpired(status, loaderBooking.to)
+              }
+            >
               <ApproveBookingDialog booking={{ name: name ?? "", status }} />
             </When>
 

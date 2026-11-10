@@ -3259,17 +3259,22 @@ async function recordApprovalOnCheckout(
  * @param args.actorUserId - The acting user
  * @param args.organizationId - The workspace
  * @param args.settings - The workspace's approval switches
+ * @param args.client - Prisma client to read through; the transaction when
+ *   called under the booking row lock
  */
 async function actorReservesAsRequest({
   actorUserId,
   organizationId,
   settings,
+  client = db,
 }: {
   actorUserId: User["id"];
   organizationId: Organization["id"];
   settings: Partial<BookingApprovalSwitches> | null | undefined;
+  /** The transaction, when called under the booking row lock. */
+  client?: Pick<typeof db, "userOrganization">;
 }): Promise<boolean> {
-  const membership = await db.userOrganization.findUnique({
+  const membership = await client.userOrganization.findUnique({
     where: { userId_organizationId: { userId: actorUserId, organizationId } },
     select: { roles: true },
   });
@@ -3286,8 +3291,9 @@ type CheckoutApproval = Awaited<ReturnType<typeof approvalOnCheckout>>;
 
 /**
  * Resolves the actor's approval before a check-out transaction opens, when the
- * booking already reads as a pending request, so the permission and user
- * lookups do not run while the booking row lock is held.
+ * booking already reads as a pending request or is a draft the actor would
+ * have to request, so the permission and user lookups do not run while the
+ * booking row lock is held.
  *
  * @param args.booking - The pre-transaction snapshot's status and approval
  * @param args.organizationId - The booking's organization
@@ -3305,10 +3311,9 @@ async function resolveApprovalBeforeTx({
   actorUserId: User["id"] | null | undefined;
 }): Promise<CheckoutApproval | undefined> {
   if (!actorUserId) return undefined;
-  if (
-    booking.status !== BookingStatus.RESERVED ||
-    booking.approvedAt !== null
-  ) {
+  const isPendingRequest =
+    booking.status === BookingStatus.RESERVED && booking.approvedAt === null;
+  if (!isPendingRequest && booking.status !== BookingStatus.DRAFT) {
     return undefined;
   }
   const switches = await db.bookingSettings.findUnique({
@@ -3316,13 +3321,25 @@ async function resolveApprovalBeforeTx({
     select: BOOKING_APPROVAL_SWITCHES_SELECT,
   });
   if (!isBookingApprovalEnabled(switches)) return undefined;
+  // A draft only needs the answer from a member whose reservation would be a
+  // request: everyone else checks it out straight away.
+  if (
+    !isPendingRequest &&
+    !(await actorReservesAsRequest({
+      actorUserId,
+      organizationId,
+      settings: switches,
+    }))
+  ) {
+    return undefined;
+  }
   return approvalOnCheckout({ actorUserId, organizationId });
 }
 
 /**
  * The approval gate every check-out runs inside its transaction, after the
  * booking row lock: a pending request is approved by an approver's check-out
- * and refused for anyone else. Both reads go through `tx`, so a revert that
+ * and refused for anyone else. The booking reads go through `tx`, so a revert that
  * cleared the approval after the caller's pre-transaction read is seen here.
  *
  * @param tx - Prisma transaction client holding the booking row lock
@@ -3381,6 +3398,7 @@ async function settleApprovalWithinTx(
         actorUserId,
         organizationId,
         settings: approvalSwitches,
+        client: tx,
       }))
     ) {
       const approval =
@@ -4561,6 +4579,14 @@ export async function checkoutBooking({
           bookingId: id,
         });
       }
+    }
+    // A draft checked out straight away: answered here too, outside the lock.
+    if (bookingFound.status === BookingStatus.DRAFT) {
+      resolvedApproval = await resolveApprovalBeforeTx({
+        booking: bookingFound,
+        organizationId,
+        actorUserId: userId,
+      });
     }
 
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
@@ -13653,7 +13679,8 @@ export async function cancelBooking({
  * @param args.userId - The viewer
  * @param args.roles - The viewer's roles in the workspace
  * @param args.settings - The workspace's approval switches
- * @returns The number of pending requests whose end date has not passed
+ * @returns The number of pending requests whose end date has not passed;
+ *   0 when the count fails, which is logged
  */
 export async function getPendingApprovalCount({
   organizationId,
@@ -13667,26 +13694,39 @@ export async function getPendingApprovalCount({
   settings: Partial<BookingApprovalSwitches> | null | undefined;
 }): Promise<number> {
   if (!isBookingApprovalEnabled(settings)) return 0;
-  const mayApprove = await hasPermission({
-    organizationId,
-    userId,
-    roles,
-    // why: no workspace switch grants this action.
-    workspace: null,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.approve,
-  });
-  if (!mayApprove) return 0;
-  return db.booking.count({
-    where: {
+  try {
+    const mayApprove = await hasPermission({
       organizationId,
-      status: BookingStatus.RESERVED,
-      approvedAt: null,
-      // A request whose end date passed is dead, not waiting: the Expired
-      // option lists it, the count does not.
-      to: { gte: new Date() },
-    },
-  });
+      userId,
+      roles,
+      // why: no workspace switch grants this action.
+      workspace: null,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.approve,
+    });
+    if (!mayApprove) return 0;
+    return await db.booking.count({
+      where: {
+        organizationId,
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        // A request whose end date passed is dead, not waiting: the Expired
+        // option lists it, the count does not.
+        to: { gte: new Date() },
+      },
+    });
+  } catch (cause) {
+    // A failed count costs the menu badge, never the page that loads it.
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Could not count the booking requests waiting.",
+        label,
+        additionalData: { organizationId, userId },
+      })
+    );
+    return 0;
+  }
 }
 
 /**

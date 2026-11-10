@@ -5399,6 +5399,59 @@ describe("checkoutBooking", () => {
     );
   });
 
+  it("lets a member check a draft out when their own role's switch is off", async () => {
+    // why: the draft gate reads the actor's switch, not "any switch on"; a
+    // Base member in a workspace that only gates Self service is not refused.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({ roles: ["BASE"] });
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-draft-ok",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await checkoutBooking({ ...mockCheckoutParams, userId: "user-1" });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
   it("should checkout booking successfully with no conflicts", async () => {
     expect.assertions(2);
 
@@ -26149,6 +26202,16 @@ describe("getPendingApprovalCount", () => {
     vitest.mocked(hasPermission).mockResolvedValue(false);
     await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(0);
     expect(db.booking.count).not.toHaveBeenCalled();
+  });
+
+  it("is zero, and logs, when the count fails", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.count.mockRejectedValueOnce(new Error("pool timeout"));
+    const logged = vitest.spyOn(Logger, "error").mockImplementation(() => {});
+
+    await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(0);
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
   });
 
   it("is zero while approval is off in the workspace", async () => {

@@ -39,11 +39,11 @@ export default function ApproveBookingDialog({
   trigger,
 }: ApproveBookingDialogProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  // A native post never changes the router's navigation state, so
-  // `useDisabled` alone would leave the button live while it runs. The
-  // document load that answers the post resets this.
+  // Set on the first submit so a double click posts once; reset when the
+  // dialog closes, so a failed approval can be tried again.
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const disabled = useDisabled() || isSubmitting;
+  const isBusy = useDisabled();
+  const disabled = isBusy || isSubmitting;
 
   function handleOpenDialog() {
     setIsDialogOpen(true);
@@ -51,6 +51,8 @@ export default function ApproveBookingDialog({
 
   function handleCloseDialog() {
     setIsDialogOpen(false);
+    // Only once nothing is in flight: closing mid-post must not re-arm it.
+    if (!isBusy) setIsSubmitting(false);
   }
 
   return (

@@ -110,8 +110,9 @@ export default function BookingProcessSidebar({
 
         <div className="p-4">
           <p className="mb-8 border-b-2 border-blue-500 bg-blue-50 p-2 text-blue-500">
-            Base users reserve bookings that require approval and can be
-            cancelled at any time if there are conflicts with other bookings.
+            {requireBookingApproval
+              ? "Base users reserve bookings that require approval and can be cancelled at any time if there are conflicts with other bookings."
+              : "Base users reserve bookings that can be cancelled at any time if there are conflicts with other bookings."}{" "}
             Administrators and managers handle equipment check-out and check-in.
           </p>
 

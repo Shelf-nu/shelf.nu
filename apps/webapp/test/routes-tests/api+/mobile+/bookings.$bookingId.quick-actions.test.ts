@@ -220,6 +220,8 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
   // One individual asset on the row: check-out needs at least one item.
   const pendingRow = {
     ...(BOOKING_ROW as Record<string, unknown>),
+    // Still ahead: an ended request is not offered for approval.
+    to: new Date("2099-01-02T00:00:00.000Z"),
     approvedAt: null,
     bookingAssets: [
       {
