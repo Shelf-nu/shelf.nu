@@ -30,6 +30,7 @@ The same goes for test data, fixtures and screenshots: use made-up names
 If you find customer data already published in a PR description, issue or
 comment you can edit, remove it from the text, then delete the old revisions
 from the edit history. Tell a maintainer privately in every other case: text
-you cannot edit, a committed file or commit message (a later commit does not
+you cannot edit, a PR or issue title (the old title stays in the timeline),
+a committed file or commit message (a later commit does not
 remove it), or an uploaded screenshot (its file stays reachable at its URL
 until GitHub Support removes it).
