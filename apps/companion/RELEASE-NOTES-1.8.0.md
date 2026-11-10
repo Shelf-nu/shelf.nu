@@ -76,19 +76,29 @@ cold start.
 Run these on the release build (or a production-profile build of the same
 commit), and tick each one with the device and date:
 
-- [ ] **Cold-start quick action:** with the app fully closed, long-press the
-      icon and pick Scan. The scanner opens, not Home. Repeat with the app in
-      the background. (iOS; Android too if shortcuts show there.)
-- [ ] **Deep links:** `shelf://` links to an asset, a kit and a booking open the
-      right screen, with the app closed and with it in the background.
-- [ ] **Universal links / app links:** an `app.shelf.nu` asset, kit and booking
-      URL tapped in Mail or Notes opens the app on that screen, from a cold
-      start too.
+- [x] **Cold-start quick action:** with the app fully closed, long-press the
+      icon and pick Scan. The scanner opens, not Home. (iPhone Air, iOS 27.2,
+      build 44, 2026-11-10: pass.) Not checked: app in the background,
+      Android.
+- [x] **Deep links:** `shelf://assets/<id>` with the app closed opens the
+      asset. (iPhone Air, build 44, 2026-11-10: pass.) Not checked: kit and
+      booking links, Android.
+- [ ] **Universal links / app links:** an `app.shelf.nu` asset link opens the
+      asset with the app open, and so does `app.shelf.nu/qr/<id>` (where
+      `eam.sh` labels redirect). **Failed with the app closed:** an
+      `app.shelf.nu` asset link tapped in Notes opens Home (iPhone Air,
+      build 44, 2026-11-10). Fix pending in #3385, to ship as an OTA on
+      runtime 1.8.0 and be retested here. Not checked: kit and booking
+      links, Android.
 - [x] **Android compile:** a clean Android build of the release commit
       succeeds. (EAS production build of `e49568afa`, 2026-11-10.)
-- [ ] **iOS release archive:** the production build archives, installs and
-      launches. Check the scan sound, camera, push registration and sign-in.
-- [ ] **Android release build with R8:** the production AAB installs (bundletool
-      universal APK) and launches. Check scanning, the scan sound and push.
-      R8 strips anything a missing keep rule should have protected, so open
-      every tab.
+- [x] **iOS release archive:** build 44 installs from TestFlight, launches,
+      signs in against production, and the camera scans with the flashlight
+      staying on; description boxes grow. No Shelf crash reports on the
+      device. (iPhone Air, 2026-11-10.) Not checked: scan sound, push
+      registration.
+- [x] **Android release build with R8:** the production AAB (versionCode 19)
+      installs as a bundletool universal APK on an API 35 emulator and
+      launches to sign-in; the private-server sheet and SSO open with no
+      crash in logcat. All native libraries are 16 KB aligned. (2026-11-10.)
+      Not checked: signed-in tabs, scanning, scan sound, push.
