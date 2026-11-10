@@ -27,7 +27,10 @@ import {
  */
 const LIMIT = 5;
 
-/** Mirrors how `server/index.ts` mounts the tunnel's two bounds. */
+/**
+ * The tunnel's two bounds on the canonical POST. Matching other spellings and
+ * methods is covered in `server/path-guards.test.ts`.
+ */
 function buildApp() {
   const app = new Hono();
   app.on(
@@ -201,10 +204,11 @@ describe("the tunnel path is named once", () => {
     expect(publicPathsBlock()).toContain("SENTRY_TUNNEL_PATH");
   });
 
-  it("rate limits the path it exposes, for POST only", () => {
+  it("mounts the tunnel's guards on every path", () => {
+    // The guard matches the tunnel itself (any spelling, any method that
+    // reaches the action), so it is mounted on `*`.
     const src = collapsed(SERVER_ENTRY);
-    expect(src).toContain('server.on( "POST", SENTRY_TUNNEL_PATH');
-    expect(src).toContain("sentryTunnelRateLimit()");
+    expect(src).toContain('server.use("*", sentryTunnelGuard())');
   });
 
   it("has the client post to the same constant", () => {

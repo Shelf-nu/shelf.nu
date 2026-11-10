@@ -19,6 +19,7 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import { assertSignupEnabled } from "~/modules/auth/signup-gate.server";
 import { isSsoDomainEmail } from "~/modules/auth/sso-enforcement.server";
 import {
   getSelectedOrganization,
@@ -126,6 +127,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const signupIntent = isLogin ? null : await readSignupIntent(request);
 
         if (!userExists) {
+          // A verified code with no Shelf account behind it is a signup, so it
+          // obeys the same switch as `/join`. Invited and SSO users get their
+          // account from their own flows, not from here.
+          assertSignupEnabled();
+
           try {
             const username = await generateUniqueUsername(authSession.email);
             // Detect the caller's date/time/week/timezone prefs from browser
