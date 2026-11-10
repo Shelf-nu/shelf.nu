@@ -166,8 +166,17 @@ export default function CreateAssetScreen() {
   // Only the latest location load commits, so a slow load for a previous
   // workspace cannot replace the current list.
   const latestLocationsRequestRef = useRef(0);
+  /** The workspace whose complete location list the form holds, if any. */
+  const completeLocationsOrgRef = useRef<string | null>(null);
   const loadLocations = useCallback(async () => {
-    if (!currentOrg) return;
+    if (!currentOrg) {
+      // Signed out or no workspace: drop any load still in flight.
+      latestLocationsRequestRef.current += 1;
+      completeLocationsOrgRef.current = null;
+      setLocations([]);
+      setIsLocationsLoading(false);
+      return;
+    }
     const requestId = ++latestLocationsRequestRef.current;
     setIsLocationsLoading(true);
     // Every page: the field searches only what it holds.
@@ -178,8 +187,15 @@ export default function CreateAssetScreen() {
     );
     // A newer load (e.g. after a workspace switch) owns the list now.
     if (requestId !== latestLocationsRequestRef.current) return;
-    // Keep what did load when a later page fails.
-    if (!error || rows.length > 0) setLocations(rows);
+    if (!error) {
+      setLocations(rows);
+      completeLocationsOrgRef.current = orgId;
+    } else if (completeLocationsOrgRef.current !== orgId) {
+      // No complete list for this workspace yet: show what did load, and
+      // never another workspace's list.
+      setLocations(rows);
+    }
+    // Otherwise a later page failed: keep the complete list already shown.
     setIsLocationsLoading(false);
   }, [currentOrg]);
 
