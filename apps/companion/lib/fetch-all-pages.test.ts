@@ -64,9 +64,38 @@ test("stops at the hard stop", async () => {
     (ALL_PAGES_HARD_STOP + 5) * ALL_PAGES_PAGE_SIZE
   );
 
-  await fetchAllPages(fetchPage, (d) => d.locations);
+  const { truncated, error } = await fetchAllPages(
+    fetchPage,
+    (d) => d.locations
+  );
 
   assert.equal(calls.length, ALL_PAGES_HARD_STOP);
+  assert.equal(error, null);
+  // The caller is told the list is not complete.
+  assert.equal(truncated, true);
+});
+
+test("is not truncated when the last page is reached", async () => {
+  const { fetchPage } = fakeEndpoint(260);
+
+  const { truncated } = await fetchAllPages(fetchPage, (d) => d.locations);
+
+  assert.equal(truncated, false);
+});
+
+test("treats a page with neither data nor an error as a failure", async () => {
+  const fetchPage = async (page: number) =>
+    page === 1
+      ? { data: { locations: [{ id: "a" }], totalPages: 2 }, error: null }
+      : { data: null, error: null };
+
+  const { rows, error } = await fetchAllPages<{ locations: Loc[] }, Loc>(
+    fetchPage,
+    (d) => d.locations
+  );
+
+  assert.equal(error, "Failed to load");
+  assert.deepEqual(rows, [{ id: "a" }]);
 });
 
 test("returns the error and the rows loaded so far when a page fails", async () => {

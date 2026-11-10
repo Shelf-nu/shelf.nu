@@ -25,25 +25,30 @@ export const ALL_PAGES_HARD_STOP = 50;
  *
  * @param fetchPage - Fetches one page, given its number and page size.
  * @param pickRows - Reads the rows out of a page's data.
- * @returns Every row in page order, or the first error.
+ * @returns Every row in page order (the rows loaded so far on an error), the
+ *   first error, and `truncated` when the hard stop ended the walk before the
+ *   last page.
  */
 export async function fetchAllPages<T, Row>(
   fetchPage: (page: number, perPage: number) => Promise<PageResult<T>>,
   pickRows: (data: T) => Row[]
-): Promise<{ rows: Row[]; error: string | null }> {
+): Promise<{ rows: Row[]; error: string | null; truncated: boolean }> {
   const rows: Row[] = [];
 
   for (let page = 1; ; page += 1) {
     const { data, error } = await fetchPage(page, ALL_PAGES_PAGE_SIZE);
     if (error || !data) {
-      return { rows, error: error || "Failed to load" };
+      return { rows, error: error || "Failed to load", truncated: false };
     }
 
     rows.push(...pickRows(data));
 
     const totalPages = data.totalPages ?? 1;
-    if (page >= totalPages || page >= ALL_PAGES_HARD_STOP) {
-      return { rows, error: null };
+    if (page >= totalPages) {
+      return { rows, error: null, truncated: false };
+    }
+    if (page >= ALL_PAGES_HARD_STOP) {
+      return { rows, error: null, truncated: true };
     }
   }
 }

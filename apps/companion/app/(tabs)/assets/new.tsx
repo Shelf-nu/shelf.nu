@@ -41,7 +41,8 @@ import {
 } from "@/lib/api";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 import { valuationFromInput } from "@/lib/asset-valuation";
-import { fetchAllPages } from "@/lib/fetch-all-pages";
+import { useAllLocations } from "@/hooks/use-all-locations";
+import { moreRowsHint, visibleRows } from "@/lib/visible-rows";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -106,10 +107,8 @@ export default function CreateAssetScreen() {
 
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
-  const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
   // Server-computed from GET /api/mobile/tags: whether the caller may mint
   // tags inline (admins/owners). Gates the picker's "create tag" row.
@@ -163,42 +162,17 @@ export default function CreateAssetScreen() {
   }, [currentOrg]);
 
   // ── Load locations ──────────────────────────────
-  // Only the latest location load commits, so a slow load for a previous
-  // workspace cannot replace the current list.
-  const latestLocationsRequestRef = useRef(0);
-  /** The workspace whose complete location list the form holds, if any. */
-  const completeLocationsOrgRef = useRef<string | null>(null);
-  const loadLocations = useCallback(async () => {
-    if (!currentOrg) {
-      // Signed out or no workspace: drop any load still in flight.
-      latestLocationsRequestRef.current += 1;
-      completeLocationsOrgRef.current = null;
-      setLocations([]);
-      setIsLocationsLoading(false);
-      return;
-    }
-    const requestId = ++latestLocationsRequestRef.current;
-    setIsLocationsLoading(true);
-    // Every page: the field searches only what it holds.
-    const orgId = currentOrg.id;
-    const { rows, error } = await fetchAllPages(
-      (page, perPage) => api.locations(orgId, undefined, { page, perPage }),
-      (data) => data.locations
-    );
-    // A newer load (e.g. after a workspace switch) owns the list now.
-    if (requestId !== latestLocationsRequestRef.current) return;
-    if (!error) {
-      setLocations(rows);
-      completeLocationsOrgRef.current = orgId;
-    } else if (completeLocationsOrgRef.current !== orgId) {
-      // No complete list for this workspace yet: show what did load, and
-      // never another workspace's list.
-      setLocations(rows);
-      completeLocationsOrgRef.current = null;
-    }
-    // Otherwise a later page failed: keep the complete list already shown.
-    setIsLocationsLoading(false);
-  }, [currentOrg]);
+  // Every page of locations: the field searches only what it holds. See
+  // useAllLocations for how loads, workspace switches and failures are handled.
+  const fetchLocationsPage = useCallback(
+    (orgId: string, page: number, perPage: number) =>
+      api.locations(orgId, undefined, { page, perPage }),
+    []
+  );
+  const { locations, isLocationsLoading, loadLocations } = useAllLocations(
+    currentOrg?.id,
+    fetchLocationsPage
+  );
 
   // ── Load tags ───────────────────────────────────
   // Guards against a stale response winning after an org switch: each call gets
@@ -344,6 +318,8 @@ export default function CreateAssetScreen() {
         l.name.toLowerCase().includes(locationSearch.toLowerCase())
       )
     : locations;
+  // Draw at most a page of rows; the search box reaches the rest.
+  const shownLocations = visibleRows(filteredLocations);
 
   // ── Image Picker ───────────────────────────────
   const pickImage = async (source: "camera" | "library") => {
@@ -884,42 +860,52 @@ export default function CreateAssetScreen() {
               ) : filteredLocations.length === 0 ? (
                 <Text style={styles.pickerEmpty}>No locations found</Text>
               ) : (
-                <ScrollView
-                  nestedScrollEnabled
-                  keyboardShouldPersistTaps="handled"
-                >
-                  {filteredLocations.map((loc) => (
-                    <TouchableOpacity
-                      key={loc.id}
-                      style={[
-                        styles.pickerItem,
-                        selectedLocation?.id === loc.id &&
-                          styles.pickerItemSelected,
-                      ]}
-                      onPress={() => {
-                        setSelectedLocation(
-                          selectedLocation?.id === loc.id ? null : loc
-                        );
-                        setShowLocationPicker(false);
-                        setLocationSearch("");
-                      }}
-                    >
-                      <Ionicons
-                        name="location-outline"
-                        size={16}
-                        color={colors.muted}
-                      />
-                      <Text style={styles.pickerItemText}>{loc.name}</Text>
-                      {selectedLocation?.id === loc.id && (
+                <>
+                  <ScrollView
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {shownLocations.rows.map((loc) => (
+                      <TouchableOpacity
+                        key={loc.id}
+                        style={[
+                          styles.pickerItem,
+                          selectedLocation?.id === loc.id &&
+                            styles.pickerItemSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectedLocation(
+                            selectedLocation?.id === loc.id ? null : loc
+                          );
+                          setShowLocationPicker(false);
+                          setLocationSearch("");
+                        }}
+                      >
                         <Ionicons
-                          name="checkmark"
-                          size={18}
-                          color={colors.iconActive}
+                          name="location-outline"
+                          size={16}
+                          color={colors.muted}
                         />
+                        <Text style={styles.pickerItemText}>{loc.name}</Text>
+                        {selectedLocation?.id === loc.id && (
+                          <Ionicons
+                            name="checkmark"
+                            size={18}
+                            color={colors.iconActive}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  {shownLocations.hiddenCount > 0 && (
+                    <Text style={styles.pickerEmpty}>
+                      {moreRowsHint(
+                        shownLocations.rows.length,
+                        filteredLocations.length
                       )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+                    </Text>
+                  )}
+                </>
               )}
               {selectedLocation && (
                 <TouchableOpacity

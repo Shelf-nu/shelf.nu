@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type Location } from "@/lib/api";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -23,11 +24,6 @@ type Props = {
   onSelect: (location: Location) => void;
   onClose: () => void;
 };
-
-/** Rows per request while walking to a complete location set. */
-const LOCATION_PAGE_SIZE = 100;
-/** Safety bound so a pathological workspace can't loop indefinitely. */
-const LOCATION_PAGE_HARD_STOP = 50;
 
 const locationKeyExtractor = (item: LocationNode) => item.id;
 
@@ -273,7 +269,7 @@ export function LocationPicker({
    * with more locations than that could not place an asset in the ones that
    * sorted after the cut. Locations are a small, bounded entity (rooms,
    * shelves, sites), so completing the set costs one extra request per 100.
-   * `LOCATION_PAGE_HARD_STOP` bounds pathological workspaces rather than
+   * `fetchAllPages` stops at a hard limit for pathological workspaces rather than
    * looping forever.
    */
   /**
@@ -289,35 +285,22 @@ export function LocationPicker({
     setIsLoading(true);
     setError(null);
 
-    const collected: Location[] = [];
-    let page = 1;
+    const { rows, error: fetchErr } = await fetchAllPages(
+      (page, perPage) =>
+        api.locations(orgId, debouncedSearch || undefined, { page, perPage }),
+      (data) => data.locations
+    );
 
-    // Loop rather than do/while so `totalPages` is only ever read from the
-    // response that defined it, with no dead initial value.
-    for (;;) {
-      const { data, error: fetchErr } = await api.locations(
-        orgId,
-        debouncedSearch || undefined,
-        { page, perPage: LOCATION_PAGE_SIZE }
-      );
+    // Superseded by a newer fetch — drop this result entirely.
+    if (generation !== requestGenerationRef.current) return;
 
-      // Superseded by a newer fetch — drop this result entirely.
-      if (generation !== requestGenerationRef.current) return;
-
-      if (fetchErr || !data) {
-        setError(fetchErr || "Failed to load locations");
-        setIsLoading(false);
-        return;
-      }
-
-      collected.push(...data.locations);
-
-      const totalPages = data.totalPages ?? 1;
-      if (page >= totalPages || page >= LOCATION_PAGE_HARD_STOP) break;
-      page += 1;
+    if (fetchErr) {
+      setError(fetchErr);
+      setIsLoading(false);
+      return;
     }
 
-    setLocations(collected);
+    setLocations(rows);
     setIsLoading(false);
   }, [orgId, debouncedSearch]);
 

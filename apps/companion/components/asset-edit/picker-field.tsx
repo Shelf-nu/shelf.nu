@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { moreRowsHint, visibleRows } from "@/lib/visible-rows";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 
 type PickerItem = {
@@ -65,6 +66,8 @@ export function PickerField<T extends PickerItem>({
         item.name.toLowerCase().includes(search.toLowerCase())
       )
     : items;
+  // Draw at most a page of rows; the search box reaches the rest.
+  const shownItems = visibleRows(filteredItems);
 
   const toggleOpen = () => {
     const next = !isOpen;
@@ -138,28 +141,38 @@ export function PickerField<T extends PickerItem>({
               No {label.toLowerCase()} found
             </Text>
           ) : (
-            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-              {filteredItems.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[
-                    styles.pickerItem,
-                    selectedId === item.id && styles.pickerItemSelected,
-                  ]}
-                  onPress={() => handleSelect(item)}
-                >
-                  {renderItemIcon?.(item)}
-                  <Text style={styles.pickerItemText}>{item.name}</Text>
-                  {selectedId === item.id && (
-                    <Ionicons
-                      name="checkmark"
-                      size={18}
-                      color={colors.iconActive}
-                    />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <>
+              <ScrollView
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                {shownItems.rows.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.pickerItem,
+                      selectedId === item.id && styles.pickerItemSelected,
+                    ]}
+                    onPress={() => handleSelect(item)}
+                  >
+                    {renderItemIcon?.(item)}
+                    <Text style={styles.pickerItemText}>{item.name}</Text>
+                    {selectedId === item.id && (
+                      <Ionicons
+                        name="checkmark"
+                        size={18}
+                        color={colors.iconActive}
+                      />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              {shownItems.hiddenCount > 0 && (
+                <Text style={styles.pickerEmpty}>
+                  {moreRowsHint(shownItems.rows.length, filteredItems.length)}
+                </Text>
+              )}
+            </>
           )}
           {selectedId && (
             <TouchableOpacity style={styles.pickerClear} onPress={handleClear}>

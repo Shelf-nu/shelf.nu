@@ -24,7 +24,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { valuationToInput } from "@/lib/asset-valuation";
-import { fetchAllPages } from "@/lib/fetch-all-pages";
+import { useAllLocations } from "@/hooks/use-all-locations";
 import {
   api,
   type AssetDetail,
@@ -224,10 +224,8 @@ export function useEditAssetForm(
 
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
-  const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
   // Server-computed from GET /api/mobile/tags: whether the caller may mint
   // tags inline (admins/owners). Gates the picker's "create tag" row.
@@ -292,41 +290,17 @@ export function useEditAssetForm(
     setIsCategoriesLoading(false);
   }, [orgId]);
 
-  // Only the latest location load commits, so a slow load for a previous
-  // workspace cannot replace the current list.
-  const latestLocationsRequestRef = useRef(0);
-  /** The workspace whose complete location list the form holds, if any. */
-  const completeLocationsOrgRef = useRef<string | null>(null);
-  const loadLocations = useCallback(async () => {
-    if (!orgId) {
-      // Signed out or no workspace: drop any load still in flight.
-      latestLocationsRequestRef.current += 1;
-      completeLocationsOrgRef.current = null;
-      setLocations([]);
-      setIsLocationsLoading(false);
-      return;
-    }
-    const requestId = ++latestLocationsRequestRef.current;
-    setIsLocationsLoading(true);
-    // Every page: the field searches only what it holds.
-    const { rows, error } = await fetchAllPages(
-      (page, perPage) => api.locations(orgId, undefined, { page, perPage }),
-      (data) => data.locations
-    );
-    // A newer load (e.g. after a workspace switch) owns the list now.
-    if (requestId !== latestLocationsRequestRef.current) return;
-    if (!error) {
-      setLocations(rows);
-      completeLocationsOrgRef.current = orgId;
-    } else if (completeLocationsOrgRef.current !== orgId) {
-      // No complete list for this workspace yet: show what did load, and
-      // never another workspace's list.
-      setLocations(rows);
-      completeLocationsOrgRef.current = null;
-    }
-    // Otherwise a later page failed: keep the complete list already shown.
-    setIsLocationsLoading(false);
-  }, [orgId]);
+  // Every page of locations: the field searches only what it holds. See
+  // useAllLocations for how loads, workspace switches and failures are handled.
+  const fetchLocationsPage = useCallback(
+    (orgId: string, page: number, perPage: number) =>
+      api.locations(orgId, undefined, { page, perPage }),
+    []
+  );
+  const { locations, isLocationsLoading, loadLocations } = useAllLocations(
+    orgId,
+    fetchLocationsPage
+  );
 
   // Stale-response guard: if orgId changes mid-flight, only the latest fetch
   // commits its tag list. Unlike the create screen we intentionally do NOT prune
