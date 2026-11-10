@@ -141,6 +141,92 @@ export const env = (
   isBrowser ? PublicEnvSchema.parse(window.env) : EnvSchema.parse(process.env)
 ) as Env;
 
+/**
+ * Secret values printed in this repo's `.env.example`, docs and test setup.
+ * Anyone can read them, so a production server must never sign with one.
+ */
+export const PUBLISHED_PLACEHOLDER_SECRETS: readonly string[] = [
+  "super-duper-s3cret",
+  "another-super-duper-s3cret",
+  "your-super-secret-session-key",
+  "your-local-session-secret",
+  "test-session-secret",
+  "secret-test-invite",
+  "your-invite-token-secret",
+  "generate-with-openssl-rand-hex-32",
+];
+
+/** The signing secrets checked before a production server starts. */
+type SigningSecrets = {
+  SESSION_SECRET?: string;
+  INVITE_TOKEN_SECRET?: string;
+};
+
+/**
+ * Lists what is wrong with the signing secrets a server is about to use.
+ * Outside production nothing is checked, so local development and tests keep
+ * working with the example values.
+ *
+ * - `SESSION_SECRET` signs the session cookie: it must not be a published
+ *   placeholder.
+ * - `INVITE_TOKEN_SECRET` signs invite links: it must not be a published
+ *   placeholder.
+ *
+ * The messages name the variable, never its value.
+ *
+ * @param source - The environment to read (usually `process.env`)
+ * @param nodeEnv - The NODE_ENV the server runs under
+ * @returns One message per problem; empty when the secrets are acceptable
+ */
+export function findWeakSigningSecrets(
+  source: SigningSecrets,
+  nodeEnv: string | undefined
+): string[] {
+  if (nodeEnv !== "production") return [];
+
+  const problems: string[] = [];
+  const sessionSecret = source.SESSION_SECRET?.trim() ?? "";
+  const inviteSecret = source.INVITE_TOKEN_SECRET?.trim() ?? "";
+
+  if (PUBLISHED_PLACEHOLDER_SECRETS.includes(sessionSecret)) {
+    problems.push("SESSION_SECRET is a published example value");
+  }
+
+  if (PUBLISHED_PLACEHOLDER_SECRETS.includes(inviteSecret)) {
+    problems.push("INVITE_TOKEN_SECRET is a published example value");
+  }
+
+  return problems;
+}
+
+/**
+ * Refuses to start a production server whose signing secrets are published
+ * placeholders. Generate real ones with `openssl rand -hex 32`.
+ *
+ * @param source - The environment to read (usually `process.env`)
+ * @param nodeEnv - The NODE_ENV the server runs under
+ * @throws {ShelfError} When {@link findWeakSigningSecrets} finds a problem
+ */
+export function assertStrongSigningSecrets(
+  source: SigningSecrets,
+  nodeEnv: string | undefined
+) {
+  const problems = findWeakSigningSecrets(source, nodeEnv);
+  if (problems.length === 0) return;
+
+  throw new ShelfError({
+    cause: null,
+    message: `Refusing to start: ${problems.join(
+      "; "
+    )}. Generate a value with \`openssl rand -hex 32\`.`,
+    label: "Environment",
+  });
+}
+
+if (!isBrowser) {
+  assertStrongSigningSecrets(process.env, process.env.NODE_ENV);
+}
+
 export function initEnv() {
   return env;
 }

@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getEnv } from "./env";
+import {
+  assertStrongSigningSecrets,
+  findWeakSigningSecrets,
+  getEnv,
+} from "./env";
 import { ShelfError } from "./error";
 
 // why: Mock isBrowser to ensure we're testing server-side behavior
@@ -191,5 +195,85 @@ describe("getEnv", () => {
         getEnv("SESSION_SECRET");
       }).toThrow(ShelfError);
     });
+  });
+});
+
+describe("signing secrets in production", () => {
+  /** A secret shaped like the output of `openssl rand -hex 32`. */
+  const STRONG = "9f".repeat(32);
+
+  it.each([
+    "super-duper-s3cret",
+    "your-super-secret-session-key",
+    "your-local-session-secret",
+    "test-session-secret",
+    "generate-with-openssl-rand-hex-32",
+  ])("refuses the example SESSION_SECRET %s", (value) => {
+    expect(
+      findWeakSigningSecrets(
+        { SESSION_SECRET: value, INVITE_TOKEN_SECRET: STRONG },
+        "production"
+      )
+    ).toEqual(["SESSION_SECRET is a published example value"]);
+  });
+
+  it.each([
+    "another-super-duper-s3cret",
+    "secret-test-invite",
+    "your-invite-token-secret",
+  ])("refuses the example INVITE_TOKEN_SECRET %s", (value) => {
+    expect(
+      findWeakSigningSecrets(
+        { SESSION_SECRET: STRONG, INVITE_TOKEN_SECRET: value },
+        "production"
+      )
+    ).toEqual(["INVITE_TOKEN_SECRET is a published example value"]);
+  });
+
+  it("accepts generated secrets", () => {
+    expect(
+      findWeakSigningSecrets(
+        { SESSION_SECRET: STRONG, INVITE_TOKEN_SECRET: STRONG },
+        "production"
+      )
+    ).toEqual([]);
+  });
+
+  it.each(["development", "test"])(
+    "does not check the secrets under NODE_ENV=%s",
+    (nodeEnv) => {
+      expect(
+        findWeakSigningSecrets(
+          {
+            SESSION_SECRET: "super-duper-s3cret",
+            INVITE_TOKEN_SECRET: "secret-test-invite",
+          },
+          nodeEnv
+        )
+      ).toEqual([]);
+    }
+  );
+
+  it("stops the server from starting, without printing the value", () => {
+    const start = () =>
+      assertStrongSigningSecrets(
+        {
+          SESSION_SECRET: "super-duper-s3cret",
+          INVITE_TOKEN_SECRET: "secret-test-invite",
+        },
+        "production"
+      );
+
+    expect(start).toThrow(ShelfError);
+    const message = (() => {
+      try {
+        start();
+        return "";
+      } catch (error) {
+        return (error as Error).message;
+      }
+    })();
+    expect(message).toMatch(/SESSION_SECRET.*INVITE_TOKEN_SECRET/);
+    expect(message).not.toMatch(/super-duper-s3cret|secret-test-invite/);
   });
 });

@@ -152,6 +152,41 @@ export async function endAllSessionsForUser(userId: string): Promise<number> {
 }
 
 /**
+ * Ends the one Supabase session that owns `refreshToken`, so the refresh token
+ * in a signed-out browser's cookie stops working on the server as well.
+ *
+ * Deleting the `auth.sessions` row cascades to all of its refresh tokens
+ * (`refresh_tokens_session_id_fkey`), including rotated ones. The account's
+ * other sessions (other browsers, the companion app) stay signed in.
+ *
+ * Best-effort: signing out must always succeed for the person in front of the
+ * browser, so a failure is logged rather than thrown.
+ *
+ * @param refreshToken - The refresh token stored in the session cookie
+ */
+export async function endSessionByRefreshToken(
+  refreshToken: string
+): Promise<void> {
+  try {
+    await db.$executeRaw`
+      DELETE FROM auth.sessions
+      WHERE id IN (
+        SELECT session_id FROM auth.refresh_tokens
+        WHERE token = ${refreshToken}
+      )
+    `;
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to end the session on sign-out.",
+        label,
+      })
+    );
+  }
+}
+
+/**
  * Asks the legacy sign-in decision for an address that has just authenticated,
  * and ends the session it opened when the address must use SSO.
  *
@@ -765,19 +800,29 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
-export async function validateSession(token: string) {
+/**
+ * Checks that the session cookie still points at a live refresh token that
+ * belongs to the user the cookie names. This is the web auth boundary: the
+ * `protect()` middleware calls it on every non-public request.
+ *
+ * The session cookie is bound to its refresh token's user, so a cookie whose
+ * `userId` and `refreshToken` belong to different accounts is not a session.
+ * GoTrue stores `auth.refresh_tokens.user_id` as text, so the id is compared
+ * as text.
+ *
+ * @param token - The refresh token stored in the session cookie
+ * @param userId - The user id stored in the same session cookie
+ * @returns true when an unrevoked refresh token of that user matches
+ */
+export async function validateSession(token: string, userId: string) {
   try {
-    // const t0 = performance.now();
     const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
-      SELECT id, revoked FROM auth.refresh_tokens 
-      WHERE token = ${token} 
+      SELECT id, revoked FROM auth.refresh_tokens
+      WHERE token = ${token}
+      AND user_id::text = ${userId}
       AND revoked = false
-      LIMIT 1 
+      LIMIT 1
     `;
-    // const t1 = performance.now();
-
-    // eslint-disable-next-line no-console
-    // console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
 
     if (result.length === 0) {
       //logging for debug
