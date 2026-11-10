@@ -58,6 +58,7 @@ vi.mock("~/modules/scan/service.server", () => ({
 }));
 
 import { loader } from "~/routes/api+/get-scanned-item.$qrId";
+import { accessFor } from "@helpers/role-access";
 
 const ORG_ID = "org-1";
 
@@ -99,6 +100,7 @@ beforeEach(() => {
   mockRequirePermission.mockResolvedValue({
     organizationId: ORG_ID,
     canUseBarcodes: true,
+    access: accessFor(["ADMIN"]),
   });
   mockGetQr.mockResolvedValue({
     id: "qr-1",

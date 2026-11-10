@@ -61,6 +61,16 @@ describe("custody selections", () => {
     expect(ASSET_CUSTODY_INCLUDE.custody.select.quantity).toBe(true);
   });
 
+  it("carries each custodian's user id on both sides", () => {
+    // The scanned-item endpoints redact custodians a restricted viewer may not
+    // see and keep the viewer's own by matching this id. Absent, a restricted
+    // viewer's own custody reads as someone else's and is redacted too.
+    expect(ASSET_CUSTODY_INCLUDE.custody.select.custodian.select.userId).toBe(
+      true
+    );
+    expect(KIT_INCLUDE.custody.select.custodian.select.userId).toBe(true);
+  });
+
   it("refuses an asset-only field on the kit side at compile time", () => {
     // `Kit.custody` is a `KitCustody`, which has no `quantity`. Both scanned-item
     // endpoints resolve the asset and kit branches in one query, so an invalid

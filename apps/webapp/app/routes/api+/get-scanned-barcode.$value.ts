@@ -12,6 +12,7 @@ import {
   ScannerPickerContextSchema,
   type ScannerPickerMeta,
 } from "~/modules/scanner/picker-meta.server";
+import { redactScannedItemForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -63,7 +64,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset, // Use asset permissions for barcode scanning
@@ -265,17 +266,26 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           })
         : null;
 
+    // Custodians the viewer may not see are redacted from the asset and the
+    // kit, as on their own pages; the viewer's own custody stays named.
+    const visibility = { canSeeAllCustody: access.custody.seeAll, userId };
+
     return data(
       payload({
         barcode: {
           ...barcode,
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
+          kit: barcode.kit
+            ? redactScannedItemForViewer(barcode.kit, visibility)
+            : barcode.kit,
           asset: barcode.asset
             ? {
                 // Collapse the model-image cascade into the flat image
                 // fields the scanner drawers read; the nested relation is
                 // dropped so the row carries one source of truth.
-                ...serializeAssetImage(barcode.asset),
+                ...serializeAssetImage(
+                  redactScannedItemForViewer(barcode.asset, visibility)
+                ),
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,

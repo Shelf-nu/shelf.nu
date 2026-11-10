@@ -269,3 +269,47 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
     return { ...withBookings, custody: redactEntry(row.custody) } as T;
   });
 }
+
+/**
+ * Redacts the custodians on one scanned asset or kit for the viewer.
+ *
+ * Applies {@link redactCustodianForViewer} to the item itself (an asset's
+ * custody rows, or a kit's single custody row) and to every member asset a
+ * kit carries under `assetKits[].asset`, so a scanner drawer receives the same
+ * identities the viewer could see on the asset or kit page.
+ *
+ * @param item - The scanned asset or kit row.
+ * @param visibility.canSeeAllCustody - The caller's `access.custody.seeAll`.
+ * @param visibility.userId - The viewer.
+ * @returns A shallow copy with disallowed custodian identities emptied.
+ */
+export function redactScannedItemForViewer<T extends RowWithCustody>(
+  item: T,
+  visibility: { canSeeAllCustody: boolean; userId: string }
+): T {
+  if (visibility.canSeeAllCustody) {
+    return item;
+  }
+
+  const [redacted] = redactCustodianForViewer([item], visibility);
+
+  // Kit members: structural probe, for the reason `BookingCustodianCarrier`
+  // gives. An asset's own `assetKits` entries carry no `asset` and pass as is.
+  const rawAssetKits = (redacted as { assetKits?: unknown }).assetKits;
+  if (!Array.isArray(rawAssetKits)) {
+    return redacted;
+  }
+
+  const assetKits = (
+    rawAssetKits as Array<{ asset?: RowWithCustody | null }>
+  ).map((assetKit) =>
+    assetKit?.asset?.custody
+      ? {
+          ...assetKit,
+          asset: redactCustodianForViewer([assetKit.asset], visibility)[0],
+        }
+      : assetKit
+  );
+
+  return { ...redacted, assetKits } as T;
+}

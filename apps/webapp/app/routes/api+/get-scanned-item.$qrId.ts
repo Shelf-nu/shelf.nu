@@ -15,6 +15,8 @@ import {
   ScannerPickerContextSchema,
   type ScannerPickerMeta,
 } from "~/modules/scanner/picker-meta.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
+import { redactScannedItemForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -57,7 +59,7 @@ export type KitFromQr = KitFromScanner;
  */
 type ScannedBarcodeMatch = {
   id: string;
-  asset: (AssetWithResolvableImage & { id: string }) | null;
+  asset: (AssetWithResolvableImage & { id: string } & RowWithCustody) | null;
   kit: KitFromScanner | null;
 };
 
@@ -71,23 +73,27 @@ type ScannedBarcodeMatch = {
  * manage-assets picker shows.
  *
  * Shared by all three lookups (SAM id, QR code, SAM-shaped barcode) so a
- * scanned asset carries identical fields whichever one matched.
+ * scanned asset carries identical fields whichever one matched. Custodians
+ * the viewer may not see are redacted (`redactScannedItemForViewer`).
  *
  * @param args.asset - The asset row, fetched with `ASSET_INCLUDE`.
+ * @param args.visibility - The viewer and their `access.custody.seeAll`.
  * @param args.organizationId - The caller's workspace, for the picker bound.
  * @param args.auditSessionId - Audit session to count notes and images against.
  * @param args.pickerContext - Destination the scanner is filling, if any.
  * @returns The asset as the endpoint responds with it.
  */
 async function serializeScannedAsset<
-  T extends AssetWithResolvableImage & { id: string },
+  T extends AssetWithResolvableImage & { id: string } & RowWithCustody,
 >({
   asset,
   organizationId,
   auditSessionId,
   pickerContext,
+  visibility,
 }: {
   asset: T;
+  visibility: { canSeeAllCustody: boolean; userId: string };
   organizationId: string;
   auditSessionId?: string;
   pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
@@ -122,7 +128,7 @@ async function serializeScannedAsset<
     : null;
 
   return {
-    ...serializeAssetImage(asset),
+    ...serializeAssetImage(redactScannedItemForViewer(asset, visibility)),
     auditAssetId,
     auditNotesCount,
     auditImagesCount,
@@ -152,12 +158,18 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
       action: PermissionAction.read,
     });
+
+    /** Whose custody this viewer may see named in the response. */
+    const visibility = {
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+    };
 
     const { qrId } = getParams(params, z.object({ qrId: z.string() }), {
       additionalData: {
@@ -304,6 +316,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               }),
             },
           })
@@ -353,6 +366,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               }),
             },
           })
@@ -361,7 +375,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
       if (barcode?.kit) {
         return data(
-          payload({ qr: { type: "kit" as const, kit: barcode.kit } })
+          payload({
+            qr: {
+              type: "kit" as const,
+              kit: redactScannedItemForViewer(barcode.kit, visibility),
+            },
+          })
         );
       }
 
@@ -430,12 +449,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+          kit: qr.kit ? redactScannedItemForViewer(qr.kit, visibility) : qr.kit,
           asset: qr.asset
             ? await serializeScannedAsset({
                 asset: qr.asset,
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               })
             : undefined,
         },

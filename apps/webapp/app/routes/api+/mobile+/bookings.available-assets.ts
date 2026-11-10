@@ -149,6 +149,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pickerParams.set("per_page", String(MOBILE_PICKER_MAX_PAGE_SIZE));
     }
 
+    /**
+     * The booking whose own assets stay listed (`unhideAssetsBookigIds`), only
+     * when the caller may see it. Un-hiding a booking's assets reveals what it
+     * holds, so every caller-supplied value is dropped from the params the
+     * list reads, and only the one booking that passed the visibility check is
+     * put back.
+     */
+    const excludeBookingId = await resolveVisibleBookingId({
+      bookingId: pickerParams.get("unhideAssetsBookigIds")?.split(",")[0],
+      organizationId,
+      userId: user.id,
+    });
+    pickerParams.delete("unhideAssetsBookigIds");
+    if (excludeBookingId) {
+      pickerParams.set("unhideAssetsBookigIds", excludeBookingId);
+    }
+
     const {
       assets: storedAssets,
       page,
@@ -210,11 +227,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // not count against what it may re-book.
     const bookingFrom = pickerParams.get("bookingFrom");
     const bookingTo = pickerParams.get("bookingTo");
-    const excludeBookingId = await resolveVisibleBookingId({
-      bookingId: pickerParams.get("unhideAssetsBookigIds")?.split(",")[0],
-      organizationId,
-      userId: user.id,
-    });
     const qtyAssetIds = codeRows
       .filter((r) => r.type === "QUANTITY_TRACKED")
       .map((r) => r.id);

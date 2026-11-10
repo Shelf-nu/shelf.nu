@@ -9,9 +9,12 @@ import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
  * The custodian fields every scanner row renders a holder with.
  *
  * Shared by the asset and kit custody selections below, which select it off
- * two different relations.
+ * two different relations. `userId` is what lets the scanned-item endpoints
+ * keep a viewer's own custody visible when they redact everyone else's for a
+ * role without custody visibility (`redactScannedItemForViewer`).
  */
 const CUSTODIAN_SELECT = {
+  userId: true,
   name: true,
   user: {
     select: {
