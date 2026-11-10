@@ -36,8 +36,9 @@ rewrite (#3) or the JS hook (#4) does. The hook opens custom-scheme links,
 resolves `/qr/:id` (async API call), and opens the HTTPS link that launches the
 app on iOS, where the router does not open the launch URL under the scene life
 cycle. It opens that link through `webLaunchRoute`, the router's own mapping, so
-nested kit ids and the query survive. Every other HTTPS link is the router's: opening it in the hook as well
-navigates twice. Change the split only in `link-routing.ts`, with its tests.
+nested kit ids and the query survive. Every other HTTPS link is the router's:
+opening it in the hook as well navigates twice. Change the split only in
+`link-routing.ts`, with its tests.
 
 **Prerequisite:** the destination screen must already exist (e.g.
 `apps/companion/app/(tabs)/locations/[id].tsx`) and be reachable via
