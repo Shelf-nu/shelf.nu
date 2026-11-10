@@ -11080,9 +11080,8 @@ describe("revertBookingToDraft", () => {
     expect(err.shouldBeCaptured).toBe(false);
   });
 
-  // why: regression — reverting a reservation used to be silent. The custodian
-  // submitted a request, an admin sent it back, and no email went out (every
-  // other lifecycle transition emails). This pins the notification in place.
+  // why: a custodian whose request is sent back must hear about it, like
+  // every other lifecycle transition. This pins the notification.
   it("emails the resolved recipients when a reservation is reverted", async () => {
     const custodianUser = {
       id: "user-2",
