@@ -26,6 +26,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
+import { findAddonsAwaitingWorkspace } from "~/modules/stripe-webhook/helpers.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -145,11 +146,33 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currency,
     });
 
+    // Add-ons the user's subscriptions carry without a workspace go to this
+    // one when it is the only Team workspace they could belong to (an
+    // invoice-billed subscription created in Stripe, for instance). A failed
+    // lookup links nothing and never blocks workspace creation.
+    const awaitingAddons = await findAddonsAwaitingWorkspace({
+      userId,
+      organizationId: newOrg.id,
+    }).catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to look up add-ons waiting for a workspace during workspace creation",
+          additionalData: { userId, organizationId: newOrg.id },
+          label: "Stripe",
+        })
+      );
+      return { audits: false, barcodes: false };
+    });
+
     // Link audit addon to new org if checkout included audits.
-    // This must not block workspace creation — if it fails, we log,
+    // This must not block workspace creation: if it fails, we log,
     // notify the admin, and let the user continue.
     const url = new URL(request.url);
-    const includesAudits = url.searchParams.get("includesAudits") === "true";
+    const includesAudits =
+      url.searchParams.get("includesAudits") === "true" ||
+      awaitingAddons.audits;
     let auditLinkFailed = false;
 
     if (includesAudits) {
@@ -202,7 +225,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // Link barcode addon to new org if checkout included barcodes.
     // Same graceful failure pattern as audits above.
     const includesBarcodes =
-      url.searchParams.get("includesBarcodes") === "true";
+      url.searchParams.get("includesBarcodes") === "true" ||
+      awaitingAddons.barcodes;
     let barcodeLinkFailed = false;
 
     if (includesBarcodes) {

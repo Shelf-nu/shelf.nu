@@ -18,6 +18,21 @@ import { styles } from "../styles";
 interface SubscriptionGrantedEmailProps {
   customerName?: string | null;
   subscriptionName: string;
+  /**
+   * The plan is a Team plan and the customer owns no Team workspace yet: the
+   * call to action creates one instead of opening the app.
+   */
+  needsTeamWorkspace?: boolean;
+}
+
+/** The email's call to action: create a Team workspace, or open the app. */
+function callToAction(needsTeamWorkspace?: boolean) {
+  return needsTeamWorkspace
+    ? {
+        label: "Create your team workspace",
+        href: `${SERVER_URL}/account-details/workspace/new`,
+      }
+    : { label: "Go to your workspace", href: `${SERVER_URL}` };
 }
 
 interface SendSubscriptionGrantedEmailProps
@@ -28,6 +43,7 @@ interface SendSubscriptionGrantedEmailProps
 export const sendSubscriptionGrantedEmail = async ({
   customerName,
   subscriptionName,
+  needsTeamWorkspace,
   email,
 }: SendSubscriptionGrantedEmailProps) => {
   try {
@@ -35,8 +51,13 @@ export const sendSubscriptionGrantedEmail = async ({
     const html = await subscriptionGrantedHtml({
       customerName,
       subscriptionName,
+      needsTeamWorkspace,
     });
-    const text = subscriptionGrantedText({ customerName, subscriptionName });
+    const text = subscriptionGrantedText({
+      customerName,
+      subscriptionName,
+      needsTeamWorkspace,
+    });
 
     void sendEmail({
       to: email,
@@ -60,8 +81,13 @@ export const sendSubscriptionGrantedEmail = async ({
 export const subscriptionGrantedText = ({
   customerName,
   subscriptionName,
+  needsTeamWorkspace,
 }: SubscriptionGrantedEmailProps) => {
   const greeting = customerName ? `Hey ${customerName}` : "Hey there";
+  const cta = callToAction(needsTeamWorkspace);
+  const getStarted = needsTeamWorkspace
+    ? `Your plan is used in a team workspace. ${cta.label}: ${cta.href}`
+    : `Get started: ${cta.href}`;
 
   return `${greeting},
 
@@ -74,7 +100,7 @@ You now have access to all the features included in your plan:
 - Advanced asset management features
 - Priority support
 
-Get started: ${SERVER_URL}
+${getStarted}
 
 You can manage your subscription anytime from your subscription settings:
 ${SERVER_URL}/account-details/subscription
@@ -88,8 +114,10 @@ The Shelf Team
 function SubscriptionGrantedEmailTemplate({
   customerName,
   subscriptionName,
+  needsTeamWorkspace,
 }: SubscriptionGrantedEmailProps) {
   const { emailPrimaryColor } = config;
+  const cta = callToAction(needsTeamWorkspace);
 
   return (
     <Html>
@@ -128,8 +156,15 @@ function SubscriptionGrantedEmailTemplate({
             <li style={{ marginBottom: "8px" }}>Priority support</li>
           </ul>
 
+          {needsTeamWorkspace ? (
+            <Text style={{ ...styles.p }}>
+              Your plan is used in a team workspace. Create yours to get
+              started.
+            </Text>
+          ) : null}
+
           <Button
-            href={`${SERVER_URL}`}
+            href={cta.href}
             style={{
               ...styles.button,
               textAlign: "center" as const,
@@ -137,7 +172,7 @@ function SubscriptionGrantedEmailTemplate({
               marginBottom: "24px",
             }}
           >
-            Go to your workspace
+            {cta.label}
           </Button>
 
           <Text style={{ ...styles.p }}>
@@ -166,10 +201,12 @@ function SubscriptionGrantedEmailTemplate({
 export const subscriptionGrantedHtml = ({
   customerName,
   subscriptionName,
+  needsTeamWorkspace,
 }: SubscriptionGrantedEmailProps) =>
   render(
     <SubscriptionGrantedEmailTemplate
       customerName={customerName}
       subscriptionName={subscriptionName}
+      needsTeamWorkspace={needsTeamWorkspace}
     />
   );
