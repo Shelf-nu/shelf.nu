@@ -9,6 +9,7 @@
  * @see ./deep-links.ts
  * @see ../app/+native-intent.ts
  */
+import { nativeRouteForLink } from "./resource-path";
 
 /** What the hook needs to know about a link to decide who opens it. */
 export type LinkRoutingInput = {
@@ -48,4 +49,23 @@ export function isOpenedByRouter({
   if (linkType === "qr") return false;
   if (initial && platform === "ios") return false;
   return true;
+}
+
+/**
+ * The in-app route for an HTTPS link the hook opens itself (the iOS launch
+ * link), taken from the same `nativeRouteForLink` mapping the router uses, so
+ * it keeps what the link carries: nested kit ids (`/assets/kits/:id`) and the
+ * query (`/assets/new?qrId=...`).
+ *
+ * @param url - the raw URL the OS delivered
+ * @param linkType - the link kind parsed from the URL
+ * @returns the route to open, or null when the hook must not open a route for
+ *   this link: not HTTPS, a `/qr/:id` link (resolved through the API instead),
+ *   the start screen, or a path outside the allowlist
+ */
+export function webLaunchRoute(url: string, linkType: string): string | null {
+  if (!/^https?:/i.test(url) || linkType === "qr") return null;
+  const route = nativeRouteForLink(url);
+  if (route === "/" || route === url) return null;
+  return route;
 }

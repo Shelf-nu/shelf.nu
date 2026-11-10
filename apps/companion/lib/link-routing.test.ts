@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isOpenedByRouter } from "./link-routing";
+import { isOpenedByRouter, webLaunchRoute } from "./link-routing";
 
 const WEB_ASSET = "https://app.shelf.nu/assets/as_1/overview";
 const WEB_QR = "https://app.shelf.nu/qr/qr_1";
@@ -81,4 +81,29 @@ test("the hook always opens a custom-scheme link", () => {
       );
     }
   }
+});
+
+test("a web launch link opens the route the router's own mapping names", () => {
+  assert.equal(webLaunchRoute(WEB_ASSET, "asset"), "/assets/as_1");
+});
+
+test("a web launch link keeps a nested kit id", () => {
+  assert.equal(
+    webLaunchRoute("https://app.shelf.nu/assets/kits/kt_1", "asset"),
+    "/assets/kits/kt_1"
+  );
+});
+
+test("a web launch link keeps its query", () => {
+  assert.equal(
+    webLaunchRoute("https://app.shelf.nu/assets/new?qrId=qr_1", "asset"),
+    "/assets/new?qrId=qr_1"
+  );
+});
+
+test("no web launch route for QR, custom-scheme, start-screen or unclaimed links", () => {
+  assert.equal(webLaunchRoute(WEB_QR, "qr"), null);
+  assert.equal(webLaunchRoute(SCHEME_ASSET, "asset"), null);
+  assert.equal(webLaunchRoute("https://app.shelf.nu/", "unknown"), null);
+  assert.equal(webLaunchRoute("https://app.shelf.nu/login", "unknown"), null);
 });

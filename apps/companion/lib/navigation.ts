@@ -52,6 +52,18 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
 }
 
 /**
+ * Open the in-app route a claimed web link maps to (`nativeRouteForLink`),
+ * anchored the same way as `pushIntoTab` so "back" returns to that tab's list.
+ *
+ * @param route - an in-app path such as `/assets/as_1` or `/assets/new?qrId=q`
+ */
+export function openLinkedRoute(route: string) {
+  // why: routes from nativeRouteForLink are runtime strings that the
+  // typed-routes `Href` union cannot describe statically.
+  router.navigate(route as Href, { withAnchor: true });
+}
+
+/**
  * Open a booking's detail screen from an alert button.
  *
  * Navigating synchronously inside an `Alert` button's `onPress` wedges the

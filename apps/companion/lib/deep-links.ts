@@ -2,8 +2,8 @@ import { useEffect } from "react";
 import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
-import { isOpenedByRouter } from "./link-routing";
-import { openShelfWebUrl, pushIntoTab } from "./navigation";
+import { isOpenedByRouter, webLaunchRoute } from "./link-routing";
+import { openLinkedRoute, openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
   type QrLookups,
@@ -39,13 +39,19 @@ import { getScanCoordinates } from "./scan-location";
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
  * are never delivered to the app and keep opening the web.
  *
- * Division of labour with `app/+native-intent.ts`: HTTPS universal links are
- * rewritten there to native routes and handled by expo-router itself (a
- * claimed path that nests deeper than the app renders, e.g.
- * `/assets/:id/overview`, maps to the resource detail). This hook only
- * handles (a) custom-scheme links, which have no native path mapping
- * guarantees, and (b) `/qr/:id` links, which need an async API resolve.
- * Acting on other HTTPS links here would double-navigate.
+ * Division of labour with `app/+native-intent.ts`, decided per link by
+ * `isOpenedByRouter` (`lib/link-routing.ts`). HTTPS universal links are
+ * rewritten there to native routes (a claimed path that nests deeper than the
+ * app renders, e.g. `/assets/:id/overview`, maps to the resource detail).
+ *
+ * - While the app runs, expo-router opens every HTTPS link except `/qr/:id`.
+ *   This hook opens custom-scheme links and resolves `/qr/:id` through the API.
+ * - At launch, the same split applies on Android. On iOS the router does not
+ *   open the launch URL, so this hook opens HTTPS launch links too, through
+ *   the router's own mapping (`webLaunchRoute`), which keeps nested kit ids
+ *   and the query.
+ *
+ * Opening a link the router already opens would navigate twice.
  */
 
 type ParsedLink =
@@ -237,20 +243,29 @@ export function useDeepLinkHandler() {
     // Handle the URL that launched the app (cold start). Links the router
     // opens itself are skipped (see `isOpenedByRouter`).
     Linking.getInitialURL().then((url) => {
-      if (url) {
-        const link = parseDeepLink(url);
-        if (
-          link.type !== "unknown" &&
-          !isOpenedByRouter({
-            url,
-            linkType: link.type,
-            initial: true,
-            platform: Platform.OS,
-          })
-        ) {
-          // Small delay to let navigation mount
-          setTimeout(() => navigateToLink(link), 500);
-        }
+      if (!url) return;
+      const link = parseDeepLink(url);
+      if (
+        isOpenedByRouter({
+          url,
+          linkType: link.type,
+          initial: true,
+          platform: Platform.OS,
+        })
+      ) {
+        return;
+      }
+      // HTTPS links open their mapped route; custom-scheme and `/qr/:id`
+      // links go through `navigateToLink`. The delay lets navigation mount.
+      const webRoute = webLaunchRoute(url, link.type);
+      const isWebLink = /^https?:/i.test(url);
+      if (webRoute) {
+        setTimeout(() => openLinkedRoute(webRoute), 500);
+      } else if (
+        link.type !== "unknown" &&
+        (link.type === "qr" || !isWebLink)
+      ) {
+        setTimeout(() => navigateToLink(link), 500);
       }
     });
 
