@@ -233,14 +233,16 @@ export function useDeepLinkHandler() {
       }
     }
 
-    // Handle the URL that launched the app (cold start). HTTPS links are
-    // already routed by expo-router via the +native-intent rewrite — only
-    // custom-scheme links and /qr resolution need JS navigation here.
+    // Handle the URL that launched the app (cold start). Every recognised
+    // link is navigated here, HTTPS included: with the Expo SDK 58 scene life
+    // cycle on iOS, the +native-intent rewrite alone left a cold-start
+    // universal link on the start screen. `router.navigate` goes to a screen
+    // that is already showing instead of stacking a copy, so a link the
+    // router did route is not opened twice.
     Linking.getInitialURL().then((url) => {
       if (url) {
         const link = parseDeepLink(url);
-        // Skip natively-routed and unrecognized links.
-        if (link.type !== "unknown" && !isNativelyRouted(url, link)) {
+        if (link.type !== "unknown") {
           // Small delay to let navigation mount
           setTimeout(() => navigateToLink(link), 500);
         }
