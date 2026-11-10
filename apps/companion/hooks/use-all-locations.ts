@@ -59,7 +59,7 @@ export function useAllLocations<L>(
 
     const requestId = ++latestRequestRef.current;
     setIsLocationsLoading(true);
-    const { rows, error } = await fetchAllPages(
+    const { rows, error, truncated } = await fetchAllPages(
       (page, perPage) => fetchPageRef.current(orgId, page, perPage),
       (data) => data.locations,
       () => requestId === latestRequestRef.current
@@ -68,7 +68,9 @@ export function useAllLocations<L>(
 
     if (!error) {
       setLocations(rows);
-      completeOrgRef.current = orgId;
+      // A list cut off at the hard stop is not complete: a later failed
+      // reload must not keep it as the fallback.
+      completeOrgRef.current = truncated ? null : orgId;
     } else if (completeOrgRef.current !== orgId) {
       setLocations(rows);
       completeOrgRef.current = null;

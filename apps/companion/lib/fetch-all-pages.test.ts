@@ -18,6 +18,8 @@ import {
 type Loc = { id: string };
 
 /** A fake list endpoint holding `total` rows, served `perPage` at a time. */
+// why: the real endpoint is the network; a fake with a known row count lets
+// each test check exactly which pages were asked for.
 function fakeEndpoint(total: number) {
   const calls: { page: number; perPage: number }[] = [];
   const fetchPage = async (page: number, perPage: number) => {

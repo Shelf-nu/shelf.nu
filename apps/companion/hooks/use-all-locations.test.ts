@@ -25,6 +25,8 @@ type PendingPage = {
 };
 
 /** A fake page endpoint whose requests wait for the test to answer them. */
+// why: the real endpoint is the network; these tests need to decide when each
+// page answers and with what, to play out slow, failed and superseded loads.
 function fakeEndpoint() {
   const pending: PendingPage[] = [];
   const fetchPage = (orgId: string, page: number) =>
@@ -125,6 +127,28 @@ describe("useAllLocations", () => {
     await flush();
 
     assert.equal(loader.result().locations.length, 120);
+  });
+
+  it("does not keep a list cut off at the hard stop as complete", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    // 60 pages exist; the walk stops after the hard stop (50).
+    act(() => void loader.result().loadLocations());
+    for (let p = 0; p < 50; p += 1) {
+      pending.shift()!.resolve(page("A", p, 1, 60));
+      await flush();
+    }
+    assert.equal(loader.result().locations.length, 50);
+
+    // A reload that fails on page 2 shows what loaded, not the cut-off list.
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("A", 0, 1, 60));
+    await flush();
+    pending.shift()!.resolve({ error: "Network error" });
+    await flush();
+
+    assert.equal(loader.result().locations.length, 1);
   });
 
   it("shows another workspace's partial list rather than the old workspace's", async () => {
