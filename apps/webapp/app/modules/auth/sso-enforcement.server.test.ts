@@ -69,8 +69,13 @@ function givenUsers(rows: AccountRow[]) {
   );
 }
 
-/** Sets the row the by-id user lookup returns. */
-function givenUserById(row: Pick<AccountRow, "id" | "sso"> | null) {
+/**
+ * Sets the row the by-id user lookup returns. Without `email` the stored
+ * address is treated as unknown, so only the session address is decided.
+ */
+function givenUserById(
+  row: (Pick<AccountRow, "id" | "sso"> & { email?: string }) | null
+) {
   vi.mocked(db.user.findUnique).mockResolvedValue(
     row as unknown as Awaited<ReturnType<typeof db.user.findUnique>>
   );
@@ -124,6 +129,23 @@ function givenLinkedWorkspaces(
       })
     ) as unknown as LinkedOrganizations,
     ssoProviderId: "provider-1",
+  });
+}
+
+/**
+ * Makes only the given domain configured for SSO (with `LINKED_ORG_ID` linked
+ * and enforcing); every other domain is not.
+ */
+function givenOnlyDomainIsSso(ssoDomain: string) {
+  vi.mocked(checkDomainSSOStatus).mockImplementation((email: string) => {
+    const isSso = email.split("@")[1]?.toLowerCase() === ssoDomain;
+    return Promise.resolve({
+      isConfiguredForSSO: isSso,
+      linkedOrganizations: (isSso
+        ? [{ id: LINKED_ORG_ID, enabledSso: true }]
+        : []) as unknown as LinkedOrganizations,
+      ssoProviderId: isSso ? "provider-1" : null,
+    });
   });
 }
 
@@ -459,7 +481,7 @@ describe("getLegacyLoginDecisionForUser", () => {
     ).resolves.toEqual({ allowed: true });
     expect(db.user.findUnique).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      select: { id: true, sso: true },
+      select: { id: true, sso: true, email: true },
     });
     expect(db.user.findMany).not.toHaveBeenCalled();
     expect(db.organization.count).toHaveBeenCalledWith({
@@ -492,6 +514,72 @@ describe("getLegacyLoginDecisionForUser", () => {
       getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
     ).resolves.toEqual({ allowed: true });
     expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the stored email is on an enforcing SSO domain and the session email is not", async () => {
+    givenUserById({ id: "user-1", sso: false, email: EMAIL });
+    givenOnlyDomainIsSso("acme.com");
+
+    await expect(
+      getLegacyLoginDecisionForUser({
+        userId: "user-1",
+        email: "jane@personal.example",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "sso_domain" });
+    expect(checkDomainSSOStatus).toHaveBeenCalledWith(EMAIL);
+  });
+
+  it("refuses when the session email is on an enforcing SSO domain and the stored email is not", async () => {
+    givenUserById({
+      id: "user-1",
+      sso: false,
+      email: "jane@personal.example",
+    });
+    givenOnlyDomainIsSso("acme.com");
+
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: false, reason: "sso_domain" });
+  });
+
+  it("allows a standard account whose two addresses are both on domains without SSO", async () => {
+    givenUserById({
+      id: "user-1",
+      sso: false,
+      email: "jane@personal.example",
+    });
+    givenOnlyDomainIsSso("acme.com");
+
+    await expect(
+      getLegacyLoginDecisionForUser({
+        userId: "user-1",
+        email: "jane@other.example",
+      })
+    ).resolves.toEqual({ allowed: true });
+    expect(checkDomainSSOStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("decides the domain once when both addresses share it", async () => {
+    givenUserById({ id: "user-1", sso: false, email: "Jane@ACME.com" });
+    givenOnlyDomainIsSso("other.example");
+
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: true });
+    expect(checkDomainSSOStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows the owner of the linked workspace under both addresses", async () => {
+    givenUserById({ id: "user-1", sso: false, email: EMAIL });
+    givenOnlyDomainIsSso("acme.com");
+    givenOwnership({ ownedOrgs: 1, ownerMemberships: 0 });
+
+    await expect(
+      getLegacyLoginDecisionForUser({
+        userId: "user-1",
+        email: "jane@personal.example",
+      })
+    ).resolves.toEqual({ allowed: true });
   });
 });
 
@@ -546,6 +634,37 @@ describe("assertEmailChangeAllowed", () => {
 
     await expect(
       assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses when only the stored email is on an enforcing SSO domain", async () => {
+    givenUserById({ id: "user-1", sso: false, email: EMAIL });
+    givenOnlyDomainIsSso("acme.com");
+
+    await expect(
+      assertEmailChangeAllowed({
+        userId: "user-1",
+        email: "jane@personal.example",
+      })
+    ).rejects.toMatchObject({
+      status: 403,
+      message: SSO_EMAIL_CHANGE_REFUSED_MESSAGE,
+    });
+  });
+
+  it("allows a standard account whose two addresses are both on domains without SSO", async () => {
+    givenUserById({
+      id: "user-1",
+      sso: false,
+      email: "jane@personal.example",
+    });
+    givenOnlyDomainIsSso("acme.com");
+
+    await expect(
+      assertEmailChangeAllowed({
+        userId: "user-1",
+        email: "jane@other.example",
+      })
     ).resolves.toBeUndefined();
   });
 

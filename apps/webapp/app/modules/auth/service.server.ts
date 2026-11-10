@@ -199,7 +199,8 @@ export async function endSessionByRefreshToken(
  *   authenticated address, never one taken from the request. Pass `userId`
  *   (the session's auth user id) whenever it is known, so the decision is
  *   made for exactly that account rather than for whichever account the
- *   address resolves to.
+ *   address resolves to. With `userId`, the account's stored `User.email` is
+ *   decided too, and a refusal under either address refuses the session.
  * @returns null when the sign-in may proceed, otherwise why it is refused
  * @throws {ShelfError} If the decision fails (the session is already revoked)
  */
