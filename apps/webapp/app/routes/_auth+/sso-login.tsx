@@ -204,7 +204,7 @@ export default function SSOLogin() {
             app: its sign-in sheet has its own Cancel, and /login inside that
             sheet could not sign the app in. */}
         {platform === "web" ? (
-          <div className="text-center">
+          <div className="pt-4 text-center">
             <Button variant="link" to="/login">
               Back to login
             </Button>

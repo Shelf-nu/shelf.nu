@@ -2,8 +2,7 @@
  * The SSO login page links back to the password login page.
  *
  * Installed as an app (PWA, `display: standalone`) the window has no browser
- * back button, so without this link a person who opened the SSO page by
- * mistake had no way back to email and password login.
+ * back button, so the page itself must link to email and password login.
  *
  * The native app opens this page in its own sign-in sheet, which has a Cancel
  * button, and the web login page cannot sign the native app in, so the link is
@@ -42,7 +41,8 @@ describe("SSO login page", () => {
   });
 
   it("hides the link in the native app's sign-in sheet", async () => {
-    renderAt("/sso-login?platform=mobile&code_challenge=" + "a".repeat(43));
+    // Only `platform` matters here: the loader is stubbed, so PKCE is not exercised.
+    renderAt("/sso-login?platform=mobile");
 
     await screen.findByRole("button", { name: "Log In" });
     expect(
