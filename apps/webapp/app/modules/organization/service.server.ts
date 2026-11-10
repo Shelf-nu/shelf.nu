@@ -35,6 +35,7 @@ import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { recordEvent } from "../activity-event/service.server";
 import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
+import { pdfTemplatesForNewWorkspace } from "../pdf-template/service.server";
 import { updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
 import { lockMembership } from "../user/membership-lock.server";
@@ -266,6 +267,8 @@ export async function createOrganization({
           bufferStartTime: 0,
         },
       },
+
+      ...pdfTemplatesForNewWorkspace(),
     } satisfies Prisma.OrganizationCreateInput;
 
     const org = await db.organization.create({ data });
@@ -488,6 +491,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   selfServiceCanSeeBookings: true,
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
+  managersCanEditAssets: true,
   barcodesEnabled: true,
   usedBarcodeTrial: true,
   auditsEnabled: true,
@@ -881,6 +885,28 @@ export function updateOrganizationPermissions({
     data: {
       ...configuration,
     },
+  });
+}
+
+/**
+ * Saves the owner-only `managersCanEditAssets` switch. Callers assert the
+ * caller owns the workspace first (`assertIsOrganizationOwner`).
+ *
+ * @param args.id - The workspace
+ * @param args.managersCanEditAssets - The new value
+ * @returns The updated organization's id and switch
+ */
+export function updateOrganizationManagersCanEditAssets({
+  id,
+  managersCanEditAssets,
+}: {
+  id: Organization["id"];
+  managersCanEditAssets: boolean;
+}) {
+  return db.organization.update({
+    where: { id },
+    data: { managersCanEditAssets },
+    select: { id: true, managersCanEditAssets: true },
   });
 }
 

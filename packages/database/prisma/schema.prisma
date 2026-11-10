@@ -123,6 +123,10 @@ model User {
   // Native-app SSO web-delegated login — single-use session-handoff codes
   mobileAuthCodes MobileAuthCode[]
 
+  // Companion-app push notifications: the devices to reach, and the switches
+  pushTokens             PushToken[]
+  notificationPreference NotificationPreference?
+
   // Updates feature
   createdUpdates Update[]
   updateReads    UserUpdateRead[]
@@ -439,6 +443,43 @@ model AssetIndexSettings {
   @@index([organizationId])
 }
 
+/// The kind of PDF a PdfTemplate lays out. Only the booking PDF has saved
+/// layouts today; the check-in receipt and the audit receipt can join as new
+/// kinds.
+enum PdfTemplateKind {
+  BOOKING
+}
+
+/// A saved layout for a generated PDF, kept per team workspace under a name:
+/// which columns, rows and header lines print, and in what order the rows
+/// come. A row is a layout, not a generated file; the person generating a PDF
+/// picks a template by name.
+model PdfTemplate {
+  id   String          @id @default(cuid())
+  name String
+  kind PdfTemplateKind @default(BOOKING)
+
+  /// The layout's switches. Read through `parseBookingTemplateConfig`,
+  /// which fills any key a stored row lacks from the Checklist template's
+  /// values.
+  config Json @default("{}")
+
+  /// The template the PDF dialog offers first. One per workspace and kind,
+  /// enforced by a partial unique index in raw SQL (migration
+  /// 20261103120000_add_pdf_templates). Names are also unique per workspace
+  /// and kind ignoring case, through an expression index in the same
+  /// migration.
+  isDefault Boolean @default(false)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, kind, name])
+}
+
 enum AssetIndexMode {
   SIMPLE
   ADVANCED
@@ -498,6 +539,11 @@ model AssetModel {
   defaultCategoryId String?
   defaultCategory   Category? @relation(fields: [defaultCategoryId], references: [id])
   defaultValuation  Float?
+
+  /// Default custom field values. Like the category and valuation defaults,
+  /// each one fills the matching field only when it is empty, at the moment
+  /// an asset joins this model. Nothing stays linked afterwards.
+  customFieldDefaults AssetModelCustomFieldDefault[]
 
   // Relationships
   assets         Asset[]
@@ -957,6 +1003,10 @@ model Location {
   @@index([organizationId, parentId])
   // Trigram index for substring search from the asset-list search bar
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_name_trgm_idx")
+  // Trigram indexes for the locations index search, which also matches
+  // description and address with ILIKE '%term%'
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_description_trgm_idx")
+  @@index([address(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_address_trgm_idx")
 }
 
 // Master data for roles
@@ -1099,6 +1149,9 @@ model Organization {
   selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+  // Owner-only switch. When true, managers may add and edit assets and kits,
+  // update locations and link codes (the grants live in @shelf/permissions WORKSPACE_GRANTS)
+  managersCanEditAssets     Boolean @default(false)
 
   // Barcode add-on (per-organization, managed via Stripe subscription)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
@@ -1141,6 +1194,8 @@ model Organization {
   auditSessions      AuditSession[]
   auditImages        AuditImage[]
   assetImports       AssetImport[]
+  linkPreviews       LinkPreview[]
+  pdfTemplates       PdfTemplate[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
@@ -1337,6 +1392,8 @@ model TierLimit {
   canImportNRM         Boolean  @default(false)
   canHideShelfBranding Boolean  @default(false)
   canUseReports        Boolean  @default(false)
+  canUseRecurringReminders Boolean @default(false)
+  canUsePushNotifications Boolean @default(false)
   maxCustomFields      Int      @default(0)
   maxOrganizations     Int      @default(1)
   createdAt            DateTime @default(now())
@@ -1353,6 +1410,8 @@ model CustomTierLimit {
   canImportNRM         Boolean  @default(true)
   canHideShelfBranding Boolean  @default(true)
   canUseReports        Boolean  @default(true)
+  canUseRecurringReminders Boolean @default(true)
+  canUsePushNotifications Boolean @default(true)
   maxCustomFields      Int      @default(1000)
   maxOrganizations     Int      @default(1)
   isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -1367,8 +1426,11 @@ model CustomField {
   required Boolean @default(false)
   active   Boolean @default(true)
 
-  type    CustomFieldType @default(TEXT)
+  type    CustomFieldType   @default(TEXT)
   options String[]
+  /// How a TEXT field's values are read. LINK requires a web link in every
+  /// value; any other type stays PLAIN (enforced by a CHECK constraint).
+  format  CustomFieldFormat @default(PLAIN)
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -1402,6 +1464,13 @@ enum CustomFieldType {
   NUMBER
 }
 
+/// The format of a TEXT custom field. Unlike the type, it can change after the
+/// field exists.
+enum CustomFieldFormat {
+  PLAIN
+  LINK
+}
+
 model AssetCustomFieldValue {
   id String @id @default(cuid())
 
@@ -1421,6 +1490,37 @@ model AssetCustomFieldValue {
 
   @@index([assetId, customFieldId], name: "AssetCustomFieldValue_lookup_idx")
   // Index for foreign key
+  @@index([customFieldId])
+}
+
+/// A custom field value an AssetModel gives the assets that join it.
+///
+/// `value` has the exact shape of `AssetCustomFieldValue.value`, so filling an
+/// asset is a plain copy. Rows cascade away with their model or field.
+model AssetModelCustomFieldDefault {
+  id String @id @default(cuid())
+
+  value Json
+
+  assetModel   AssetModel @relation(fields: [assetModelId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetModelId String
+
+  // Deliberately a plain column without a Prisma `@relation`: the migration
+  // creates the FK to `CustomField("id")` with `ON DELETE CASCADE`, but a
+  // back-relation on `CustomField` pushes the extended client's generics past
+  // TS's recursion limit (TS2321) in `organization/service.server`. Services
+  // read the field rows with a second query keyed on these ids. Because the
+  // schema does not describe the FK, `prisma migrate dev` treats it as drift
+  // and generates a drop for it. `pnpm db:prepare-migration` then runs
+  // `src/post-migration.ts`, which strips that drop because the FK is listed in
+  // `PROTECTED_FOREIGN_KEYS` (`src/protected-indexes.ts`). Plain
+  // `prisma migrate dev` keeps the drop.
+  customFieldId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assetModelId, customFieldId])
   @@index([customFieldId])
 }
 
@@ -1957,10 +2057,11 @@ model Booking {
   // When a booking is auto-archived, we store the timestamp here
   autoArchivedAt DateTime? @db.Timestamptz(3)
 
-  // True when the booking was archived directly from RESERVED — i.e. its end
-  // date passed without ever being checked out/in. Such bookings were never
-  // "returned", so return-behaviour reports (e.g. Booking Compliance) must
-  // exclude them. Bookings archived from COMPLETE keep the default `false`.
+  // True when the booking was archived before any check-out: from RESERVED
+  // (its end date passed unused) or from DRAFT ("Discard draft"). Such bookings
+  // were never "returned", so return-behaviour reports (e.g. Booking
+  // Compliance) must exclude them. Bookings archived from COMPLETE keep the
+  // default `false`.
   archivedWithoutCheckin Boolean @default(false)
 
   cancellationReason String?
@@ -2149,6 +2250,56 @@ model MobileAuthCode {
   @@index([expiresAt])
 }
 
+/// The operating system a companion-app push token was issued for.
+enum DevicePlatform {
+  IOS
+  ANDROID
+}
+
+/// One Expo push token per installed companion app. A token identifies a
+/// device, not a person: when someone else signs in on the same phone, the
+/// row moves to them. Pushes go only to rows where `disabledAt` is null.
+/// @see apps/webapp/app/modules/push/service.server.ts
+model PushToken {
+  id String @id @default(cuid())
+
+  // The `ExponentPushToken[...]` string the Expo push service addresses.
+  token String @unique
+
+  platform   DevicePlatform
+  deviceName String?
+  appVersion String?
+
+  // Refreshed on every registration, so stale devices are visible.
+  lastSeenAt DateTime
+
+  // Set when Expo reports the device as no longer registered.
+  disabledAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// A person's push notification switches. A missing row means every switch
+/// is on, so no backfill is needed. The three category columns are named
+/// after `PushCategory` in apps/webapp/app/modules/push/types.ts.
+model NotificationPreference {
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String @id
+
+  pushEnabled       Boolean @default(true)
+  bookings          Boolean @default(true)
+  audits            Boolean @default(true)
+  stockAndReminders Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+}
+
 model Kit {
   id String @id @default(cuid())
 
@@ -2322,12 +2473,34 @@ model AssetLocation {
   @@index([assetKitId])
 }
 
+// Units for reminder recurrence cadences ("every N <unit>"). Stored as
+// unit + interval (not presets) so future custom cadences need no migration.
+enum ReminderRecurrenceUnit {
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
 model AssetReminder {
   id                       String       @id @default(cuid())
   name                     String
   message                  String
   alertDateTime            DateTime
   activeSchedulerReference String?
+
+  // Recurrence (null unit/interval = one-shot reminder, the default). For an
+  // active recurring reminder, alertDateTime always holds the NEXT occurrence:
+  // the worker advances it in place each time the reminder fires, keeping every
+  // "upcoming" surface and the status/edit/cancel guards correct without forks.
+  recurrenceUnit     ReminderRecurrenceUnit?
+  recurrenceInterval Int?
+  // IANA zone captured from client hints at create/edit so "every month at
+  // 09:00" stays wall-clock-stable across DST. Null = UTC math (legacy rows).
+  recurrenceTimezone String?
+  // Optional series end (inclusive). Null = repeat until deleted.
+  recurrenceEndsAt DateTime?
+
   organization             Organization @relation(fields: [organizationId], references: [id])
   organizationId           String
   asset                    Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -2638,6 +2811,47 @@ model AssetImport {
   @@index([createdById, organizationId, status])
 }
 
+/// What Shelf knows about one web link used in a workspace's custom fields,
+/// keyed by its `LinkKey` from @shelf/links. Two writers on disjoint columns:
+/// the link preview job (fetch columns) and people (customTitle).
+model LinkPreview {
+  id             String              @id @default(cuid())
+  /// `LinkKey` from @shelf/links, never a raw field value. At most 2048
+  /// characters (CHECK constraint in the migration).
+  url            String
+  pageTitle      String?
+  /// Null until the first fetch finishes.
+  outcome        LinkPreviewOutcome?
+  attempts       Int                 @default(0)
+  fetchedAt      DateTime?
+  /// When the link may be fetched next; null means never again. A claim moves
+  /// it a few minutes ahead, which is also the lease on a fetch in flight.
+  nextFetchAt    DateTime?           @default(now())
+  /// The name a person gave the link in this workspace; wins over pageTitle.
+  customTitle    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  @@unique([organizationId, url])
+}
+
+/// How the last fetch of a link's page went.
+enum LinkPreviewOutcome {
+  /// The page has a title.
+  TITLE
+  /// The page answered but has no title, or is not an HTML page.
+  NO_TITLE
+  /// The link needs a signed-in user.
+  SIGN_IN
+  /// A bot challenge or refusal stood in the way.
+  BLOCKED
+  /// The page could not be reached, or the address is not allowed.
+  UNREACHABLE
+}
+
 model AuditAssignment {
   id String @id @default(cuid())
 
@@ -2673,6 +2887,24 @@ model AuditAsset {
 
   scannedAt DateTime?
   metadata  Json?
+
+  /// Units the audit expects to find, snapshotted when the row is created: the
+  /// units in the audit's scope (placed at its locations, held in its kits, or
+  /// held by its person; at most `Asset.quantity`), or `Asset.quantity` when
+  /// none are in scope or the audit has no scope. Null for INDIVIDUAL assets,
+  /// which count as one.
+  ///
+  /// A snapshot, not a live read: stock that moves during the audit must not
+  /// move the target the auditor is counting against.
+  expectedQuantity Int?
+  /// Units the auditor counted. Null until a quantity-tracked asset is
+  /// counted, and always null for INDIVIDUAL assets. A FOUND row with a count
+  /// below `expectedQuantity` is a shortfall: the status stays FOUND (the pool
+  /// was located), the gap is this number.
+  ///
+  /// Both columns are non-negative, enforced by CHECK constraints in raw SQL
+  /// (migration `20261104120000_add_audit_asset_quantities`).
+  foundQuantity    Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2753,6 +2985,15 @@ model AuditImage {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
+  /// When the photo was taken, from its EXIF data (or the phone app's copy of
+  /// it). Null when the photo carried no usable date. EXIF can be edited, so
+  /// this is the best signal available, not proof.
+  capturedAt DateTime?
+
+  /// How the photo reached Shelf. Null only for photos uploaded before this
+  /// field existed; a phone upload with no or an unknown source is PHONE.
+  captureSource AuditImageCaptureSource?
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2762,6 +3003,19 @@ model AuditImage {
   @@index([auditAssetId])
   @@index([organizationId])
   @@index([uploadedById])
+}
+
+/// How an audit photo reached Shelf, as reported by the client. The phone app
+/// reports CAMERA only for its own camera, which cannot hand back an old
+/// picture, so it is the strongest evidence short of a modified client; a
+/// library photo's date is only what its file claims; the web app cannot tell
+/// a camera shot from a file; PHONE is a phone app version that does not say
+/// which.
+enum AuditImageCaptureSource {
+  CAMERA
+  LIBRARY
+  WEB_UPLOAD
+  PHONE
 }
 
 /// How a membership's role came to change.
@@ -2878,6 +3132,7 @@ enum ActivityAction {
   ASSET_MIN_QUANTITY_CHANGED
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
+  ASSET_AVAILABLE_TO_BOOK_CHANGED
   ASSET_ARCHIVED
   ASSET_UNARCHIVED
   ASSET_DELETED

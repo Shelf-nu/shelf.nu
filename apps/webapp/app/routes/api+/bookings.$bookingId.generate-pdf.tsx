@@ -1,11 +1,18 @@
 /**
- * Booking Checklist API
+ * Booking PDF API
  *
- * Serves `/api/bookings/:bookingId/generate-pdf`: everything the printable
- * booking checklist renders, loaded when its preview opens. Dates are
- * formatted in the acting user's format, lapsed asset photos are signed for
- * print (read-only, no row cap) so every photo prints, and one
- * `pdf_preview_opened` event is sent per preview.
+ * Serves `/api/bookings/:bookingId/generate-pdf`: everything a booking's PDF
+ * renders, loaded when its preview opens and again when the person picks
+ * another template. Dates are formatted in the acting user's format, lapsed
+ * asset photos are signed for print (read-only, no row cap) so every photo
+ * prints, and one `pdf_preview_opened` event is sent per preview.
+ *
+ * A workspace that can use bookings picks a template with `?template=<id>`:
+ * it must be one of the workspace's templates, or the answer is a 404, and the
+ * pick is remembered for this person and workspace. Without it the template is
+ * the person's last pick, then the workspace default. Every other workspace
+ * prints the built-in Checklist and `?template=` is ignored. Refusals are returned with their status, for the
+ * dialog to show.
  *
  * @see {@link file://./../../modules/booking/pdf-helpers.ts}
  * @see {@link file://./../../modules/asset/print-images.server.ts}
@@ -19,6 +26,13 @@ import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
+import { canUsePdfTemplates } from "~/modules/pdf-template/access";
+import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-template/config";
+import {
+  readLastPdfTemplateId,
+  rememberPdfTemplate,
+} from "~/modules/pdf-template/cookie.server";
+import { resolvePdfTemplateForPrint } from "~/modules/pdf-template/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { formatDate } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -53,20 +67,58 @@ export const loader = async ({
   );
 
   try {
-    const { organizationId, access } = await requirePermission({
-      userId: userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, access } =
+      await requirePermission({
+        userId: userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     // Extract sorting params from URL using standard utilities
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
-    // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
-    const orderBy =
-      paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
-    const orderDirection = paramsValues.orderDirection;
+
+    // A workspace without templates (any but a team workspace) prints the
+    // Checklist: no template is read or seeded, and a `?template=` never
+    // reaches the database.
+    const canUseTemplates = canUsePdfTemplates(currentOrganization);
+    const requestedTemplateId = canUseTemplates
+      ? searchParams.get("template")
+      : null;
+
+    // The acting user's format preferences, so booking PDF dates, custom
+    // field dates included, render per their settings rather than the
+    // request locale.
+    const [resolved, prefs] = await Promise.all([
+      canUseTemplates
+        ? resolvePdfTemplateForPrint({
+            organizationId,
+            requestedId: requestedTemplateId,
+            rememberedId: await readLastPdfTemplateId({
+              request,
+              organizationId,
+              userId,
+            }),
+          })
+        : null,
+      resolveUserFormatPrefsById(userId, getClientHint(request)),
+    ]);
+    const config = resolved?.template.config ?? BOOKING_CHECKLIST_CONFIG;
+
+    // A template sorted by name prints A to Z; one sorted by status prints in
+    // the booking page's order, which defaults to status (getParamsValues
+    // defaults to "createdAt", which isn't valid here).
+    const { orderBy, orderDirection } =
+      config.sortBy === "name"
+        ? { orderBy: "title", orderDirection: "asc" as const }
+        : {
+            orderBy:
+              paramsValues.orderBy === "createdAt"
+                ? "status"
+                : paramsValues.orderBy,
+            orderDirection: paramsValues.orderDirection,
+          };
 
     const pdfMeta: PdfDbResult = await fetchAllPdfRelatedData(
       bookingId,
@@ -74,20 +126,20 @@ export const loader = async ({
       userId,
       access,
       request,
-      { orderBy, orderDirection, search: paramsValues.search }
+      { orderBy, orderDirection, search: paramsValues.search },
+      { customFieldIds: config.customFieldIds, formatPrefs: prefs }
     );
 
     // Asset photos are signed URLs that stop loading once they lapse, and a
     // photo that does not load prints as the placeholder. Signed here, in the
-    // loader of the sheet that prints photos, rather than in the shared data
+    // loader of the template that prints photos, rather than in the shared data
     // helper: the check-in receipt reuses that helper and prints none.
-    // The acting user's format preferences are resolved alongside, so booking
-    // PDF dates render per their settings rather than the request locale.
-    const [signedAssets, prefs] = await Promise.all([
-      signAssetPhotosForPrint(pdfMeta.assets, { organizationId }),
-      resolveUserFormatPrefsById(userId, getClientHint(request)),
-    ]);
-    pdfMeta.assets = signedAssets;
+    // A template without the Image column prints no photo, so it signs none.
+    if (config.columns.image) {
+      pdfMeta.assets = await signAssetPhotosForPrint(pdfMeta.assets, {
+        organizationId,
+      });
+    }
 
     // Preserve the existing `.format(date)` call shape used below.
     const dateTimeFormat = {
@@ -108,21 +160,60 @@ export const loader = async ({
       pdfMeta.originalTo = dateTimeFormat.format(new Date(originalTo));
     }
 
-    captureServerEvent({
-      distinctId: userId,
-      event: "pdf_preview_opened",
-      properties: {
-        sheet: "booking_checklist",
-        organizationId,
-        rowCount: pdfMeta.assets.length,
-        // Rows are booking slices: one asset can print in several of them.
-        assetCount: new Set(pdfMeta.assets.map((asset) => asset.id)).size,
-      },
-    });
+    // Counted once per opening of the preview: picking another template
+    // reloads this route with `?template=`, which is not a new preview.
+    if (!requestedTemplateId) {
+      captureServerEvent({
+        distinctId: userId,
+        event: "pdf_preview_opened",
+        properties: {
+          sheet: "booking_checklist",
+          // The saved template shown when the preview opens; `null` for a
+          // workspace without PDF templates, which shows the built-in Checklist.
+          documentId: resolved?.template.id ?? null,
+          documentName: resolved?.template.name ?? null,
+          organizationId,
+          rowCount: pdfMeta.assets.length,
+          // Rows are booking slices: one asset can print in several of them.
+          assetCount: new Set(pdfMeta.assets.map((asset) => asset.id)).size,
+        },
+      });
+    }
 
-    return data(payload({ pdfMeta }));
+    return data(
+      payload({
+        pdfMeta,
+        // `null` for a workspace without PDF templates: it prints the
+        // built-in Checklist and the dialog offers no choice.
+        template: resolved
+          ? {
+              id: resolved.template.id,
+              name: resolved.template.name,
+              config: resolved.template.config,
+            }
+          : null,
+        templates: (resolved?.templates ?? []).map(
+          ({ id, name, isDefault }) => ({ id, name, isDefault })
+        ),
+      }),
+      resolved && requestedTemplateId
+        ? {
+            headers: {
+              "Set-Cookie": await rememberPdfTemplate({
+                organizationId,
+                userId,
+                templateId: resolved.template.id,
+              }),
+            },
+          }
+        : undefined
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw data(error(reason), { status: reason.status });
+    // Returned, not thrown: only the PDF dialog's fetcher loads this route,
+    // and a thrown response would replace the whole booking page with the
+    // route error screen. The dialog shows the message instead.
+    // No toast: the dialog shows the message where it was asked for.
+    return data(error(reason, false), { status: reason.status });
   }
 };

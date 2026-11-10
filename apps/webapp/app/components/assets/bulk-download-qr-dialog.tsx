@@ -262,6 +262,7 @@ export default function BulkDownloadQrDialog({
         open={isDialogOpen}
         onClose={handleClose}
         className={className}
+        ariaLabel="Download QR codes"
         title={
           <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
             <DownloadIcon />

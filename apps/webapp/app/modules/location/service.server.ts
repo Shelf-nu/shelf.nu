@@ -54,6 +54,7 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
@@ -66,7 +67,6 @@ import {
 } from "~/utils/storage.server";
 import {
   formatLocationLink,
-  buildAssetListMarkup,
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
@@ -75,17 +75,21 @@ import {
   getLocationsWhereInput,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { getAssetListWhereForSelectAll } from "../asset/list-where.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
   applyArchivedFilter,
-  getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import type { ArchivedFilter } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
-import { createSystemLocationNote as createSystemLocationActivityNote } from "../location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  createSystemLocationNote as createSystemLocationActivityNote,
+} from "../location-note/service.server";
+import type { AssetLocationMove } from "../location-note/service.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -185,7 +189,18 @@ export async function getLocation(
     orderDirection?: "asc" | "desc";
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
+    /**
+     * Extra relations to load on the location. Passing it asks for the
+     * location alone: neither the asset page nor the asset count is queried,
+     * and `assets` comes back empty with `totalAssetsWithinLocation` 0.
+     */
     include?: Prisma.LocationInclude;
+    /**
+     * Whether to load a page of the location's assets. `false` keeps the
+     * asset count without the page, for pages that show only the total.
+     * Defaults to `true`; ignored when `include` is passed.
+     */
+    withAssetsPage?: boolean;
     teamMemberIds?: string[] | null;
     /**
      * Which of the location's assets to list by archive state. Pages that
@@ -206,6 +221,7 @@ export async function getLocation(
     orderBy = "createdAt",
     orderDirection,
     include,
+    withAssetsPage = true,
     teamMemberIds,
     archivedFilter = "all",
   } = params;
@@ -308,13 +324,10 @@ export async function getLocation(
     } satisfies Prisma.LocationInclude["parent"];
 
     /**
-     * Assets at a location are queried via the `AssetLocation` pivot —
-     * there is no `Location.assets` relation. We run a separate
-     * `db.asset.findMany` filtered by
-     * `assetLocations: { some: { locationId: id } }` and synthesize the
-     * `assets` array onto the wrapper return below. Consumers that read
-     * `location.assets` from the old shape must read `assets` from the
-     * wrapper return value (e.g.
+     * Placement lives on the `AssetLocation` pivot; `Location` has no
+     * `assets` relation. The location's assets come from a separate
+     * `db.asset.findMany` scoped by `assetLocations` and are returned as
+     * `assets` beside `location` (see
      * `app/routes/_layout+/locations.$locationId.assets.tsx`).
      */
     const locationInclude: Prisma.LocationInclude = include
@@ -327,11 +340,6 @@ export async function getLocation(
       assetLocations: { some: { locationId: id } },
       ...assetsWhere,
     };
-
-    const assetsCountWhere: Prisma.AssetWhereInput = applyArchivedFilter(
-      { assetLocations: { some: { locationId: id } } },
-      archivedFilter
-    );
 
     const [location, totalAssetsWithinLocation, assets] = await Promise.all([
       /** Get the items */
@@ -348,19 +356,20 @@ export async function getLocation(
       }),
 
       /** Count them */
-      db.asset.count({
-        // Follows the archived view so the count matches the list it heads.
-        where: assetsCountWhere,
-      }),
+      include
+        ? Promise.resolve(0)
+        : db.asset.count({
+            // Same where as the list (archived view, search, custodians), so
+            // the count and the pager built on it describe exactly the listed
+            // rows.
+            where: assetsWhereForLocation,
+          }),
 
       /**
-       * Paginated assets placed at this location. Returned alongside
-       * the location so consumers can keep using the existing
-       * `{ location, assets, totalAssetsWithinLocation }` contract
-       * without depending on a `Location.assets` relation (which no
-       * longer exists — placement lives on the `AssetLocation` pivot).
+       * One page of the assets placed at this location, returned as
+       * `assets` in `{ location, assets, totalAssetsWithinLocation }`.
        */
-      include
+      include || !withAssetsPage
         ? Promise.resolve([] as Awaited<ReturnType<typeof db.asset.findMany>>)
         : db.asset.findMany({
             skip,
@@ -742,7 +751,9 @@ export async function getLocations(params: {
         skip,
         take,
         where,
-        orderBy: orderByClause,
+        // `id` breaks ties between rows with the same sort key, so a page
+        // boundary never moves between requests.
+        orderBy: [orderByClause, { id: "asc" }],
         include: LOCATION_LIST_INCLUDE,
       }),
 
@@ -1273,16 +1284,17 @@ async function createLocationEditNotes({
     parentId?: string | null;
   };
 }) {
-  // Strips Markdoc delimiters BEFORE escaping markdown emphasis: location name
-  // and address are free-form user input rendered through Markdoc, so escaping
-  // `*_~` alone still lets `{% … %}` through as a live tag.
-  const escape = (v: string) =>
-    `**${stripMarkdocDelimiters(v).replace(/([*_`~])/g, "\\$1")}**`;
+  // Location name and address are free-form user input, so each goes inside
+  // a `name` tag: never bare text, where a URL-shaped value would become a link.
   const changes: string[] = [];
 
   // Name change
   if (next.name !== undefined && next.name !== previous.name) {
-    changes.push(`- **Name:** ${escape(previous.name)} → ${escape(next.name)}`);
+    changes.push(
+      `- **Name:** ${wrapNameForNote(previous.name)} → ${wrapNameForNote(
+        next.name
+      )}`
+    );
   }
 
   // Description change
@@ -1300,8 +1312,8 @@ async function createLocationEditNotes({
     const prev = previous.address?.trim() || null;
     const curr = next.address?.trim() || null;
     if (prev !== curr) {
-      const prevDisplay = prev ? escape(prev) : "*none*";
-      const currDisplay = curr ? escape(curr) : "*none*";
+      const prevDisplay = prev ? wrapNameForNote(prev) : "*none*";
+      const currDisplay = curr ? wrapNameForNote(curr) : "*none*";
       changes.push(`- **Address:** ${prevDisplay} → ${currDisplay}`);
     }
   }
@@ -1311,7 +1323,7 @@ async function createLocationEditNotes({
     const prevParent = previous.parent
       ? wrapLinkForNote(
           `/locations/${previous.parent.id}`,
-          previous.parent.name
+          stripMarkdocDelimiters(previous.parent.name)
         )
       : "*none*";
 
@@ -1322,7 +1334,10 @@ async function createLocationEditNotes({
         select: { id: true, name: true },
       });
       newParentDisplay = newParent
-        ? wrapLinkForNote(`/locations/${newParent.id}`, newParent.name)
+        ? wrapLinkForNote(
+            `/locations/${newParent.id}`,
+            stripMarkdocDelimiters(newParent.name)
+          )
         : "*unknown*";
     }
 
@@ -1936,8 +1951,8 @@ async function createBulkLocationChangeNotes({
         });
       });
 
-    const addedAssets: Array<{ id: string; title: string }> = [];
-    const removedAssetsSummary: Array<{ id: string; title: string }> = [];
+    /** What the location activity log records, one move per changed asset. */
+    const moves: AssetLocationMove[] = [];
 
     // Iterate over the modified assets
     for (const asset of modifiedAssets) {
@@ -2003,92 +2018,19 @@ async function createBulkLocationChangeNotes({
           quantity: affectedQuantity,
         });
 
-        if (isNew && newLocation) {
-          addedAssets.push({ id: asset.id, title: asset.title });
-        }
-
-        if (isRemoving && currentLocation) {
-          removedAssetsSummary.push({ id: asset.id, title: asset.title });
-        }
-      }
-    }
-
-    // Create summary notes on the location's activity log.
-    // why: out of this rule — multi-asset popover, per-asset qty deferred.
-    // The `buildAssetListMarkup` summary renders MANY assets in one
-    // interactive chip; inlining per-asset unit counts here is the same
-    // limitation as the assets_list popover. Per-asset counts land on the
-    // individual asset notes above.
-    const userLink = wrapUserLinkForNote({ ...user, id: userId });
-
-    if (addedAssets.length > 0) {
-      // Group added assets by their previous location for "Moved from" context
-      const byPrevLoc = new Map<string, string>();
-      for (const asset of modifiedAssets) {
-        const prevLoc = getPrimaryLocation(asset);
-        if (assetIds.includes(asset.id) && prevLoc) {
-          byPrevLoc.set(prevLoc.id, prevLoc.name);
-        }
-      }
-      const prevLocLinks = [...byPrevLoc.entries()].map(([id, name]) =>
-        wrapLinkForNote(`/locations/${id}`, name)
-      );
-      const movedFromSuffix =
-        prevLocLinks.length > 0
-          ? ` Moved from ${prevLocLinks.join(", ")}.`
-          : "";
-
-      const content = `${userLink} added ${buildAssetListMarkup(
-        addedAssets,
-        "added"
-      )} to ${formatLocationLink(location)}.${movedFromSuffix}`;
-      await createSystemLocationActivityNote({
-        locationId: location.id,
-        content,
-        userId,
-      });
-
-      // Also create removal notes on previous locations
-      const byPrevLocation = new Map<
-        string,
-        { name: string; assets: typeof addedAssets }
-      >();
-      for (const asset of modifiedAssets) {
-        const prevLoc = getPrimaryLocation(asset);
-        if (!assetIds.includes(asset.id) || !prevLoc) continue;
-        const existing = byPrevLocation.get(prevLoc.id);
-        if (existing) {
-          existing.assets.push({ id: asset.id, title: asset.title });
-        } else {
-          byPrevLocation.set(prevLoc.id, {
-            name: prevLoc.name,
-            assets: [{ id: asset.id, title: asset.title }],
-          });
-        }
-      }
-      for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
-        const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
-        const assetMarkup = buildAssetListMarkup(locAssets, "removed");
-        const movedTo = ` Moved to ${formatLocationLink(location)}.`;
-        await createSystemLocationActivityNote({
-          locationId: locId,
-          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
-          userId,
+        moves.push({
+          asset,
+          from: currentLocation,
+          to: newLocation,
+          quantity: affectedQuantity,
         });
       }
     }
 
-    if (removedAssetsSummary.length > 0) {
-      const content = `${userLink} removed ${buildAssetListMarkup(
-        removedAssetsSummary,
-        "removed"
-      )} from ${formatLocationLink(location)}.`;
-      await createSystemLocationActivityNote({
-        locationId: location.id,
-        content,
-        userId,
-      });
-    }
+    await createAssetLocationMoveNotes({
+      moves,
+      actor: { ...user, id: userId },
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -2188,12 +2130,22 @@ export async function updateLocationAssets({
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
+      /**
+       * Re-runs the picker list's own query, with the options its loader
+       * (`locations.$locationId.assets.manage-assets.tsx`) passes to
+       * `getPaginatedAndFilterableAssets`, so select-all adds exactly the
+       * assets the picker showed. That list refuses every custodian filter
+       * (`canSeeAllCustody: false` with no user), hence `[]`; it is not
+       * scoped to a role and shows active assets, ignoring low stock.
+       */
+      const assetsWhere = await getAssetListWhereForSelectAll({
         organizationId,
         currentSearchParams: searchParams.toString(),
-        // Location writes are ADMIN/OWNER-only, so the custodian filter
-        // here can never come from a restricted viewer.
-        allowedTeamMemberIds: "all",
+        allowedTeamMemberIds: [],
+        bookableScope: null,
+        locationIdsOverride: undefined,
+        honorArchivedView: false,
+        honorLowStockFilter: false,
       });
 
       const allAssets = await db.asset.findMany({

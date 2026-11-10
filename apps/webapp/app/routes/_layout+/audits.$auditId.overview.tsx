@@ -9,18 +9,23 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useLoaderData } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  useRouteLoaderData,
+} from "react-router";
 import { z } from "zod";
 
 import { AuditAssetListItem } from "~/components/audit/audit-asset-list-item";
+import { AuditFindings } from "~/components/audit/audit-findings";
+import { findingsListKey } from "~/components/audit/audit-findings-helpers";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import BulkActionsDropdown from "~/components/audit/bulk-actions-dropdown";
 import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-assets-from-audit-dialog";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
-import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
@@ -33,7 +38,11 @@ import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
-import { getAuditImages } from "~/modules/audit/image.service.server";
+import {
+  getAuditFindingsPage,
+  getAuditWideFindings,
+} from "~/modules/audit/findings.server";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
@@ -43,6 +52,7 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
+import type { loader as auditLayoutLoader } from "~/routes/_layout+/audits.$auditId";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -98,7 +108,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { organizationId, userOrganizations, access } = permissionResult;
 
-    const [{ session }, assetsData, allImages] = await Promise.all([
+    const [{ session }, assetsData] = await Promise.all([
       getAuditSessionDetails({
         // Reads `session` only, so no photo is signed here.
         refreshExpectedAssetImages: false,
@@ -112,11 +122,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         auditSessionId: auditId,
       }),
-      getAuditImages({
-        auditSessionId: auditId,
-        organizationId,
-        // undefined = get ALL images
-      }),
     ]);
 
     // Gate here, not at the end: this is the earliest point `session` exists,
@@ -128,46 +133,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       auditId,
     });
 
-    // Split images into general and asset-specific
-    const generalImages = allImages.filter((img) => img.auditAssetId === null);
-    const assetImages = allImages.filter((img) => img.auditAssetId !== null);
-
-    /**
-     * The condition notes people wrote during the audit.
-     *
-     * why this page had none: every photo taken during an audit was already
-     * on this page, grouped and labelled with its asset, while the words
-     * written beside those photos appeared nowhere. Reading them meant
-     * opening rows one at a time, or scrolling the Activity feed where they
-     * sit among system rows. The written observation is the half that says
-     * "already scratched when it went out", so it is the half worth surfacing.
-     *
-     * COMMENT only: UPDATE rows are the system trail, stored as Markdoc
-     * source, and belong to the Activity tab.
-     */
-    const conditionNotes = await db.auditNote.findMany({
-      where: { auditSessionId: auditId, type: "COMMENT" },
-      select: {
-        id: true,
-        content: true,
-        createdAt: true,
-        user: {
-          select: {
-            // `displayName` first: `resolveUserDisplayName` prefers it, and an
-            // SSO account often carries only that. Selecting just first/last
-            // renders those people as "Unknown" here while the PDF, which uses
-            // the same resolver over a fuller select, names them.
-            displayName: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        auditAsset: {
-          select: { asset: { select: { id: true, title: true } } },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    // The first page of Findings; the list requests the rest from
+    // `/api/audits/:auditId/findings` as it is scrolled.
+    const [findingsPage, auditWideFindings] = await Promise.all([
+      getAuditFindingsPage({ auditSessionId: auditId, organizationId }),
+      getAuditWideFindings({ auditSessionId: auditId, organizationId }),
+    ]);
 
     const header = { title: `${session.name} · Overview` };
 
@@ -184,9 +155,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         canRemoveAssets,
         userId,
         header,
-        generalImages,
-        assetImages,
-        conditionNotes,
+        findingsPage,
+        auditWideFindings,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -345,60 +315,18 @@ export default function AuditOverview() {
   const {
     session,
     totalItems,
-    generalImages,
-    assetImages,
-    conditionNotes,
+    findingsPage,
+    auditWideFindings,
     canRemoveAssets,
   } = useLoaderData<typeof loader>();
+  // The audit layout's loader already reads the unit totals for the header's
+  // Complete Audit dialog; reading them here again would repeat the query on
+  // every revalidation.
+  const unitTotals =
+    useRouteLoaderData<typeof auditLayoutLoader>(
+      "routes/_layout+/audits.$auditId"
+    )?.unitTotals ?? null;
 
-  /**
-   * One entry per asset somebody recorded something about, holding BOTH the
-   * words and the photographs.
-   *
-   * why merged: a note about the Laerdal and a photo of the Laerdal are one
-   * observation. Splitting them into a notes list and a photo wall makes the
-   * reader join them up by asset name, which is work this page should do.
-   */
-  const findings = (() => {
-    const groups = new Map<
-      string,
-      {
-        assetName: string;
-        images: typeof assetImages;
-        notes: typeof conditionNotes;
-      }
-    >();
-
-    const groupFor = (assetId: string, assetName: string) => {
-      if (!groups.has(assetId)) {
-        groups.set(assetId, { assetName, images: [], notes: [] });
-      }
-      return groups.get(assetId)!;
-    };
-
-    for (const img of assetImages) {
-      const asset = img.auditAsset?.asset;
-      if (!asset?.id) continue;
-      groupFor(asset.id, asset.title || "Unknown").images.push(img);
-    }
-    for (const note of conditionNotes) {
-      const asset = note.auditAsset?.asset;
-      if (!asset?.id) continue;
-      groupFor(asset.id, asset.title || "Unknown").notes.push(note);
-    }
-
-    return [...groups.entries()].sort((a, b) =>
-      a[1].assetName.localeCompare(b[1].assetName)
-    );
-  })();
-
-  /** Notes about the audit as a whole — the completion note lives here. */
-  const generalNotes = conditionNotes.filter(
-    (note) => !note.auditAsset?.asset?.id
-  );
-
-  const hasFindings =
-    findings.length > 0 || generalNotes.length > 0 || generalImages.length > 0;
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
     "auditStatus"
@@ -434,298 +362,177 @@ export default function AuditOverview() {
 
   return (
     <div className="mt-8 flex flex-col gap-6">
-      {/* Three Column Layout with Flex: Stats, Audit Info, Images */}
-      <div className="flex flex-col gap-6 lg:flex-row">
-        {/* Left Column: Stats Cards */}
-        <div className="flex-1">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Statistics</h2>
-            {currentFilter && currentFilter !== "ALL" && <ClearFilterButton />}
+      {/*
+        Two columns on large screens. The left column (Statistics above Audit
+        Information) sets the row height; Findings fills the right column to
+        exactly that height and scrolls inside its own card, so the asset list
+        below starts at the same place however much was recorded.
+      */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        {/* Left column: Statistics, then Audit Information */}
+        <div className="flex min-w-0 flex-col gap-6">
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Statistics</h2>
+              {currentFilter && currentFilter !== "ALL" && (
+                <ClearFilterButton />
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <StatCard
+                label="Expected"
+                value={expectedCount}
+                filterType="EXPECTED"
+                isActive={currentFilter === "EXPECTED"}
+              />
+              <StatCard
+                label={AUDIT_ASSET_STATUS_LABELS.FOUND}
+                value={foundCount}
+                filterType="FOUND"
+                isActive={currentFilter === "FOUND"}
+              />
+              <StatCard
+                label={unscannedLabel}
+                value={missingCount}
+                filterType="MISSING"
+                isActive={currentFilter === "MISSING"}
+              />
+              <StatCard
+                label={AUDIT_ASSET_STATUS_LABELS.UNEXPECTED}
+                value={unexpectedCount}
+                filterType="UNEXPECTED"
+                isActive={currentFilter === "UNEXPECTED"}
+              />
+            </div>
+            {unitTotals ? (
+              <p className="mt-3 text-sm text-gray-600">
+                {describeAuditUnits(unitTotals)}
+              </p>
+            ) : null}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <StatCard
-              label="Expected"
-              value={expectedCount}
-              filterType="EXPECTED"
-              isActive={currentFilter === "EXPECTED"}
-            />
-            <StatCard
-              label={AUDIT_ASSET_STATUS_LABELS.FOUND}
-              value={foundCount}
-              filterType="FOUND"
-              isActive={currentFilter === "FOUND"}
-            />
-            <StatCard
-              label={unscannedLabel}
-              value={missingCount}
-              filterType="MISSING"
-              isActive={currentFilter === "MISSING"}
-            />
-            <StatCard
-              label={AUDIT_ASSET_STATUS_LABELS.UNEXPECTED}
-              value={unexpectedCount}
-              filterType="UNEXPECTED"
-              isActive={currentFilter === "UNEXPECTED"}
-            />
-          </div>
-        </div>
 
-        {/* Right Column: Audit Information */}
-        <div className="flex-1">
-          <h2 className="mb-4 text-lg font-semibold">Audit Information</h2>
-          <Card className="mt-0 px-[-4] py-[-5] md:border">
-            <ul className="item-information">
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Status
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <AuditStatusBadgeWithOverdue
-                    status={session.status}
-                    dueDate={session.dueDate}
-                  />
-                </div>
-              </li>
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Created
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <DateS date={session.createdAt} includeTime />
-                </div>
-              </li>
-              {session.dueDate && (
+          <div>
+            <h2 className="mb-4 text-lg font-semibold">Audit Information</h2>
+            <Card className="my-0 px-[-4] py-[-5] md:border">
+              <ul className="item-information">
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                    Due date
+                    Status
                   </span>
                   <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <DateS date={session.dueDate} includeTime />
+                    <AuditStatusBadgeWithOverdue
+                      status={session.status}
+                      dueDate={session.dueDate}
+                    />
                   </div>
                 </li>
-              )}
-              {session.startedAt && (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                    Started
+                    Created
                   </span>
                   <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <DateS date={session.startedAt} includeTime />
+                    <DateS date={session.createdAt} includeTime />
                   </div>
                 </li>
-              )}
-              {session.completedAt && (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                    Completed
-                  </span>
-                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <DateS date={session.completedAt} includeTime />
-                  </div>
-                </li>
-              )}
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Created by
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <UserBadge
-                    name={
-                      resolveUserDisplayName(session.createdBy) ||
-                      session.createdBy?.email ||
-                      "Unknown"
-                    }
-                    img={
-                      session.createdBy?.profilePicture ||
-                      "/static/images/default_pfp.jpg"
-                    }
-                  />
-                </div>
-              </li>
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Assigned to
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <div className="flex flex-col gap-2">
-                    {assignedUsers.length > 0 ? (
-                      assignedUsers.map((assignment) => (
-                        <UserBadge
-                          key={assignment.id}
-                          name={
-                            resolveUserDisplayName(assignment.user) ||
-                            assignment.user?.email ||
-                            "Unknown"
-                          }
-                          img={
-                            assignment.user?.profilePicture ||
-                            "/static/images/default_pfp.jpg"
-                          }
-                        />
-                      ))
-                    ) : (
-                      <span className="flex items-center gap-1">
-                        Not assigned
-                        <InfoTooltip
-                          iconClassName="size-4"
-                          content={
-                            <p className="text-sm text-gray-600">
-                              {AUDIT_UNASSIGNED_LABELS.DETAIL}
-                            </p>
-                          }
-                        />
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </li>
-            </ul>
-          </Card>
-        </div>
-
-        {/*
-          Right column: FINDINGS — what people recorded, grouped by the asset
-          they recorded it about, words and photographs together.
-
-          why this replaced "Audit Images": every photo taken during an audit
-          was already here, grouped and labelled. The notes written beside
-          those photos were on no page at all — reachable only by opening rows
-          one at a time, or by scrolling the Activity feed where they sit among
-          system rows. The written observation is the half that answers "was it
-          already damaged when it went out", so leaving it off the audit's own
-          page was the real gap. A note and a photo of the same asset are one
-          observation and now print as one.
-        */}
-        <div className="flex-1">
-          <h2 className="mb-4 text-lg font-semibold">
-            Findings{" "}
-            <InfoTooltip
-              iconClassName="size-4"
-              content={
-                <p className="mb-3 text-sm text-gray-600">
-                  The condition notes and photos people recorded while auditing,
-                  grouped by the asset they were recorded against. Notes about
-                  the audit itself, such as a completion note, appear first.
-                  System activity lives on the Activity tab.
-                </p>
-              }
-            />
-          </h2>
-
-          {/* About the audit as a whole */}
-          {(generalNotes.length > 0 || generalImages.length > 0) && (
-            <div className="mb-4">
-              <h3 className="mb-2 text-sm font-medium text-gray-700">
-                About this audit
-              </h3>
-              <Card className="mt-0 md:border">
-                {generalNotes.map((note) => (
-                  <div key={note.id} className="mb-3 last:mb-0">
-                    {/* Audit notes are Markdoc source, not plain text: the
-                        completion note carries `**bold**` stats, a receipt
-                        link, and an `{% audit_images %}` tag. Rendering the
-                        string directly prints that source to the reader.
-                        `allowExternalLinks` stays false here — this bucket is
-                        where the SYSTEM-composed completion note lands, and
-                        only notes a person authored through the editor may
-                        link off-origin. */}
-                    <div className="text-sm text-gray-900">
-                      <MarkdownViewer content={note.content} />
+                {session.dueDate && (
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                      Due date
+                    </span>
+                    <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                      <DateS date={session.dueDate} includeTime />
                     </div>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {resolveUserDisplayName(note.user) || "Unknown"} &middot;{" "}
-                      <DateS date={note.createdAt} includeTime />
-                    </p>
-                  </div>
-                ))}
-
-                {generalImages.length > 0 && (
-                  <div className="flex flex-wrap gap-3">
-                    {generalImages.map((image) => (
-                      <ImageWithPreview
-                        key={image.id}
-                        imageUrl={image.imageUrl}
-                        thumbnailUrl={image.thumbnailUrl}
-                        alt={image.description || "General audit image"}
-                        withPreview
-                        className="size-24 rounded border"
-                        images={generalImages.map((img) => ({
-                          id: img.id,
-                          imageUrl: img.imageUrl,
-                          thumbnailUrl: img.thumbnailUrl,
-                          alt: img.description || "General audit image",
-                        }))}
-                        currentImageId={image.id}
-                      />
-                    ))}
-                  </div>
+                  </li>
                 )}
-              </Card>
-            </div>
-          )}
-
-          {/* One block per asset somebody recorded something about */}
-          {findings.length > 0 && (
-            <div className="mb-4 flex flex-col gap-3">
-              {findings.map(([assetId, { assetName, images, notes }]) => (
-                <Card key={assetId} className="mt-0 md:border">
-                  <h3 className="mb-2 text-sm font-medium text-gray-900">
-                    {assetName}
-                  </h3>
-
-                  {notes.map((note) => (
-                    <div key={note.id} className="mb-3">
-                      {/* Condition notes are authored through the editor, so
-                          they may link out — same treatment the details panel
-                          gives these exact rows. */}
-                      <div className="text-sm text-gray-900">
-                        <MarkdownViewer
-                          content={note.content}
-                          allowExternalLinks
-                        />
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {resolveUserDisplayName(note.user) || "Unknown"}{" "}
-                        &middot; <DateS date={note.createdAt} includeTime />
-                      </p>
+                {session.startedAt && (
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                      Started
+                    </span>
+                    <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                      <DateS date={session.startedAt} includeTime />
                     </div>
-                  ))}
-
-                  {images.length > 0 && (
-                    <div className="flex flex-wrap gap-3">
-                      {images.map((image) => (
-                        <ImageWithPreview
-                          key={image.id}
-                          imageUrl={image.imageUrl}
-                          thumbnailUrl={image.thumbnailUrl}
-                          alt={`Photo of ${assetName}`}
-                          withPreview
-                          className="size-24 rounded border"
-                          images={images.map((img) => ({
-                            id: img.id,
-                            imageUrl: img.imageUrl,
-                            thumbnailUrl: img.thumbnailUrl,
-                            alt: `Photo of ${assetName}`,
-                          }))}
-                          currentImageId={image.id}
-                        />
-                      ))}
+                  </li>
+                )}
+                {session.completedAt && (
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                      Completed
+                    </span>
+                    <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                      <DateS date={session.completedAt} includeTime />
                     </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* Nothing recorded */}
-          {!hasFindings && (
-            <Card className="mt-0 md:border">
-              <div className="px-4 py-6 text-center text-sm text-gray-500">
-                Nothing was recorded during this audit
-              </div>
+                  </li>
+                )}
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Created by
+                  </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    <UserBadge
+                      name={
+                        resolveUserDisplayName(session.createdBy) ||
+                        session.createdBy?.email ||
+                        "Unknown"
+                      }
+                      img={
+                        session.createdBy?.profilePicture ||
+                        "/static/images/default_pfp.jpg"
+                      }
+                    />
+                  </div>
+                </li>
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Assigned to
+                  </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    <div className="flex flex-col gap-2">
+                      {assignedUsers.length > 0 ? (
+                        assignedUsers.map((assignment) => (
+                          <UserBadge
+                            key={assignment.id}
+                            name={
+                              resolveUserDisplayName(assignment.user) ||
+                              assignment.user?.email ||
+                              "Unknown"
+                            }
+                            img={
+                              assignment.user?.profilePicture ||
+                              "/static/images/default_pfp.jpg"
+                            }
+                          />
+                        ))
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          Not assigned
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p className="text-sm text-gray-600">
+                                {AUDIT_UNASSIGNED_LABELS.DETAIL}
+                              </p>
+                            }
+                          />
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              </ul>
             </Card>
-          )}
+          </div>
         </div>
+
+        {/* Right column: what people recorded while auditing. */}
+        <AuditFindings
+          // A first page with different contents (a note or photo added,
+          // edited or removed) starts the list over with fresh data.
+          key={findingsListKey(findingsPage)}
+          auditId={session.id}
+          firstPage={findingsPage}
+          auditWide={auditWideFindings}
+        />
       </div>
 
       {/* Assets List */}

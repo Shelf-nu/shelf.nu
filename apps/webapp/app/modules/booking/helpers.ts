@@ -237,6 +237,35 @@ export function shouldPromptEarlyCheckout(
 }
 
 /**
+ * Whether a reservation's whole window has passed without a check-out: the
+ * booking is still `RESERVED` and its end date is behind us.
+ *
+ * A derived state, not a stored status. Nothing in the lifecycle moves a
+ * RESERVED booking on its own: the overdue job only touches ONGOING bookings,
+ * and the dates freeze at reserve time. So a reservation nobody picked up stays
+ * RESERVED forever. Every surface that treats "reserved" as "spoken for" (the
+ * asset pill, the quantity card, the bookings list chip) reads this first, so
+ * a dead reservation does not count against stock.
+ *
+ * The server-side twin is `isBookingExpired` in `utils.server.ts`; both are a
+ * strict `to < now`. The start date plays no part: a reservation past its start
+ * but before its end is a late pickup, still a live claim.
+ *
+ * @param status - The booking's stored status
+ * @param to - Its end date (a `Date`, an ISO string off a loader, or null)
+ * @returns `true` only for a RESERVED booking whose end has passed
+ */
+export function isReservationExpired(
+  status: BookingStatus | string | null | undefined,
+  to: Date | string | null | undefined
+): boolean {
+  if (status !== BookingStatus.RESERVED || !to) return false;
+  const end = new Date(to);
+  if (Number.isNaN(end.getTime())) return false;
+  return isBefore(end, new Date());
+}
+
+/**
  * Minimal asset shape needed to decide check-out eligibility. `type` drives
  * the QT-vs-INDIVIDUAL branch in {@link isAssetCheckoutEligible}; legacy
  * callers that omit it fall through to INDIVIDUAL semantics.

@@ -302,6 +302,7 @@ export function EventCardContent({
         <BookingStatusBadge
           status={booking.status}
           custodianUserId={booking.custodian.user?.id}
+          to={booking.end}
         />
       </div>
 

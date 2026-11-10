@@ -26,6 +26,7 @@ import {
   simpleModeLoader,
 } from "~/modules/asset/data.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
@@ -242,6 +243,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             access,
             currentOrganization
           ),
+          bookableScope: resolveBookableListScope({ access, userId }),
           confirmation,
           timeZone,
         });
@@ -390,12 +392,34 @@ export default function AssetIndexPage() {
           })}
         >
           <>
-            <ImportButton canImportAssets={canImportAssets} />
-            <NewAssetDropdown canImportAssets={canImportAssets} />
+            {/* Import is its own grant: a member who may create assets one
+                at a time may still not import them. */}
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.import,
+              })}
+            >
+              <ImportButton canImportAssets={canImportAssets} />
+            </When>
+            <NewAssetDropdown
+              canImportAssets={canImportAssets}
+              canBulkCreate={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.create,
+                // Bulk create from a model answers from the matrix alone, as
+                // its action does: the workspace switches open single
+                // creation only.
+                matrixOnly: true,
+              })}
+            />
           </>
         </When>
       </Header>
       <AssetsList
+        withListContext
         customEmptyStateContent={emptyStateContent}
         titleContent={
           canViewArchivedAssets ? (

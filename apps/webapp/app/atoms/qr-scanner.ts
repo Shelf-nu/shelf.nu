@@ -238,6 +238,15 @@ export const updateScannedItemAtom = atom(
           ...currentItems,
           [qrId]: duplicateItem,
         });
+        // Signal it like a same-code duplicate, pointing at the listed row:
+        // the audit scanner reopens a counted asset's count from it.
+        if (item.type === "asset") {
+          set(lastDuplicateScanAtom, {
+            qrId: existingDuplicateKey[0],
+            assetTitle: (item.data as AssetFromQr).title || "Unknown",
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
     }
@@ -321,6 +330,11 @@ export type AuditSessionInfo = {
 export type AuditAssetStatus = "found" | "missing" | "unexpected";
 
 export type AuditScannedItem = {
+  /**
+   * The audit row's stored status (`AuditAsset.status`), for expected rows the
+   * loader sends. A finished audit stores MISSING for a row never scanned.
+   */
+  rowStatus?: string;
   id: string;
   name: string;
   type: "asset" | "kit";
@@ -333,7 +347,95 @@ export type AuditScannedItem = {
   auditImagesCount?: number;
   mainImage?: string | null;
   thumbnailImage?: string | null;
+  /** Units expected on this row; null for an individual asset. */
+  expectedQuantity?: number | null;
+  /** Units counted so far; null until counted. */
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
+
+/**
+ * The unit count of one quantity-tracked asset in the running audit, keyed by
+ * assetId in {@link auditCountsAtom}. Individual assets have no entry.
+ */
+export type AuditCount = {
+  expectedQuantity: number;
+  /** Null until the auditor counts it. */
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+  /**
+   * True from the moment the auditor enters a count until the server has
+   * saved it. Only an unsaved count outranks the loader's; once saved, the
+   * loader's value wins, so a count another auditor stored is not hidden.
+   */
+  unsaved?: boolean;
+};
+
+/**
+ * Counts of the audit's quantity-tracked assets, keyed by assetId. Seeded from
+ * the loader (expected rows and restored scans) and updated by the count
+ * dialog. The scan persistence hook sends `foundQuantity` from here, and does
+ * not send a quantity-tracked scan until it has one.
+ */
+export const auditCountsAtom = atom<Record<string, AuditCount>>({});
+
+/** Merges count entries into {@link auditCountsAtom}. */
+export const mergeAuditCountsAtom = atom(
+  null,
+  (get, set, entries: Record<string, AuditCount>) => {
+    set(auditCountsAtom, { ...get(auditCountsAtom), ...entries });
+  }
+);
+
+/**
+ * The count the dialog is asking for: a quantity-tracked asset just scanned
+ * (`mode: "first"`) or scanned again to correct its count (`"recount"`).
+ * Null while the dialog is closed.
+ */
+export type AuditCountPrompt = {
+  assetId: string;
+  /** Scanned-list key of the row, so cancelling a first count can drop it. */
+  qrId: string;
+  assetTitle: string;
+  expectedQuantity: number;
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+  /**
+   * Whether the asset is on the audit's list. Only then is `expectedQuantity`
+   * an expectation the auditor can confirm with "All here".
+   */
+  isExpected: boolean;
+  mode: "first" | "recount";
+};
+
+/** The open count prompt, or null while the dialog is closed. See {@link AuditCountPrompt}. */
+export const auditCountPromptAtom = atom<AuditCountPrompt | null>(null);
+
+/**
+ * Count entries for the quantity rows of a list of audit items; rows without
+ * an `expectedQuantity` are individual assets and are skipped.
+ */
+export function auditCountsFromItems(
+  items: ReadonlyArray<{
+    id: string;
+    expectedQuantity?: number | null;
+    foundQuantity?: number | null;
+    unitOfMeasure?: string | null;
+  }>
+): Record<string, AuditCount> {
+  const counts: Record<string, AuditCount> = {};
+  for (const item of items) {
+    if (item.expectedQuantity === null || item.expectedQuantity === undefined) {
+      continue;
+    }
+    counts[item.id] = {
+      expectedQuantity: item.expectedQuantity,
+      foundQuantity: item.foundQuantity ?? null,
+      unitOfMeasure: item.unitOfMeasure ?? null,
+    };
+  }
+  return counts;
+}
 
 export type AuditAssetMeta = {
   notesCount?: number;
@@ -399,8 +501,17 @@ export const auditResultsAtom = atom((get) => {
 // Action atom to set expected assets for audit
 export const setAuditExpectedAssetsAtom = atom(
   null,
-  (_get, set, assets: AuditScannedItem[]) => {
+  (get, set, assets: AuditScannedItem[]) => {
     set(auditExpectedAssetsAtom, assets);
+    // The loader's counts win, except a count entered here that the server
+    // has not saved yet.
+    const current = get(auditCountsAtom);
+    const fromLoader = auditCountsFromItems(assets);
+    const merged: Record<string, AuditCount> = { ...current };
+    for (const [assetId, entry] of Object.entries(fromLoader)) {
+      merged[assetId] = current[assetId]?.unsaved ? current[assetId] : entry;
+    }
+    set(auditCountsAtom, merged);
     // Seed meta counts from loader data so UI starts with server values.
     set(
       auditAssetMetaAtom,
@@ -455,6 +566,8 @@ export const startAuditSessionAtom = atom(
     // Clear any existing scanned items when starting a new audit
     set(scannedItemsAtom, {});
     set(auditAssetMetaAtom, {});
+    set(auditCountsAtom, {});
+    set(auditCountPromptAtom, null);
   }
 );
 
@@ -464,6 +577,8 @@ export const endAuditSessionAtom = atom(null, (_get, set) => {
   set(auditExpectedAssetsAtom, []);
   set(scannedItemsAtom, {});
   set(auditAssetMetaAtom, {});
+  set(auditCountsAtom, {});
+  set(auditCountPromptAtom, null);
 });
 
 /*******************************/
@@ -816,6 +931,12 @@ export type FulfilSessionInfo = {
   /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
   bookingFrom: string;
   /**
+   * ISO string, or null for a booking with no end yet. With `bookingStatus`
+   * it drives the expired-reservation prompt (`isReservationExpired`) in the
+   * submit path.
+   */
+  bookingTo: string | null;
+  /**
    * Booking status when the scanner opened. Only a RESERVED booking's first
    * check-out can move its start date, so only then is the operator asked.
    */
@@ -894,3 +1015,21 @@ export const endFulfilSessionAtom = atom(null, (_get, set) => {
  * `useBookingAssignSessionInitialization`.
  */
 export const assignAlreadyIncludedAtom = atom<AlreadyIncludedRow[]>([]);
+
+/**
+ * One model the booking reserves, whether or not its units are all filled.
+ */
+export type ReservedModel = { assetModelId: string; assetModelName: string };
+
+/**
+ * Every model the booking reserves in the current Scan to Assign session,
+ * fully filled ones included.
+ *
+ * Kept apart from `expectedModelRequestsAtom`, which lists only reservations
+ * still owed and drives matching and progress. This one answers a different
+ * question: whether an extra scan's model is reserved at all, so a scan of a
+ * model whose units are all filled reads as over the reserved count rather
+ * than as an unreserved model. Seeded and cleared by
+ * `useBookingAssignSessionInitialization`.
+ */
+export const assignReservedModelsAtom = atom<ReservedModel[]>([]);

@@ -65,6 +65,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
+import { MoreLocationsChip } from "~/components/location/more-locations-chip";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -82,11 +83,11 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
-import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
@@ -109,7 +110,6 @@ import {
   resolveLocationFilterIds,
 } from "~/modules/location/child-locations-filter.server";
 import { createNotes } from "~/modules/note/service.server";
-import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
@@ -355,11 +355,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // roster nobody renders.
             canSeeAllCustody: false,
             locationIdsOverride,
-            extraInclude: {
-              assetLocations: {
-                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-              },
-            },
           })
       ),
       getBooking({
@@ -778,7 +773,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
+      /**
+       * Re-runs the picker list's own query, with the options the loader
+       * passes to `getPaginatedAndFilterableAssets`, so select-all adds
+       * exactly the assets the picker showed: the same search, the
+       * `hideUnavailable` and booking-window rules, and every filter.
+       */
+      const assetsWhere = await getAssetListWhereForSelectAll({
         organizationId,
         currentSearchParams: searchParams.toString(),
         // Same URL, same resolver as the loader: with "Include assets from
@@ -788,16 +789,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           searchParams,
         }),
-        // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
-        // ADDS the matched assets to the booking, which then lists them — so an
-        // unscoped custodian filter would hand a restricted user a readable
-        // copy of exactly what a colleague holds.
-        allowedTeamMemberIds: await scopeCustodianFilterIds({
-          teamMemberIds: searchParams.getAll("teamMember"),
-          canSeeAllCustody: access.custody.seeAll,
-          userId: authSession?.userId,
-          organizationId,
-        }),
+        // The picker list refuses every custodian filter
+        // (`canSeeAllCustody: false` with no user), so select-all does too.
+        // A custodian filter can therefore never reveal what a colleague
+        // holds, whatever the caller's role.
+        allowedTeamMemberIds: [],
+        // The loader passes no list scope: the picker lists every asset.
+        bookableScope: null,
+        honorArchivedView: false,
+        honorLowStockFilter: false,
       });
 
       const allAssets = await db.asset.findMany({
@@ -1009,6 +1009,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         skipBookingNote: true,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       /**
@@ -1084,10 +1085,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
-          // Asset titles are user input rendered as literal text here.
+          // Asset titles are user input: each links to its asset.
           .map(
             (a) =>
-              `**${stripMarkdocDelimiters(a.title)}** (x${newQuantities[a.id]})`
+              `${wrapLinkForNote(
+                `/assets/${a.id}`,
+                stripMarkdocDelimiters(a.title)
+              )} (x${newQuantities[a.id]})`
           )
           .join(", ");
         const qtySuffix = qtyAnnotations
@@ -1187,6 +1191,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         skipBookingNote: true,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       /**
@@ -1904,7 +1909,6 @@ const RowComponent = ({
   extraProps,
 }: {
   item: AssetsFromViewItem & {
-    location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
     availableQuantity?: number;
     modelReservedElsewhere?: boolean;
   };
@@ -1916,7 +1920,16 @@ const RowComponent = ({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const currentOrganization = useCurrentOrganization();
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
-  const { category, tags, location } = item;
+  const { category, tags } = item;
+  /**
+   * `Asset` has no location column. The Location column shows the oldest
+   * placement from `assetLocations` as the badge and counts the rest in a
+   * "+N" chip, as the assets index does.
+   */
+  const location = getPrimaryLocation(item);
+  const otherLocations = (item.assetLocations ?? [])
+    .slice(1)
+    .flatMap((placement) => (placement.location ? [placement.location] : []));
   const isPartOfKit = (item.assetKits ?? []).length > 0;
   const isAddedThroughKit = isPartOfKit && checked;
   const isQtyTracked = isQuantityTracked(item);
@@ -2054,14 +2067,24 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          // Clicks on the badge, its hierarchy hover card (portalled, but React
+          // events still bubble through it) or the chip must not toggle the
+          // row's selection: the row's click handler selects the asset.
+          <span
+            role="presentation"
+            onClick={(e) => e.stopPropagation()}
+            className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap"
+          >
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+            <MoreLocationsChip primary={location} others={otherLocations} />
+          </span>
         ) : null}
       </Td>
     </>

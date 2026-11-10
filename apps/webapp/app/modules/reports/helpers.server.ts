@@ -31,8 +31,16 @@ import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
+import {
+  describeChange,
+  loadReferenceNames,
+  type ActivityDescription,
+  type DescribableEvent,
+  type ReferenceNames,
+} from "./asset-activity-description.server";
 import { mergeAssetWhere, type ReportAssetFilter } from "./asset-filter";
 import { resolveCheckInTimes } from "./check-in-time.server";
+import { WITHOUT_LOCATION_ID } from "./filter-params";
 
 import type {
   AssetActivityRow,
@@ -58,10 +66,12 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import { CURRENT_BOOKING_SLICE_FILTER } from "../asset/fields";
 import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
+import { ASSET_CODE_RESOLUTION_SELECT } from "../barcode/display";
 import { refreshExpiredKitImages } from "../kit/service.server";
 import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -123,6 +133,21 @@ const RETURNED_BOOKING_WHERE = {
     { status: "COMPLETE" },
     { status: "ARCHIVED", archivedWithoutCheckin: false },
   ],
+} satisfies Prisma.BookingWhereInput;
+
+/**
+ * Prisma predicate for "this booking really happened", shared by the usage
+ * reports (Top Booked Assets and Kits, Monthly Booking Trends, Asset
+ * Utilization).
+ *
+ * A DRAFT is a plan and a CANCELLED booking never happened. A booking archived
+ * before any check-out (`archivedWithoutCheckin`: a discarded draft, or a
+ * reservation whose end passed unused) never went out either, although its
+ * status reads ARCHIVED, so it is left out too.
+ */
+const REAL_BOOKING_WHERE = {
+  status: { notIn: ["DRAFT", "CANCELLED"] },
+  archivedWithoutCheckin: false,
 } satisfies Prisma.BookingWhereInput;
 
 /**
@@ -1655,7 +1680,9 @@ export async function idleAssetsReport(
 
     // Fetch data — `fetchIdleAssetRows` re-signs any expired thumbnail URLs
     // inline (see its body) so we don't need a separate refresh round-trip.
-    const [rows, totalCount, kpis] = await Promise.all([
+    // The KPI read already loads every idle asset, so its total doubles as
+    // the pager's row count.
+    const [rows, { kpis, totalIdle }] = await Promise.all([
       fetchIdleAssetRows(
         organizationId,
         assetWhere,
@@ -1663,7 +1690,6 @@ export async function idleAssetsReport(
         page,
         pageSize
       ),
-      countIdleAssets(organizationId, assetWhere, cutoffDate),
       computeIdleAssetsKpis(organizationId, assetWhere, cutoffDate, currency),
     ]);
 
@@ -1692,7 +1718,7 @@ export async function idleAssetsReport(
       kpis,
       rows,
       computedMs,
-      totalRows: totalCount,
+      totalRows: totalIdle,
       page,
       pageSize,
     };
@@ -1707,10 +1733,67 @@ export async function idleAssetsReport(
 }
 
 /**
- * Fetch idle asset rows with last booking date.
+ * A use of an asset: its slice on a returned booking, and only when that
+ * slice actually went out. Being listed on a booking is not a use; an asset
+ * left behind at check-out never moved. Whether a slice went out is answered
+ * by its `checkedOutAt` marker, never by the booking's status.
  *
- * An asset is considered idle if it hasn't been part of any booking
- * that was checked out since the cutoff date.
+ * @see {@link file://./../../../../../.claude/rules/booking-checkout-is-recorded-per-slice.md}
+ */
+const RETURNED_USE_SLICE_WHERE = {
+  checkedOutAt: { not: null },
+  booking: RETURNED_BOOKING_WHERE,
+} satisfies Prisma.BookingAssetWhereInput;
+
+/**
+ * The assets the Idle Assets report lists: the caller's asset predicate, not
+ * out on a booking right now, and with no use (see `RETURNED_USE_SLICE_WHERE`)
+ * on a booking that ended on or after the cutoff. Never-used assets qualify.
+ *
+ * "Out right now" is the asset's own slice: checked out and not yet checked
+ * in on an ONGOING or OVERDUE booking. An asset already checked back in, or
+ * never checked out, on a running booking is on the shelf.
+ *
+ * The rows and the KPIs both query with this one predicate, in the database,
+ * so `skip`/`take` page through idle assets only and every page holds as many
+ * rows as the pager says.
+ *
+ * @param organizationId - Workspace scope, enforced here as well as in `assetWhere`
+ * @param assetWhere - Active inventory plus the filter bar's predicate
+ * @param cutoffDate - A use on a booking ending on or after this is recent
+ */
+function idleAssetWhere(
+  organizationId: string,
+  assetWhere: Prisma.AssetWhereInput,
+  cutoffDate: Date
+): Prisma.AssetWhereInput {
+  return {
+    AND: [
+      assetWhere,
+      { organizationId },
+      {
+        NOT: {
+          bookingAssets: { some: CURRENT_BOOKING_SLICE_FILTER.where },
+        },
+      },
+      {
+        NOT: {
+          bookingAssets: {
+            some: {
+              AND: [
+                RETURNED_USE_SLICE_WHERE,
+                { booking: { to: { gte: cutoffDate } } },
+              ],
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Fetch one page of idle asset rows with their last booking date.
  */
 async function fetchIdleAssetRows(
   organizationId: string,
@@ -1721,27 +1804,12 @@ async function fetchIdleAssetRows(
 ): Promise<IdleAssetRow[]> {
   const now = new Date();
 
-  // Get assets with their last booking checkout. Phase 3a: walk the
-  // `BookingAsset` pivot for both the exclusion filter and the
-  // most-recent-completed sub-query. `organizationId` is enforced
-  // explicitly here for defense-in-depth alongside the caller's
-  // `assetWhere`. `mainImage`, `mainImageExpiration`, `organizationId`
-  // are selected so we can pipe the assets through
-  // `refreshExpiredAssetImages` below without an extra round-trip.
+  // One page of idle assets (see `idleAssetWhere`), each with its most
+  // recent returned booking for the Last Used column. `mainImage`,
+  // `mainImageExpiration` and `organizationId` are selected so the assets
+  // can go through `refreshExpiredAssetImages` without an extra round-trip.
   const assets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
     // Least recently updated first; `id` tiebreaker keeps skip/take paging
     // deterministic for assets sharing an `updatedAt` (bulk operations).
     orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -1776,14 +1844,11 @@ async function fetchIdleAssetRows(
           },
         },
       },
-      // Pull the most-recent returned booking via the pivot (archive-aware
-      // — see `RETURNED_BOOKING_WHERE`). We sort pivot rows by their
-      // related booking's `to` desc and take the first one to find the
-      // last completed booking for this asset.
+      // The most recent use (see `RETURNED_USE_SLICE_WHERE`), by its
+      // booking's end, for the Last Used column. Same test as the idle
+      // predicate, so a listed asset never shows a use after the cutoff.
       bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
+        where: RETURNED_USE_SLICE_WHERE,
         orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
@@ -1793,16 +1858,9 @@ async function fetchIdleAssetRows(
     },
   });
 
-  // Filter to only include assets that are actually idle (no recent booking)
-  const idleAssets = assets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true; // Never booked = idle
-    return lastBookingEnd < cutoffDate;
-  });
-
   // Re-sign expired thumbnail signed URLs in place. No-op when URLs are
   // still fresh (the helper checks `mainImageExpiration > now` first).
-  const refreshedAssets = await refreshExpiredAssetImages(idleAssets);
+  const refreshedAssets = await refreshExpiredAssetImages(assets);
 
   return refreshedAssets.map((asset) => {
     const lastBookedAt = asset.bookingAssets[0]?.booking.to || null;
@@ -1835,60 +1893,17 @@ async function fetchIdleAssetRows(
 }
 
 /**
- * Count total idle assets matching the criteria.
+ * Compute the Idle Assets KPIs over every idle asset (see `idleAssetWhere`).
+ *
+ * @returns The KPI cards, and `totalIdle`, the number of idle assets, which
+ *   the report also uses as its row count
  */
-async function countIdleAssets(
-  organizationId: string,
-  assetWhere: Prisma.AssetWhereInput,
-  cutoffDate: Date
-): Promise<number> {
-  // Get all potentially idle assets — Phase 3a: walk the BookingAsset
-  // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query. `organizationId` is enforced explicitly as a
-  // defense-in-depth guard alongside the caller-supplied `assetWhere`.
-  const assets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
-    select: {
-      id: true,
-      bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
-        orderBy: { booking: { to: "desc" } },
-        take: 1,
-        select: {
-          booking: { select: { to: true } },
-        },
-      },
-    },
-  });
-
-  // Filter to only truly idle assets
-  return assets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true;
-    return lastBookingEnd < cutoffDate;
-  }).length;
-}
-
 async function computeIdleAssetsKpis(
   organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date,
   currency: Currency
-): Promise<ReportKpi[]> {
+): Promise<{ kpis: ReportKpi[]; totalIdle: number }> {
   const now = new Date();
 
   // Get total asset count for percentage.
@@ -1902,24 +1917,10 @@ async function computeIdleAssetsKpis(
     },
   });
 
-  // Get idle assets with details — Phase 3a: walk the BookingAsset
-  // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query. Org scoping is enforced explicitly here so the helper is
-  // safe even if `assetWhere` ever loses its organizationId clause.
-  const idleAssets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
+  // Every idle asset (see `idleAssetWhere`) with its most recent returned
+  // booking, for the value and average-days KPIs.
+  const trulyIdle = await db.asset.findMany({
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
     select: {
       id: true,
       valuation: true,
@@ -1928,9 +1929,7 @@ async function computeIdleAssetsKpis(
       quantity: true,
       updatedAt: true,
       bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
+        where: RETURNED_USE_SLICE_WHERE,
         orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
@@ -1938,13 +1937,6 @@ async function computeIdleAssetsKpis(
         },
       },
     },
-  });
-
-  // Filter to truly idle and calculate metrics
-  const trulyIdle = idleAssets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true;
-    return lastBookingEnd < cutoffDate;
   });
 
   const totalIdle = trulyIdle.length;
@@ -1977,7 +1969,7 @@ async function computeIdleAssetsKpis(
         )
       : 0;
 
-  return [
+  const kpis: ReportKpi[] = [
     {
       id: "total_idle",
       label: "Idle Assets",
@@ -2032,6 +2024,8 @@ async function computeIdleAssetsKpis(
           : "positive",
     },
   ];
+
+  return { kpis, totalIdle };
 }
 
 // -----------------------------------------------------------------------------
@@ -2444,7 +2438,7 @@ async function fetchTopBookedAssetRows(
       organizationId,
       from: { lte: timeframe.to },
       to: { gte: timeframe.from },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
+      ...REAL_BOOKING_WHERE,
     },
     select: {
       from: true,
@@ -2627,7 +2621,7 @@ async function computeTopBookedKpis(
       organizationId,
       from: { lte: timeframe.to },
       to: { gte: timeframe.from },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
+      ...REAL_BOOKING_WHERE,
       // "Total Bookings" counts the same population the rows aggregate:
       // bookings holding at least one asset matching the report's asset
       // filters. Without this, assetless bookings — and, when
@@ -2734,11 +2728,55 @@ async function computeTopBookedKpis(
 // Top Booked Kits Report
 // -----------------------------------------------------------------------------
 
+/**
+ * The filter bar's Category and Location choices for a kit report. They match
+ * the kit's own category and location, not its members'. Ids must already be
+ * verified against the workspace (see `resolveReportFilters`).
+ */
+export interface ReportKitFilter {
+  categoryIds: string[];
+  /** Location ids; {@link WITHOUT_LOCATION_ID} selects kits with no location. */
+  locationIds: string[];
+}
+
 interface TopBookedKitsArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
+  /** Category and Location from the filter bar. */
+  kitFilter?: ReportKitFilter;
   page?: number;
   pageSize?: number;
+}
+
+/**
+ * Builds the kit `where` for a {@link ReportKitFilter}. Several categories (or
+ * locations) match any of them; category and location together must both
+ * match. Returns an empty object when nothing is chosen.
+ */
+function buildReportKitWhere(
+  filter: ReportKitFilter | undefined
+): Prisma.KitWhereInput {
+  const and: Prisma.KitWhereInput[] = [];
+
+  if (filter?.categoryIds.length) {
+    and.push({ categoryId: { in: filter.categoryIds } });
+  }
+
+  if (filter?.locationIds.length) {
+    const realLocationIds = filter.locationIds.filter(
+      (id) => id !== WITHOUT_LOCATION_ID
+    );
+    const or: Prisma.KitWhereInput[] = [];
+    if (realLocationIds.length > 0) {
+      or.push({ locationId: { in: realLocationIds } });
+    }
+    if (filter.locationIds.includes(WITHOUT_LOCATION_ID)) {
+      or.push({ locationId: null });
+    }
+    and.push(or.length === 1 ? or[0] : { OR: or });
+  }
+
+  return and.length > 0 ? { AND: and } : {};
 }
 
 /**
@@ -2760,7 +2798,13 @@ interface TopBookedKitsArgs {
 export async function topBookedKitsReport(
   args: TopBookedKitsArgs
 ): Promise<ReportPayload<TopBookedKitRow>> {
-  const { organizationId, timeframe, page = 1, pageSize = 50 } = args;
+  const {
+    organizationId,
+    timeframe,
+    kitFilter,
+    page = 1,
+    pageSize = 50,
+  } = args;
 
   const startTime = performance.now();
 
@@ -2771,6 +2815,7 @@ export async function topBookedKitsReport(
     const data = await fetchTopBookedKitData(
       organizationId,
       timeframe,
+      buildReportKitWhere(kitFilter),
       page,
       pageSize
     );
@@ -2818,12 +2863,16 @@ export async function topBookedKitsReport(
  * metadata in a single org-scoped query, and re-signs expired kit image URLs
  * server-side.
  *
+ * @param kitWhere - The filter bar's Category and Location as a kit `where`,
+ *   applied to the kit lookup so it decides which kits are listed.
  * @returns Paginated rows, total unique-kit count, the #1 kit, and the total
- *   kit-booking incidences (sum of every kit's booking count) for the KPIs.
+ *   kit-booking incidences (sum of the listed kits' booking counts) for the
+ *   KPIs.
  */
 async function fetchTopBookedKitData(
   organizationId: string,
   timeframe: ResolvedTimeframe,
+  kitWhere: Prisma.KitWhereInput,
   page: number,
   pageSize: number
 ): Promise<{
@@ -2843,7 +2892,7 @@ async function fetchTopBookedKitData(
       organizationId,
       from: { lte: timeframe.to },
       to: { gte: timeframe.from },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
+      ...REAL_BOOKING_WHERE,
     },
     select: {
       from: true,
@@ -2941,17 +2990,18 @@ async function fetchTopBookedKitData(
     return { rows: [], totalCount: 0, topKit: null, totalKitBookings: 0 };
   }
 
-  const totalKitBookings = Array.from(kitAgg.values()).reduce(
-    (sum, entry) => sum + entry.bookingCount,
-    0
-  );
-
-  // Step 2 — hydrate kit metadata in one org-scoped query. Explicit
+  // Step 2: hydrate kit metadata in one org-scoped query, which also applies
+  // the filter bar's Category and Location (`kitWhere`). Explicit
   // `organizationId` even though kitIds derive from this org's bookings
-  // (defence-in-depth per the org-scope rule). Kits deleted between the two
-  // queries simply drop out — `results` is built from the rows we got back.
+  // (defence-in-depth per the org-scope rule). Kits the filter leaves out, or
+  // deleted between the two queries, drop out: `results` and every total
+  // below are built from the rows we got back.
   const kits = await db.kit.findMany({
-    where: { id: { in: Array.from(kitAgg.keys()) }, organizationId },
+    where: {
+      id: { in: Array.from(kitAgg.keys()) },
+      organizationId,
+      ...kitWhere,
+    },
     select: {
       id: true,
       organizationId: true,
@@ -2992,8 +3042,14 @@ async function fetchTopBookedKitData(
     })
     .sort((a, b) => b.bookingCount - a.bookingCount);
 
-  // The #1 most booked kit (before pagination) — always the first sorted result.
+  // The #1 most booked kit (before pagination), always the first sorted result.
   const topKit = results[0] || null;
+
+  // Sum over the listed kits only, so the KPI reconciles with the table.
+  const totalKitBookings = results.reduce(
+    (sum, row) => sum + row.bookingCount,
+    0
+  );
 
   const paginatedRows = results.slice((page - 1) * pageSize, page * pageSize);
 
@@ -3009,7 +3065,7 @@ async function fetchTopBookedKitData(
  * Builds the KPI cards for the Top Booked Kits report from pre-computed
  * aggregates (pure — no DB access).
  *
- * `total_kit_bookings` is the sum of every kit's booking count, so it
+ * `total_kit_bookings` is the sum of the listed kits' booking counts, so it
  * reconciles exactly with the table's Bookings column (deliberately defined
  * differently from the asset report's raw booking count, which would be
  * inflated here by bookings that contain no kits).
@@ -3883,10 +3939,9 @@ export async function monthlyBookingTrendsReport(
         ? mergeAssetWhere({ organizationId }, assetFilter)
         : null;
 
-    // Fetch all bookings created in the timeframe. DRAFT and CANCELLED are
-    // excluded so "Total Bookings" means the same thing it means in the
-    // top-booked reports: real bookings, not plans or bookings that never
-    // happened.
+    // Fetch all bookings created in the timeframe, limited to real bookings
+    // (REAL_BOOKING_WHERE) so "Total Bookings" means the same thing it means
+    // in the top-booked reports.
     const bookings = await db.booking.findMany({
       where: {
         organizationId,
@@ -3894,7 +3949,7 @@ export async function monthlyBookingTrendsReport(
           gte: timeframe.from,
           lte: timeframe.to,
         },
-        status: { notIn: ["DRAFT", "CANCELLED"] },
+        ...REAL_BOOKING_WHERE,
         ...(narrowedAssetWhere && {
           bookingAssets: { some: { asset: narrowedAssetWhere } },
         }),
@@ -4251,7 +4306,7 @@ export async function assetUtilizationReport(
             booking: {
               from: { lte: timeframe.to },
               to: { gte: timeframe.from },
-              status: { notIn: ["DRAFT", "CANCELLED"] },
+              ...REAL_BOOKING_WHERE,
             },
           },
           select: {
@@ -4449,6 +4504,13 @@ interface AssetActivityArgs {
   assetFilter?: ReportAssetFilter;
   page?: number;
   pageSize?: number;
+  /**
+   * Read every event in the timeframe instead of one page, for the CSV
+   * export: in batches of {@link ACTIVITY_EXPORT_BATCH_SIZE}, up to
+   * {@link ACTIVITY_EXPORT_MAX_ROWS}, without re-signing thumbnails. Ignores
+   * `page` and `pageSize`.
+   */
+  allRows?: boolean;
 }
 
 /**
@@ -4469,6 +4531,7 @@ export async function assetActivityReport(
     assetFilter,
     page = 1,
     pageSize = 50,
+    allRows = false,
   } = args;
 
   const startTime = performance.now();
@@ -4488,76 +4551,197 @@ export async function assetActivityReport(
       "ASSET_MIN_QUANTITY_CHANGED",
       "ASSET_TAGS_CHANGED",
       "ASSET_CUSTOM_FIELD_CHANGED",
+      "ASSET_AVAILABLE_TO_BOOK_CHANGED",
       "CUSTODY_ASSIGNED",
       "CUSTODY_RELEASED",
       "BOOKING_CHECKED_OUT",
       "BOOKING_CHECKED_IN",
+      "ASSET_ARCHIVED",
+      "ASSET_UNARCHIVED",
     ];
 
-    const { events, totalCount, actionCounts, mostActive } =
-      assetFilter && !assetFilter.isEmpty
-        ? await fetchFilteredActivityEvents({
-            organizationId,
-            timeframe,
-            actions: assetActions,
-            assetId,
-            assetFilter,
-            page,
-            pageSize,
-          })
-        : await fetchActivityEvents({
-            organizationId,
-            timeframe,
-            actions: assetActions,
-            assetId,
-            page,
-            pageSize,
-          });
+    // An export ends when it starts: a range ending later today would
+    // otherwise count events the batches never reach, and the file would not
+    // match its own count.
+    const readTimeframe = allRows
+      ? {
+          ...timeframe,
+          to: new Date(Math.min(timeframe.to.getTime(), Date.now())),
+        }
+      : timeframe;
 
-    // Get asset details for the events. `mainImage`, `mainImageExpiration`,
-    // `organizationId` are selected so we can pipe assets through
-    // `refreshExpiredAssetImages` below without an extra round-trip.
-    const assetIds = [
-      ...new Set(events.map((e) => e.assetId).filter(Boolean)),
-    ] as string[];
-    const assets = await db.asset.findMany({
-      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
-      where: { id: { in: assetIds }, organizationId },
-      select: {
-        id: true,
-        organizationId: true,
-        title: true,
-        mainImage: true,
-        mainImageExpiration: true,
-        thumbnailImage: true,
-        // Model cover image for assets with no image of their own
-        ...ASSET_MODEL_IMAGE_SELECT,
-      },
-    });
-    const refreshedAssets = await refreshExpiredAssetImages(assets);
-    const assetMap = new Map(refreshedAssets.map((a) => [a.id, a]));
-
-    // Map events to rows
-    const rows: AssetActivityRow[] = events.map((event) => {
-      const asset = event.assetId ? assetMap.get(event.assetId) : null;
-      const actorSnapshot = event.actorSnapshot as UserNameFields | null;
-
-      return {
-        id: event.id,
-        assetId: event.assetId || "",
-        assetName: asset?.title || "Unknown Asset",
-        thumbnailImage: asset?.thumbnailImage || null,
-        mainImage: asset?.mainImage || null,
-        assetModel: asset?.assetModel ?? null,
-        activityType: mapActionToActivityType(event.action),
-        description: buildActivityDescription(event),
-        occurredAt: event.occurredAt,
-        performedBy: actorSnapshot
-          ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
-          : null,
-        context: null,
+    /**
+     * Reads one page of events, with as much of the summary as `summary` asks.
+     * Export batches pass `after`, the last event already read.
+     */
+    const readEvents = (
+      pageNumber: number,
+      size: number,
+      summary: SummaryNeed,
+      after?: ActivityEventCursor
+    ) => {
+      const query = {
+        organizationId,
+        timeframe: readTimeframe,
+        actions: assetActions,
+        assetId,
+        page: pageNumber,
+        pageSize: size,
+        summary,
+        after,
       };
-    });
+      return assetFilter && !assetFilter.isEmpty
+        ? fetchFilteredActivityEvents({ ...query, assetFilter })
+        : fetchActivityEvents(query);
+    };
+
+    /** The asset fields every row reads, on the page and in a file. */
+    const rowAssetSelect = {
+      id: true,
+      title: true,
+      unitOfMeasure: true,
+    } as const satisfies Prisma.AssetSelect;
+
+    /**
+     * Assets for the page: the row fields plus images, re-signed when expired.
+     * `organizationId` and `mainImageExpiration` feed the re-signing.
+     */
+    const readPageAssets = async (assetIds: string[]) =>
+      (
+        await refreshExpiredAssetImages(
+          await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
+            where: { id: { in: assetIds }, organizationId },
+            select: {
+              ...rowAssetSelect,
+              organizationId: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              thumbnailImage: true,
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
+            },
+          })
+        )
+      ).map((asset) => ({
+        ...asset,
+        // The page has no SAM ID or QR code column; only a file writes them.
+        sequentialId: null,
+        qrCodes: [] as { id: string }[],
+      }));
+
+    /**
+     * Assets for a file: only the fields it writes, including SAM ID and the
+     * first QR code in the order every other surface shows them. Image URLs
+     * run to hundreds of characters each, and an export holds up to
+     * {@link ACTIVITY_EXPORT_MAX_ROWS} rows, so it never reads them.
+     */
+    const readExportAssets = async (assetIds: string[]) => {
+      const assets = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still name their asset
+        where: { id: { in: assetIds }, organizationId },
+        select: {
+          ...rowAssetSelect,
+          // The shared code fragment's SAM ID and QR parts, without its
+          // barcode list, which a file never writes.
+          sequentialId: ASSET_CODE_RESOLUTION_SELECT.sequentialId,
+          qrCodes: ASSET_CODE_RESOLUTION_SELECT.qrCodes,
+        },
+      });
+      return assets.map((asset) => ({
+        ...asset,
+        mainImage: null,
+        thumbnailImage: null,
+        assetModel: null,
+      }));
+    };
+
+    /** Names loaded by earlier export batches, so each is read only once. */
+    let knownNames: ReferenceNames | undefined;
+
+    /** Turns a batch of events into rows. */
+    const toRows = async (
+      events: ActivityEventRecord[]
+    ): Promise<AssetActivityRow[]> => {
+      const assetIds = [
+        ...new Set(events.map((e) => e.assetId).filter(Boolean)),
+      ] as string[];
+      const [assets, referenceNames] = await Promise.all([
+        allRows ? readExportAssets(assetIds) : readPageAssets(assetIds),
+        loadReferenceNames(organizationId, events, knownNames),
+      ]);
+      const assetMap = new Map(assets.map((a) => [a.id, a]));
+      knownNames = referenceNames;
+
+      return events.map((event) => {
+        const asset = event.assetId ? assetMap.get(event.assetId) : null;
+        const actorSnapshot = event.actorSnapshot as UserNameFields | null;
+        const { description, changedFrom, changedTo } =
+          buildActivityDescription(event, referenceNames, asset?.unitOfMeasure);
+
+        return {
+          id: event.id,
+          assetId: event.assetId || "",
+          samId: asset?.sequentialId ?? null,
+          qrId: asset?.qrCodes[0]?.id ?? null,
+          assetName: asset?.title || "Unknown Asset",
+          thumbnailImage: asset?.thumbnailImage || null,
+          mainImage: asset?.mainImage || null,
+          assetModel: asset?.assetModel ?? null,
+          activityType: mapActionToActivityType(event.action),
+          description,
+          // Only a file shows the two sides; the page shows the sentence.
+          changedFrom: allRows ? changedFrom : null,
+          changedTo: allRows ? changedTo : null,
+          occurredAt: event.occurredAt,
+          performedBy: actorSnapshot
+            ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
+            : null,
+          context: null,
+        };
+      });
+    };
+
+    const batchSize = allRows
+      ? Math.min(ACTIVITY_EXPORT_BATCH_SIZE, ACTIVITY_EXPORT_MAX_ROWS)
+      : pageSize;
+    // A file needs only the total, for its row-count note; the page needs
+    // everything its KPIs show.
+    const first = await readEvents(
+      allRows ? 1 : page,
+      batchSize,
+      allRows ? "count" : "full"
+    );
+    const { totalCount, actionCounts, mostActive } =
+      first.summary ?? NO_ACTIVITY_SUMMARY;
+    const rows = await toRows(first.events);
+
+    // The export reads on until a short batch ends the timeframe. Each batch
+    // starts after the last event read rather than at an offset, so an asset
+    // that joins or leaves the filter mid-export cannot repeat or skip rows
+    // of other assets.
+    let batch = first.events;
+    // Each read asks for at most the rows left under the ceiling, so the file
+    // never passes ACTIVITY_EXPORT_MAX_ROWS whatever the two constants are.
+    let requested = batchSize;
+    while (
+      allRows &&
+      batch.length === requested &&
+      rows.length < ACTIVITY_EXPORT_MAX_ROWS
+    ) {
+      const last = batch[batch.length - 1];
+      requested = Math.min(
+        ACTIVITY_EXPORT_BATCH_SIZE,
+        ACTIVITY_EXPORT_MAX_ROWS - rows.length
+      );
+      batch = (
+        await readEvents(1, requested, "none", {
+          occurredAt: last.occurredAt,
+          id: last.id,
+        })
+      ).events;
+      rows.push(...(await toRows(batch)));
+    }
 
     const custodyChanges =
       (actionCounts.get("CUSTODY_ASSIGNED") || 0) +
@@ -4615,9 +4799,8 @@ export async function assetActivityReport(
       },
     ];
 
-    // Thumbnail URLs were already refreshed when we built `assetMap` above,
-    // so the rows we just constructed have fresh URLs — no separate
-    // refresh step needed here.
+    // `toRows` re-signs thumbnails as it builds page rows, so they need no
+    // separate refresh here. Export rows keep whatever URL is stored.
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -4634,8 +4817,8 @@ export async function assetActivityReport(
       rows,
       computedMs,
       totalRows: totalCount,
-      page,
-      pageSize,
+      page: allRows ? 1 : page,
+      pageSize: allRows ? rows.length : pageSize,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -4647,6 +4830,21 @@ export async function assetActivityReport(
   }
 }
 
+/**
+ * Events read per query while building an export. Each batch's asset and
+ * name lookups pass at most this many ids, well under Postgres' bind limit.
+ */
+const ACTIVITY_EXPORT_BATCH_SIZE = 5000;
+
+/**
+ * Most rows one Activity Summary export writes: about three times the busiest
+ * workspace's whole history. The export holds every row and the CSV text in
+ * memory at once (about 220 MB at this ceiling when a tenth of the rows are
+ * long description edits), so raise it only after timing it. A file that
+ * reaches it says so in its last line.
+ */
+export const ACTIVITY_EXPORT_MAX_ROWS = 100_000;
+
 /** Arguments shared by the two Asset Activity event readers. */
 interface ActivityEventQueryArgs {
   organizationId: string;
@@ -4656,17 +4854,46 @@ interface ActivityEventQueryArgs {
   assetId: string | undefined;
   page: number;
   pageSize: number;
+  /**
+   * What to count across every page: nothing, the total only (an export), or
+   * everything the KPIs read (the page).
+   */
+  summary: SummaryNeed;
+  /** Read the page that follows this event in report order; ignores `page`. */
+  after?: ActivityEventCursor;
 }
 
-/** One page of Asset Activity events plus the counts its KPIs read. */
-interface ActivityEventPage {
-  events: Prisma.ActivityEventGetPayload<object>[];
+/** An event's place in report order (`occurredAt` desc, then `id` asc). */
+interface ActivityEventCursor {
+  occurredAt: Date;
+  id: string;
+}
+
+type ActivityEventRecord = Prisma.ActivityEventGetPayload<object>;
+
+/** Counts across every page of the timeframe, which the KPIs read. */
+interface ActivitySummary {
   totalCount: number;
   /** Event count per action across every page. */
   actionCounts: Map<ActivityAction, number>;
   /** The asset with the most events, or `null` when there are none. */
   mostActive: { assetId: string; count: number } | null;
 }
+
+/** How much of the timeframe's summary a read needs. */
+type SummaryNeed = "none" | "count" | "full";
+
+/** One page of Asset Activity events, with the summary when asked for. */
+interface ActivityEventPage {
+  events: ActivityEventRecord[];
+  summary: ActivitySummary | null;
+}
+
+const NO_ACTIVITY_SUMMARY: ActivitySummary = {
+  totalCount: 0,
+  actionCounts: new Map(),
+  mostActive: null,
+};
 
 /**
  * Reads one page of asset events, unfiltered by asset attributes, through
@@ -4679,6 +4906,8 @@ async function fetchActivityEvents({
   assetId,
   page,
   pageSize,
+  summary: summaryNeed,
+  after,
 }: ActivityEventQueryArgs): Promise<ActivityEventPage> {
   const where: Prisma.ActivityEventWhereInput = {
     organizationId,
@@ -4687,39 +4916,66 @@ async function fetchActivityEvents({
     assetId: assetId ? assetId : { not: null },
   };
 
-  const [events, totalCount, byAction, byAsset] = await Promise.all([
+  const readSummary = async (): Promise<ActivitySummary> => {
+    if (summaryNeed === "count") {
+      return {
+        ...NO_ACTIVITY_SUMMARY,
+        totalCount: await db.activityEvent.count({ where }),
+      };
+    }
+    const [totalCount, byAction, byAsset] = await Promise.all([
+      db.activityEvent.count({ where }),
+      db.activityEvent.groupBy({
+        by: ["action"],
+        where,
+        _count: { id: true },
+      }),
+      db.activityEvent.groupBy({
+        by: ["assetId"],
+        where,
+        _count: { id: true },
+        orderBy: { _count: { id: "desc" } },
+        take: 1,
+      }),
+    ]);
+    const top = byAsset[0];
+    return {
+      totalCount,
+      actionCounts: new Map(byAction.map((g) => [g.action, g._count.id])),
+      mostActive: top?.assetId
+        ? { assetId: top.assetId, count: top._count.id }
+        : null,
+    };
+  };
+
+  const [events, summary] = await Promise.all([
     db.activityEvent.findMany({
-      where,
-      // `id` tiebreaker keeps skip/take paging deterministic for events
-      // sharing an `occurredAt` (bulk mutations emit same-instant events).
+      where: after
+        ? {
+            AND: [
+              where,
+              // The plain bound lets the (organizationId, occurredAt) index
+              // start at the cursor; the OR settles same-instant events.
+              { occurredAt: { lte: after.occurredAt } },
+              {
+                OR: [
+                  { occurredAt: { lt: after.occurredAt } },
+                  { occurredAt: after.occurredAt, id: { gt: after.id } },
+                ],
+              },
+            ],
+          }
+        : where,
+      // `id` tiebreaker keeps paging deterministic for events sharing an
+      // `occurredAt` (bulk mutations emit same-instant events).
       orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
-      skip: (page - 1) * pageSize,
+      skip: after ? 0 : (page - 1) * pageSize,
       take: pageSize,
     }),
-    db.activityEvent.count({ where }),
-    db.activityEvent.groupBy({
-      by: ["action"],
-      where,
-      _count: { id: true },
-    }),
-    db.activityEvent.groupBy({
-      by: ["assetId"],
-      where,
-      _count: { id: true },
-      orderBy: { _count: { id: "desc" } },
-      take: 1,
-    }),
+    summaryNeed === "none" ? null : readSummary(),
   ]);
 
-  const top = byAsset[0];
-  return {
-    events,
-    totalCount,
-    actionCounts: new Map(byAction.map((g) => [g.action, g._count.id])),
-    mostActive: top?.assetId
-      ? { assetId: top.assetId, count: top._count.id }
-      : null,
-  };
+  return { events, summary };
 }
 
 /**
@@ -4738,6 +4994,8 @@ async function fetchFilteredActivityEvents({
   assetFilter,
   page,
   pageSize,
+  summary: summaryNeed,
+  after,
 }: ActivityEventQueryArgs & {
   assetFilter: ReportAssetFilter;
 }): Promise<ActivityEventPage> {
@@ -4756,28 +5014,55 @@ async function fetchFilteredActivityEvents({
     ${assetId ? Prisma.sql`AND e."assetId" = ${assetId}` : Prisma.empty}
   `;
 
-  const [pageRows, byAction, byAsset] = await Promise.all([
+  const readSummary = async (): Promise<ActivitySummary> => {
+    if (summaryNeed === "count") {
+      const [row] = await db.$queryRaw<{ count: number }[]>(Prisma.sql`
+        SELECT COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+      `);
+      return { ...NO_ACTIVITY_SUMMARY, totalCount: row?.count ?? 0 };
+    }
+    const [byAction, byAsset] = await Promise.all([
+      db.$queryRaw<{ action: ActivityAction; count: number }[]>(Prisma.sql`
+        SELECT e.action::text AS action, COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+        GROUP BY e.action
+      `),
+      db.$queryRaw<{ assetId: string; count: number }[]>(Prisma.sql`
+        SELECT e."assetId" AS "assetId", COUNT(*)::int AS count
+        FROM "ActivityEvent" e
+        WHERE ${eventWhereSql}
+        GROUP BY e."assetId"
+        ORDER BY count DESC
+        LIMIT 1
+      `),
+    ]);
+    // Every event matched one of `actions`, so the per-action counts sum to
+    // the total.
+    const top = byAsset[0];
+    return {
+      totalCount: byAction.reduce((sum, row) => sum + row.count, 0),
+      actionCounts: new Map(byAction.map((row) => [row.action, row.count])),
+      mostActive: top ? { assetId: top.assetId, count: top.count } : null,
+    };
+  };
+
+  const [pageRows, summary] = await Promise.all([
     db.$queryRaw<{ id: string }[]>(Prisma.sql`
       SELECT e.id
       FROM "ActivityEvent" e
       WHERE ${eventWhereSql}
+      ${
+        after
+          ? Prisma.sql`AND e."occurredAt" <= ${after.occurredAt} AND (e."occurredAt" < ${after.occurredAt} OR (e."occurredAt" = ${after.occurredAt} AND e.id > ${after.id}))`
+          : Prisma.empty
+      }
       ORDER BY e."occurredAt" DESC, e.id ASC
-      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+      LIMIT ${pageSize} OFFSET ${after ? 0 : (page - 1) * pageSize}
     `),
-    db.$queryRaw<{ action: ActivityAction; count: number }[]>(Prisma.sql`
-      SELECT e.action::text AS action, COUNT(*)::int AS count
-      FROM "ActivityEvent" e
-      WHERE ${eventWhereSql}
-      GROUP BY e.action
-    `),
-    db.$queryRaw<{ assetId: string; count: number }[]>(Prisma.sql`
-      SELECT e."assetId" AS "assetId", COUNT(*)::int AS count
-      FROM "ActivityEvent" e
-      WHERE ${eventWhereSql}
-      GROUP BY e."assetId"
-      ORDER BY count DESC
-      LIMIT 1
-    `),
+    summaryNeed === "none" ? null : readSummary(),
   ]);
 
   const events =
@@ -4788,16 +5073,7 @@ async function fetchFilteredActivityEvents({
         })
       : [];
 
-  // Every event matched one of `actions`, so the per-action counts sum to
-  // the total.
-  const totalCount = byAction.reduce((sum, row) => sum + row.count, 0);
-  const top = byAsset[0];
-  return {
-    events,
-    totalCount,
-    actionCounts: new Map(byAction.map((row) => [row.action, row.count])),
-    mostActive: top ? { assetId: top.assetId, count: top.count } : null,
-  };
+  return { events, summary };
 }
 
 /** Map ActivityAction enum to the report's activity type */
@@ -4817,18 +5093,24 @@ function mapActionToActivityType(action: ActivityAction): AssetActivityType {
       return "BOOKING_CHECKED_OUT";
     case "BOOKING_CHECKED_IN":
       return "BOOKING_CHECKED_IN";
+    case "ASSET_ARCHIVED":
+      return "ARCHIVED";
+    case "ASSET_UNARCHIVED":
+      return "REINSTATED";
     default:
       return "UPDATED";
   }
 }
 
-/** Build human-readable description from activity event */
-function buildActivityDescription(event: {
-  action: ActivityAction;
-  field?: string | null;
-  fromValue?: unknown;
-  toValue?: unknown;
-}): string {
+/**
+ * Describes an activity event in plain words, with record ids replaced by the
+ * names in `names`.
+ */
+function buildActivityDescription(
+  event: DescribableEvent,
+  names: ReferenceNames,
+  unitOfMeasure?: string | null
+): ActivityDescription {
   const actionLabels: Record<string, string> = {
     ASSET_CREATED: "Asset created",
     ASSET_NAME_CHANGED: "Name changed",
@@ -4842,36 +5124,17 @@ function buildActivityDescription(event: {
     ASSET_MIN_QUANTITY_CHANGED: "Min quantity changed",
     ASSET_TAGS_CHANGED: "Tags updated",
     ASSET_CUSTOM_FIELD_CHANGED: "Custom field updated",
+    ASSET_AVAILABLE_TO_BOOK_CHANGED: "Available for bookings changed",
     CUSTODY_ASSIGNED: "Custody assigned",
     CUSTODY_RELEASED: "Custody released",
     BOOKING_CHECKED_OUT: "Checked out",
     BOOKING_CHECKED_IN: "Checked in",
+    ASSET_ARCHIVED: "Archived",
+    ASSET_UNARCHIVED: "Reinstated",
   };
 
   const label =
     actionLabels[event.action] || event.action.replace(/_/g, " ").toLowerCase();
 
-  // Add from/to values for change events
-  if (
-    event.field &&
-    event.fromValue !== undefined &&
-    event.toValue !== undefined
-  ) {
-    const from = formatFieldValue(event.fromValue);
-    const to = formatFieldValue(event.toValue);
-    if (from && to) {
-      return `${label}: ${from} → ${to}`;
-    }
-  }
-
-  return label;
-}
-
-/** Format a field value for display */
-function formatFieldValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  return JSON.stringify(value);
+  return describeChange(label, event, names, unitOfMeasure);
 }

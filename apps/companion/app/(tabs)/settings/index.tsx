@@ -1,3 +1,13 @@
+/**
+ * Settings list, the root of the Settings tab stack.
+ *
+ * Account, workspace, appearance, start page, scanner, notifications, about
+ * and server, legal links and sign-out. Notifications opens its own screen in
+ * this stack; everything else is edited in place.
+ *
+ * @see {@link file://./_layout.tsx} the stack
+ * @see {@link file://./notifications.tsx}
+ */
 import { useState, useEffect } from "react";
 import {
   View,
@@ -6,9 +16,10 @@ import {
   Alert,
   ScrollView,
   Switch,
+  ActivityIndicator,
 } from "react-native";
+import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import * as WebBrowser from "expo-web-browser";
 import { Image } from "expo-image";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
@@ -35,6 +46,9 @@ import {
 } from "@/lib/server";
 import ConnectServerSheet from "@/components/connect-server-sheet";
 import { getApiBaseUrl } from "@/lib/api";
+import { openShelfWebUrl } from "@/lib/navigation";
+import { usePushSettings } from "@/hooks/use-push-settings";
+import { notificationsRowValue } from "@/lib/push/preferences";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -61,6 +75,8 @@ export default function SettingsScreen() {
   const [scanSoundOn, setScanSoundOn] = useState(true);
   const [isConnectVisible, setIsConnectVisible] = useState(false);
   const [isSwitchingServer, setIsSwitchingServer] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const notificationsValue = notificationsRowValue(usePushSettings().state);
 
   // Subscribed, not read once: this screen is where a signed-in user changes
   // servers, so it is mounted across the switch it starts and must re-render
@@ -142,13 +158,29 @@ export default function SettingsScreen() {
     ? [userProfile.firstName, userProfile.lastName].filter(Boolean).join(" ")
     : null;
 
+  /**
+   * Confirms, then signs out. Sign-out first asks the server to forget this
+   * phone for push, which can take a few seconds, so the row shows that it is
+   * working and ignores further taps until it is done.
+   */
   const handleSignOut = () => {
+    if (isSigningOut) return;
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
         style: "destructive",
-        onPress: signOut,
+        onPress: () => {
+          setIsSigningOut(true);
+          void signOut()
+            .catch(() => {
+              Alert.alert(
+                "Couldn't sign out",
+                "Something went wrong signing out. Please try again."
+              );
+            })
+            .finally(() => setIsSigningOut(false));
+        },
       },
     ]);
   };
@@ -374,6 +406,43 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Push notifications have their own screen; the row shows whether
+          they reach this phone. */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Notifications</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            testID="notifications-row"
+            style={styles.settingRow}
+            onPress={() => router.push("/(tabs)/settings/notifications")}
+            activeOpacity={0.7}
+            accessibilityLabel={`Push notifications${
+              notificationsValue ? `: ${notificationsValue}` : ""
+            }. Open notification settings.`}
+            accessibilityRole="button"
+          >
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="notifications-outline"
+                size={20}
+                color={colors.foreground}
+              />
+              <Text style={styles.settingLabel}>Push notifications</Text>
+            </View>
+            <View style={styles.settingLeft}>
+              {notificationsValue && (
+                <Text style={styles.settingValue}>{notificationsValue}</Text>
+              )}
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={colors.mutedLight}
+              />
+            </View>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>About</Text>
         <View style={styles.card}>
@@ -428,9 +497,7 @@ export default function SettingsScreen() {
             // Stays Shelf's own site on every server, unlike the links
             // around it: this policy covers the APP, which is Shelf's
             // regardless of who hosts the instance its data lives on.
-            onPress={() =>
-              WebBrowser.openBrowserAsync("https://www.shelf.nu/privacy")
-            }
+            onPress={() => openShelfWebUrl("https://www.shelf.nu/privacy")}
             activeOpacity={0.7}
             accessibilityLabel="Privacy Policy"
             accessibilityRole="link"
@@ -460,7 +527,7 @@ export default function SettingsScreen() {
                     text: "Continue",
                     style: "destructive",
                     onPress: () =>
-                      WebBrowser.openBrowserAsync(
+                      openShelfWebUrl(
                         `${getApiBaseUrl()}/account-details/general`
                       ),
                   },
@@ -490,7 +557,7 @@ export default function SettingsScreen() {
           // The web app this companion belongs to, which is the CONNECTED
           // server — a self-hosted user's advanced features live on their own
           // instance, and Shelf Cloud has no account of theirs to show them.
-          onPress={() => WebBrowser.openBrowserAsync(getApiBaseUrl())}
+          onPress={() => openShelfWebUrl(getApiBaseUrl())}
           accessibilityLabel={`Open ${serverLabel} in a browser`}
           accessibilityRole="link"
         >
@@ -499,14 +566,25 @@ export default function SettingsScreen() {
       </Text>
 
       <TouchableOpacity
+        testID="sign-out-row"
         style={styles.signOutButton}
         onPress={handleSignOut}
+        disabled={isSigningOut}
         activeOpacity={0.7}
-        accessibilityLabel="Sign out of your account"
+        accessibilityLabel={
+          isSigningOut ? "Signing out" : "Sign out of your account"
+        }
         accessibilityRole="button"
+        accessibilityState={{ disabled: isSigningOut, busy: isSigningOut }}
       >
-        <Ionicons name="log-out-outline" size={20} color={colors.error} />
-        <Text style={styles.signOutText}>Sign Out</Text>
+        {isSigningOut ? (
+          <ActivityIndicator size="small" color={colors.error} />
+        ) : (
+          <Ionicons name="log-out-outline" size={20} color={colors.error} />
+        )}
+        <Text style={styles.signOutText}>
+          {isSigningOut ? "Signing out..." : "Sign Out"}
+        </Text>
       </TouchableOpacity>
 
       <ConnectServerSheet
@@ -591,15 +669,20 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
     padding: 14,
   },
+  // Each side of a row may shrink and its text wrap, so a long value next to
+  // a label still fits on a narrow screen with large text instead of being
+  // clipped by the card.
   settingLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
+    flexShrink: 1,
   },
   settingLabel: {
     fontSize: fontSize.base,
     color: colors.foreground,
     fontWeight: "500",
+    flexShrink: 1,
   },
   settingHint: {
     fontSize: fontSize.xs,
@@ -609,6 +692,8 @@ const useStyles = createStyles((colors, shadows) => ({
   settingValue: {
     fontSize: fontSize.sm,
     color: colors.muted,
+    flexShrink: 1,
+    textAlign: "right",
   },
 
   // Theme toggle (segmented control)

@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { buildLabelsCsv } from "~/modules/qr/labels-csv.server";
@@ -135,6 +136,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
           access,
           currentOrganization
         ),
+        bookableScope: resolveBookableListScope({ access, userId }),
       });
     }
 

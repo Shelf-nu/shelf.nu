@@ -260,7 +260,7 @@ describe("monthlyBookingTrendsReport", () => {
 });
 
 describe("idleAssetsReport and assetUtilizationReport", () => {
-  it("narrows the idle rows, the idle count and the denominator-free KPIs", async () => {
+  it("narrows the idle rows and the KPI read that also gives the idle count", async () => {
     await idleAssetsReport({
       organizationId: ORG,
       currency: "USD",

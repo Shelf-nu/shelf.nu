@@ -2,9 +2,11 @@
  * Booking page action: the `delete` and `extend-booking` guards a direct POST
  * is held to.
  *
- * SELF_SERVICE and BASE delete only their own DRAFT bookings; ADMIN deletes any
- * booking. BASE holds no `booking:extend`, so it is refused extending. A
- * refused request never reaches `deleteBooking` / `extendBooking`.
+ * SELF_SERVICE and BASE hold no `booking:delete`, so they are refused deleting
+ * any booking, their own drafts included (they discard drafts instead, see the
+ * discard-draft test). ADMIN deletes any booking. BASE holds no
+ * `booking:extend`, so it is refused extending. A refused request never
+ * reaches `deleteBooking` / `extendBooking`.
  *
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.tsx}
  */
@@ -157,34 +159,17 @@ function postDelete({
 describe("booking page delete intent", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("refuses SELF_SERVICE deleting its own RESERVED booking", async () => {
-    const response = await postDelete({
-      roles: [OrganizationRoles.SELF_SERVICE],
-      status: "RESERVED",
-    });
+  it.each([
+    [OrganizationRoles.SELF_SERVICE, "DRAFT"],
+    [OrganizationRoles.SELF_SERVICE, "RESERVED"],
+    [OrganizationRoles.BASE, "DRAFT"],
+    [OrganizationRoles.BASE, "COMPLETE"],
+  ])("refuses %s deleting its own %s booking", async (role, status) => {
+    const response = await postDelete({ roles: [role], status });
     expect(response.status).toBe(403);
-    expect(deleteBookingMock).not.toHaveBeenCalled();
-  });
-
-  it("lets SELF_SERVICE delete its own draft", async () => {
-    const response = await postDelete({
-      roles: [OrganizationRoles.SELF_SERVICE],
-      status: "DRAFT",
-    });
-    expect(deleteBookingMock).toHaveBeenCalledTimes(1);
-    // The draft-only rule is re-checked when the row is deleted.
-    expect(deleteBookingMock.mock.calls[0][3]).toEqual({ onlyIfDraft: true });
-    expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/bookings");
-  });
-
-  it("refuses BASE on someone else's draft", async () => {
-    const response = await postDelete({
-      roles: [OrganizationRoles.BASE],
-      status: "DRAFT",
-      creatorId: "someone-else",
-    });
-    expect(response.status).toBe(403);
+    expect(requirePermissionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: "booking", action: "delete" })
+    );
     expect(deleteBookingMock).not.toHaveBeenCalled();
   });
 
@@ -214,8 +199,6 @@ describe("booking page delete intent", () => {
       creatorId: "someone-else",
     });
     expect(deleteBookingMock).toHaveBeenCalledTimes(1);
-    // A role that may delete any status needs no write-time draft check.
-    expect(deleteBookingMock.mock.calls[0][3]).toEqual({ onlyIfDraft: false });
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe("/bookings");
   });

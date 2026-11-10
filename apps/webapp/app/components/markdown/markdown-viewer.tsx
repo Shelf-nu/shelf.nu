@@ -2,6 +2,7 @@ import React from "react";
 import type { ComponentProps, ComponentType } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
+import { chipBareUrls } from "~/utils/link-chips-in-markdoc";
 import { markdocConfig } from "~/utils/markdoc.config";
 import { parseMarkdownToReact } from "~/utils/md";
 import { sanitizeMarkdocTree } from "~/utils/sanitize-markdoc-tree";
@@ -13,7 +14,9 @@ import { CategoryBadgeComponent } from "./category-badge-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
+import { LinkChipComponent } from "./link-chip-component";
 import { LinkComponent } from "./link-component";
+import { NameComponent } from "./name-component";
 import { TagComponent } from "./tag-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
@@ -48,6 +51,22 @@ interface Props {
    * Dangerous schemes and off-origin images are blocked regardless.
    */
   allowExternalLinks?: boolean;
+  /**
+   * Show bare http(s) URLs in the text as link chips (comments). Links written
+   * as Markdown keep their own text. Applies only with `allowExternalLinks`: a
+   * chip links off-site, which system notes never do from bare text (their
+   * writers mark the values that may, with the `name` tag's `chips`).
+   */
+  linkChips?: boolean;
+  /**
+   * Render Shelf's Markdoc tags (`{% date %}`, `{% audit_images %}`, ...).
+   * Turn off for free text a member typed outside the note editor, such as a
+   * description: it is Markdown only, so any tag in it is dropped instead of
+   * rendering a forged badge or a component fed values it does not expect.
+   * Applies to string `content` only; a pre-parsed tree was already
+   * transformed by its caller, so pass free text as a string.
+   */
+  withTags?: boolean;
 }
 
 // Default components map including our custom components
@@ -57,6 +76,8 @@ const defaultComponents = {
   AuditImagesComponent,
   KitsListComponent,
   LinkComponent,
+  LinkChipComponent,
+  NameComponent,
   BookingStatusComponent,
   DescriptionComponent,
   CategoryBadgeComponent,
@@ -87,6 +108,8 @@ export const MarkdownViewer = ({
   className,
   disablePortal,
   allowExternalLinks = false,
+  linkChips = false,
+  withTags = true,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
@@ -117,11 +140,14 @@ export const MarkdownViewer = ({
   const parsedContent = React.useMemo(() => {
     const tree =
       typeof content === "string"
-        ? parseMarkdownToReact(content, markdocConfig)
+        ? parseMarkdownToReact(content, withTags ? markdocConfig : {})
         : content;
 
-    return sanitizeMarkdocTree(tree, { allowExternalLinks });
-  }, [content, allowExternalLinks]);
+    const sanitized = sanitizeMarkdocTree(tree, { allowExternalLinks });
+    return linkChips && allowExternalLinks
+      ? chipBareUrls(sanitized)
+      : sanitized;
+  }, [content, allowExternalLinks, linkChips, withTags]);
 
   return (
     <div className={styles}>

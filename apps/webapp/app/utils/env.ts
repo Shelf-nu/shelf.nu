@@ -82,6 +82,7 @@ declare global {
       INSTANCE_NAME: string;
       MIN_COMPANION_VERSION: string;
       LATEST_COMPANION_VERSION: string;
+      EXPO_ACCESS_TOKEN: string;
     }
   }
 }
@@ -316,6 +317,19 @@ export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
  */
 export const LATEST_COMPANION_VERSION = getEnv("LATEST_COMPANION_VERSION", {
   isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Access token for the Expo push service, which delivers companion-app push
+ * notifications. Needed only once "enhanced push security" is switched on for
+ * the Expo project; until then the push sender works without it. Server side
+ * only, and deliberately absent from `getBrowserEnv()`.
+ *
+ * @see {@link file://./../modules/push/expo.server.ts}
+ */
+export const EXPO_ACCESS_TOKEN = getEnv("EXPO_ACCESS_TOKEN", {
+  isSecret: true,
   isRequired: false,
 });
 

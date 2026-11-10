@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { RecordEventTxClient } from "~/modules/activity-event/service.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import type { ModelDefaultsTxClient } from "~/modules/asset-model/defaults.server";
 import {
   buildAssetModelChangeNote,
   resolveUserLink,
@@ -25,7 +26,10 @@ import {
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { assertCategoryBelongsToOrg } from "~/utils/org-validation.server";
 import { getFileUploadPath, parseFileFormData } from "~/utils/storage.server";
-import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import type {
+  CreateAssetFromContentImportPayload,
+  ICustomFieldValueJson,
+} from "../asset/types";
 
 const label: ErrorLabel = "Asset Model";
 
@@ -121,6 +125,12 @@ function getAssetModelsWhereInput({
  * deleting the model unlinks archived assets too. `activeAssetCount` leaves
  * archived assets out, as every inventory count does, and is what the list
  * shows.
+ *
+ * With `withCustomFieldDefaults`, each model also carries its default custom
+ * field values (`customFieldId` and `value` only). The asset form uses them to
+ * pre-fill empty custom fields when a model is picked; it checks each value
+ * against the field definitions it already loads, so no field rows are read
+ * here.
  */
 export async function getAssetModels(params: {
   organizationId: Organization["id"];
@@ -129,8 +139,16 @@ export async function getAssetModels(params: {
   /** Items to be loaded per page */
   perPage?: number;
   search?: string | null;
+  /** Also load each model's default custom field values. */
+  withCustomFieldDefaults?: boolean;
 }) {
-  const { organizationId, page = 1, perPage = 8, search } = params;
+  const {
+    organizationId,
+    page = 1,
+    perPage = 8,
+    search,
+    withCustomFieldDefaults = false,
+  } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -157,27 +175,52 @@ export async function getAssetModels(params: {
       db.assetModel.count({ where }),
     ]);
 
-    const archivedCounts =
-      assetModels.length > 0
-        ? await db.asset.groupBy({
+    const modelIds = assetModels.map((model) => model.id);
+    const [archivedCounts, fieldDefaults] = await Promise.all([
+      modelIds.length > 0
+        ? db.asset.groupBy({
             by: ["assetModelId"],
             where: {
               organizationId,
-              assetModelId: { in: assetModels.map((model) => model.id) },
+              assetModelId: { in: modelIds },
               archivedAt: { not: null },
             },
             _count: { _all: true },
           })
-        : [];
+        : [],
+      withCustomFieldDefaults && modelIds.length > 0
+        ? db.assetModelCustomFieldDefault.findMany({
+            where: { assetModelId: { in: modelIds } },
+            select: { assetModelId: true, customFieldId: true, value: true },
+          })
+        : [],
+    ]);
     const archivedByModelId = new Map(
       archivedCounts.map((row) => [row.assetModelId, row._count._all])
     );
+
+    /** Default custom field values by model id, as the asset form reads them. */
+    const defaultsByModelId = new Map<
+      string,
+      { customFieldId: string; value: ICustomFieldValueJson }[]
+    >();
+    for (const fieldDefault of fieldDefaults) {
+      const list = defaultsByModelId.get(fieldDefault.assetModelId) ?? [];
+      list.push({
+        customFieldId: fieldDefault.customFieldId,
+        value: fieldDefault.value as unknown as ICustomFieldValueJson,
+      });
+      defaultsByModelId.set(fieldDefault.assetModelId, list);
+    }
 
     return {
       assetModels: assetModels.map((model) => ({
         ...model,
         activeAssetCount:
           model._count.assets - (archivedByModelId.get(model.id) ?? 0),
+        ...(withCustomFieldDefaults && {
+          customFieldDefaults: defaultsByModelId.get(model.id) ?? [],
+        }),
       })),
       totalAssetModels,
     };
@@ -227,34 +270,43 @@ export async function getAssetModel({
 
 /**
  * Updates an existing asset model's fields.
+ *
+ * @param tx - Optional transaction, so the model and its custom field
+ *   defaults can be saved together
  */
-export async function updateAssetModel({
-  id,
-  organizationId,
-  name,
-  description,
-  defaultCategoryId,
-  defaultValuation,
-}: Pick<AssetModel, "id" | "organizationId"> & {
-  name?: string;
-  description?: string | null;
-  defaultCategoryId?: string | null;
-  defaultValuation?: number | null;
-}) {
+export async function updateAssetModel(
+  {
+    id,
+    organizationId,
+    name,
+    description,
+    defaultCategoryId,
+    defaultValuation,
+  }: Pick<AssetModel, "id" | "organizationId"> & {
+    name?: string;
+    description?: string | null;
+    defaultCategoryId?: string | null;
+    defaultValuation?: number | null;
+  },
+  tx: ModelDefaultsTxClient = db
+) {
   // why: defaultCategoryId comes from form input and Prisma's foreign key
   // only proves the row exists, not that it belongs to this workspace —
   // without this the model would connect another tenant's category. Runs
   // outside the try so its 400 reaches the form instead of being rewritten
   // into the generic constraint-violation message.
   if (defaultCategoryId) {
-    await assertCategoryBelongsToOrg({
-      categoryId: defaultCategoryId,
-      organizationId,
-    });
+    await assertCategoryBelongsToOrg(
+      {
+        categoryId: defaultCategoryId,
+        organizationId,
+      },
+      tx
+    );
   }
 
   try {
-    return await db.assetModel.update({
+    return await tx.assetModel.update({
       where: { id, organizationId },
       data: {
         name: name?.trim(),

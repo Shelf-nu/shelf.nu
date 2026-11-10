@@ -2,17 +2,17 @@
   "expo": {
     "name": "Shelf",
     "slug": "shelf-companion",
-    "version": "1.6.0",
+    "version": "1.8.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shelf",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.shelf.companion",
       "associatedDomains": ["applinks:app.shelf.nu"],
       "infoPlist": {
+        "AppStoreID": "6765639874",
         "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
         "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits.",
         "NSLocationWhenInUseUsageDescription": "Shelf records where assets were scanned so your team can see each item's last known location."
@@ -87,23 +87,33 @@
         }
       ],
       [
-        "expo-av",
+        "expo-audio",
         {
-          "microphonePermission": false
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
         }
       ],
       "expo-font",
       "expo-web-browser",
       "expo-quick-actions",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#FF7809",
+          "defaultChannel": "default"
+        }
+      ],
       "./plugins/swift-concurrency-fix",
       "@sentry/react-native",
       [
         "expo-build-properties",
         {
           "android": {
-            "enableProguardInReleaseBuilds": true,
+            "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
-            "extraProguardRules": "# Expo resolves module and Record classes reflectively from the generated\n# package list, so R8 cannot see those constructors as reachable.\n-keep class expo.modules.** { *; }\n-keep class com.shelf.companion.** { *; }\n\n# React Native marks JNI-reachable members with @DoNotStrip.\n-keepclassmembers class * { @com.facebook.proguard.annotations.DoNotStrip *; }\n-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod *; }\n\n# expo-image references expo.modules.kotlin.runtime.Runtime, which is absent from\n# expo-modules-core. R8 treats a missing class as a hard error, so the reference is\n# suppressed here. The reference is unreachable from our code: nothing calls the\n# Image(Drawable) constructor it sits on.\n-dontwarn expo.modules.kotlin.runtime.**\n"
+            "extraProguardRules": "# Expo resolves module and Record classes reflectively from the generated\n# package list, so R8 cannot see those constructors as reachable.\n-keep class expo.modules.** { *; }\n-keep class com.shelf.companion.** { *; }\n\n# React Native marks JNI-reachable members with @DoNotStrip.\n-keepclassmembers class * { @com.facebook.proguard.annotations.DoNotStrip *; }\n-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod *; }\n\n# expo-image references classes in expo.modules.kotlin.runtime. R8 treats a\n# missing class as a hard error, so the reference is suppressed: a release\n# build must not fail on it if expo-modules-core does not ship that package.\n-dontwarn expo.modules.kotlin.runtime.**\n"
           }
         }
       ]
@@ -120,7 +130,7 @@
       }
     },
     "owner": "shelfassetmanagement",
-    "runtimeVersion": "1.6.0",
+    "runtimeVersion": "1.8.0",
     "updates": {
       "url": "https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58",
       "enabled": true,

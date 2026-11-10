@@ -3,10 +3,13 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
+import type { FieldLinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
   CustodySourceOption,
 } from "@shelf/quantity-control";
+import type { NotificationPreferences } from "../push/preferences";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -39,6 +42,13 @@ export type Organization = {
   baseUserCanSeeBookings?: boolean;
   selfServiceCanSeeCustody?: boolean;
   baseUserCanSeeCustody?: boolean;
+  /**
+   * Owner-only permission switch from `/api/mobile/me`: when true, Managers may
+   * add and edit assets and kits, update locations and link codes. Pass the
+   * organization to `userHasPermission` so entry points follow it. Absent on
+   * older servers; read as `false`, which only ever under-offers.
+   */
+  managersCanEditAssets?: boolean;
 };
 
 export type MeResponse = {
@@ -409,8 +419,21 @@ export type AssetDetail = {
       type: string;
       helpText: string | null;
       active: boolean;
+      /** Absent on servers older than the Link format. */
+      format?: MobileCustomFieldFormat;
     };
   }[];
+  /**
+   * Page titles and names people gave the links in this asset's values,
+   * keyed by custom field id. The server keys them because this app's URL
+   * implementation cannot reproduce link keys for every host. A chip whose
+   * field has no entry reads what the URL alone says.
+   *
+   * Mirrors `fieldLinkTitles` of
+   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. Absent on older
+   * servers.
+   */
+  fieldLinkTitles?: FieldLinkTitles;
   /**
    * Aggregated per-status quantity slices for QUANTITY_TRACKED assets.
    * Optional + nullable: absent on pre-quantity servers, `null` for INDIVIDUAL
@@ -1219,6 +1242,12 @@ export type BookingDetailResponse = {
     canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
+    /**
+     * Whether the caller may discard this draft (archive a DRAFT): offered to
+     * members who may archive but not delete. Optional: servers that predate
+     * the flag omit it, and an absent flag hides the action.
+     */
+    canDiscardDraft?: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
     /**
@@ -1295,6 +1324,19 @@ export type BookingMutationResponse = {
    * servers that predate archiving.
    */
   droppedArchivedCount?: number;
+  /**
+   * Duplicate only: models the copy reserved fewer units of than the source
+   * had open, because the dates have fewer free or, when `failed`, because the
+   * reservation could not be written. Absent on other mutations and on servers
+   * that predate copying reservations.
+   */
+  reducedModelReservations?: {
+    assetModelId: string;
+    assetModelName: string;
+    requested: number;
+    reserved: number;
+    failed?: boolean;
+  }[];
 };
 
 /**
@@ -1543,6 +1585,15 @@ export type AuditExpectedAsset = {
   name: string;
   auditAssetId: string;
   /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
+  /**
    * Evidence recorded against this asset, whether or not anyone scanned it —
    * a note or photo can be attached to an expected asset directly.
    *
@@ -1607,6 +1658,15 @@ export type AuditScanData = {
    * Absent on servers that predate archiving.
    */
   archivedAt?: string | null;
+  /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
 };
 
 export type AuditDetailResponse = {
@@ -1678,6 +1738,10 @@ export type AuditEvidenceImage = {
   /** Always populated — the server falls back to `imageUrl`. */
   thumbnailUrl: string;
   description: string | null;
+  /** When the photo was taken (from its EXIF), ISO; null when unknown. */
+  capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;
@@ -1722,6 +1786,9 @@ export type RecordScanResponse = {
   auditAssetId: string | null;
   foundAssetCount: number;
   unexpectedAssetCount: number;
+  /** The row's counts after this scan. Absent on servers without audit counts. */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
 };
 
 /**
@@ -1907,6 +1974,19 @@ export type MobileCustomFieldType =
   | "AMOUNT"
   | "OPTION";
 
+/**
+ * How a TEXT custom field's value is read. `LINK` fields hold one web link:
+ * the server refuses any other value with a 400 whose message the edit
+ * screens show. `PLAIN` is every other field, of any type.
+ *
+ * Mirrors the `CustomFieldFormat` enum in
+ * packages/database/prisma/schema.prisma, sent by
+ * apps/webapp/app/routes/api+/mobile+/custom-fields.ts and
+ * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. The link rule
+ * itself is shared, not mirrored: both apps read it from `@shelf/links`.
+ */
+export type MobileCustomFieldFormat = "PLAIN" | "LINK";
+
 export type MobileCustomFieldDefinition = {
   id: string;
   name: string;
@@ -1914,6 +1994,8 @@ export type MobileCustomFieldDefinition = {
   helpText: string | null;
   required: boolean;
   options: string[] | null;
+  /** Absent on servers older than the Link format: read as `PLAIN`. */
+  format?: MobileCustomFieldFormat;
 };
 
 /**
@@ -2045,4 +2127,45 @@ export type AssetBookingsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+// ── Push notifications ─────────────────────────────────
+
+/**
+ * Body of `POST /api/mobile/push-token`: this device, for the signed-in
+ * person. Repeating it refreshes the server's `lastSeenAt`, and a token
+ * another person registered moves to the caller.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/push-token.ts}
+ */
+export type RegisterPushTokenPayload = {
+  /** The `ExponentPushToken[...]` string from `getExpoPushTokenAsync`. */
+  token: string;
+  platform: "IOS" | "ANDROID";
+  /** `expo-device` model name, at most 120 characters; null when unknown. */
+  deviceName: string | null;
+  /** This build's version, at most 20 characters; null when unknown. */
+  appVersion: string | null;
+};
+
+/** Answer of both `POST` and `DELETE /api/mobile/push-token`. */
+export type PushTokenResponse = { ok: true };
+
+/**
+ * Answer of `GET /api/mobile/notification-preferences`.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/notification-preferences.ts}
+ */
+export type NotificationPreferencesResponse = {
+  /** The four switches; all on for someone who never changed them. */
+  preferences: NotificationPreferences;
+  /** Whether any of the caller's workspaces' plans include push. */
+  pushAvailable: boolean;
+  /** Ids of the caller's workspaces whose plans include push. */
+  organizationsWithPush: string[];
+};
+
+/** Answer of `PUT /api/mobile/notification-preferences`: all four switches. */
+export type UpdateNotificationPreferencesResponse = {
+  preferences: NotificationPreferences;
 };

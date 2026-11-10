@@ -7,6 +7,7 @@ import {
   wrapKitsWithDataForNote,
   wrapUserLinkForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapCustodianForNote,
   wrapDescriptionForNote,
   wrapTagForNote,
@@ -430,7 +431,7 @@ describe("wrapCustodianForNote", () => {
     );
   });
 
-  it("should wrap custodian without user as bold text", () => {
+  it("should wrap custodian without user in a name tag", () => {
     const custodian = {
       teamMember: {
         name: "External Team Member",
@@ -438,7 +439,29 @@ describe("wrapCustodianForNote", () => {
       },
     };
     const result = wrapCustodianForNote(custodian);
-    expect(result).toBe("**External Team Member**");
+    expect(result).toBe('{% name text="External Team Member" /%}');
+  });
+
+  it("keeps a URL-shaped custodian name without a user inside a name tag", () => {
+    const result = wrapCustodianForNote({
+      teamMember: { name: "https://evil.example/login", user: null },
+    });
+    const nodes = [...Markdoc.parse(`Given to ${result}.`).walk()];
+    expect(
+      nodes.filter(
+        (node) =>
+          node.type === "text" &&
+          String(node.attributes.content).includes("https://evil.example")
+      )
+    ).toEqual([]);
+    expect(
+      nodes.filter(
+        (node) =>
+          node.type === "tag" &&
+          node.tag === "name" &&
+          node.attributes.text === "https://evil.example/login"
+      )
+    ).toHaveLength(1);
   });
 
   it("should handle custodian with user having only firstName", () => {
@@ -474,6 +497,42 @@ describe("wrapCustodianForNote", () => {
     const result = wrapCustodianForNote(custodian);
     expect(result).toBe(
       `{% link to="/settings/team/users/user789" text="Unknown User" /%}`
+    );
+  });
+});
+
+describe("wrapNameForNote", () => {
+  it("wraps plain text in a name tag", () => {
+    expect(wrapNameForNote("Shoot 2")).toBe('{% name text="Shoot 2" /%}');
+  });
+
+  it("escapes quotes", () => {
+    expect(wrapNameForNote('Box "A"')).toBe(
+      '{% name text="Box &quot;A&quot;" /%}'
+    );
+  });
+
+  it("strips Markdoc delimiters so the value cannot open a tag", () => {
+    const result = wrapNameForNote('X{% link to="javascript:alert(1)" /%}');
+    expect(result).toBe(
+      '{% name text="X link to=&quot;javascript:alert(1)&quot; /" /%}'
+    );
+    const tags = [...Markdoc.parse(result).walk()].filter(
+      (node) => node.type === "tag"
+    );
+    expect(tags.map((node) => node.tag)).toEqual(["name"]);
+  });
+
+  it("treats a missing value as empty text", () => {
+    expect(wrapNameForNote(null)).toBe('{% name text="" /%}');
+  });
+
+  it("adds chips=true only when asked", () => {
+    expect(wrapNameForNote("https://x.example/a.pdf", { chips: true })).toBe(
+      '{% name text="https://x.example/a.pdf" chips=true /%}'
+    );
+    expect(wrapNameForNote("https://x.example/a.pdf")).toBe(
+      '{% name text="https://x.example/a.pdf" /%}'
     );
   });
 });

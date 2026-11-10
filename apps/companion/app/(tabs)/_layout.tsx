@@ -11,14 +11,17 @@ import { showsTabSidebar } from "@/lib/content-column";
 
 /**
  * Holds the tabs that are single screens in the content column on wide
- * windows. Assets, Bookings and Audits are stacks that apply the column to
- * their own screens (wrapping them here would squeeze their headers too), and
- * the scanner's camera uses the whole window.
+ * windows. Assets, Bookings, Audits and Settings are stacks that apply the
+ * column to their own screens (wrapping them here would squeeze their headers
+ * too), and the scanner's camera uses the whole window.
  */
 const TAB_SCREEN_LAYOUT = contentColumnLayout({
-  only: ["home", "custody", "settings"],
+  only: ["home", "custody"],
 });
 
+// The tab icons cast `color` to a string: React Native 0.88 types the tint
+// as any ColorValue (numbers and null included), Ionicons takes a string, and
+// every tint set below is one.
 export default function TabLayout() {
   const { colors } = useTheme();
   const { session } = useAuth();
@@ -91,7 +94,7 @@ export default function TabLayout() {
           title: "Home",
           tabBarAccessibilityLabel: "Home",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
+            <Ionicons name="home-outline" size={size} color={color as string} />
           ),
         }}
       />
@@ -102,7 +105,7 @@ export default function TabLayout() {
           headerShown: false,
           tabBarAccessibilityLabel: "Assets",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cube-outline" size={size} color={color} />
+            <Ionicons name="cube-outline" size={size} color={color as string} />
           ),
         }}
       />
@@ -113,7 +116,7 @@ export default function TabLayout() {
           tabBarAccessibilityLabel: "Scan",
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="scan" size={size + 2} color={color} />
+            <Ionicons name="scan" size={size + 2} color={color as string} />
           ),
           tabBarLabelStyle: {
             fontSize: sidebar ? fontSize.base : fontSize.xs,
@@ -128,7 +131,11 @@ export default function TabLayout() {
           headerShown: false,
           tabBarAccessibilityLabel: "Bookings",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
+            <Ionicons
+              name="calendar-outline"
+              size={size}
+              color={color as string}
+            />
           ),
         }}
       />
@@ -150,9 +157,17 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: "Settings",
+          headerShown: false,
+          // Leaving the tab returns its stack to the Settings list, so every
+          // way into the tab (the tab bar, `pushIntoTab`) opens the list.
+          popToTopOnBlur: true,
           tabBarAccessibilityLabel: "Settings",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings-outline" size={size} color={color} />
+            <Ionicons
+              name="settings-outline"
+              size={size}
+              color={color as string}
+            />
           ),
         }}
       />

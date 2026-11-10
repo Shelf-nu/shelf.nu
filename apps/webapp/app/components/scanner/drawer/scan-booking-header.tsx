@@ -51,6 +51,7 @@ export function ScanBookingHeader({
         <BookingStatusBadge
           status={booking.status}
           custodianUserId={booking.custodianUserId || undefined}
+          to={booking.to}
         />
       </div>
 

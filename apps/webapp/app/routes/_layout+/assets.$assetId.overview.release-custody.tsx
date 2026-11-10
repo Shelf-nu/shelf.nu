@@ -18,9 +18,9 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCustodianForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import {
@@ -213,8 +213,8 @@ export const action = async ({
               user: custodyRecord.custodian.user,
             },
           })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianDisplayName)}**`;
+        : // Free-form fallback name: a value someone typed, never a link.
+          wrapNameForNote(custodianDisplayName);
       const actor = wrapUserLinkForNote(user);
       const content = assignsSelfOnly
         ? `${actor} released their custody.`

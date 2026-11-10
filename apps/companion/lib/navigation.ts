@@ -1,5 +1,8 @@
+import { Platform } from "react-native";
 import { router, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
+import { joinOpensInFlight, openPastStaleLock } from "./browser-lock";
+import { lightColors } from "./theme-colors";
 
 /**
  * Tab index routes. Pushing one of these roots that tab's stack at its list
@@ -49,21 +52,71 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
 }
 
 /**
- * Open a `shelf.nu` web URL in an in-app browser (Custom Tab on Android,
- * SFSafariViewController on iOS).
+ * Open a booking's detail screen from an alert button.
  *
- * Use this — NOT `Linking.openURL` — for any `https://app.shelf.nu/...` link
- * whose path the app claims as a Universal Link / App Link (`/qr`, `/assets`,
- * `/bookings`, `/audits`). On Android, `Linking.openURL` of a *verified*
- * app-link is re-intercepted by the system and re-launches this app — so a
- * deep link that fails to resolve in-app and falls back to its own web URL
- * would loop straight back into the failing handler. An in-app browser renders
- * the page directly without re-triggering link interception, making web
- * fallbacks loop-safe on both platforms.
+ * Navigating synchronously inside an `Alert` button's `onPress` wedges the
+ * navigation transition into an endless render-commit loop (the JS thread
+ * stays busy and network callbacks starve). The push therefore runs on the
+ * next frame, outside the button handler. It goes through `pushIntoTab`, so
+ * "back" returns to the bookings list.
  *
- * @param url - the absolute https URL to open
- * @returns the `WebBrowser.openBrowserAsync` promise (resolves when dismissed)
+ * @param bookingId - the booking to open
  */
-export function openShelfWebUrl(url: string) {
-  return WebBrowser.openBrowserAsync(url);
+export function openBookingAfterAlert(bookingId: string): void {
+  requestAnimationFrame(() => {
+    pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
+  });
 }
+
+/**
+ * How the in-app browser looks: a sheet over the screen the person tapped
+ * on (iOS), with Shelf orange on its controls (iOS) or toolbar (Android),
+ * the page title shown, and reader mode off so a page opens as published.
+ * Dismissing it returns to that screen exactly as it was.
+ */
+const IN_APP_BROWSER_OPTIONS: WebBrowser.WebBrowserOpenOptions = {
+  presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+  controlsColor: lightColors.primary,
+  dismissButtonStyle: "close",
+  readerMode: false,
+  enableBarCollapsing: true,
+  // why: Android only. On iOS `toolbarColor` is the bar background, and an
+  // orange bar under orange controls would hide them; iOS keeps its system
+  // bar (light or dark) with orange controls instead.
+  ...(Platform.OS === "android" ? { toolbarColor: lightColors.primary } : {}),
+  showTitle: true,
+  enableDefaultShareMenuItem: true,
+};
+
+/**
+ * Open a web page in the in-app browser (SFSafariViewController on iOS, a
+ * Custom Tab on Android). Files behind a URL (PDF, images, Office documents)
+ * open in it too, with no download step.
+ *
+ * Use this, NOT `Linking.openURL`, for every web page the app opens. On
+ * Android, `Linking.openURL` of a *verified* app-link (`app.shelf.nu/qr`,
+ * `/assets`, `/bookings`, `/audits`) is re-intercepted by the system and
+ * re-launches this app, so a deep link that falls back to its own web URL
+ * would loop straight back into the failing handler. An in-app browser
+ * renders the page directly without re-triggering link interception, making
+ * web fallbacks loop-safe on both platforms.
+ *
+ * A session iOS never released (see `./browser-lock.ts`) is released and
+ * the page opened once more, so a link never silently opens nothing. A
+ * second tap while the first page is still being presented joins that open
+ * (`joinOpensInFlight`), so a double tap never closes and reopens the
+ * browser.
+ *
+ * @param url - the absolute http(s) URL to open
+ * @returns the `WebBrowser.openBrowserAsync` result, once the browser is
+ *   dismissed
+ */
+export const openShelfWebUrl: (
+  url: string
+) => Promise<WebBrowser.WebBrowserResult> = joinOpensInFlight((url) =>
+  openPastStaleLock(
+    () => WebBrowser.openBrowserAsync(url, IN_APP_BROWSER_OPTIONS),
+    () => WebBrowser.dismissBrowser(),
+    WebBrowser.WebBrowserResultType.LOCKED
+  )
+);

@@ -23,6 +23,7 @@ export {
   hydrateActiveServer,
   subscribeToServerChange,
 } from "./active-server";
+export { onBeforeSessionEnd, runBeforeSessionEnd } from "./session-end";
 export {
   disconnectFromServer,
   fetchLatestCompanionVersion,

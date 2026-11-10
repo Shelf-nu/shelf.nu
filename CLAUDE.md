@@ -69,8 +69,9 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 `/pr-review <number>`): intent vs. actual change, bugs, tests, conventions and
 reuse, security, consumers, performance and deploy safety. Every finding is
 verified, and the report is a plain-language verdict with numbered findings.
-Read-only during the review; afterwards it fixes only the findings you pick (or
-writes a throwaway "prove N" test), and it never posts unless you ask.
+Read-only during the review; afterwards it either fixes the findings you pick or
+posts them as a request-changes review for the author (never both), or writes a
+throwaway "prove N" test. It never posts unless you ask.
 
 - Skill: `.claude/skills/pr-review/SKILL.md`
 - Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,
@@ -137,7 +138,8 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 | `@shelf/permissions`      | `packages/permissions/`      | **Owns authorization**: the `PermissionAction`/`PermissionEntity` vocabulary, the role → permission matrix and `roleHasPermission()` (with the ADMIN/OWNER allow-all short-circuit), **and** the role policy table `ROLE_POLICIES` with `resolveRoleAccess()`: how far each role reaches (booking/custody/audit scope, limits, notification audience, membership rules). Every authorization decision in both apps resolves here; the webapp imports it only through `~/utils/permissions/role-access` and `permission.data`. |
 | `@shelf/datetime`         | `packages/datetime/`         | Pure, preference-aware date/time formatting shared by both apps so their date rendering never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `@shelf/quantity-control` | `packages/quantity-control/` | Pure quantity/availability domain for `QUANTITY_TRACKED` assets, shared by both apps so their availability math never drifts.                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `@shelf/labels`           | `packages/labels/`           | Canonical user-facing label strings shared by both apps so their terminology never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `@shelf/labels`           | `packages/labels/`           | Canonical user-facing label strings, and the small display rules that pick between them (such as which audit photo flag applies), shared by both apps so their terminology never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `@shelf/links`            | `packages/links/`            | Pure web-link reading for custom field values (URL detection, provider and kind, chip words and icons, the Link-format input rule), shared by both apps so a link reads the same on web and phone.                                                                                                                                                                                                                                                                                                                            |
 
 Except for `@shelf/database`, these are **pure, dependency-free, no-build**
 packages: their `exports` point straight at `src/index.ts` and consumers
@@ -296,6 +298,7 @@ Two questions, both answered by `@shelf/permissions`:
 - **May this role do X on Y?** → the matrix: `requirePermission` / `requireMobilePermission` on the server, `userHasPermission({ roles, entity, action })` on the client (`roles` from `useOrganizationRoles()`).
 - **How far does this role reach?** (whose bookings, whose custody, which audits, limits, who is notified) → `access`: `requirePermission(...).access`, `getMobileUserContext(...).access`, `useRoleAccess()` in components and in the companion.
 - Owner-only → `isWorkspaceOwner(roles)` / `access.ownsWorkspace`. Prisma role audiences → `rolesWhere(policy => …)`.
+- Workspace permission switches (owner-only, e.g. `managersCanEditAssets`) widen the matrix through `WORKSPACE_GRANTS`; every check above already reads them. A route that shares a granted pair but must stay closed passes `matrixOnly: true`; every such check is classified in `apps/webapp/test/routes-tests/manager-edit-switch.route-registry.test.ts`, which fails on a new one.
 
 **Never compare roles directly** (`role === "ADMIN"`, `roles.includes(...)`, `roles[0]`): `local-rules/no-direct-role-checks` blocks it in the webapp and the companion. A new reach question gets a `RolePolicy` field with a value for every role. Webapp code imports the package only via `~/utils/permissions/role-access` (TS instantiation ceiling).
 
@@ -701,6 +704,14 @@ multi-file features, or anything genuinely needing an independent review.
   - Subject line can be longer, only body lines are restricted
 - dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
 - Include test readability and mock discipline in PR reviews. Overly mocked or verbose tests should be refactored before merge.
+
+### Opening a pull request
+
+Follow the process in [CONTRIBUTING.md](./CONTRIBUTING.md#the-pull-request-process):
+
+- Open every PR as a **draft** (`gh pr create --draft`), with a description of what the change does, why, and how it was tested.
+- Do **not** mark it ready (`gh pr ready`) or request a review until every item in "Get it ready" is done: CI green, CodeRabbit has reviewed the latest commit, every CodeRabbit thread fixed or answered and resolved, branch up to date with `main` and free of conflicts, and (for team members) `/pr-review` run with its must-fix and should-fix findings fixed.
+- After review feedback: fix or answer each comment, resolve the threads you fixed, and leave a reviewer's thread open when you replied with a question or a disagreement. CodeRabbit threads are always resolved once fixed or answered. Go through "Get it ready" again for the new commits, then re-request the review. A push alone does not put the PR back in the review queue.
 
 ## Rule Improvement Triggers
 

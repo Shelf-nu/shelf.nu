@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatPersonName } from "@/lib/person-name";
 import { TagChip } from "@/components/tag-chip";
@@ -30,7 +30,6 @@ import {
   consumeBookingDirty,
   markBookingsListDirty,
 } from "@/lib/booking-refresh";
-import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -44,11 +43,8 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
-import {
-  archivedLeftOutNote,
-  assetBadgeStatus,
-  isArchivedAsset,
-} from "@/lib/archived-assets";
+import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
+import { duplicateLeftOutNote } from "@/lib/booking-duplicate-note";
 import {
   MODEL_SHORTFALL_NOTICE,
   modelShortfallLabel,
@@ -77,6 +73,10 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  canOfferDiscardDraft,
+  discardOutcome,
+} from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
@@ -89,7 +89,7 @@ import {
 } from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
-import { ExpandableText } from "@/components/shared/expandable-text";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import {
   bookingRowKey,
   buildBookingRows,
@@ -201,6 +201,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   >({
     canCancel: false,
     canArchive: false,
+    canDiscardDraft: false,
     canDuplicate: false,
     canDelete: false,
   });
@@ -899,6 +900,54 @@ function BookingDetailScreen({ id }: { id: string }) {
     );
   };
 
+  // Discarding a draft archives it: it leaves the caller's list but stays in
+  // the workspace history, so a plain confirm is enough.
+  const handleDiscardDraft = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Discard Draft",
+      `Discard "${booking.name}"? It moves to your archived bookings.`,
+      [
+        { text: "Keep draft", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.discardDraftBooking(
+              currentOrg.id,
+              booking.id
+            );
+            // An error can still mean the discard landed (a timed-out
+            // response), so re-read the booking before reporting a failure.
+            const outcome = err
+              ? discardOutcome(
+                  (await api.booking(booking.id, currentOrg.id)).data
+                    ?.booking ?? null
+                )
+              : "landed";
+            setIsActioning(false);
+            // Either way the booking may have changed: refresh list and detail.
+            markBookingsListDirty();
+            fetchBooking();
+            if (outcome === "unknown") {
+              Alert.alert(
+                "Discard status unknown",
+                "We couldn't confirm whether the draft was discarded. Pull to refresh to check its status."
+              );
+              return;
+            }
+            if (outcome === "not-landed") {
+              Alert.alert("Couldn't discard", err ?? "Please try again.");
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  };
+
   // A permanent delete asks for the booking's name to be typed first, the
   // same rule as the webapp's delete dialog.
   const handleDelete = () => {
@@ -980,10 +1029,11 @@ function BookingDetailScreen({ id }: { id: string }) {
             markBookingsListDirty();
             // Open the new draft's edit screen so the user can adjust dates etc.
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
-            // Archived assets cannot be booked, so the copy left them out.
-            // Say so, as the web does, instead of letting it look complete.
-            const droppedNote = archivedLeftOutNote(dup.droppedArchivedCount);
-            if (droppedNote) Alert.alert("Booking duplicated", droppedNote);
+            // Archived assets cannot be booked, and model reservations are
+            // capped at what the dates have free, so the copy can leave things
+            // out. Say so, as the web does, instead of letting it look complete.
+            const leftOutNote = duplicateLeftOutNote(dup);
+            if (leftOutNote) Alert.alert("Booking duplicated", leftOutNote);
           },
         },
       ]
@@ -1022,6 +1072,14 @@ function BookingDetailScreen({ id }: { id: string }) {
       icon: "archive-outline",
       destructive: false,
       onPress: handleArchive,
+    });
+  if (canOfferDiscardDraft(bookingActions))
+    lifecycleActions.push({
+      key: "discardDraft",
+      label: "Discard draft",
+      icon: "archive-outline",
+      destructive: true,
+      onPress: handleDiscardDraft,
     });
   if (bookingActions.canCancel)
     lifecycleActions.push({
@@ -1636,6 +1694,7 @@ function BookingDetailScreen({ id }: { id: string }) {
           // Reinstating uses the web's archive grant (admins and owners).
           canReinstate: userHasPermission({
             roles: currentOrg?.roles,
+            workspace: currentOrg,
             entity: "asset",
             action: "archive",
           }),
@@ -1721,6 +1780,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     canPartialCheckout &&
     userHasPermission({
       roles: currentOrg?.roles,
+      workspace: currentOrg,
       entity: "booking",
       action: "checkout",
     }) &&
@@ -1810,7 +1870,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             <Text style={styles.searchEmpty}>
               No assets match &ldquo;{searchTerm.trim()}&rdquo;
             </Text>
-          ) : null
+          ) : undefined
         }
         ListHeaderComponent={
           <View style={styles.header}>
@@ -1839,11 +1899,10 @@ function BookingDetailScreen({ id }: { id: string }) {
               </View>
 
               {booking.description ? (
-                <ExpandableText
+                <LinkedParagraph
                   key={booking.id}
                   text={booking.description}
-                  label="description"
-                  numberOfLines={3}
+                  expandable={{ label: "description", numberOfLines: 3 }}
                   style={styles.description}
                   testID="booking-description"
                 />
@@ -2919,7 +2978,7 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: spacing.md,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.overlayDark,
     justifyContent: "center",
     alignItems: "center",

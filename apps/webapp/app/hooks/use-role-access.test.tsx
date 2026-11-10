@@ -27,6 +27,7 @@ describe("useRoleAccess", () => {
         baseUserCanSeeBookings: false,
         selfServiceCanSeeCustody: false,
         baseUserCanSeeCustody: false,
+        managersCanEditAssets: false,
       },
     });
     vi.mocked(useRouteLoaderData).mockReturnValue({ roleAccess: adminAccess });

@@ -299,6 +299,7 @@ export async function action({ request }: ActionFunctionArgs) {
       alertsOrgOnReservation:
         access.policy.notifications.reservationAlertsAdmins,
       userId: user.id,
+      seesAllBookings: access.bookings.seeAll,
     });
 
     return data({

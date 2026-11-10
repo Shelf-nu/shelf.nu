@@ -420,7 +420,16 @@ export default function DynamicSelect({
             <PopoverContent
               className={tw(
                 popoverZIndexClassName ?? "z-[100]",
-                "overflow-y-auto rounded-md border border-gray-300 bg-white",
+                "flex flex-col overflow-y-auto rounded-md border border-gray-300 bg-white",
+                // Fit the room left on the side Radix placed it, so the footer
+                // and the create entry stay on screen: the option list is the
+                // part that shrinks. On phones the panel is pinned 20px from
+                // the top (MOBILE_POPPER_CSS), so it caps against the viewport:
+                // `vh` for browsers in the support floor without `dvh` (Chrome
+                // and Edge before 108, Firefox before 101), `dvh` where it works.
+                // The `dvh` cap is a variant, not a second plain class, because
+                // `tw` merges two plain `max-h-*` classes down to the last one.
+                "max-h-[calc(100vh-40px)] supports-[height:100dvh]:max-sm:max-h-[calc(100dvh-40px)] sm:max-h-[var(--radix-popover-content-available-height)]",
                 className
               )}
               style={{
@@ -429,6 +438,7 @@ export default function DynamicSelect({
               }}
               align="center"
               sideOffset={5}
+              collisionPadding={8}
               // A modal Radix Dialog — every `Sheet`, so every route rendered
               // through `ContextualSidebar` — mounts `react-remove-scroll`,
               // which cancels any `wheel` whose target sits outside the dialog
@@ -498,7 +508,7 @@ export default function DynamicSelect({
                 </div>
               </When>
 
-              <div className="max-h-[320px] divide-y overflow-y-auto">
+              <div className="max-h-[320px] min-h-24 divide-y overflow-y-auto">
                 {searchQuery !== "" && items.length === 0 && (
                   <EmptyState
                     searchQuery={searchQuery}
@@ -636,7 +646,9 @@ export default function DynamicSelect({
               </When>
 
               <When truthy={typeof extraContentNode !== "undefined"}>
-                <div className="border-t px-3 pb-3">{extraContentNode}</div>
+                <div className="border-t px-3 pb-3 empty:hidden">
+                  {extraContentNode}
+                </div>
               </When>
             </PopoverContent>
           </PopoverPortal>

@@ -7,21 +7,24 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
-  InteractionManager,
+  ScrollView,
   Linking,
   Platform,
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useOrg } from "@/lib/org-context";
-import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
+import {
+  openBookingAfterAlert,
+  openShelfWebUrl,
+  pushIntoTab,
+} from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
@@ -43,6 +46,7 @@ import type {
 } from "@/lib/api/types";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -109,8 +113,11 @@ import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useRoleAccess } from "@/hooks/use-role-access";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { endScan, tryBeginScan } from "@/lib/scan-lock";
+import { CONTROL_ROW_GAP, SCAN_FRAME_SIZE } from "@/lib/scanner-geometry";
 import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
+import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
 import { ScanFrame } from "@/components/scanner/scan-frame";
 import { ScanResultCard } from "@/components/scanner/scan-result-card";
 import type { IoniconName } from "@/components/scanner/scan-result-card";
@@ -304,11 +311,12 @@ function ScannerContent() {
       SCANNER_ACTIONS.filter(({ permission: perm }) =>
         userHasPermission({
           roles: currentOrg?.roles,
+          workspace: currentOrg,
           entity: perm.entity,
           action: perm.action,
         })
       ),
-    [currentOrg?.roles]
+    [currentOrg]
   );
 
   const access = useRoleAccess();
@@ -316,11 +324,13 @@ function ScannerContent() {
   // web scanner, which pre-selects self and disables the custodian picker).
   const takesCustodyForSelfOnly = access.custody.assign === "self";
 
-  // Native claim / link-existing is gated on qr:update — effectively
-  // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
-  // BASE/SELF_SERVICE only hold qr:read). Non-admins keep the web bridge.
+  // Native claim / link-existing is gated on qr:update: ADMIN/OWNER (the
+  // server short-circuits those roles to allow-all), and MANAGER when the
+  // workspace switches on managersCanEditAssets. Everyone else keeps the web
+  // bridge.
   const canManageQrCodes = userHasPermission({
     roles: currentOrg?.roles,
+    workspace: currentOrg,
     entity: "qr",
     action: "update",
   });
@@ -356,10 +366,24 @@ function ScannerContent() {
 
   /**
    * Measured height of the open drawer. The overlay itself never resizes (see
-   * the bottom-section comment), so this is used only to lift the floating
-   * manual-entry pill clear of the drawer.
+   * the bottom-section comment). While a drawer is open, the scan status
+   * (lookup spinner, result card) moves to a host just above it, and the idle
+   * hint is not shown.
    */
   const [drawerHeight, setDrawerHeight] = useState(0);
+  /**
+   * Distance from the top of the screen to the bottom of the mode pills and
+   * camera controls. The status host above an open drawer starts below it, so
+   * a tall result card can never cover the controls.
+   */
+  const [controlsBottom, setControlsBottom] = useState(0);
+  /**
+   * Top of the overlay's bottom strip, and the offset inside it where the
+   * scan status sits (under the mode dots). Together they place the status
+   * host under the frame while no drawer is open.
+   */
+  const [bottomStripTop, setBottomStripTop] = useState(0);
+  const [statusSlotTop, setStatusSlotTop] = useState(0);
 
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -395,8 +419,8 @@ function ScannerContent() {
 
   /**
    * Clear the measured height once no drawer can be showing. The drawer host
-   * unmounts on close, so its `onLayout` never fires again — without this the
-   * manual-entry pill stays floating at the old offset over empty space.
+   * unmounts on close, so its `onLayout` never fires again; without this the
+   * scan status stays floating at the old offset over empty space.
    *
    * Mirrors the `show*Drawer` predicates further down (which sit past an early
    * return, so a hook can't read them) rather than only checking the item
@@ -410,6 +434,14 @@ function ScannerContent() {
   }, [anyDrawerVisible]);
 
   const insets = useSafeAreaInsets();
+  /**
+   * Insets the overlay's controls keep clear of: an iPhone Duo's status-bar
+   * rail or a turned foldable's camera cutout on the sides, each side its own,
+   * and the home indicator once the tab bar has moved to a sidebar. The
+   * sidebar already covers the left side when it is showing.
+   */
+  const screenInsets = useTabScreenInsets();
+  const sideInsetStyle = { left: screenInsets.left, right: screenInsets.right };
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -506,32 +538,12 @@ function ScannerContent() {
     setBookingCheckinItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
   }, [bookingBlockers]);
 
-  // Dev-mode scan injection (stripped from production builds)
+  // Manual code entry (the `devScan` prefix keeps the e2e testIDs stable)
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
 
-  /**
-   * Absolute position of the manual-entry control.
-   *
-   * The open text field always lives in the top strip, just under the status
-   * bar: the keyboard rises from the bottom and would cover a field anchored
-   * there, and the top strip is free above the header and pills. The closed
-   * pill sits low in the bottom strip while nothing else is there, and moves
-   * to the top strip as soon as a drawer opens: the drawer shares the bottom
-   * strip with the hint text and the camera controls, and no offset keeps the
-   * pill clear of all three on a short screen.
-   */
-  const manualEntryPlacement =
-    devScanVisible || drawerHeight > 0
-      ? { top: insets.top + spacing.md }
-      : { bottom: MANUAL_ENTRY_BOTTOM };
-
   // Cooldown (shared hook)
-  const {
-    shouldSkip: shouldSkipScan,
-    startCooldown,
-    lastScanRef,
-  } = useScanCooldown();
+  const { startCooldown, lastScanRef } = useScanCooldown();
 
   // Scan processing state (extracted hook) -- created first so
   // its setIsPaused can be referenced by the inactivity callback.
@@ -680,7 +692,7 @@ function ScannerContent() {
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = () => {
-    isProcessingRef.current = false;
+    endScan(isProcessingRef);
     setIsProcessing(false);
     startCooldown();
   };
@@ -785,10 +797,8 @@ function ScannerContent() {
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || shouldSkipScan(data)) return;
+      if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
-      isProcessingRef.current = true;
-      lastScanRef.current = data;
       setIsProcessing(true);
       setScanResult(null);
       resetInactivityTimer();
@@ -921,7 +931,7 @@ function ScannerContent() {
                 : null;
 
             if (unclaimedQrId && canManageQrCodes) {
-              // Admin/owner: native takeover of the web claim flow. The two
+              // Holds `qr:update`: native takeover of the web claim flow. The two
               // actions claim at DIFFERENT points, deliberately: "Create New
               // Asset" claims up front (the create form needs an owned code),
               // while "Link Existing Asset" does not claim at all here — the
@@ -956,8 +966,8 @@ function ScannerContent() {
                 },
               });
             } else if (unclaimedQrId) {
-              // Non-admin/owner: claiming is not allowed for their role —
-              // keep the web bridge. Loop-safe in-app browser via
+              // Without `qr:update`, their role may not claim, so they keep
+              // the web bridge. Loop-safe in-app browser via
               // openShelfWebUrl, never Linking.openURL (claimed App Link).
               setScanResult({
                 type: "not_found",
@@ -1407,7 +1417,7 @@ function ScannerContent() {
 
           // For Shelf QR codes, offer a path forward for the unlinked code:
           // - If claimed to current org → in-app asset creation and/or
-          //   linking an existing asset (admins) — no claim step needed
+          //   linking an existing asset (`qr:update`), with no claim step
           // - Otherwise → bridge to web
           // Barcodes don't have an external link flow, so no action for those
           type UnlinkedQrAction = {
@@ -1421,6 +1431,7 @@ function ScannerContent() {
 
           const canCreateAsset = userHasPermission({
             roles: currentOrg?.roles,
+            workspace: currentOrg,
             entity: "asset",
             action: "create",
           });
@@ -1428,28 +1439,37 @@ function ScannerContent() {
           // A QR linked to a kit (kitId set, asset null) must NOT offer in-app
           // "Create Asset". createAsset only attaches a passed QR when both its
           // assetId AND kitId are null; for a kit-linked QR it silently mints a
-          // *different* QR and leaves the scanned kit QR untouched — breaking the
-          // "this QR will be linked" promise. Bridge those to the web kit view.
+          // *different* QR and leaves the scanned kit QR untouched, breaking
+          // the "this QR will be linked" promise. The card opens the kit's own
+          // screen instead, or offers nothing when the lookup did not return
+          // the kit (deleted, or not visible to this person).
           const isKitLinked = Boolean(kitId);
 
           // Claimed to the current org, truly unlinked, and the caller can
-          // act on it in-app (create is admin/owner + qr:update is too, but
-          // gate each action on its own permission for correctness).
+          // act on it in-app. Create and qr:update usually travel together,
+          // but each action is gated on its own permission.
           const canActOnUnlinked =
             codeOrgId === currentOrg?.id &&
             (canCreateAsset || canManageQrCodes);
 
-          if (qrId && isKitLinked) {
-            // QR belongs to a kit — open the web app to view the kit
+          if (qrId && kitId && kit) {
+            // The kit is in this workspace (another workspace's code was
+            // handled above), and the app has its screen. A kit the lookup
+            // could not return (deleted, or not visible to this person)
+            // gets no button: its screen would only say "not found".
+            const linkedKitId = kitId;
             unlinkedQrAction = {
-              label: "Open in Browser",
-              icon: "open-outline",
+              label: "View Kit",
+              icon: "cube-outline",
               onPress: () => {
-                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
+                pushIntoTab(
+                  "/(tabs)/assets",
+                  `/(tabs)/assets/kits/${linkedKitId}`
+                );
                 dismissResult();
               },
             };
-          } else if (qrId && canActOnUnlinked) {
+          } else if (qrId && canActOnUnlinked && !isKitLinked) {
             // Already claimed by this org — the claim step is skipped; the
             // create form / link picker attach this exact QR directly.
             const createAction: UnlinkedQrAction | undefined = canCreateAsset
@@ -1485,7 +1505,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1495,7 +1515,7 @@ function ScannerContent() {
             unlinkedQrAction = offered[0];
             unlinkedQrSecondaryAction = offered[1];
             unlinkedQrTertiaryAction = offered[2];
-          } else if (qrId) {
+          } else if (qrId && !isKitLinked) {
             // Unclaimed (for roles without the native claim flow) or claimed
             // by this org while the caller can't act — bridge to web
             unlinkedQrAction = {
@@ -1513,7 +1533,7 @@ function ScannerContent() {
             title: isKitLinked ? "Linked to a Kit" : "No Asset Linked",
             message: qrId
               ? isKitLinked
-                ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
+                ? "This QR code is linked to a kit, not an asset."
                 : canActOnUnlinked
                 ? "This QR code is not linked to any asset. Create a new asset, link an existing one, or link it to a kit in the browser."
                 : "This QR code is not linked to any asset. Open the web app to link it."
@@ -1875,8 +1895,8 @@ function ScannerContent() {
         finalizeScan();
       }
     },
-    // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing, setScanResult,
-    // and shouldSkipScan are stable across renders (refs and setState identities) or
+    // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing and
+    // setScanResult are stable across renders (refs and setState identities) or
     // would cause render storms if listed; intentionally excluded. setCurrentOrg is
     // likewise stable (a useCallback with no deps in OrgProvider). `organizations`
     // IS listed: refreshing the org list hands over a new array without changing
@@ -1899,6 +1919,16 @@ function ScannerContent() {
       flashFrame,
       resetInactivityTimer,
     ]
+  );
+
+  /**
+   * The camera's frame callback. A View-mode result card holds the camera
+   * until it is dismissed, so frames are dropped while one is up; a running
+   * lookup is already refused by the handler's processing lock.
+   */
+  const handleCameraScan = useCameraScanHandler(
+    handleBarCodeScanned,
+    Boolean(scanResult && action === "view" && !isBookingMode)
   );
 
   // ── Batch Actions ──────────────────────────────────
@@ -2330,17 +2360,8 @@ function ScannerContent() {
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    // Defer past the alert dismissal: navigating
-                    // synchronously from an Alert onPress wedges the
-                    // navigation transition into an endless render-commit
-                    // loop (JS thread pegged at ~125% CPU, network
-                    // callbacks starve) — verified by process sampling.
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
+                    // Opens the booking once the alert has dismissed
+                    openBookingAfterAlert(bookingId);
                   },
                 },
               ]
@@ -2457,9 +2478,7 @@ function ScannerContent() {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          InteractionManager.runAfterInteractions(() => {
-            pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
-          });
+          openBookingAfterAlert(bookingId);
         },
       },
     ]);
@@ -2711,16 +2730,9 @@ function ScannerContent() {
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
                   if (result?.isComplete) {
-                    // Anchored navigation — router.back() from a tab screen
-                    // falls through history and can land on Home. Deferred
-                    // past the alert dismissal (same render-loop wedge as
-                    // the add path — see handleBookingAdd).
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
+                    // Anchored navigation: router.back() from a tab screen
+                    // falls through history and can land on Home.
+                    openBookingAfterAlert(bookingId);
                   }
                 },
               },
@@ -2841,16 +2853,9 @@ function ScannerContent() {
             // freshness gate has to be bypassed too.
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
-              // Nothing left to scan. Anchored navigation — router.back() from
+              // Nothing left to scan. Anchored navigation: router.back() from
               // a tab screen falls through history and can land on Home.
-              // Deferred past the alert dismissal (same render-loop wedge as
-              // the add path — see handleBookingAdd).
-              InteractionManager.runAfterInteractions(() => {
-                pushIntoTab(
-                  "/(tabs)/bookings",
-                  `/(tabs)/bookings/${bookingId}`
-                );
-              });
+              openBookingAfterAlert(bookingId);
             }
           },
         },
@@ -3039,6 +3044,133 @@ function ScannerContent() {
     update_location: "Choose Location",
   };
 
+  /** The lookup spinner or the result card; null while idle. */
+  const scanStatus =
+    isProcessing && !scanResult ? (
+      <View style={styles.statusRow}>
+        <ActivityIndicator size="small" color="#fff" />
+        <Text style={styles.instructionText}>Looking up asset...</Text>
+      </View>
+    ) : scanResult ? (
+      <ScanResultCard result={scanResult} onDismiss={dismissResult} />
+    ) : null;
+  /** The swipe transition shared by the status in either position. */
+  const statusMotion = {
+    transform: [{ translateX: swipeTranslateX }],
+    opacity: swipeOpacity,
+  };
+
+  /** Submits the typed code through the camera's resolution pipeline. */
+  const submitManualCode = () => {
+    if (devScanInput.trim()) {
+      handleBarCodeScanned({ data: devScanInput.trim() });
+      setDevScanInput("");
+    }
+  };
+
+  /**
+   * Camera controls: manual code entry, pause and torch in one right-aligned
+   * row under the mode pills (or the booking header). The drawers rise from
+   * the bottom and are capped below this row, so no list length can cover it.
+   * The open code field takes the closed pill's place in the row, above the
+   * scan frame and clear of the keyboard.
+   *
+   * Manual entry is hidden while a result card is up: the card answers the
+   * last code and is dismissed before the next one.
+   *
+   * NOTE: testIDs and state keep the `dev-scan`/`devScan` prefix from the
+   * control's origin so the existing e2e flows stay stable. Web parity: every
+   * web scan surface exposes a manual code-entry input
+   * (apps/webapp/app/components/scanner/code-scanner.tsx).
+   */
+  const cameraControls = (
+    <View
+      style={styles.controlRow}
+      pointerEvents="box-none"
+      testID="camera-controls"
+    >
+      {!scanResult &&
+        (devScanVisible ? (
+          <View style={styles.devScanRow} testID="manual-entry-container">
+            <TextInput
+              testID="dev-scan-input"
+              style={styles.devScanInput}
+              value={devScanInput}
+              onChangeText={setDevScanInput}
+              // Opens the keyboard as soon as the field appears, so one tap
+              // on "Enter code" is enough to start typing.
+              autoFocus
+              placeholder="Enter QR, barcode, or SAM ID"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="go"
+              onSubmitEditing={submitManualCode}
+            />
+            <TouchableOpacity
+              testID="dev-scan-submit"
+              style={styles.devScanButton}
+              onPress={submitManualCode}
+              accessibilityLabel="Look up code"
+              accessibilityRole="button"
+            >
+              <Ionicons name="arrow-forward" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.devScanClose}
+              onPress={() => setDevScanVisible(false)}
+              accessibilityLabel="Close manual entry"
+              accessibilityRole="button"
+            >
+              <Ionicons name="close" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            testID="dev-scan-toggle"
+            style={styles.devScanToggle}
+            onPress={() => setDevScanVisible(true)}
+            accessibilityLabel="Enter a code manually"
+            accessibilityRole="button"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="keypad-outline" size={16} color="#fff" />
+            <Text style={styles.devScanToggleText}>Enter code</Text>
+          </TouchableOpacity>
+        ))}
+      <TouchableOpacity
+        testID="camera-pause"
+        style={[styles.controlButton, isPaused && styles.controlButtonActive]}
+        onPress={togglePause}
+        accessibilityLabel={isPaused ? "Resume camera" : "Pause camera"}
+        accessibilityRole="button"
+        activeOpacity={0.7}
+      >
+        <Ionicons name={isPaused ? "play" : "pause"} size={20} color="#fff" />
+      </TouchableOpacity>
+      <TouchableOpacity
+        testID="camera-torch"
+        style={[
+          styles.controlButton,
+          torchEnabled && styles.controlButtonActive,
+        ]}
+        onPress={toggleTorch}
+        accessibilityLabel={
+          torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
+        }
+        accessibilityRole="button"
+        accessibilityState={{ selected: torchEnabled }}
+        activeOpacity={0.7}
+      >
+        <Ionicons
+          name={torchEnabled ? "flash" : "flash-outline"}
+          size={20}
+          color={torchEnabled ? "#FFD600" : "#fff"}
+        />
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {isFocused && !isPaused && (
@@ -3049,11 +3181,10 @@ function ScannerContent() {
           barcodeScannerSettings={{
             barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
           }}
-          onBarcodeScanned={
-            isProcessing || (scanResult && action === "view" && !isBookingMode)
-              ? undefined
-              : handleBarCodeScanned
-          }
+          // Always a function: swapping it for undefined reconfigures the
+          // iOS capture session and switches the torch off. The gate drops
+          // frames instead (see lib/camera-frame-gate.ts).
+          onBarcodeScanned={handleCameraScan}
         />
       )}
 
@@ -3086,8 +3217,24 @@ function ScannerContent() {
       <View style={styles.overlay} pointerEvents="box-none">
         {/* Top - Action picker or Booking header */}
         <View style={styles.overlaySection} pointerEvents="box-none">
-          {isBookingMode ? (
-            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+          <View
+            // Bounded by the safe area on top, so on the shortest phones a
+            // tall booking header shrinks (see bookingModeHeader) instead of
+            // sliding under the status bar.
+            style={[
+              styles.actionPickerContainer,
+              sideInsetStyle,
+              { top: insets.top },
+            ]}
+            pointerEvents="box-none"
+            onLayout={(e) => {
+              const { y, height } = e.nativeEvent.layout;
+              const bottom = Math.round(y + height);
+              // Guarded like the drawer height: onLayout re-fires on relayout.
+              setControlsBottom((prev) => (prev === bottom ? prev : bottom));
+            }}
+          >
+            {isBookingMode ? (
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
                   // Anchored navigation, like the submit handlers: the scanner
@@ -3140,20 +3287,15 @@ function ScannerContent() {
                     )}
                 </View>
               </View>
-            </View>
-          ) : (
-            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+            ) : (
               <ActionPills
                 actions={availableActions}
                 currentAction={action}
                 onActionChange={handleActionChange}
               />
-              <ActionPillsCoachmark
-                enabled={availableActions.length > 1}
-                currentAction={action}
-              />
-            </View>
-          )}
+            )}
+            {cameraControls}
+          </View>
         </View>
 
         {/* Middle row -- swipe gesture target. Switched off while paused so
@@ -3177,20 +3319,26 @@ function ScannerContent() {
           /**
            * The overlay must NOT reflow when a drawer opens.
            *
-           * This used to collapse to `flex: 0`, but only the BOTTOM section
-           * did — the top kept `flex: 1`, so it absorbed the freed space and
-           * pushed the header and the 240px scan frame downward. The camera is
-           * a static `absoluteFill` layer underneath, so what actually moved
-           * was the cutout sliding down over a still picture: it reads as "the
-           * camera jumped". It also dragged the absolutely-positioned
-           * manual-entry pill (anchored to this section's bottom) up onto the
-           * drawer.
-           *
-           * The drawer is an absolutely-positioned sibling at `bottom: 0`, so
-           * it never needed the overlay to make room in the first place.
+           * The top and bottom sections share the free height equally, which
+           * centres the scan frame. The camera is a static `absoluteFill`
+           * layer underneath, so resizing either section would slide the
+           * cutout over a still picture and read as "the camera jumped". The
+           * drawer is an absolutely-positioned sibling at `bottom: 0` and
+           * needs no room from the overlay.
            */
-          style={[styles.overlaySection, styles.bottomSection]}
+          style={[
+            styles.overlaySection,
+            styles.bottomSection,
+            {
+              paddingLeft: screenInsets.left,
+              paddingRight: screenInsets.right,
+            },
+          ]}
           pointerEvents="box-none"
+          onLayout={(e) => {
+            const top = Math.round(e.nativeEvent.layout.y);
+            setBottomStripTop((prev) => (prev === top ? prev : top));
+          }}
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -3198,27 +3346,34 @@ function ScannerContent() {
               <ModeDots actions={availableActions} currentAction={action} />
             </View>
           )}
+          {/* One-time hint, beside the mode dots under the frame: the top
+              strip above the frame has no spare height on short phones. */}
+          {!isBookingMode && (
+            <ActionPillsCoachmark
+              enabled={availableActions.length > 1}
+              currentAction={action}
+              hidden={scanStatus !== null || drawerHeight > 0}
+            />
+          )}
 
-          {/* Status / instruction text -- animated for swipe transitions.
-              Only the result card takes touches; plain text lets them pass. */}
-          <Animated.View
-            style={[
-              styles.instructionContainer,
-              {
-                transform: [{ translateX: swipeTranslateX }],
-                opacity: swipeOpacity,
-              },
-            ]}
-            pointerEvents={scanResult ? "auto" : "none"}
-          >
-            {isProcessing && !scanResult ? (
-              <View style={styles.statusRow}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.instructionText}>Looking up asset...</Text>
-              </View>
-            ) : scanResult ? (
-              <ScanResultCard result={scanResult} onDismiss={dismissResult} />
-            ) : (
+          {/* Where the scan status host starts while no drawer is open. */}
+          <View
+            pointerEvents="none"
+            onLayout={(e) => {
+              const top = Math.round(e.nativeEvent.layout.y);
+              setStatusSlotTop((prev) => (prev === top ? prev : top));
+            }}
+          />
+
+          {/* Idle instruction text, animated for swipe transitions. A lookup
+              or a result replaces it in the status host (below), and an open
+              drawer replaces it too: the drawer's title and submit button say
+              what the scans are for. */}
+          {drawerHeight === 0 && !scanStatus && (
+            <Animated.View
+              style={[styles.instructionContainer, statusMotion]}
+              pointerEvents="none"
+            >
               <Text style={styles.instructionText}>
                 {isBookingMode
                   ? isBookingFulfilMode
@@ -3230,125 +3385,50 @@ function ScannerContent() {
                     : "Scan assets to check in"
                   : instructionMap[action]}
               </Text>
-            )}
-          </Animated.View>
-
-          {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
-          <View style={styles.controlButtons} pointerEvents="box-none">
-            {/* Pause/Resume toggle */}
-            <TouchableOpacity
-              style={[
-                styles.controlButton,
-                isPaused && styles.controlButtonActive,
-              ]}
-              onPress={togglePause}
-              accessibilityLabel={isPaused ? "Resume camera" : "Pause camera"}
-              accessibilityRole="button"
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={isPaused ? "play" : "pause"}
-                size={20}
-                color="#fff"
-              />
-            </TouchableOpacity>
-            {/* Flashlight toggle */}
-            <TouchableOpacity
-              style={[
-                styles.controlButton,
-                torchEnabled && styles.controlButtonActive,
-              ]}
-              onPress={toggleTorch}
-              accessibilityLabel={
-                torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
-              }
-              accessibilityRole="button"
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={torchEnabled ? "flash" : "flash-outline"}
-                size={20}
-                color={torchEnabled ? "#FFD600" : "#fff"}
-              />
-            </TouchableOpacity>
-          </View>
+            </Animated.View>
+          )}
         </View>
-
-        {/* ── Manual code entry ───────────────────────────
-            Type a QR id, barcode value, or SAM id when a label can't be
-            scanned (damaged/missing/no camera focus). Feeds the same
-            resolution pipeline as the camera. Web parity: every web scan
-            surface exposes a manual code-entry Input
-            (apps/webapp/app/components/scanner/code-scanner.tsx).
-            NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
-            control's origin so the existing e2e flows stay stable. */}
-        {/* Hidden while a result card is shown — the card's actions must never
-            be occluded (the unclaimed card is tall enough to reach this pill). */}
-        {!scanResult && (
-          <View
-            style={[styles.devScanContainer, manualEntryPlacement]}
-            // Full-width host: only the pill or the field inside it takes
-            // touches, so a tap beside them reaches the paused layer.
-            pointerEvents="box-none"
-            testID="manual-entry-container"
-          >
-            {devScanVisible ? (
-              <View style={styles.devScanRow}>
-                <TextInput
-                  testID="dev-scan-input"
-                  style={styles.devScanInput}
-                  value={devScanInput}
-                  onChangeText={setDevScanInput}
-                  // Opens the keyboard as soon as the field appears, so one tap
-                  // on "Enter code" is enough to start typing.
-                  autoFocus
-                  placeholder="Enter QR, barcode, or SAM ID"
-                  placeholderTextColor="rgba(255,255,255,0.4)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="go"
-                  onSubmitEditing={() => {
-                    if (devScanInput.trim()) {
-                      handleBarCodeScanned({ data: devScanInput.trim() });
-                      setDevScanInput("");
-                    }
-                  }}
-                />
-                <TouchableOpacity
-                  testID="dev-scan-submit"
-                  style={styles.devScanButton}
-                  onPress={() => {
-                    if (devScanInput.trim()) {
-                      handleBarCodeScanned({ data: devScanInput.trim() });
-                      setDevScanInput("");
-                    }
-                  }}
-                  accessibilityLabel="Look up code"
-                >
-                  <Ionicons name="arrow-forward" size={16} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.devScanClose}
-                  onPress={() => setDevScanVisible(false)}
-                  accessibilityLabel="Close manual entry"
-                >
-                  <Ionicons name="close" size={16} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                testID="dev-scan-toggle"
-                style={styles.devScanToggle}
-                onPress={() => setDevScanVisible(true)}
-                accessibilityLabel="Enter a code manually"
-              >
-                <Ionicons name="keypad-outline" size={14} color="#fff" />
-                <Text style={styles.devScanToggleText}>Enter code</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
       </View>
+
+      {/* ── Scan status host ───────────────────────────
+          One screen-level host for the lookup spinner and the result card.
+          With no drawer it sits under the frame, below the mode dots; with a
+          drawer open it fills the gap between the camera controls and the
+          drawer's top edge, bottom-aligned. Only its position changes, so a
+          showing card stays mounted when the drawer opens or closes. It is
+          never drawn under the list or over the controls, and it stays inside
+          its own bounds (on Android a touch outside them is not delivered).
+          A card taller than the space scrolls. */}
+      {scanStatus && (
+        <View
+          style={[
+            styles.statusHost,
+            sideInsetStyle,
+            drawerHeight > 0
+              ? {
+                  top: controlsBottom + spacing.sm,
+                  bottom: drawerHeight + spacing.sm,
+                  justifyContent: "flex-end",
+                }
+              : {
+                  top: bottomStripTop + statusSlotTop,
+                  bottom: spacing.sm,
+                  justifyContent: "flex-start",
+                },
+          ]}
+          pointerEvents="box-none"
+        >
+          <ScrollView
+            style={styles.statusScroll}
+            bounces={false}
+            pointerEvents={scanResult ? "auto" : "none"}
+          >
+            <Animated.View style={[styles.instructionContainer, statusMotion]}>
+              {scanStatus}
+            </Animated.View>
+          </ScrollView>
+        </View>
+      )}
 
       {/* ── Drawers ─────────────────────────────────────
           Hosted OUTSIDE the overlay view as a sibling ABOVE the paused
@@ -3357,7 +3437,7 @@ function ScannerContent() {
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
         <View
-          style={styles.drawerHost}
+          style={[styles.drawerHost, sideInsetStyle]}
           pointerEvents="box-none"
           onLayout={(e) => {
             const h = Math.round(e.nativeEvent.layout.height);
@@ -3457,6 +3537,16 @@ function ScannerContent() {
               onResolveAllBlockers={resolveAllBookingBlockers}
             />
           )}
+          {/* Below a tab sidebar nothing covers the home indicator: extend
+              the drawer's white under it so its buttons stay clear. */}
+          {screenInsets.bottom > 0 ? (
+            <View
+              style={{
+                height: screenInsets.bottom,
+                backgroundColor: colors.white,
+              }}
+            />
+          ) : null}
         </View>
       )}
 
@@ -3593,9 +3683,8 @@ export default function ScannerScreen() {
 
 // ── Styles ────────────────────────────────────────────────
 
-const FRAME_SIZE = 240;
-/** Distance of the closed "Enter code" pill from the bottom edge when no drawer is open. */
-const MANUAL_ENTRY_BOTTOM = 90;
+/** Touch target edge for the camera controls (Apple HIG minimum). */
+const CONTROL_SIZE = 44;
 
 const useStyles = createStyles((colors) => ({
   container: {
@@ -3638,16 +3727,15 @@ const useStyles = createStyles((colors) => ({
 
   // Hosts the drawers as a sibling ABOVE the paused overlay (zIndex 5) so
   // their buttons stay tappable while the camera is auto-paused.
+  // `left` and `right` come from the side insets at render time.
   drawerHost: {
     position: "absolute",
-    left: 0,
-    right: 0,
     bottom: 0,
     zIndex: 10,
   },
   // Paused overlay
   pausedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.8)",
     justifyContent: "center",
     alignItems: "center",
@@ -3672,18 +3760,20 @@ const useStyles = createStyles((colors) => ({
 
   // Overlay
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
-  controlButtons: {
+  controlRow: {
     flexDirection: "row",
-    justifyContent: "center",
-    gap: spacing.lg,
-    paddingTop: spacing.lg,
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.sm,
   },
   controlButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: CONTROL_SIZE,
+    height: CONTROL_SIZE,
+    borderRadius: CONTROL_SIZE / 2,
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
     alignItems: "center",
@@ -3697,20 +3787,31 @@ const useStyles = createStyles((colors) => ({
   },
 
   // Action picker
+  // `left` and `right` come from the side insets at render time.
   actionPickerContainer: {
     position: "absolute",
-    bottom: spacing.lg,
-    left: 0,
-    right: 0,
+    bottom: CONTROL_ROW_GAP,
+    // Content sits on the bottom edge, just above the frame.
+    justifyContent: "flex-end",
   },
   bookingModeHeader: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
+    // When the strip above the frame is shorter than header plus controls
+    // (568pt phones with a two-line reservation hint), the header gives up
+    // height and the controls row keeps its 44pt targets.
+    flexShrink: 1,
+    overflow: "hidden",
   },
   bookingModeInfo: {
     flex: 1,
+    alignSelf: "stretch",
+    // Bottom-aligned, so a squeezed header loses its small mode label first
+    // and keeps the booking name and the reservation hint.
+    justifyContent: "flex-end",
+    overflow: "hidden",
   },
   bookingModeLabel: {
     fontSize: fontSize.xs,
@@ -3732,7 +3833,7 @@ const useStyles = createStyles((colors) => ({
   },
   middleRow: {
     flexDirection: "row",
-    height: FRAME_SIZE,
+    height: SCAN_FRAME_SIZE,
   },
   bottomSection: {
     justifyContent: "flex-start",
@@ -3743,6 +3844,17 @@ const useStyles = createStyles((colors) => ({
   instructionContainer: {
     alignItems: "center",
     paddingHorizontal: spacing.xxl,
+  },
+  // `left`, `right`, `top`, `bottom` and the alignment come from the drawer
+  // state and side insets at render time.
+  statusHost: {
+    position: "absolute",
+    // Same layer as the drawer host, above the paused overlay.
+    zIndex: 10,
+  },
+  statusScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
   statusRow: {
     flexDirection: "row",
@@ -3759,16 +3871,12 @@ const useStyles = createStyles((colors) => ({
     textShadowRadius: 3,
   },
 
-  // ── Dev Scan Injection (DEV only) ───────────────
-  devScanContainer: {
-    position: "absolute" as const,
-    left: spacing.md,
-    right: spacing.md,
-    zIndex: 999,
-  },
+  // ── Manual code entry (in the camera control row) ───
   devScanRow: {
+    flex: 1,
     flexDirection: "row" as const,
     alignItems: "center" as const,
+    minHeight: CONTROL_SIZE,
     backgroundColor: "rgba(0,0,0,0.85)",
     borderRadius: borderRadius.md,
     padding: spacing.xs,
@@ -3794,12 +3902,11 @@ const useStyles = createStyles((colors) => ({
   devScanToggle: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    alignSelf: "center" as const,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    borderRadius: borderRadius.pill,
+    height: CONTROL_SIZE,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: CONTROL_SIZE / 2,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    gap: 4,
+    gap: spacing.xs,
   },
   devScanToggleText: {
     color: "rgba(255,255,255,0.9)",

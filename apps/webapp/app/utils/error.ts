@@ -67,6 +67,7 @@ export type FailureReason = {
     | "User onboarding"
     | "Location"
     | "Notification"
+    | "Push"
     | "Organization"
     | "Permission"
     | "QR"
@@ -102,6 +103,7 @@ export type FailureReason = {
     | "Environment" // Related to the environment setup
     | "Image Import"
     | "Image Cache"
+    | "Link preview"
     | "Asset Model"
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import
@@ -109,6 +111,7 @@ export type FailureReason = {
     | "Activity"
     | "Consumption Log"
     | "Update"
+    | "PDF templates"
     | "Analytics";
   /**
    * The message intended for the user.

@@ -29,6 +29,7 @@ import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
@@ -41,8 +42,11 @@ import {
 } from "~/utils/asset-description";
 import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
-import type { CustomFieldZodSchema } from "~/utils/custom-fields";
-import { mergedSchema } from "~/utils/custom-fields";
+import {
+  mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
+} from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -60,6 +64,13 @@ import {
   type BulkCreateSuccess,
 } from "./bulk-create-success-modal";
 import AssetCustomFields from "./custom-fields-inputs";
+import type { ModelPrefill, PrefillModel } from "./model-default-prefill";
+import {
+  EMPTY_MODEL_PREFILL,
+  VALUATION_PREFILL_KEY,
+  planModelPrefill,
+  prefillVersion,
+} from "./model-default-prefill";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
@@ -190,6 +201,20 @@ export const NewAssetFormSchema = z.object({
 });
 
 /**
+ * Whether a `bulk` query param or form field asks for bulk create from a
+ * model. The page link sends `1`; `true` is accepted too. The new-asset
+ * loader, its action and the page all decide through this one function, so
+ * the bulk gate (`matrixOnly: true`) and the bulk schema can never disagree
+ * about what counts as bulk.
+ *
+ * @param value - The raw `bulk` value, `null` when absent
+ * @returns `true` for `"1"` or `"true"`
+ */
+export function isBulkCreate(value: FormDataEntryValue | null): boolean {
+  return value === "1" || value === "true";
+}
+
+/**
  * Bulk-create variant of `NewAssetFormSchema`. Extends the base shape
  * (via Zod's `.extend()` which keeps the result as a `ZodObject`, so
  * `mergedSchema` still accepts it) and tightens the fields the bulk
@@ -219,6 +244,22 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
       .max(100, "Count must be at most 100")
   ),
 });
+
+/**
+ * Starting value of the Value input for a stored valuation.
+ *
+ * Zero is a real valuation and must show as 0. Only a missing valuation
+ * leaves the field blank, because the form schema reads a blank field as
+ * "no value" and saving it would clear the stored 0.
+ *
+ * @param valuation - The asset's stored valuation, if any.
+ * @returns The number to show, or `""` for no valuation.
+ */
+export function valuationInputDefault(
+  valuation: Asset["valuation"] | undefined
+): number | "" {
+  return valuation ?? "";
+}
 
 /** Pass props of the values to be used as default for the form fields */
 
@@ -340,17 +381,16 @@ const AssetFormInner = ({
     { id?: string; type: Barcode["type"]; value: string }[]
   >(barcodes ?? []);
 
-  const customFields = useLoaderData<typeof loader>().customFields.map(
-    (cf) =>
-      cf.active && {
-        id: cf.id,
-        name: cf.name,
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      }
-  ) as CustomFieldZodSchema[];
+  const loaderData = useLoaderData<typeof loader>();
+  const customFields = loaderData.customFields
+    .filter((cf) => cf.active)
+    .map(toCustomFieldZodSchema);
+  // When editing, what the asset stores now: a Link field accepts its stored
+  // value unchanged, as the edit action does.
+  const storedValues = useMemo(
+    () => storedCustomFieldTexts(loaderData.asset?.customFields ?? []),
+    [loaderData.asset?.customFields]
+  );
 
   // Bulk mode tightens a few fields (assetModelId, nameTemplate,
   // count). Same `mergedSchema` pipeline either way — both base
@@ -365,11 +405,14 @@ const AssetFormInner = ({
           ? NewAssetBulkFormSchema
           : NewAssetFormSchema) as typeof NewAssetFormSchema,
         customFields,
+        storedValues,
       }),
-    [bulkMode, customFields]
+    [bulkMode, customFields, storedValues]
   );
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);
+  /** "Create new" shortcuts show only to members who may create that entity. */
+  const canCreateInline = useInlineCreatePermissions();
   const disabled = isFormProcessing(navigation.state);
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
@@ -554,14 +597,24 @@ const AssetFormInner = ({
 
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<{
-      id: string;
-      name?: string;
-      defaultCategoryId?: string | null;
-      image?: string | null;
-      thumbnailImage?: string | null;
-    }>;
+    assetModels?: Array<
+      PrefillModel & {
+        id: string;
+        name?: string;
+        defaultCategoryId?: string | null;
+        image?: string | null;
+        thumbnailImage?: string | null;
+      }
+    >;
   }>()?.assetModels;
+
+  /**
+   * Valuation and custom field values the picked model filled into empty
+   * inputs. Without it a required custom field the model covers would block
+   * the save on the client before the server fill could run.
+   */
+  const [modelPrefill, setModelPrefill] =
+    useState<ModelPrefill>(EMPTY_MODEL_PREFILL);
 
   /** The chosen model's row, used for the inherited-image preview + copy. */
   const selectedAssetModel = selectedAssetModelId
@@ -616,10 +669,13 @@ const AssetFormInner = ({
     : null;
 
   /**
-   * When a model is selected, apply its default category by updating
-   * the search params. When cleared, remove the category param.
-   * This triggers a revalidation so the Category DynamicSelect
-   * picks up the new default.
+   * When a model is selected and the asset has no category yet, show the
+   * model's default category by updating the search params, which
+   * revalidates so the Category selector and the category's custom fields
+   * follow. A category the asset already has, or one the user picked, is
+   * never replaced. Clearing the model takes back only the category it put
+   * there. The server fills every empty field the same way on save (see
+   * `fillAssetFormDataFromModel`).
    */
   const handleAssetModelChange = (modelId: string | undefined) => {
     // Mirror the DynamicSelect's current selection so the row's error
@@ -631,15 +687,60 @@ const AssetFormInner = ({
     setHasPickedAssetModel(Boolean(modelId));
     setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
-
-    if (!modelId) {
-      // Model was cleared — remove the category param
+    const previousModel = assetModelsData?.find(
+      (m) => m.id === selectedAssetModelId
+    );
+    if (
+      previousModel?.defaultCategoryId &&
+      params.get("category") === previousModel.defaultCategoryId
+    ) {
       params.delete("category");
-    } else if (assetModelsData) {
-      const model = assetModelsData.find((m) => m.id === modelId);
-      if (model?.defaultCategoryId) {
-        params.set("category", model.defaultCategoryId);
-      }
+    }
+
+    const model = modelId
+      ? assetModelsData?.find((m) => m.id === modelId)
+      : undefined;
+
+    // Fill the empty valuation and custom field inputs with the model's
+    // defaults, and take back the untouched ones the previous model filled.
+    const form = formRef.current;
+    const formData = form ? new FormData(form) : null;
+    const savedKeys = new Set<string>(
+      (asset?.customFields ?? []).map((cfv) => cfv.customFieldId)
+    );
+    if (valuation !== null && valuation !== undefined) {
+      savedKeys.add(VALUATION_PREFILL_KEY);
+    }
+    setModelPrefill(
+      planModelPrefill({
+        previous: modelPrefill,
+        model,
+        readCurrent: (key) => {
+          const entry = formData?.get(
+            key === VALUATION_PREFILL_KEY ? key : `cf-${key}`
+          );
+          return typeof entry === "string" ? entry : null;
+        },
+        savedKeys,
+      })
+    );
+
+    // The Category select keeps its pick in a hidden input, not in the URL.
+    // A value the previous model put there does not count as the user's pick.
+    const categoryInput = formRef.current?.elements.namedItem("category");
+    const pickedCategory =
+      categoryInput instanceof HTMLInputElement ? categoryInput.value : "";
+    const userPickedCategory =
+      pickedCategory !== "" &&
+      pickedCategory !== previousModel?.defaultCategoryId;
+    // On the edit form `categoryId` is the asset's saved category, which is
+    // never replaced. On the create form it only mirrors the URL, which the
+    // lines above already account for.
+    const savedCategory = id ? categoryId : null;
+    const formHasCategory =
+      userPickedCategory || Boolean(params.get("category") ?? savedCategory);
+    if (model?.defaultCategoryId && !formHasCategory) {
+      params.set("category", model.defaultCategoryId);
     }
 
     void navigate(`${location.pathname}?${params.toString()}`, {
@@ -1238,14 +1339,16 @@ const AssetFormInner = ({
             <p>
               Make it unique. Each asset can have 1 category. It will show on
               your index.{" "}
-              <Button
-                to="/categories/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create categories
-              </Button>
+              {canCreateInline.category ? (
+                <Button
+                  to="/categories/new"
+                  variant="link-gray"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                >
+                  Create categories
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -1293,14 +1396,16 @@ const AssetFormInner = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Button
-                to="/tags/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create tags
-              </Button>
+              {canCreateInline.tag ? (
+                <Button
+                  to="/tags/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create tags
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -1319,14 +1424,16 @@ const AssetFormInner = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Button
-                to="/locations/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create locations
-              </Button>
+              {canCreateInline.location ? (
+                <Button
+                  to="/locations/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create locations
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -1423,6 +1530,8 @@ const AssetFormInner = ({
         >
           <div className="relative w-full">
             <Input
+              // Remounts when a picked model changes the pre-filled value.
+              key={prefillVersion(modelPrefill, VALUATION_PREFILL_KEY)}
               type="number"
               label="Value"
               inputClassName="pl-[70px] valuation-input"
@@ -1432,7 +1541,10 @@ const AssetFormInner = ({
               step="any"
               min={0}
               className="w-full"
-              defaultValue={valuation || ""}
+              defaultValue={
+                modelPrefill.values[VALUATION_PREFILL_KEY] ??
+                valuationInputDefault(valuation)
+              }
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
@@ -1489,6 +1601,7 @@ const AssetFormInner = ({
         <AssetCustomFields
           currency={currency}
           fieldErrors={customFieldErrors}
+          modelPrefill={modelPrefill}
         />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">

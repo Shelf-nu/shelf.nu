@@ -36,6 +36,8 @@ import { recordEvents } from "~/modules/activity-event/service.server";
 import { validateQtyTrackedFields } from "~/modules/asset/qty-validation.server";
 import { getNextSequentialIds } from "~/modules/asset/sequential-id.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { resolveImportedAssetModel } from "~/modules/asset-model/service.server";
 import { BARCODE_IMPORT_COLUMNS } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
@@ -113,6 +115,8 @@ type PreparedRow = {
   kitId: string | undefined;
   custodianId: string | undefined;
   assetModelId: string | undefined;
+  /** The row's value, or the model's default when the cell is empty. */
+  valuation: number | null;
   tagIds: string[];
   type: AssetType | undefined;
   quantity: number | undefined;
@@ -212,6 +216,7 @@ function prepareRow(
     kitId,
     custodianId,
     assetModelId: model.id,
+    valuation: row.valuation ? +row.valuation : null,
     tagIds: (row.tags ?? [])
       .filter((tag) => resolved.tags[tag])
       .map((tag) => resolved.tags[tag]),
@@ -229,6 +234,8 @@ function toAssetCreateManyInput(
   prepared: PreparedRow,
   ctx: {
     sequentialId: string;
+    /** Distinct per row, see {@link getCreatedAtStamps}. */
+    createdAt: Date;
     userId: string;
     organizationId: string;
     image: ImportedImage | undefined;
@@ -240,11 +247,12 @@ function toAssetCreateManyInput(
     title: row.title,
     description: row.description || "",
     sequentialId: ctx.sequentialId,
+    createdAt: ctx.createdAt,
     userId: ctx.userId,
     organizationId: ctx.organizationId,
     categoryId: prepared.categoryId,
     assetModelId: prepared.assetModelId ?? null,
-    valuation: row.valuation ? +row.valuation : null,
+    valuation: prepared.valuation,
     availableToBook: row.bookable !== "no",
     mainImage: ctx.image?.mainImage ?? null,
     mainImageExpiration: ctx.image?.mainImageExpiration ?? null,
@@ -259,6 +267,36 @@ function toAssetCreateManyInput(
       ? { status: AssetStatus.IN_CUSTODY }
       : {}),
   };
+}
+
+/**
+ * One `createdAt` per row of a chunk, one millisecond apart in file order.
+ *
+ * The asset index sorts by `createdAt`, and a single `createMany` would give
+ * every row of the chunk the same `now()`, leaving the `id` tiebreaker (random)
+ * to decide their order. Distinct stamps keep the rows in file order, so they
+ * line up with their sequential ids. The first stamp is after the newest asset
+ * of the workspace, which keeps each chunk after the one before it however
+ * fast the chunks run.
+ *
+ * @param organizationId - Workspace the chunk is written to
+ * @param count - Number of rows in the chunk
+ * @param tx - The chunk's transaction
+ * @returns `count` ascending dates
+ */
+async function getCreatedAtStamps(
+  organizationId: string,
+  count: number,
+  tx: ChunkTxClient
+): Promise<Date[]> {
+  const { _max } = await tx.asset.aggregate({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archived assets keep their createdAt and still sort in the archived view, so the newest stamp counts across both sides
+    where: { organizationId },
+    _max: { createdAt: true },
+  });
+  const newest = _max.createdAt?.getTime() ?? 0;
+  const start = Math.max(Date.now(), newest + 1);
+  return Array.from({ length: count }, (_, index) => new Date(start + index));
 }
 
 /**
@@ -290,7 +328,10 @@ function toCustodyCreateManyInput(
 function buildCustomFieldValueRows(
   prepared: PreparedRow[],
   fieldIdsByName: Record<string, string>,
-  definitions: Map<string, Pick<CustomField, "id" | "name" | "type">>,
+  definitions: Map<
+    string,
+    Pick<CustomField, "id" | "name" | "type" | "format">
+  >,
   warnings: ImportWarning[]
 ): Prisma.AssetCustomFieldValueCreateManyInput[] {
   const values: Prisma.AssetCustomFieldValueCreateManyInput[] = [];
@@ -354,6 +395,63 @@ function buildCustomFieldValueRows(
   }
 
   return values;
+}
+
+/**
+ * Fills the empty cells of rows that name an asset model from that model's
+ * defaults (category, valuation, custom field values), in place. Same rule as
+ * every other way an asset joins a model: only empty fields are filled, and a
+ * value in the file always wins.
+ *
+ * @param tx - The chunk's transaction
+ * @param prepared - The chunk's rows (category and valuation are updated)
+ * @param customFieldValues - The rows' custom field values (defaults appended)
+ * @param organizationId - Workspace the models belong to
+ */
+async function fillRowsFromModelDefaults(
+  tx: ChunkTxClient,
+  prepared: PreparedRow[],
+  customFieldValues: Prisma.AssetCustomFieldValueCreateManyInput[],
+  organizationId: string
+): Promise<void> {
+  const modelIds = distinct(prepared.map((p) => p.assetModelId));
+  if (modelIds.length === 0) return;
+
+  const models = await getAssetModelsDefaults(
+    { assetModelIds: modelIds, organizationId },
+    tx
+  );
+
+  const fieldIdsByAsset = new Map<string, Set<string>>();
+  for (const value of customFieldValues) {
+    const ids = fieldIdsByAsset.get(value.assetId) ?? new Set<string>();
+    ids.add(value.customFieldId);
+    fieldIdsByAsset.set(value.assetId, ids);
+  }
+
+  for (const p of prepared) {
+    const model = p.assetModelId ? models.get(p.assetModelId) : undefined;
+    if (!model) continue;
+
+    const fill = planModelDefaultFill({
+      model,
+      current: {
+        categoryId: p.categoryId,
+        valuation: p.valuation,
+        customFieldIdsWithValue:
+          fieldIdsByAsset.get(p.row.assetId) ?? new Set(),
+      },
+    });
+    if (fill.categoryId !== undefined) p.categoryId = fill.categoryId;
+    if (fill.valuation !== undefined) p.valuation = fill.valuation;
+    for (const fieldDefault of fill.customFields) {
+      customFieldValues.push({
+        assetId: p.row.assetId,
+        customFieldId: fieldDefault.customFieldId,
+        value: fieldDefault.value as unknown as Prisma.InputJsonValue,
+      });
+    }
+  }
 }
 
 /**
@@ -642,7 +740,7 @@ export async function writeImportChunk({
                   organizationId,
                   deletedAt: null,
                 },
-                select: { id: true, name: true, type: true },
+                select: { id: true, name: true, type: true, format: true },
               })
             : [];
         const customFieldValues = buildCustomFieldValueRows(
@@ -652,7 +750,20 @@ export async function writeImportChunk({
           warnings
         );
 
+        await fillRowsFromModelDefaults(
+          tx,
+          prepared,
+          customFieldValues,
+          organizationId
+        );
+
         const sequentialIds = await getNextSequentialIds(
+          organizationId,
+          rows.length,
+          tx
+        );
+
+        const createdAts = await getCreatedAtStamps(
           organizationId,
           rows.length,
           tx
@@ -662,6 +773,7 @@ export async function writeImportChunk({
           data: prepared.map((p, index) =>
             toAssetCreateManyInput(p, {
               sequentialId: sequentialIds[index],
+              createdAt: createdAts[index],
               userId,
               organizationId,
               image: imagePaths[p.row.assetId],

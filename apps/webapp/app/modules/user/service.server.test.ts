@@ -320,6 +320,27 @@ describe(createUserAccountForTesting.name, () => {
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     expect(fetchAuthTokenAPI.size).toEqual(1);
   });
+
+  it("creates a personal workspace without PDF templates", async () => {
+    //@ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue({
+      id: USER_ID,
+      email: USER_EMAIL,
+      username,
+      organizations: [{ id: "org-id" }],
+    });
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementationOnce((callback) => callback(db));
+
+    await createUserAccountForTesting(USER_EMAIL, USER_PASSWORD, username);
+
+    const { data } = vi.mocked(db.user.create).mock.calls.at(-1)![0];
+    const [personal] = (
+      data.organizations as { create: Record<string, unknown>[] }
+    ).create;
+    expect(personal.name).toBe("Personal");
+    expect(personal).not.toHaveProperty("pdfTemplates");
+  });
 });
 
 const newUserMock = {

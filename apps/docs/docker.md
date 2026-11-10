@@ -50,6 +50,8 @@ docker run -d \
 
 `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in the [Supabase Setup Guide](./supabase-setup.md).
 
+The running server also uses `DIRECT_URL` to deliver toast notifications between instances. Keep it set even if you run migrations elsewhere with `SKIP_MIGRATIONS=true`. See [Toast Notifications](./notifications.md).
+
 ### Database migrations
 
 The container applies any pending Prisma migrations (`prisma migrate deploy`) on startup, before the server starts, using `DIRECT_URL`. If a migration fails, the container exits instead of starting against an out-of-date schema.

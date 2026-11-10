@@ -5,6 +5,7 @@ import { data, redirect, redirectDocument, useLoaderData } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   AssetForm,
+  isBulkCreate,
   NewAssetBulkFormSchema,
   NewAssetFormSchema,
 } from "~/components/assets/form";
@@ -19,6 +20,10 @@ import {
 } from "~/modules/asset/service.server";
 import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import {
+  fillAssetFormDataFromModel,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
+import {
   getAssetModel,
   getAssetModels,
 } from "~/modules/asset-model/service.server";
@@ -31,6 +36,7 @@ import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
+  toCustomFieldZodSchema,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -48,7 +54,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { slugify } from "~/utils/slugify";
 
 const title = "New asset";
 const header = {
@@ -65,6 +70,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.create,
+      // The bulk-create page (`?bulk=1`) stays closed to the workspace
+      // switches: they open single-asset creation only.
+      matrixOnly: isBulkCreate(new URL(request.url).searchParams.get("bulk")),
     });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
@@ -93,7 +101,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         category: searchParams.get("category"),
       }),
       estimateNextSequentialId(organizationId),
-      getAssetModels({ organizationId, page: 1, perPage: 100 }),
+      getAssetModels({
+        organizationId,
+        page: 1,
+        perPage: 100,
+        withCustomFieldDefaults: true,
+      }),
     ]);
 
     return payload({
@@ -153,6 +166,36 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const formData = await clonedRequest.formData();
 
+    const isBulkSubmit = isBulkCreate(formData.get("bulk"));
+    if (isBulkSubmit) {
+      // Bulk create stays closed to the workspace switches: they open
+      // single-asset creation only. Checked before any other work, so a
+      // refused submit reads nothing.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.create,
+        matrixOnly: true,
+      });
+    }
+
+    /**
+     * An asset joining a model gets the model's defaults in its empty fields.
+     * Filled before validation, so the category decides which custom fields
+     * load and a required field the model fills passes.
+     */
+    const joiningModelId = formData.get("assetModelId");
+    if (typeof joiningModelId === "string" && joiningModelId) {
+      const model = await getAssetModelDefaults({
+        assetModelId: joiningModelId,
+        organizationId,
+      });
+      if (model) {
+        fillAssetFormDataFromModel({ formData, model });
+      }
+    }
+
     const customFields = await getActiveCustomFields({
       organizationId,
       category: formData.get("category") as string | null,
@@ -162,8 +205,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     // tightens assetModelId + nameTemplate + count when `bulk=1`). Both
     // remain `ZodObject`s so `mergedSchema` can still layer the
     // category-driven custom fields on top.
-    const isBulkSubmit =
-      formData.get("bulk") === "1" || formData.get("bulk") === "true";
     const FormSchema = mergedSchema({
       // Cast the union to the base schema's type — `mergedSchema`'s
       // generic expects a single ZodObject shape. The bulk variant is
@@ -171,14 +212,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       baseSchema: (isBulkSubmit
         ? NewAssetBulkFormSchema
         : NewAssetFormSchema) as typeof NewAssetFormSchema,
-      customFields: customFields.map((cf) => ({
-        id: cf.id,
-        name: slugify(cf.name),
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      })),
+      customFields: customFields.map(toCustomFieldZodSchema),
     });
 
     const payload = parseData(formData, FormSchema);
@@ -368,11 +402,11 @@ export default function NewAssetPage() {
   // Get category from URL params or use the default passed prop
   const categoryFromUrl = searchParams.get("category");
 
-  // Bulk-create mode flag — set via `?bulk=1` query param from the
+  // Bulk-create mode flag, set via `?bulk=1` query param from the
   // `+New` Popover dropdown on /assets, or from the asset form itself
   // when the user enables bulk-create after selecting a model. The
   // page header label and the form's field layout both branch on this.
-  const bulkMode = searchParams.get("bulk") === "1";
+  const bulkMode = isBulkCreate(searchParams.get("bulk"));
 
   return (
     <div className="relative">

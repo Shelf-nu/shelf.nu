@@ -4,7 +4,7 @@
  * A body that is not JSON makes `request.json()` throw a `SyntaxError`. Left
  * unguarded, that reaches `makeShelfError`'s generic branch and goes out as a
  * captured 500 — a server-error status, and a Sentry event, for the caller's own
- * malformed request. These four actions read their body after authorization, so
+ * malformed request. These actions read their body after authorization, so
  * each is driven past its gates with a body that is not JSON at all.
  *
  * @see {@link file://./../../../app/modules/api/mobile-body.server.ts} parseMobileBody
@@ -12,6 +12,8 @@
  * @see {@link file://./../../../app/routes/api+/mobile+/audits.note.ts}
  * @see {@link file://./../../../app/routes/api+/mobile+/custody.assign-quantity.ts}
  * @see {@link file://./../../../app/routes/api+/mobile+/custody.release-quantity.ts}
+ * @see {@link file://./../../../app/routes/api+/mobile+/push-token.ts}
+ * @see {@link file://./../../../app/routes/api+/mobile+/notification-preferences.ts}
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
@@ -58,16 +60,18 @@ import {
 import { action as auditNote } from "~/routes/api+/mobile+/audits.note";
 import { action as assignQuantity } from "~/routes/api+/mobile+/custody.assign-quantity";
 import { action as releaseQuantity } from "~/routes/api+/mobile+/custody.release-quantity";
+import { action as notificationPreferences } from "~/routes/api+/mobile+/notification-preferences";
+import { action as pushToken } from "~/routes/api+/mobile+/push-token";
 import { action as createTag } from "~/routes/api+/mobile+/tags.create";
 
 // @vitest-environment node
 
 type Action = (args: never) => Promise<unknown>;
 
-/** Posts `body` verbatim — no JSON.stringify, so it can be unreadable. */
-async function post(action: Action, body: string) {
+/** Sends `body` verbatim, without JSON.stringify, so it can be unreadable. */
+async function send(action: Action, body: string, method: string) {
   const request = new Request("http://localhost/api/mobile/x?orgId=org-1", {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body,
   });
@@ -96,11 +100,24 @@ describe("mobile actions with a body that is not JSON", () => {
   });
 
   it.each([
-    { name: "tags.create", action: createTag },
-    { name: "audits.note", action: auditNote },
-    { name: "custody.assign-quantity", action: assignQuantity },
-    { name: "custody.release-quantity", action: releaseQuantity },
-  ])("$name answers 400", async ({ action }) => {
-    expect(await post(action as unknown as Action, "{not json")).toBe(400);
+    { name: "tags.create", action: createTag, method: "POST" },
+    { name: "audits.note", action: auditNote, method: "POST" },
+    { name: "custody.assign-quantity", action: assignQuantity, method: "POST" },
+    {
+      name: "custody.release-quantity",
+      action: releaseQuantity,
+      method: "POST",
+    },
+    { name: "push-token", action: pushToken, method: "POST" },
+    { name: "push-token", action: pushToken, method: "DELETE" },
+    {
+      name: "notification-preferences",
+      action: notificationPreferences,
+      method: "PUT",
+    },
+  ])("$method $name answers 400", async ({ action, method }) => {
+    expect(await send(action as unknown as Action, "{not json", method)).toBe(
+      400
+    );
   });
 });

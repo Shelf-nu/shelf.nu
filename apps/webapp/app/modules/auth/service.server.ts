@@ -119,6 +119,39 @@ export async function revokeAllSessions(accessToken: string): Promise<void> {
 }
 
 /**
+ * Ends every session of a user by id, on every device: web browsers and the
+ * companion app alike.
+ *
+ * Deleting the `auth.sessions` rows cascades to their refresh tokens
+ * (`refresh_tokens_session_id_fkey`). The web auth boundary is the
+ * refresh-token row (`validateSession`), so the user's next web request lands
+ * on the login page. Supabase Auth refuses an access token whose session no
+ * longer exists, so the companion app is signed out on its next call as well.
+ *
+ * Unlike `revokeAllSessions`, this needs no access token of the user, and it
+ * throws: the caller is an admin who must learn whether the logout happened.
+ *
+ * @param userId - The user (Shelf and auth user share the id) to sign out
+ * @returns The number of sessions that were ended
+ * @throws {ShelfError} If the sessions could not be deleted
+ */
+export async function endAllSessionsForUser(userId: string): Promise<number> {
+  try {
+    return await db.$executeRaw`
+      DELETE FROM auth.sessions
+      WHERE user_id = ${userId}::uuid
+    `;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while logging out the user.",
+      additionalData: { userId },
+      label,
+    });
+  }
+}
+
+/**
  * Asks the legacy sign-in decision for an address that has just authenticated,
  * and ends the session it opened when the address must use SSO.
  *
@@ -437,11 +470,27 @@ export async function signInWithSSO(
 }
 
 /**
+ * Whether Supabase refused a one-time code because the address has no account
+ * and accounts are not created from a code (`shouldCreateUser: false`, or
+ * signups disabled on the project).
+ *
+ * @param error - the error `signInWithOtp` returned
+ * @returns true for the "no account here" refusals, false for any other error
+ */
+function isNoAccountForCodeError(error: AuthError): boolean {
+  return (
+    isAuthApiError(error) &&
+    (error.code === "otp_disabled" || error.code === "signup_disabled")
+  );
+}
+
+/**
  * Sends a one-time sign-in code by email.
  *
- * An address that must use SSO is sent nothing, and the function returns
- * exactly as a successful send does: the caller cannot be authenticated yet, so
- * its response must not depend on the account behind the address.
+ * An address that must use SSO is sent nothing, and neither is an address with
+ * no account on an instance that does not create accounts from a code. Both
+ * return exactly as a successful send does: the caller cannot be authenticated
+ * yet, so its response must not depend on the account behind the address.
  *
  * @param email - the address to send the code to
  * @throws {ShelfError} a wrapped Supabase failure
@@ -459,10 +508,19 @@ export async function sendOTP(email: string) {
     });
 
     if (error) {
+      if (isNoAccountForCodeError(error)) {
+        // Supabase's own text ("Signups not allowed for otp") stays in the
+        // server log. Showing it, or any answer of its own, would tell a
+        // stranger which addresses have an account.
+        Logger.info(
+          `OTP not sent: no account for the address (${error.code}: ${error.message})`
+        );
+        return;
+      }
       throw error;
     }
   } catch (cause) {
-    // Read `code` via narrowing instead of `@ts-expect-error` — `cause` is
+    // Read `code` via narrowing instead of `@ts-expect-error`: `cause` is
     // `unknown`, and a bare property access would throw at runtime if it
     // were null/undefined.
     const errorCode =

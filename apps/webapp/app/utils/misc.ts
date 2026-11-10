@@ -1,4 +1,5 @@
-import _ from "lodash";
+import startCase from "lodash/startCase";
+import toLower from "lodash/toLower";
 
 /**
  * .email() has an issue with validating email
@@ -8,9 +9,6 @@ import _ from "lodash";
  *  */
 export const validEmail = (val: string) =>
   /^([A-Z0-9_+-]+\.?)*[A-Z0-9_+-]@([A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,}$/i.test(val);
-
-export const isLink = (val: string) =>
-  /\b(?:https?):\/\/[-\w+&@#/%?=~|$!:,.;]*[\w+&@#/%=~|$]/.test(val);
 
 export const isValidDomain = (val: string) =>
   /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);
@@ -104,5 +102,5 @@ export function sanitizeFilename(filename: string): string {
  * @example SOME_ENUM_CASE -> Some Enum Case
  */
 export function formatEnum(value: string) {
-  return _.startCase(_.toLower(value));
+  return startCase(toLower(value));
 }

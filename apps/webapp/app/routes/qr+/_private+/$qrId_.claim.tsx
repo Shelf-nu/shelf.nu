@@ -63,7 +63,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Code not found",
           message:
             "The code you are trying to claim is not available for claiming.",
-          additionalData: { qrId, currentOrganization },
+          additionalData: {
+            qrId,
+            currentOrganizationId: currentOrganization.id,
+          },
           label: "QR",
         });
       });
@@ -75,14 +78,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Only workspaces the action will accept are offered: the caller must hold
-     * `qr:update` in the one they pick. The selected workspace always stays,
-     * because the check above already passed for it.
+     * `qr:update` in the one they pick, judged with that workspace's own
+     * permission switches. The selected workspace always stays, because the
+     * check above already passed for it.
      */
     const claimableOrganizations = organizations.filter((organization) =>
       roleHasPermission({
         roles: userOrganizations.find(
           (membership) => membership.organization.id === organization.id
         )?.roles,
+        workspace: organization,
         entity: PermissionEntity.qr,
         action: PermissionAction.update,
       })

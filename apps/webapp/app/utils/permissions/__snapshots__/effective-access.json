@@ -1215,7 +1215,6 @@
         "create",
         "read",
         "update",
-        "delete",
         "checkout",
         "checkin",
         "export",
@@ -1289,8 +1288,8 @@
         "create",
         "read",
         "update",
-        "delete",
         "export",
+        "archive",
         "manage-assets",
         "manage-kits"
       ],
@@ -8236,7 +8235,6 @@
         "create",
         "read",
         "update",
-        "delete",
         "checkout",
         "checkin",
         "export",
@@ -9513,7 +9511,6 @@
         "create",
         "read",
         "update",
-        "delete",
         "checkout",
         "checkin",
         "export",
@@ -9642,6 +9639,97 @@
       "user-data": [],
       "update": [],
       "command-palette-search": []
+    }
+  },
+  "workspaceGrants": {
+    "managersCanEditAssets": {
+      "OWNER": {},
+      "ADMIN": {},
+      "MANAGER": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "SELF_SERVICE": {},
+      "BASE": {},
+      "OWNER+ADMIN": {},
+      "OWNER+MANAGER": {},
+      "OWNER+SELF_SERVICE": {},
+      "OWNER+BASE": {},
+      "ADMIN+OWNER": {},
+      "ADMIN+MANAGER": {},
+      "ADMIN+SELF_SERVICE": {},
+      "ADMIN+BASE": {},
+      "MANAGER+OWNER": {},
+      "MANAGER+ADMIN": {},
+      "MANAGER+SELF_SERVICE": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "MANAGER+BASE": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "SELF_SERVICE+OWNER": {},
+      "SELF_SERVICE+ADMIN": {},
+      "SELF_SERVICE+MANAGER": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "SELF_SERVICE+BASE": {},
+      "BASE+OWNER": {},
+      "BASE+ADMIN": {},
+      "BASE+MANAGER": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "BASE+SELF_SERVICE": {},
+      "(none)": {},
+      "UNKNOWN_ROLE": {}
     }
   },
   "D-01": {
@@ -11583,19 +11671,19 @@
     },
     "SELF_SERVICE": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied",
-      "custodianNotCreator|ONGOING": "denied",
-      "custodianNotCreator|OVERDUE": "denied",
-      "custodianNotCreator|COMPLETE": "denied",
-      "custodianNotCreator|ARCHIVED": "denied",
-      "custodianNotCreator|CANCELLED": "denied",
+      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|ONGOING": "allowed",
+      "custodianNotCreator|OVERDUE": "allowed",
+      "custodianNotCreator|COMPLETE": "allowed",
+      "custodianNotCreator|ARCHIVED": "allowed",
+      "custodianNotCreator|CANCELLED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied",
-      "creatorNotCustodian|ONGOING": "denied",
-      "creatorNotCustodian|OVERDUE": "denied",
-      "creatorNotCustodian|COMPLETE": "denied",
-      "creatorNotCustodian|ARCHIVED": "denied",
-      "creatorNotCustodian|CANCELLED": "denied",
+      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|ONGOING": "allowed",
+      "creatorNotCustodian|OVERDUE": "allowed",
+      "creatorNotCustodian|COMPLETE": "allowed",
+      "creatorNotCustodian|ARCHIVED": "allowed",
+      "creatorNotCustodian|CANCELLED": "allowed",
       "neither|DRAFT": "denied",
       "neither|RESERVED": "denied",
       "neither|ONGOING": "denied",
@@ -11606,19 +11694,19 @@
     },
     "BASE": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied",
-      "custodianNotCreator|ONGOING": "denied",
-      "custodianNotCreator|OVERDUE": "denied",
-      "custodianNotCreator|COMPLETE": "denied",
-      "custodianNotCreator|ARCHIVED": "denied",
-      "custodianNotCreator|CANCELLED": "denied",
+      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|ONGOING": "allowed",
+      "custodianNotCreator|OVERDUE": "allowed",
+      "custodianNotCreator|COMPLETE": "allowed",
+      "custodianNotCreator|ARCHIVED": "allowed",
+      "custodianNotCreator|CANCELLED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied",
-      "creatorNotCustodian|ONGOING": "denied",
-      "creatorNotCustodian|OVERDUE": "denied",
-      "creatorNotCustodian|COMPLETE": "denied",
-      "creatorNotCustodian|ARCHIVED": "denied",
-      "creatorNotCustodian|CANCELLED": "denied",
+      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|ONGOING": "allowed",
+      "creatorNotCustodian|OVERDUE": "allowed",
+      "creatorNotCustodian|COMPLETE": "allowed",
+      "creatorNotCustodian|ARCHIVED": "allowed",
+      "creatorNotCustodian|CANCELLED": "allowed",
       "neither|DRAFT": "denied",
       "neither|RESERVED": "denied",
       "neither|ONGOING": "denied",
@@ -14235,9 +14323,9 @@
       "neither": "denied:owner"
     },
     "BASE": {
-      "custodianNotCreator": "denied:gate",
-      "creatorNotCustodian": "denied:gate",
-      "neither": "denied:gate"
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "denied:owner"
     },
     "OWNER+ADMIN": {
       "custodianNotCreator": "allowed",
@@ -14650,20 +14738,20 @@
       "neither|RESERVED": "allowed"
     },
     "SELF_SERVICE": {
-      "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
-      "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "custodianNotCreator|DRAFT": "denied:gate",
+      "custodianNotCreator|RESERVED": "denied:gate",
+      "creatorNotCustodian|DRAFT": "denied:gate",
+      "creatorNotCustodian|RESERVED": "denied:gate",
+      "neither|DRAFT": "denied:gate",
+      "neither|RESERVED": "denied:gate"
     },
     "BASE": {
-      "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
-      "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "custodianNotCreator|DRAFT": "denied:gate",
+      "custodianNotCreator|RESERVED": "denied:gate",
+      "creatorNotCustodian|DRAFT": "denied:gate",
+      "creatorNotCustodian|RESERVED": "denied:gate",
+      "neither|DRAFT": "denied:gate",
+      "neither|RESERVED": "denied:gate"
     },
     "OWNER+ADMIN": {
       "custodianNotCreator|DRAFT": "allowed",
@@ -14786,12 +14874,12 @@
       "neither|RESERVED": "allowed"
     },
     "SELF_SERVICE+BASE": {
-      "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
-      "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "custodianNotCreator|DRAFT": "denied:gate",
+      "custodianNotCreator|RESERVED": "denied:gate",
+      "creatorNotCustodian|DRAFT": "denied:gate",
+      "creatorNotCustodian|RESERVED": "denied:gate",
+      "neither|DRAFT": "denied:gate",
+      "neither|RESERVED": "denied:gate"
     },
     "BASE+OWNER": {
       "custodianNotCreator|DRAFT": "allowed",
@@ -14818,12 +14906,12 @@
       "neither|RESERVED": "allowed"
     },
     "BASE+SELF_SERVICE": {
-      "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
-      "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "custodianNotCreator|DRAFT": "denied:gate",
+      "custodianNotCreator|RESERVED": "denied:gate",
+      "creatorNotCustodian|DRAFT": "denied:gate",
+      "creatorNotCustodian|RESERVED": "denied:gate",
+      "neither|DRAFT": "denied:gate",
+      "neither|RESERVED": "denied:gate"
     },
     "(none)": {
       "custodianNotCreator|DRAFT": "denied:gate",
@@ -20316,11 +20404,11 @@
       "RESERVED": true
     },
     "SELF_SERVICE": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     },
     "BASE": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     },
     "OWNER+ADMIN": {
@@ -20384,7 +20472,7 @@
       "RESERVED": true
     },
     "SELF_SERVICE+BASE": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     },
     "BASE+OWNER": {
@@ -20400,15 +20488,125 @@
       "RESERVED": true
     },
     "BASE+SELF_SERVICE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "(none)": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "UNKNOWN_ROLE": {
+      "DRAFT": false,
+      "RESERVED": false
+    }
+  },
+  "B9:D-22:web-discard-draft-menu": {
+    "OWNER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "ADMIN": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "MANAGER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "SELF_SERVICE": {
+      "DRAFT": true,
+      "RESERVED": false
+    },
+    "BASE": {
+      "DRAFT": true,
+      "RESERVED": false
+    },
+    "OWNER+ADMIN": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "OWNER+MANAGER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "OWNER+SELF_SERVICE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "OWNER+BASE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "ADMIN+OWNER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "ADMIN+MANAGER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "ADMIN+SELF_SERVICE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "ADMIN+BASE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "MANAGER+OWNER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "MANAGER+ADMIN": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "MANAGER+SELF_SERVICE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "MANAGER+BASE": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "SELF_SERVICE+OWNER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "SELF_SERVICE+ADMIN": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "SELF_SERVICE+MANAGER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "SELF_SERVICE+BASE": {
+      "DRAFT": true,
+      "RESERVED": false
+    },
+    "BASE+OWNER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "BASE+ADMIN": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "BASE+MANAGER": {
+      "DRAFT": false,
+      "RESERVED": false
+    },
+    "BASE+SELF_SERVICE": {
       "DRAFT": true,
       "RESERVED": false
     },
     "(none)": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     },
     "UNKNOWN_ROLE": {
-      "DRAFT": true,
+      "DRAFT": false,
       "RESERVED": false
     }
   },

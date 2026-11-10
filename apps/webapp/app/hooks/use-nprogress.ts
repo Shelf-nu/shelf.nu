@@ -9,6 +9,7 @@
 import { useMemo, useEffect } from "react";
 import NProgress from "nprogress";
 import { useNavigation, useFetchers } from "react-router";
+import { RECORD_NAVIGATION_FETCHER_PREFIX } from "./use-list-context";
 
 /** Fetcher keys that never move the progress bar. */
 const excludeFetchers = [
@@ -23,6 +24,7 @@ const excludeFetchers = [
   "cancel-audit",
   "sidebar-toggler",
   "team-upgrade-banner",
+  "managersCanEditAssets",
 ];
 
 /** Prefixes of per-item fetcher keys that never move the progress bar. */
@@ -34,6 +36,8 @@ const EXCLUDED_FETCHER_KEY_PREFIXES = [
   "quick-image-upload-",
   "mark-update-read-",
   "scan-history-",
+  "notification-preference-",
+  RECORD_NAVIGATION_FETCHER_PREFIX,
 ] as const;
 
 /**

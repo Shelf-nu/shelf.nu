@@ -242,6 +242,14 @@ describe("POST /api/mobile/bookings/add-scanned-assets — kit provenance", () =
     expect(call.kitIds).toEqual(["kit-1"]);
   });
 
+  it("hands the service the client hints a model-pool refusal is written in", async () => {
+    await post({ kitIds: ["kit-1"] });
+
+    expect(serviceCall().hints).toEqual(
+      expect.objectContaining({ timeZone: expect.any(String) })
+    );
+  });
+
   it("scopes the membership lookup to the caller's organization", async () => {
     await post({ kitIds: ["kit-from-another-org"] });
 

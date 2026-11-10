@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,9 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useFormatPrefs } from "@/lib/use-date-formatter";
+import { markdocToSegments } from "@/lib/note-plain-text";
+import { getActiveServer } from "@/lib/server/active-server";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 
 interface NotesSectionProps {
   notes: AssetNote[] | undefined;
@@ -119,68 +122,6 @@ function timeAgo(dateStr: string, prefs: ResolvedFormatPrefs): string {
   return formatDate(dateStr, prefs);
 }
 
-/**
- * Converts Markdoc tag syntax in note content to readable plain text.
- * Handles: {% link text="..." /%}, {% date value="..." /%},
- * {% category_badge name="..." /%}, {% tag name="..." /%},
- * {% booking_status status="..." /%}, {% description ... /%},
- * {% assets_list count=N ... /%}, {% kits_list count=N ... /%},
- * and **bold** markers.
- */
-function markdocToPlainText(
-  content: string,
-  prefs: ResolvedFormatPrefs
-): string {
-  return (
-    content
-      // {% link to="..." text="Display Text" /%} -> Display Text
-      .replace(/{%\s*link\s+[^%]*?text="([^"]*)"[^%]*\/%}/g, "$1")
-      // {% date value="2024-01-01T..." /%} -> date in the user's format + timezone
-      .replace(
-        /{%\s*date\s+value="([^"]*)"[^%]*\/%}/g,
-        (_match, iso: string) => {
-          try {
-            return formatDate(iso, prefs);
-          } catch {
-            return iso;
-          }
-        }
-      )
-      // {% category_badge name="..." ... /%} -> name
-      .replace(/{%\s*category_badge\s+name="([^"]*)"[^%]*\/%}/g, "$1")
-      // {% tag name="..." ... /%} -> name
-      .replace(/{%\s*tag\s+name="([^"]*)"[^%]*\/%}/g, "$1")
-      // {% booking_status status="RESERVED" ... /%} -> Reserved
-      // why: the shared helper rather than a local sentence-caser, so a wording
-      // change in @shelf/labels reaches this preview too.
-      .replace(
-        /{%\s*booking_status\s+status="([^"]*)"[^%]*\/%}/g,
-        (_match, status: string) => formatStatus(status)
-      )
-      // {% assets_list count=3 ... action="added" /%} -> 3 assets added
-      .replace(
-        /{%\s*assets_list\s+count=(\d+)[^%]*action="([^"]*)"[^%]*\/%}/g,
-        "$1 assets $2"
-      )
-      // {% kits_list count=2 ... action="added" /%} -> 2 kits added
-      .replace(
-        /{%\s*kits_list\s+count=(\d+)[^%]*action="([^"]*)"[^%]*\/%}/g,
-        "$1 kits $2"
-      )
-      // {% description newText="..." /%} -> (description updated)
-      .replace(/{%\s*description[^%]*\/%}/g, "(description updated)")
-      // Catch any remaining {% ... /%} tags
-      .replace(/{%[^%]*\/%}/g, "")
-      // Strip **bold** markers
-      .replace(/\*\*/g, "")
-      // Clean up &quot; entities
-      .replace(/&quot;/g, '"')
-      // Clean up extra whitespace
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
 // ── Sub-components ──────────────────────────────────────
 
 const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
@@ -192,6 +133,25 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
       "User"
     : "System";
   const isUpdate = note.type === "UPDATE";
+  // The connected server, read each render: a note link resolves against it.
+  const baseUrl = getActiveServer().baseUrl;
+  const segments = useMemo(
+    () =>
+      markdocToSegments(
+        note.content,
+        {
+          date: (iso) => formatDate(iso, prefs),
+          // why: the shared helper rather than a local sentence-caser, so a
+          // wording change in @shelf/labels reaches this preview too.
+          status: formatStatus,
+        },
+        baseUrl,
+        // A comment's Markdown links read as their labels; a system note's
+        // typed values never hide an outside link (as on the web).
+        { allowExternalLinks: !isUpdate }
+      ),
+    [note.content, prefs, isUpdate, baseUrl]
+  );
 
   return (
     <View style={[styles.noteItem, isUpdate && styles.noteItemUpdate]}>
@@ -210,9 +170,12 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
         </View>
         <Text style={styles.noteTime}>{timeAgo(note.createdAt, prefs)}</Text>
       </View>
-      <Text style={styles.noteContent} selectable>
-        {markdocToPlainText(note.content, prefs)}
-      </Text>
+      <LinkedParagraph
+        text={note.content}
+        segments={segments}
+        style={styles.noteContent}
+        selectable
+      />
     </View>
   );
 });

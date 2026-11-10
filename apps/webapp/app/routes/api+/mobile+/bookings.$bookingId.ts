@@ -137,6 +137,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        archivedWithoutCheckin: true,
         from: true,
         to: true,
         createdAt: true,
@@ -730,6 +731,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.cancel,
       }),
@@ -737,6 +739,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.archive,
       }),
@@ -744,6 +747,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.create,
       }),
@@ -751,6 +755,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.delete,
       }),
@@ -758,6 +763,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
       }),
@@ -765,6 +771,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
       }),
@@ -772,6 +779,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.extend,
       }),
@@ -827,17 +835,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         isBookingArchivable({ status: booking.status, to: booking.to }) &&
         writesBooking &&
         canArchivePerm,
+      // Discard draft: archive a DRAFT, for a caller who may archive but not
+      // delete (web `discardDraft` in booking-actions.ts). Served by
+      // `bookings/archive` with `discardDraft: true`.
+      canDiscardDraft:
+        booking.status === "DRAFT" &&
+        writesBooking &&
+        canArchivePerm &&
+        !canDeletePerm,
       // Duplicate: any status; gated by create permission and by writing this
       // booking, the two checks the duplicate endpoint makes.
       canDuplicate: writesBooking && canCreatePerm,
-      // Delete: the delete permission, and drafts only for roles whose policy
-      // says so, the same rule the endpoint enforces (`assertCanDeleteBooking`).
-      // The companion reads this server-computed flag as is.
-      canDelete:
-        (!access.policy.bookings.deleteOnlyDrafts ||
-          booking.status === "DRAFT") &&
-        writesBooking &&
-        canDeletePerm,
+      // Delete: the delete permission and writing this booking, the checks
+      // the endpoint makes (`assertCanDeleteBooking`). The companion reads
+      // this server-computed flag as is.
+      canDelete: writesBooking && canDeletePerm,
       // Extend: the service's state rules (started, something still out) +
       // extend permission, so the app never offers an extension it refuses.
       canExtend:
@@ -972,6 +984,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 

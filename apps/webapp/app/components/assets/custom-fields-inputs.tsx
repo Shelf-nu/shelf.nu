@@ -1,4 +1,4 @@
-import type { ReactElement, KeyboardEvent } from "react";
+import type { ComponentProps, ReactElement, KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
@@ -10,13 +10,21 @@ import {
 } from "@radix-ui/react-popover";
 import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
+import { linkInputProps } from "~/components/links/link-input-props";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
+import type { ModelPrefill } from "./model-default-prefill";
+import {
+  EMPTY_MODEL_PREFILL,
+  getUsablePrefill,
+  prefillVersion,
+} from "./model-default-prefill";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
@@ -25,39 +33,72 @@ import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
 import { DateTimePicker } from "../shared/date-time-picker";
 
+/**
+ * The custom field inputs of the asset form.
+ *
+ * Inputs are uncontrolled: each starts from the value a picked model
+ * pre-filled (`modelPrefill`) or else the asset's saved value. An input
+ * remounts only when the model changes its pre-filled value, so whatever the
+ * user typed elsewhere stays.
+ *
+ * @param props.currency - Workspace currency, shown on amount fields
+ * @param props.fieldErrors - Validation message per custom field id
+ * @param props.modelPrefill - Values the picked asset model filled in
+ */
 export default function AssetCustomFields({
   currency,
   fieldErrors,
+  modelPrefill = EMPTY_MODEL_PREFILL,
 }: {
   currency: Currency;
   fieldErrors: Record<string, string | undefined>;
+  modelPrefill?: ModelPrefill;
 }) {
   const { customFields, asset } = useLoaderData<typeof loader>();
 
   const customFieldsValues =
     (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) || [];
 
-  const [dateObj, setDateObj] = useState(() =>
-    customFieldsValues
-      .filter((v) => v.value.valueDate)
-      .reduce(
-        (res, cur) => {
-          res[cur.customFieldId] = new Date(cur.value.valueDate!);
-          return res;
-        },
-        {} as Record<string, Date | null>
-      )
-  );
-
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const { prefs } = useDateFormatter();
+  /** Managing the definitions is for members who may create custom fields. */
+  const canManageCustomFields = useInlineCreatePermissions().customField;
+
+  const getSavedValue = (id: string) =>
+    customFieldsValues?.find((cfv) => cfv.customFieldId === id)?.value;
+
+  /** The value a picked model pre-filled into this field, when usable. */
+  const getPrefill = (id: string) => {
+    const field = customFields.find((f) => f.id === id);
+    return field ? getUsablePrefill(modelPrefill, field) : undefined;
+  };
 
   const getCustomFieldVal = (id: string) => {
-    const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
-      ?.value;
+    const prefilled = getPrefill(id);
+    if (prefilled !== undefined) {
+      return prefilled;
+    }
+    const value = getSavedValue(id);
     return value ? (getCustomFieldDisplayValue(value, prefs) as string) : "";
   };
+
+  /** Initial `YYYY-MM-DD` value of a date field. */
+  const getDateVal = (id: string) => {
+    const prefilled = getPrefill(id);
+    if (prefilled !== undefined) {
+      return prefilled;
+    }
+    const valueDate = getSavedValue(id)?.valueDate;
+    return valueDate ? new Date(valueDate).toISOString().split("T")[0] : "";
+  };
+
+  /**
+   * React key of a field's input: it changes only when a picked model
+   * changes the field's pre-filled value, which remounts the uncontrolled
+   * input with that value.
+   */
+  const inputKey = (id: string) => `${id}-${prefillVersion(modelPrefill, id)}`;
 
   // Get field errors from the plain object passed from parent
   // This avoids react-zorm + React 19 incompatibility
@@ -91,32 +132,14 @@ export default function AssetCustomFields({
     DATE: (field) => (
       <div className="flex w-full items-end">
         <DateTimePicker
+          key={inputKey(field.id)}
           mode="date"
           className="w-full"
           label={field.name}
           hideLabel
           name={`cf-${field.id}`}
-          value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
+          defaultValue={getDateVal(field.id)}
           clearable
-          onChange={(next) => {
-            if (!next) {
-              // Clear affordance emits an empty wire.
-              setDateObj({ ...dateObj, [field.id]: null });
-              return;
-            }
-
-            let selectedDate = new Date(next);
-
-            /**
-             * Guard against an unparseable value so we never store an invalid
-             * Date (mirrors the previous native-input behaviour).
-             */
-            if (isNaN(selectedDate.valueOf())) {
-              selectedDate = new Date();
-            }
-
-            setDateObj({ ...dateObj, [field.id]: selectedDate });
-          }}
           error={getFieldError(field.id)}
           disabled={disabled}
         />
@@ -131,28 +154,28 @@ export default function AssetCustomFields({
         </label>
 
         <OptionSelect
+          key={inputKey(field.id)}
           field={field}
           getCustomFieldVal={getCustomFieldVal}
           error={getFieldError(field.id)}
+          disabled={disabled}
         />
       </>
     ),
     MULTILINE_TEXT: (field) => {
-      const value = customFieldsValues?.find(
-        (cfv) => cfv.customFieldId === field.id
-      )?.value?.raw;
+      const value = getPrefill(field.id) ?? getSavedValue(field.id)?.raw;
 
       const error = getFieldError(field.id);
 
       return (
         <>
-          <MarkdownEditor
+          <MultilineCustomFieldEditor
+            key={inputKey(field.id)}
             name={`cf-${field.id}`}
             label={field.name}
             defaultValue={value ? String(value) : ""}
             placeholder={field.helpText ?? field.name}
             disabled={disabled}
-            maxLength={5000}
           />
           {error ? (
             <p className="mt-1 text-sm text-error-500">{error}</p>
@@ -163,6 +186,7 @@ export default function AssetCustomFields({
     AMOUNT: (field) => (
       <div className="relative w-full">
         <Input
+          key={inputKey(field.id)}
           hideLabel
           type="number"
           label={field.name}
@@ -184,6 +208,7 @@ export default function AssetCustomFields({
     ),
     NUMBER: (field) => (
       <Input
+        key={inputKey(field.id)}
         hideLabel
         type="number"
         label={field.name}
@@ -207,14 +232,16 @@ export default function AssetCustomFields({
     <div className="border-b pb-6">
       <div className=" border-t py-5">
         <h2 className="mb-1 text-[18px] font-semibold">Custom Fields</h2>
-        <Button
-          to="/settings/custom-fields"
-          className="font-medium text-primary-600"
-          target="_blank"
-          variant="link"
-        >
-          Manage custom fields
-        </Button>
+        {canManageCustomFields ? (
+          <Button
+            to="/settings/custom-fields"
+            className="font-medium text-primary-600"
+            target="_blank"
+            variant="link"
+          >
+            Manage custom fields
+          </Button>
+        ) : null}
       </div>
       {customFields.length > 0 ? (
         <>
@@ -233,6 +260,7 @@ export default function AssetCustomFields({
                 >
                   {fieldTypeToCompMap[field.type]?.(field) ?? (
                     <Input
+                      key={inputKey(field.id)}
                       hideLabel
                       placeholder={field.helpText || undefined}
                       type={field.type.toLowerCase()}
@@ -243,6 +271,7 @@ export default function AssetCustomFields({
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
                       required={isFieldRequired(field.id)}
+                      {...linkInputProps(field)}
                     />
                   )}
                 </FormRow>
@@ -264,6 +293,7 @@ export default function AssetCustomFields({
                 >
                   {fieldTypeToCompMap[field.type]?.(field) ?? (
                     <Input
+                      key={inputKey(field.id)}
                       hideLabel
                       placeholder={field.helpText || undefined}
                       type={field.type.toLowerCase()}
@@ -274,6 +304,7 @@ export default function AssetCustomFields({
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
                       required={isFieldRequired(field.id)}
+                      {...linkInputProps(field)}
                     />
                   )}
                 </FormRow>
@@ -289,9 +320,11 @@ export default function AssetCustomFields({
                 <SearchIcon />
               </div>
               <h4 className="mb-6 text-base">No active custom fields</h4>
-              <Button to="/settings/custom-fields/new" variant="primary">
-                Create custom fields
-              </Button>
+              {canManageCustomFields ? (
+                <Button to="/settings/custom-fields/new" variant="primary">
+                  Create custom fields
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -301,7 +334,28 @@ export default function AssetCustomFields({
 }
 
 /**
- * Component that renders select for CustomField OPTION fields.
+ * The multiline custom field editor of the asset form.
+ *
+ * The editor rebuilds its text whenever its `defaultValue` changes, so it is
+ * handed the value it mounted with and never a later one: a re-render that
+ * computes a different initial value would otherwise wipe what the user
+ * typed. A picked model's pre-fill reaches it by remounting it through `key`.
+ *
+ * @param props.defaultValue - The text the editor starts from
+ */
+function MultilineCustomFieldEditor({
+  defaultValue,
+  ...props
+}: Omit<ComponentProps<typeof MarkdownEditor>, "maxLength" | "ref">) {
+  const [initialValue] = useState(defaultValue);
+  return (
+    <MarkdownEditor {...props} defaultValue={initialValue} maxLength={5000} />
+  );
+}
+
+/**
+ * Component that renders select for CustomField OPTION fields. Shared by the
+ * asset form and the asset model form's default values.
  *
  * The value travels in a hidden input, so the browser never flags it as
  * invalid on its own: the validation message has to be rendered here,
@@ -309,15 +363,19 @@ export default function AssetCustomFields({
  * the save with nothing on screen to explain why.
  *
  * @param error - Validation message for this field, shown under the trigger
+ * @param disabled - Disables the trigger so no option can be picked
  */
-function OptionSelect({
+export function OptionSelect({
   field,
   getCustomFieldVal,
   error,
+  disabled = false,
 }: {
-  field: CustomField;
+  field: Pick<CustomField, "id" | "name" | "options">;
   getCustomFieldVal: (id: string) => string;
   error?: string;
+  /** Disables the trigger, e.g. while the form submits. */
+  disabled?: boolean;
 }) {
   // State for popover, search, selection
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -404,6 +462,7 @@ function OptionSelect({
               shownError && "border-error-300 focus:border-error-300"
             )}
             ref={triggerRef}
+            disabled={disabled}
             aria-invalid={shownError ? true : undefined}
             aria-describedby={shownError ? `cf-${field.id}-error` : undefined}
           >

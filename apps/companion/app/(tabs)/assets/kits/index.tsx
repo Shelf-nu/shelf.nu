@@ -310,7 +310,7 @@ export default function KitsListScreen() {
                 color={colors.muted}
                 style={styles.footerSpinner}
               />
-            ) : null
+            ) : undefined
           }
         />
       )}

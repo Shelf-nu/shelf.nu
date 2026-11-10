@@ -8,19 +8,21 @@
  * @see {@link file://./utils.server.ts} parseScanData, the card's payload
  * @see {@link file://./../../components/location/scan-details.tsx} the card
  */
-import type { OrganizationRoles, Prisma, Scan } from "@prisma/client";
+import type { Prisma, Scan } from "@prisma/client";
 import { ScanCodeType, ScanSource } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapNameForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import {
+  hasPermission,
+  type PermissionSubject,
+} from "~/utils/permissions/permission.validator.server";
 import { parseSequentialId } from "~/utils/sequential-id";
 import type { ScanTarget } from "./target";
 import { scanTargetFilter } from "./target";
@@ -519,9 +521,8 @@ type GetLastScanForViewerArgs = {
   userId: string;
   /** The viewer's active organization */
   organizationId: string;
-  /** The viewer's roles in that organization (skips the validator's DB lookup) */
-  roles?: OrganizationRoles[];
-};
+  // The viewer's roles and switches there skip the validator's DB lookup.
+} & PermissionSubject;
 
 /**
  * Resolves the parsed last scan for an asset or kit, but ONLY for a viewer who
@@ -545,12 +546,12 @@ export async function getLastScanForViewer({
   target,
   userId,
   organizationId,
-  roles,
+  ...subject
 }: GetLastScanForViewerArgs) {
   const canReadScan = await hasPermission({
     userId,
     organizationId,
-    roles,
+    ...subject,
     entity: PermissionEntity.scan,
     action: PermissionAction.read,
   });
@@ -571,15 +572,14 @@ export async function getLastScanForViewer({
  *
  * A barcode or SAM ID names its value, because an asset can carry several
  * barcodes and the note should say which one was scanned. The value is
- * stripped of Markdoc delimiters: it is user-controlled and the note is
- * rendered through Markdoc.
+ * user-controlled, so it goes inside a `name` tag, never bare text.
  */
 function describeScannedCode(codeType: ScanCodeType, code: string) {
   switch (codeType) {
     case ScanCodeType.BARCODE:
-      return `the asset barcode **${stripMarkdocDelimiters(code)}**`;
+      return `the asset barcode ${wrapNameForNote(code)}`;
     case ScanCodeType.SAM_ID:
-      return `the asset SAM ID **${stripMarkdocDelimiters(code)}**`;
+      return `the asset SAM ID ${wrapNameForNote(code)}`;
     case ScanCodeType.QR:
       return "the asset QR code";
   }
@@ -643,9 +643,11 @@ export async function createScanNote({
       });
       const actor = wrapUserLinkForNote({ ...scanningUser, id: userId });
       const message = manuallyGenerated
-        ? `${actor} manually updated the GPS coordinates to *${stripMarkdocDelimiters(
-            String(latitude)
-          )}, ${stripMarkdocDelimiters(String(longitude))}*.`
+        ? // Manually entered coordinates are typed text, so they go inside a
+          // `name` tag like every other typed value.
+          `${actor} manually updated the GPS coordinates to ${wrapNameForNote(
+            `${String(latitude)}, ${String(longitude)}`
+          )}.`
         : `${actor} performed a scan of ${scannedCode}.`;
 
       return await createNote({

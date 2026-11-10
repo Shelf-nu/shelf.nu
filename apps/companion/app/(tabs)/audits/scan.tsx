@@ -17,17 +17,23 @@ import {
   Platform,
   Alert,
   AppState,
+  useWindowDimensions,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, type AuditExpectedAsset } from "@/lib/api";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { scanSplit } from "@/lib/safe-edges";
+import {
+  useOverlayEdges,
+  useTabScreenInsets,
+  useTabScreenWidth,
+} from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
@@ -40,8 +46,10 @@ import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { endScan, tryBeginScan } from "@/lib/scan-lock";
 import { useAuditInit } from "@/hooks/use-audit-init";
 import { useScanQueue } from "@/hooks/use-scan-queue";
+import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
 import {
   useToastNotification,
   type ScanResult,
@@ -57,11 +65,35 @@ import {
   type ListTab,
 } from "@/components/audit/segmented-control";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import type { PendingRecount } from "@/lib/audit-scan-queue";
+import {
+  auditScanDecision,
+  countExpectation,
+  countSheetDefault,
+  recountAnswerToast,
+  recountQueueEntry,
+  MAX_AUDIT_COUNT,
+} from "@/lib/audit-scan-queue";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
 import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // ── Main Export ──────────────────────────────────────────
+
+/** The count the sheet is asking for. See `countRequest` in the screen. */
+type AuditCountRequest = {
+  mode: "first" | "recount";
+  assetId: string;
+  assetTitle: string;
+  /** The scanned code, sent with the recorded scan. */
+  codeId: string;
+  isExpected: boolean;
+  expectedQuantity: number;
+  /** The count already recorded; null on a first scan. */
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+};
 
 export default function AuditScanScreen() {
   return (
@@ -82,6 +114,36 @@ function AuditScannerContent() {
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
 
+  // ── Layout ───────────────────────────────────────────
+
+  /**
+   * The screen's own width: beside the tab sidebar it is narrower than the
+   * window. Seeded before the first layout, so a wide screen opens straight
+   * into the side-by-side layout.
+   */
+  const { width: screenWidth, onLayout: onScreenLayout } = useTabScreenWidth();
+  /**
+   * Height to weigh it against: the window's, which the keyboard never
+   * changes. The screen's measured height shrinks while the Android keyboard
+   * is up, and judging by it would move the list beside the camera, and back,
+   * while a code is being typed. Above a bottom tab bar the screen is a little
+   * shorter than the window, so a near-square screen stays stacked, the
+   * phone layout.
+   */
+  const { height: screenHeight } = useWindowDimensions();
+  /**
+   * Whether the list sits beside the camera, and which insets each part keeps
+   * clear of: an iPhone Duo's status-bar rail or a turned foldable's camera
+   * cutout, each side on its own. The tab sidebar already covers the left one
+   * when it is showing.
+   */
+  const split = scanSplit(
+    { width: screenWidth, height: screenHeight },
+    useTabScreenInsets()
+  );
+  const { sideBySide } = split;
+  const cameraEdges = useOverlayEdges(split.camera);
+
   // ── Camera state ─────────────────────────────────────
 
   const [torchEnabled, setTorchEnabled] = useState(false);
@@ -89,13 +151,24 @@ function AuditScannerContent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(false);
 
+  // The count sheet for a quantity-tracked asset: open on its first scan
+  // ("first", the scan is recorded on confirm) and on a re-scan ("recount",
+  // the count is replaced). Scanning stays paused while it is open.
+  const [countRequest, setCountRequest] = useState<AuditCountRequest | null>(
+    null
+  );
+  // What the open sheet can promise: a target only when units are expected.
+  const countExpectationValue = countRequest
+    ? countExpectation(countRequest)
+    : null;
+  // Records the first scan once its count is confirmed.
+  const pendingCommitRef = useRef<((foundQuantity: number) => void) | null>(
+    null
+  );
+
   // ── Cooldown (shared hook) ───────────────────────────
 
-  const {
-    shouldSkip: shouldSkipScan,
-    startCooldown,
-    lastScanRef,
-  } = useScanCooldown();
+  const { startCooldown, lastScanRef } = useScanCooldown();
 
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
@@ -152,23 +225,72 @@ function AuditScannerContent() {
     React.SetStateAction<ScannedItem | null>
   > | null>(null);
 
+  // Recounts confirmed on this device and not answered yet, by asset. The
+  // result toast waits for the server: a finished audit keeps its count.
+  const pendingRecountsRef = useRef(new Map<string, PendingRecount>());
+
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
-    (assetId: string, auditAssetId: string) => {
-      // Update the scanned items list (clear any prior sync-failed marker)
+    (
+      assetId: string,
+      auditAssetId: string | null,
+      storedCount?: number | null,
+      countRefused?: boolean
+    ) => {
+      // Update the scanned items list (clear any prior sync-failed marker).
+      // The count the server stored, when given, replaces the local one.
       setScannedItemsRef.current?.((prev) =>
         prev.map((item) =>
           item.assetId === assetId
-            ? { ...item, auditAssetId, syncFailed: false }
+            ? {
+                ...item,
+                ...(auditAssetId ? { auditAssetId } : {}),
+                syncFailed: false,
+                ...(storedCount !== undefined
+                  ? { foundQuantity: storedCount }
+                  : {}),
+              }
             : item
         )
       );
       // Also update selectedItem if evidence modal is open for this asset
       setSelectedItemRef.current?.((prev) =>
-        prev?.assetId === assetId ? { ...prev, auditAssetId } : prev
+        prev?.assetId === assetId && auditAssetId
+          ? { ...prev, auditAssetId }
+          : prev
       );
+      // A recount from this device: report what the server stored.
+      const pending = pendingRecountsRef.current.get(assetId);
+      const recountToast = pending
+        ? recountAnswerToast(pending, storedCount)
+        : null;
+      if (pending && recountToast) {
+        pendingRecountsRef.current.delete(assetId);
+        Haptics.notificationAsync(
+          recountToast.type === "found"
+            ? Haptics.NotificationFeedbackType.Success
+            : Haptics.NotificationFeedbackType.Error
+        );
+        showToast(recountToast.type, recountToast.title, recountToast.subtitle);
+        return;
+      }
+      // The count the auditor entered did not stick: say so, since the row
+      // has just changed back under them.
+      if (countRefused) {
+        const name =
+          stableScannedItemsRef.current
+            .find((item) => item.assetId === assetId)
+            ?.name?.trim() || "Count not saved";
+        showToast(
+          "error",
+          name,
+          storedCount === null || storedCount === undefined
+            ? "Count not saved: the scan is no longer in this audit"
+            : `Count not saved: the audit kept ${storedCount}`
+        );
+      }
     },
-    []
+    [showToast]
   );
 
   // Callback for when a scan exhausts its retries — surface it in the list so
@@ -592,20 +714,202 @@ function AuditScannerContent() {
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = useCallback(() => {
-    isProcessingRef.current = false;
+    endScan(isProcessingRef);
     setIsProcessing(false);
     startCooldown();
   }, [startCooldown]);
+
+  /**
+   * Records a resolved scan: optimistic row, counters, feedback, the queued
+   * server write and the crash-recovery snapshot. A quantity-tracked asset
+   * arrives here with its count, after the count sheet.
+   */
+  const commitScan = useCallback(
+    ({
+      asset,
+      codeId,
+      isExpected,
+      expectedRecord,
+      count,
+    }: {
+      asset: { id: string; title: string };
+      codeId: string;
+      isExpected: boolean;
+      expectedRecord: AuditExpectedAsset | undefined;
+      count: {
+        expectedQuantity: number;
+        foundQuantity: number;
+        unitOfMeasure: string | null;
+      } | null;
+    }) => {
+      if (!auditId) return;
+      try {
+        // 4. Optimistic update: instant feedback
+        scannedAssetIdsRef.current.add(asset.id);
+
+        // why: an expected asset's full record is already in memory, so the
+        // row can show WHERE it belongs immediately. An unexpected asset has
+        // no such record; its location fills in on the next audit load.
+        const newItem: ScannedItem = {
+          assetId: asset.id,
+          name: asset.title,
+          isExpected,
+          scannedAt: new Date().toISOString(),
+          locationName: expectedRecord?.locationName ?? null,
+          thumbnailImage:
+            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
+          ...(count ? count : {}),
+        };
+        setScannedItems((prev) => {
+          const next = [newItem, ...prev];
+          scannedItemsRef.current = next;
+          return next;
+        });
+
+        if (isExpected) {
+          // Found an expected asset
+          const newFound = foundCount + 1;
+          setFoundCount(newFound);
+          animateProgress(newFound);
+          flashFrame("found");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          playScanSound();
+          announce("Asset found");
+          showToast(
+            "found",
+            asset.title,
+            count
+              ? `Counted ${count.foundQuantity} of ${count.expectedQuantity} · ${newFound}/${expectedTotal}`
+              : `Found · ${newFound}/${expectedTotal}`
+          );
+        } else {
+          // Unexpected asset
+          setUnexpectedCount((prev) => prev + 1);
+          flashFrame("unexpected");
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          announce("Asset not in audit");
+          showToast("unexpected", asset.title, "Unexpected asset");
+        }
+
+        // 5. Background persistence: submit to server
+        enqueueScan({
+          auditSessionId: auditId,
+          qrId: codeId,
+          assetId: asset.id,
+          isExpected,
+          ...(count ? { foundQuantity: count.foundQuantity } : {}),
+        });
+
+        // 6. Persist to disk for crash recovery (debounced)
+        debouncedSaverRef.current?.save(
+          scannedItemsRef.current,
+          scanQueueRef.current,
+          failedQueueRef.current
+        );
+
+        finalizeScan();
+      } catch (err) {
+        if (__DEV__) console.error("[AuditScanner] Error:", err);
+        flashFrame("error");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        showToast("error", "Scan Error", "Something went wrong.");
+        finalizeScan();
+      }
+    },
+    [
+      auditId,
+      foundCount,
+      expectedTotal,
+      flashFrame,
+      showToast,
+      animateProgress,
+      enqueueScan,
+      finalizeScan,
+      scannedAssetIdsRef,
+      setScannedItems,
+      scannedItemsRef,
+      setFoundCount,
+      setUnexpectedCount,
+      debouncedSaverRef,
+      scanQueueRef,
+      failedQueueRef,
+    ]
+  );
+
+  /** Confirmed count: record the first scan, or send the recount. */
+  const handleCountSubmit = useCallback(
+    (foundQuantity: number) => {
+      const request = countRequest;
+      if (!request || !auditId) return;
+      setCountRequest(null);
+
+      if (request.mode === "first") {
+        const commit = pendingCommitRef.current;
+        pendingCommitRef.current = null;
+        commit?.(foundQuantity);
+        return;
+      }
+
+      setScannedItems((prev) => {
+        const next = prev.map((item) =>
+          item.assetId === request.assetId
+            ? {
+                ...item,
+                expectedQuantity: request.expectedQuantity,
+                foundQuantity,
+                unitOfMeasure: request.unitOfMeasure,
+              }
+            : item
+        );
+        scannedItemsRef.current = next;
+        return next;
+      });
+      // The server replaces the count of a scan it already has.
+      enqueueScan(
+        recountQueueEntry({
+          auditSessionId: auditId,
+          qrId: request.codeId,
+          assetId: request.assetId,
+          isExpected: request.isExpected,
+          foundQuantity,
+        })
+      );
+      // The result toast waits for the server's answer (handleScanSynced).
+      pendingRecountsRef.current.set(request.assetId, {
+        assetTitle: request.assetTitle,
+        entered: foundQuantity,
+        expectedQuantity: request.expectedQuantity,
+        isExpected: request.isExpected,
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      showToast("duplicate", request.assetTitle, "Saving count…");
+      finalizeScan();
+    },
+    [
+      countRequest,
+      auditId,
+      setScannedItems,
+      scannedItemsRef,
+      enqueueScan,
+      showToast,
+      finalizeScan,
+    ]
+  );
+
+  /** Sheet closed without a count: a first scan is dropped, a recount kept. */
+  const handleCountClose = useCallback(() => {
+    pendingCommitRef.current = null;
+    setCountRequest(null);
+    finalizeScan();
+  }, [finalizeScan]);
 
   // ── Barcode scan handler ─────────────────────────────
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || shouldSkipScan(data)) return;
       if (!auditId || !currentOrg) return;
+      if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
-      isProcessingRef.current = true;
-      lastScanRef.current = data;
       setIsProcessing(true);
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -727,8 +1031,42 @@ function AuditScannerContent() {
           return;
         }
 
-        // 2. O(1) duplicate check
-        if (scannedAssetIdsRef.current.has(asset.id)) {
+        // A quantity-tracked asset is counted, not just found. The audit's
+        // own row says so for an expected asset; the lookup's asset type
+        // covers an unexpected one.
+        const expectedRecord = expectedAssetMapRef.current.get(asset.id);
+        const lookedUp = asset as {
+          type?: string;
+          quantity?: number | null;
+          unitOfMeasure?: string | null;
+        };
+        // 2. O(1) duplicate check, then 3. expected vs unexpected
+        const decision = auditScanDecision({
+          scannedRow: scannedAssetIdsRef.current.has(asset.id)
+            ? scannedItemsRef.current.find((item) => item.assetId === asset.id)
+            : undefined,
+          expectedRecord,
+          lookedUp,
+          isExpected: expectedAssetIdsRef.current.has(asset.id),
+        });
+
+        if (decision.kind === "recount") {
+          // Scanning a quantity-tracked asset again corrects its count. The
+          // camera stays paused until the sheet closes (finalizeScan).
+          setCountRequest({
+            mode: "recount",
+            assetId: asset.id,
+            assetTitle: asset.title,
+            codeId,
+            isExpected: decision.isExpected,
+            expectedQuantity: decision.expectedQuantity,
+            foundQuantity: decision.foundQuantity,
+            unitOfMeasure: decision.unitOfMeasure,
+          });
+          return;
+        }
+
+        if (decision.kind === "duplicate") {
           flashFrame("duplicate");
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           showToast("duplicate", "Already Scanned", asset.title);
@@ -736,70 +1074,38 @@ function AuditScannerContent() {
           return;
         }
 
-        // 3. Determine expected vs unexpected
-        const isExpected = expectedAssetIdsRef.current.has(asset.id);
-
-        // 4. Optimistic update — instant feedback
-        scannedAssetIdsRef.current.add(asset.id);
-
-        // why: an expected asset's full record is already in memory, so the
-        // row can show WHERE it belongs immediately. An unexpected asset has
-        // no such record — its location fills in on the next audit load.
-        const expectedRecord = expectedAssetMapRef.current.get(asset.id);
-        const newItem = {
-          assetId: asset.id,
-          name: asset.title,
-          isExpected,
-          scannedAt: new Date().toISOString(),
-          locationName: expectedRecord?.locationName ?? null,
-          thumbnailImage:
-            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
-        };
-        setScannedItems((prev) => {
-          const next = [newItem, ...prev];
-          scannedItemsRef.current = next;
-          return next;
-        });
-
-        if (isExpected) {
-          // Found an expected asset
-          const newFound = foundCount + 1;
-          setFoundCount(newFound);
-          animateProgress(newFound);
-          flashFrame("found");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          playScanSound();
-          announce("Asset found");
-          showToast(
-            "found",
-            asset.title,
-            `Found · ${newFound}/${expectedTotal}`
-          );
-        } else {
-          // Unexpected asset
-          setUnexpectedCount((prev) => prev + 1);
-          flashFrame("unexpected");
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          announce("Asset not in audit");
-          showToast("unexpected", asset.title, "Unexpected asset");
+        if (decision.kind === "first") {
+          // Ask for the count first; the scan is recorded on confirm and
+          // dropped if the sheet is closed.
+          const { expectedQuantity, isExpected, unitOfMeasure } = decision;
+          setCountRequest({
+            mode: "first",
+            assetId: asset.id,
+            assetTitle: asset.title,
+            codeId,
+            isExpected,
+            expectedQuantity,
+            foundQuantity: null,
+            unitOfMeasure,
+          });
+          pendingCommitRef.current = (foundQuantity: number) =>
+            commitScan({
+              asset,
+              codeId,
+              isExpected,
+              expectedRecord,
+              count: { expectedQuantity, foundQuantity, unitOfMeasure },
+            });
+          return;
         }
 
-        // 5. Background persistence — submit to server
-        enqueueScan({
-          auditSessionId: auditId,
-          qrId: codeId,
-          assetId: asset.id,
-          isExpected,
+        commitScan({
+          asset,
+          codeId,
+          isExpected: decision.isExpected,
+          expectedRecord,
+          count: null,
         });
-
-        // 6. Persist to disk for crash recovery (debounced)
-        debouncedSaverRef.current?.save(
-          scannedItemsRef.current,
-          scanQueueRef.current,
-          failedQueueRef.current
-        );
-
-        finalizeScan();
       } catch (err) {
         if (__DEV__) console.error("[AuditScanner] Error:", err);
         flashFrame("error");
@@ -811,29 +1117,22 @@ function AuditScannerContent() {
     [
       auditId,
       currentOrg,
-      foundCount,
-      expectedTotal,
       // stable ref object; listed to satisfy exhaustive-deps, never changes
       expectedAssetMapRef,
       flashFrame,
       showToast,
       resetInactivityTimer,
-      animateProgress,
-      enqueueScan,
       finalizeScan,
       scannedAssetIdsRef,
       expectedAssetIdsRef,
-      setScannedItems,
       scannedItemsRef,
-      setFoundCount,
-      setUnexpectedCount,
-      debouncedSaverRef,
-      scanQueueRef,
-      failedQueueRef,
-      shouldSkipScan,
+      commitScan,
       lastScanRef,
     ]
   );
+
+  /** The camera's frame callback; the handler's processing lock drops frames during a lookup. */
+  const handleCameraScan = useCameraScanHandler(handleBarCodeScanned, false);
 
   // ── Complete audit ───────────────────────────────────
 
@@ -990,6 +1289,11 @@ function AuditScannerContent() {
     // succeed), so we must NOT trap the audit. Offer to retry or to complete
     // anyway (acknowledging those assets will be marked missing).
     const failedCount = failedQueueRef.current.length;
+    // A failed recount only loses the correction: the scan itself is saved and
+    // keeps its last saved count. Say so instead of "marked as missing".
+    const failedRecounts = failedQueueRef.current.filter(
+      (entry) => entry.recount
+    ).length;
     if (failedCount > 0) {
       // Highest-signal case: the worker is completing an audit that has scans
       // which exhausted retries — those assets will be marked MISSING unless
@@ -1001,11 +1305,20 @@ function AuditScannerContent() {
       );
       Alert.alert(
         "Some scans didn't sync",
-        `${failedCount} scan${
-          failedCount === 1 ? "" : "s"
-        } couldn't be saved ` +
-          `to the server after several tries. Retry, or complete anyway ` +
-          `(${failedCount === 1 ? "it" : "they"} will be marked as missing).`,
+        failedRecounts === failedCount
+          ? `${failedCount} count correction${
+              failedCount === 1 ? "" : "s"
+            } couldn't be saved to the server after several tries. Retry, ` +
+              `or complete anyway (the last saved count${
+                failedCount === 1 ? " is" : "s are"
+              } kept).`
+          : `${failedCount} scan${
+              failedCount === 1 ? "" : "s"
+            } couldn't be saved ` +
+              `to the server after several tries. Retry, or complete anyway ` +
+              `(${
+                failedCount === 1 ? "it" : "they"
+              } will be marked as missing).`,
         [
           { text: "Cancel", style: "cancel" },
           { text: "Retry sync", onPress: retryFailedScans },
@@ -1078,6 +1391,8 @@ function AuditScannerContent() {
           mainImage: asset.mainImage,
           locationName: asset.locationName,
           categoryName: asset.categoryName,
+          expectedQuantity: asset.expectedQuantity ?? null,
+          unitOfMeasure: asset.unitOfMeasure ?? null,
         });
       }
     }
@@ -1180,324 +1495,418 @@ function AuditScannerContent() {
 
   // ── Camera view ──────────────────────────────────────
 
-  return (
-    <View style={styles.container}>
-      {/* Top 60%: Camera */}
-      <View style={styles.cameraSection}>
-        {isFocused && !isPaused && (
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            enableTorch={torchEnabled}
-            barcodeScannerSettings={{
-              barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
-            }}
-            onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
-          />
-        )}
+  // Upright, the camera sits above the progress and the scanned list, the way
+  // a phone is held. On a screen wider than it is tall (a foldable or a
+  // tablet turned sideways) that would leave a letterbox of camera over a
+  // short list, so the list moves beside the camera instead.
+  const cameraSection = (
+    <View style={styles.cameraSection}>
+      {isFocused && !isPaused && (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          enableTorch={torchEnabled}
+          barcodeScannerSettings={{
+            barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
+          }}
+          // Always a function: swapping it for undefined reconfigures the iOS
+          // capture session and switches the torch off. The handler's
+          // processing lock drops frames during a lookup instead.
+          onBarcodeScanned={handleCameraScan}
+        />
+      )}
 
-        {/* Paused overlay */}
-        {isPaused && (
+      {/* Paused overlay */}
+      {isPaused && (
+        <TouchableOpacity
+          style={styles.pausedOverlay}
+          onPress={togglePause}
+          activeOpacity={0.9}
+          accessibilityLabel="Camera paused. Tap to resume"
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="play-circle-outline"
+            size={64}
+            color="rgba(255,255,255,0.8)"
+          />
+          <Text style={styles.pausedTitle}>Camera Paused</Text>
+          <Text style={styles.pausedSubtitle}>Tap to resume</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Overlay with frame */}
+      <View style={[styles.cameraOverlay, { pointerEvents: "box-none" }]}>
+        {/* Header: back + audit name + controls */}
+        <View
+          style={[
+            styles.cameraHeader,
+            {
+              paddingTop: cameraEdges.top,
+              paddingLeft: spacing.lg + cameraEdges.left,
+              paddingRight: spacing.lg + cameraEdges.right,
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={styles.pausedOverlay}
-            onPress={togglePause}
-            activeOpacity={0.9}
-            accessibilityLabel="Camera paused. Tap to resume"
+            onPress={() => router.back()}
+            style={styles.headerBackButton}
+            accessibilityLabel="Go back"
             accessibilityRole="button"
           >
-            <Ionicons
-              name="play-circle-outline"
-              size={64}
-              color="rgba(255,255,255,0.8)"
-            />
-            <Text style={styles.pausedTitle}>Camera Paused</Text>
-            <Text style={styles.pausedSubtitle}>Tap to resume</Text>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
-        )}
-
-        {/* Overlay with frame */}
-        <View style={[styles.cameraOverlay, { pointerEvents: "box-none" }]}>
-          {/* Header: back + audit name + controls */}
-          <View style={styles.cameraHeader}>
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerLabel}>Audit Scanner</Text>
+            <Text style={styles.headerName} numberOfLines={1}>
+              {auditName}
+            </Text>
+          </View>
+          <View style={styles.controlButtons}>
             <TouchableOpacity
-              onPress={() => router.back()}
-              style={styles.headerBackButton}
-              accessibilityLabel="Go back"
+              style={[
+                styles.controlButton,
+                isPaused && styles.controlButtonActive,
+              ]}
+              onPress={togglePause}
+              accessibilityLabel={isPaused ? "Resume camera" : "Pause camera"}
               accessibilityRole="button"
             >
-              <Ionicons name="arrow-back" size={22} color="#fff" />
+              <Ionicons
+                name={isPaused ? "play" : "pause"}
+                size={18}
+                color="#fff"
+              />
             </TouchableOpacity>
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerLabel}>Audit Scanner</Text>
-              <Text style={styles.headerName} numberOfLines={1}>
-                {auditName}
-              </Text>
-            </View>
-            <View style={styles.controlButtons}>
-              <TouchableOpacity
-                style={[
-                  styles.controlButton,
-                  isPaused && styles.controlButtonActive,
-                ]}
-                onPress={togglePause}
-                accessibilityLabel={isPaused ? "Resume camera" : "Pause camera"}
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={isPaused ? "play" : "pause"}
-                  size={18}
-                  color="#fff"
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.controlButton,
-                  torchEnabled && styles.controlButtonActive,
-                ]}
-                onPress={() => setTorchEnabled((prev) => !prev)}
-                accessibilityLabel={
-                  torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
-                }
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={torchEnabled ? "flash" : "flash-outline"}
-                  size={18}
-                  color={torchEnabled ? "#FFD600" : "#fff"}
-                />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={[
+                styles.controlButton,
+                torchEnabled && styles.controlButtonActive,
+              ]}
+              onPress={() => setTorchEnabled((prev) => !prev)}
+              accessibilityLabel={
+                torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
+              }
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name={torchEnabled ? "flash" : "flash-outline"}
+                size={18}
+                color={torchEnabled ? "#FFD600" : "#fff"}
+              />
+            </TouchableOpacity>
           </View>
-
-          {/* Scan frame — hidden while paused so it doesn't bleed through the paused overlay */}
-          {!isPaused && (
-            <View style={styles.scanFrameContainer}>
-              <View style={styles.scanFrame}>
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerTL,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerTR,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerBL,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.corner,
-                    styles.cornerBR,
-                    frameHighlight && { borderColor: frameColor },
-                  ]}
-                />
-                {!frameHighlight && (
-                  <Animated.View
-                    style={[
-                      styles.scanLine,
-                      {
-                        transform: [{ translateY: scanLineTranslate }],
-                      },
-                    ]}
-                  />
-                )}
-              </View>
-            </View>
-          )}
-
-          {/* Processing indicator */}
-          {isProcessing && (
-            <View style={styles.processingRow}>
-              <ActivityIndicator size="small" color="#fff" />
-              <Text style={styles.processingText}>Looking up asset...</Text>
-            </View>
-          )}
         </View>
 
-        {/* Toast overlay */}
-        {toast && (
-          <Animated.View
-            style={[
-              styles.toast,
-              toast.type === "found" && styles.toastFound,
-              toast.type === "unexpected" && styles.toastUnexpected,
-              toast.type === "duplicate" && styles.toastDuplicate,
-              toast.type === "error" && styles.toastError,
-              {
-                transform: [
-                  {
-                    translateY: toastAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-60, 0],
-                    }),
-                  },
-                ],
-                opacity: toastAnim,
-              },
-            ]}
-          >
-            <Ionicons
-              name={
-                toast.type === "found"
-                  ? "checkmark-circle"
-                  : toast.type === "unexpected"
-                  ? "alert-circle"
-                  : toast.type === "duplicate"
-                  ? "copy-outline"
-                  : "close-circle"
-              }
-              size={20}
-              color="#fff"
-            />
-            <View style={styles.toastText}>
-              <Text style={styles.toastTitle} numberOfLines={1}>
-                {toast.title}
-              </Text>
-              <Text style={styles.toastSubtitle} numberOfLines={1}>
-                {toast.subtitle}
-              </Text>
+        {/* Scan frame: hidden while paused so it doesn't bleed through the paused overlay */}
+        {!isPaused && (
+          <View style={styles.scanFrameContainer}>
+            <View style={styles.scanFrame}>
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerTL,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerTR,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerBL,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.cornerBR,
+                  frameHighlight && { borderColor: frameColor },
+                ]}
+              />
+              {!frameHighlight && (
+                <Animated.View
+                  style={[
+                    styles.scanLine,
+                    {
+                      transform: [{ translateY: scanLineTranslate }],
+                    },
+                  ]}
+                />
+              )}
             </View>
-          </Animated.View>
-        )}
-      </View>
-
-      {/* ── Manual code entry ───────────────────────────
-          Type a QR id, barcode value, or SAM id when a label can't be
-          scanned. Feeds the same resolution pipeline as the camera. Web
-          parity: the web audit scanner (audits.$auditId.scan.tsx) uses the
-          shared CodeScanner, which exposes a manual code-entry Input.
-          NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
-          control's origin so the existing e2e flows stay stable. */}
-      <View style={styles.devScanContainer}>
-        {devScanVisible ? (
-          <View style={styles.devScanRow}>
-            <TextInput
-              testID="dev-scan-input"
-              style={styles.devScanInput}
-              value={devScanInput}
-              onChangeText={setDevScanInput}
-              placeholder="Enter QR, barcode, or SAM ID"
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="go"
-              onSubmitEditing={() => {
-                if (devScanInput.trim()) {
-                  handleBarCodeScanned({ data: devScanInput.trim() });
-                  setDevScanInput("");
-                }
-              }}
-            />
-            <TouchableOpacity
-              testID="dev-scan-submit"
-              style={styles.devScanButton}
-              onPress={() => {
-                if (devScanInput.trim()) {
-                  handleBarCodeScanned({ data: devScanInput.trim() });
-                  setDevScanInput("");
-                }
-              }}
-              accessibilityLabel="Look up code"
-            >
-              <Ionicons name="arrow-forward" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.devScanClose}
-              onPress={() => setDevScanVisible(false)}
-              accessibilityLabel="Close manual entry"
-            >
-              <Ionicons name="close" size={16} color="#fff" />
-            </TouchableOpacity>
           </View>
-        ) : (
-          <TouchableOpacity
-            testID="dev-scan-toggle"
-            style={styles.devScanToggle}
-            onPress={() => setDevScanVisible(true)}
-            accessibilityLabel="Enter a code manually"
-          >
-            <Ionicons name="keypad-outline" size={14} color="#fff" />
-            <Text style={styles.devScanToggleText}>Enter code</Text>
-          </TouchableOpacity>
+        )}
+
+        {/* Processing indicator */}
+        {isProcessing && (
+          <View style={styles.processingRow}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.processingText}>Looking up asset...</Text>
+          </View>
         )}
       </View>
 
-      {/* Bottom 40%: Progress + scanned list */}
-      <View style={styles.bottomPanel}>
-        <ProgressHeader
-          foundCount={foundCount}
-          expectedCount={expectedTotal}
-          unexpectedCount={unexpectedCount}
-          progressAnim={progressAnim}
-          progressPercent={progressPercent}
-        />
+      {/* Toast overlay */}
+      {toast && (
+        <Animated.View
+          style={[
+            styles.toast,
+            {
+              left: spacing.lg + cameraEdges.left,
+              right: spacing.lg + cameraEdges.right,
+            },
+            toast.type === "found" && styles.toastFound,
+            toast.type === "unexpected" && styles.toastUnexpected,
+            toast.type === "duplicate" && styles.toastDuplicate,
+            toast.type === "error" && styles.toastError,
+            {
+              transform: [
+                {
+                  translateY: toastAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-60, 0],
+                  }),
+                },
+              ],
+              opacity: toastAnim,
+            },
+          ]}
+        >
+          <Ionicons
+            name={
+              toast.type === "found"
+                ? "checkmark-circle"
+                : toast.type === "unexpected"
+                ? "alert-circle"
+                : toast.type === "duplicate"
+                ? "copy-outline"
+                : "close-circle"
+            }
+            size={20}
+            color="#fff"
+          />
+          <View style={styles.toastText}>
+            <Text style={styles.toastTitle} numberOfLines={1}>
+              {toast.title}
+            </Text>
+            <Text style={styles.toastSubtitle} numberOfLines={1}>
+              {toast.subtitle}
+            </Text>
+          </View>
+        </Animated.View>
+      )}
+    </View>
+  );
 
-        {/* Scanned / Remaining toggle + list */}
-        <View style={styles.scannedListSection}>
-          <SegmentedControl
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            scannedCount={scannedItems.length}
-            remainingCount={remainingCount}
-            unexpectedCount={unexpectedCount}
-            unexpectedFilterActive={showUnexpectedOnly}
-            onUnexpectedPress={() => {
-              // The badge sits inside the Scanned tab button, and React Native
-              // gives the press to the inner touchable only, so the parent tab
-              // never fires. Switch the tab here: without it a press from the
-              // Not-scanned tab flips the filter while that list stays on screen.
-              setActiveTab("scanned");
-              setShowUnexpectedOnly((v) => !v);
+  // Manual code entry: type a QR id, barcode value, or SAM id when a label
+  // can't be scanned. Feeds the same resolution pipeline as the camera. Web
+  // parity: the web audit scanner (audits.$auditId.scan.tsx) uses the shared
+  // CodeScanner, which exposes a manual code-entry Input. testIDs and state
+  // keep the `dev-scan`/`devScan` prefix so the e2e flows stay stable.
+  const manualEntry = (
+    <View
+      style={[
+        styles.devScanContainer,
+        {
+          paddingLeft: spacing.md + cameraEdges.left,
+          paddingRight: spacing.md + cameraEdges.right,
+          // Beside the list it is the camera column's bottom row: clear of the
+          // home indicator when the tab sidebar leaves that edge uncovered.
+          paddingBottom: spacing.xs + split.camera.bottom,
+        },
+      ]}
+    >
+      {devScanVisible ? (
+        <View style={styles.devScanRow}>
+          <TextInput
+            testID="dev-scan-input"
+            style={styles.devScanInput}
+            value={devScanInput}
+            onChangeText={setDevScanInput}
+            placeholder="Enter QR, barcode, or SAM ID"
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="go"
+            onSubmitEditing={() => {
+              if (devScanInput.trim()) {
+                handleBarCodeScanned({ data: devScanInput.trim() });
+                setDevScanInput("");
+              }
             }}
           />
-
-          {/* why: the evidence sheet lives behind a row tap, so name it once
-              the first row exists — on the Scanned tab, where the rows are. */}
-          {activeTab === "scanned" && (
-            <EvidenceCoachmark
-              enabled={scannedItems.length > 0}
-              hasOpenedEvidence={hasOpenedEvidence}
-            />
-          )}
-
-          {/* List content */}
-          {activeTab === "scanned" ? (
-            <ScannedItemsList
-              items={visibleScannedItems}
-              onItemPress={handleItemPress}
-            />
-          ) : (
-            <RemainingAssetsList items={remainingAssets} />
-          )}
-        </View>
-
-        {/* Complete button */}
-        {scannedItems.length > 0 && (
           <TouchableOpacity
-            style={styles.completeButton}
-            onPress={handleComplete}
-            accessibilityLabel="Complete audit"
-            accessibilityRole="button"
+            testID="dev-scan-submit"
+            style={styles.devScanButton}
+            onPress={() => {
+              if (devScanInput.trim()) {
+                handleBarCodeScanned({ data: devScanInput.trim() });
+                setDevScanInput("");
+              }
+            }}
+            accessibilityLabel="Look up code"
           >
-            <Ionicons
-              name="checkmark-done-outline"
-              size={18}
-              color={colors.primaryForeground}
-            />
-            <Text style={styles.completeButtonText}>Complete Audit</Text>
+            <Ionicons name="arrow-forward" size={16} color="#fff" />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.devScanClose}
+            onPress={() => setDevScanVisible(false)}
+            accessibilityLabel="Close manual entry"
+          >
+            <Ionicons name="close" size={16} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          testID="dev-scan-toggle"
+          style={styles.devScanToggle}
+          onPress={() => setDevScanVisible(true)}
+          accessibilityLabel="Enter a code manually"
+        >
+          <Ionicons name="keypad-outline" size={14} color="#fff" />
+          <Text style={styles.devScanToggleText}>Enter code</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  // Progress and the scanned / not-scanned lists.
+  const panel = (
+    <View
+      style={[
+        styles.bottomPanel,
+        sideBySide && styles.bottomPanelBeside,
+        {
+          // Beside the camera the panel reaches the top of the screen.
+          paddingTop: spacing.md + split.panel.top,
+          paddingLeft: spacing.lg + split.panel.left,
+          paddingRight: spacing.lg + split.panel.right,
+          // Below a tab sidebar nothing takes the home-indicator inset.
+          paddingBottom: split.panel.bottom,
+        },
+      ]}
+    >
+      <ProgressHeader
+        foundCount={foundCount}
+        expectedCount={expectedTotal}
+        unexpectedCount={unexpectedCount}
+        progressAnim={progressAnim}
+        progressPercent={progressPercent}
+      />
+
+      {/* Scanned / Remaining toggle + list */}
+      <View style={styles.scannedListSection}>
+        <SegmentedControl
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          scannedCount={scannedItems.length}
+          remainingCount={remainingCount}
+          unexpectedCount={unexpectedCount}
+          unexpectedFilterActive={showUnexpectedOnly}
+          onUnexpectedPress={() => {
+            // The badge sits inside the Scanned tab button, and React Native
+            // gives the press to the inner touchable only, so the parent tab
+            // never fires. Switch the tab here: without it a press from the
+            // Not-scanned tab flips the filter while that list stays on screen.
+            setActiveTab("scanned");
+            setShowUnexpectedOnly((v) => !v);
+          }}
+        />
+
+        {/* why: the evidence sheet lives behind a row tap, so name it once
+              the first row exists — on the Scanned tab, where the rows are. */}
+        {activeTab === "scanned" && (
+          <EvidenceCoachmark
+            enabled={scannedItems.length > 0}
+            hasOpenedEvidence={hasOpenedEvidence}
+          />
+        )}
+
+        {/* List content */}
+        {activeTab === "scanned" ? (
+          <ScannedItemsList
+            items={visibleScannedItems}
+            onItemPress={handleItemPress}
+          />
+        ) : (
+          <RemainingAssetsList items={remainingAssets} />
         )}
       </View>
+
+      {/* Complete button */}
+      {scannedItems.length > 0 && (
+        <TouchableOpacity
+          style={styles.completeButton}
+          onPress={handleComplete}
+          accessibilityLabel="Complete audit"
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="checkmark-done-outline"
+            size={18}
+            color={colors.primaryForeground}
+          />
+          <Text style={styles.completeButtonText}>Complete Audit</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  return (
+    <View
+      style={[styles.container, sideBySide && styles.containerBeside]}
+      onLayout={onScreenLayout}
+    >
+      {/* One element tree in both layouts, so switching between them
+          restyles the camera instead of remounting it. */}
+      <View
+        style={sideBySide ? styles.cameraColumnBeside : styles.cameraColumn}
+      >
+        {cameraSection}
+        {manualEntry}
+      </View>
+      {panel}
+
+      <QuantityInputSheet
+        visible={countRequest !== null}
+        title={
+          countRequest?.mode === "recount" ? "Update count" : "Count units"
+        }
+        subtitle={
+          countRequest
+            ? `${countRequest.assetTitle} · ${
+                countExpectationValue === "expected"
+                  ? `${countRequest.expectedQuantity} expected`
+                  : countExpectationValue === "none-expected"
+                  ? "none expected here"
+                  : "not on this audit's list"
+              }`
+            : undefined
+        }
+        min={0}
+        // A count may go past the expectation (a surplus), so the sheet's
+        // ceiling is the server's and the expectation is only its target. An
+        // asset not on the audit's list has no expectation to count against.
+        max={MAX_AUDIT_COUNT}
+        target={
+          countExpectationValue === "expected"
+            ? countRequest?.expectedQuantity
+            : undefined
+        }
+        placeholder="Units found"
+        defaultValue={countRequest ? countSheetDefault(countRequest) : null}
+        unitOfMeasure={countRequest?.unitOfMeasure}
+        confirmLabel={countRequest?.mode === "recount" ? "Update" : "Record"}
+        onSubmit={handleCountSubmit}
+        onClose={handleCountClose}
+      />
 
       <CompleteAuditSheet
         key={auditId}
@@ -1529,6 +1938,25 @@ const useStyles = createStyles((colors, shadows) => ({
   container: {
     flex: 1,
     backgroundColor: "#000",
+  },
+  containerBeside: {
+    flexDirection: "row",
+  },
+  // Holds the camera and the manual entry. Upright, it takes the manual
+  // entry's height plus 6 of the 11 shares of what is left (the panel takes
+  // 5), so the camera gets 6/11 of the space beside the manual-entry row.
+  cameraColumn: {
+    flexGrow: 6,
+    flexShrink: 1,
+    flexBasis: "auto",
+    // Above the panel, which overlaps it from below: the manual-entry row
+    // inside must stay visible and take its own taps.
+    zIndex: 1,
+  },
+  // Beside the list on a wide screen: 6 of 11 shares of the width.
+  cameraColumnBeside: {
+    flex: 6,
+    zIndex: 1,
   },
   centered: {
     flex: 1,
@@ -1565,23 +1993,22 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.md,
   },
 
-  // Camera section (top 60%)
+  // Camera: above the manual entry, in the camera column.
   cameraSection: {
-    flex: 6,
+    flex: 1,
     backgroundColor: "#000",
     position: "relative",
   },
   cameraOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "space-between",
   },
 
   // Camera header
+  // Padding comes from the screen's insets at render time.
   cameraHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: Platform.OS === "ios" ? 60 : 40,
-    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
   headerBackButton: {
@@ -1691,7 +2118,7 @@ const useStyles = createStyles((colors, shadows) => ({
 
   // Paused overlay
   pausedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
     alignItems: "center",
@@ -1709,11 +2136,10 @@ const useStyles = createStyles((colors, shadows) => ({
   },
 
   // Toast
+  // `left` and `right` come from the screen's insets at render time.
   toast: {
     position: "absolute",
     bottom: spacing.lg,
-    left: spacing.lg,
-    right: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     borderRadius: borderRadius.lg,
@@ -1747,7 +2173,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: "rgba(255,255,255,0.8)",
   },
 
-  // Bottom panel (~45%) — the scanned list needs to show more than a row and
+  // Bottom panel (~45%): the scanned list needs to show more than a row and
   // a half, otherwise a fresh scan can land below the fold.
   bottomPanel: {
     flex: 5,
@@ -1756,8 +2182,14 @@ const useStyles = createStyles((colors, shadows) => ({
     borderTopRightRadius: borderRadius.xl,
     marginTop: -12,
     paddingTop: spacing.md,
-    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
+  },
+  // Beside the camera: rounded on the camera's side, without overlapping it,
+  // so the scan frame stays centred in the camera the operator sees.
+  bottomPanelBeside: {
+    marginTop: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: borderRadius.xl,
   },
 
   // Scanned items list
@@ -1785,8 +2217,8 @@ const useStyles = createStyles((colors, shadows) => ({
   },
 
   // ── Dev Scan Injection (DEV only) ───────────────
+  // Side padding comes from the screen's insets at render time.
   devScanContainer: {
-    paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     zIndex: 999,
   },

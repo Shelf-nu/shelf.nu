@@ -33,7 +33,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import { fieldTypeLabel } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -190,9 +190,7 @@ function CustomFieldRow({
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1">
               <span className="block">{item.name}</span>
-              <span className="text-gray-600">
-                {FIELD_TYPE_NAME[item.type]}
-              </span>
+              <span className="text-gray-600">{fieldTypeLabel(item)}</span>
             </div>
           </div>
         </Link>

@@ -38,6 +38,7 @@ import {
   assertCanAddBookingItems,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -245,6 +246,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       // Re-checks the add rule against the locked booking status.
       access,
+      hints: getClientHint(request),
     });
 
     // Distinct member assets just added — used to attribute the per-asset

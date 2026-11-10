@@ -5,7 +5,8 @@
  * booked item, whether it came back, when, in what state and who received it,
  * with totals, a completeness stamp and signature lines for the hand-over.
  *
- * Offered from the booking's Actions menu once anything has been checked in.
+ * Offered from the booking's Actions menu and a bookings list row's menu,
+ * enabled once anything has been checked in.
  * Unlike the checklist it carries no code pictures and no tick boxes (the sheet
  * is a record of what happened, not a list of work to do), and it prints no
  * asset values: it is handed to custodians and clients.
@@ -16,13 +17,12 @@
 
 import type { ReactNode, RefObject } from "react";
 import { useRef, useState } from "react";
-import type { Booking, BookingStatus } from "@prisma/client";
+import type { Booking } from "@prisma/client";
+import { ReceiptTextIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
-import { useSearchParams } from "~/hooks/search-params";
-import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import type {
   CheckinReceiptView,
   CheckinReceiptViewRow,
@@ -30,6 +30,11 @@ import type {
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
+import { BookingActionTrigger } from "./booking-action-trigger";
+import type { BookingActionTriggerVariant } from "./booking-action-trigger";
+import { NO_CHECKIN_RECEIPT_REASON } from "./booking-actions";
+import type { BookingActionDisabled } from "./booking-actions";
+import type { PdfAssetOrder } from "./booking-overview-pdf";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
@@ -58,56 +63,58 @@ const RECEIPT_TABLE_COLUMNS = [
 ] as const;
 
 /**
- * The Actions-menu entry that previews and prints a booking's check-in receipt.
+ * Why a booking has no receipt to print, for the disabled trigger's tooltip.
  *
- * Rendered as bare buttons plus a portalled dialog rather than a
+ * @param bookingAssets - The booking's slices (only `checkedOutAt` is read)
+ * @returns The reason shown when `isCheckinReceiptAvailable`
+ *   (`~/modules/booking/checkin-receipt-availability`) is `false`
+ */
+export function checkinReceiptUnavailableReason(
+  bookingAssets: Array<{ checkedOutAt: string | Date | null }>
+): string {
+  return bookingAssets.some((ba) => ba.checkedOutAt != null)
+    ? NO_CHECKIN_RECEIPT_REASON
+    : "This booking was never checked out.";
+}
+
+/**
+ * The entry that previews and prints a booking's check-in receipt, from the
+ * booking page or a bookings list row.
+ *
+ * Rendered as a trigger plus a portalled dialog rather than a
  * `DropdownMenuItem`: selecting an item closes the menu, which would unmount
  * this component and the open dialog with it.
  *
- * @param props.booking - The booking to print, with the slice markers the
- *   entry's enabled state is derived from.
- * @param props.timeStamp - Stamped into the downloaded file's name so repeated
- *   prints of one booking do not overwrite each other.
+ * The downloaded file's name carries the moment the dialog was opened, so
+ * repeated prints of one booking do not overwrite each other.
+ *
+ * @param props.booking - The booking to print
+ * @param props.disabled - The trigger's disabled state, as the shared rules
+ *   (`resolveBookingActions`, its `checkinReceipt` entry) decide it, with the
+ *   reason the viewer is shown
+ * @param props.assetOrder - The sort to list rows in. Omitted, no sort is sent
+ *   and the server default (status, descending) applies.
+ * @param props.trigger - Menu row (default) or icon button
  */
 export const BookingCheckinReceiptPDF = ({
   booking,
-  hasDispositionedUnits,
-  timeStamp,
+  disabled,
+  assetOrder,
+  trigger = "menu-item",
 }: {
   booking: {
     id: Booking["id"];
     name: Booking["name"];
-    status: BookingStatus;
-    /**
-     * The booking's slices. Only the two markers are read; both arrive as ISO
-     * strings from the loader, so they are compared against `null` rather than
-     * treated as dates.
-     */
-    bookingAssets: Array<{
-      checkedOutAt: string | Date | null;
-      checkedInAt: string | Date | null;
-    }>;
   };
-  /**
-   * Whether any booked unit has been accounted for. A quantity slice returned
-   * in part keeps its `checkedInAt` NULL — that marker means fully reconciled —
-   * so the markers alone cannot say whether anything has come back.
-   */
-  hasDispositionedUnits: boolean;
-  timeStamp: number;
+  disabled: BookingActionDisabled;
+  assetOrder?: PdfAssetOrder;
+  trigger?: BookingActionTriggerVariant;
 }) => {
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  /** When the dialog was last opened; stamped into the file name. */
+  const [openedAt, setOpenedAt] = useState(0);
   const fetcher = useFetcher<CheckinReceiptApiResponse>();
-  const [searchParams] = useSearchParams();
-  const { isCompleted, isArchived } = useBookingStatusHelpers(booking.status);
-
-  // Match the checklist's sort so both sheets list the booking's rows in the
-  // order the page is showing them.
-  const rawOrderBy = searchParams.get("orderBy");
-  const orderBy =
-    !rawOrderBy || rawOrderBy === "createdAt" ? "status" : rawOrderBy;
-  const orderDirection = searchParams.get("orderDirection") || "desc";
 
   const pdfMeta = fetcher.data?.pdfMeta ?? null;
   const isFetchingReceipt = fetcher.state !== "idle" || pdfMeta === null;
@@ -116,15 +123,16 @@ export const BookingCheckinReceiptPDF = ({
     contentRef: componentRef,
     documentTitle: `checkin-receipt-${sanitizeFilename(
       booking.name
-    )}-${timeStamp}`,
+    )}-${openedAt}`,
   });
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
-    // Both values come off the page's own query string unvalidated, so they are
-    // encoded rather than interpolated: one carrying `&` or `#` would otherwise
-    // rewrite or truncate the request.
-    const query = new URLSearchParams({ orderBy, orderDirection });
+    setOpenedAt(Date.now());
+    // Both values can come off the page's own query string unvalidated, so
+    // they are encoded rather than interpolated: one carrying `&` or `#` would
+    // otherwise rewrite or truncate the request.
+    const query = new URLSearchParams(assetOrder ?? {});
     void fetcher.load(
       `/api/bookings/${booking.id}/generate-checkin-receipt?${query.toString()}`
     );
@@ -134,45 +142,20 @@ export const BookingCheckinReceiptPDF = ({
     setIsDialogOpen(false);
   };
 
-  // A finished booking always has something to state, even if some rows never
-  // went out. Before that, a single reconciled slice is enough: a partial
-  // return is exactly the case a printed record is wanted for.
-  const hasCheckedInSlice = booking.bookingAssets.some(
-    (ba) => ba.checkedInAt != null
-  );
-  const hasCheckedOutSlice = booking.bookingAssets.some(
-    (ba) => ba.checkedOutAt != null
-  );
-  // Nothing to record until something has left: a booking archived straight
-  // from reserved is finished and has no check-out marker on any slice, and a
-  // receipt for it would be a return document over rows that never moved.
-  //
-  // Past that, anything reconciled is enough — a partial return is exactly the
-  // case a printed record is wanted for. `checkedInAt` alone would miss one: a
-  // quantity slice returned in part keeps it NULL, so the units it sent back
-  // count too.
-  const disabled = !(
-    hasCheckedOutSlice &&
-    (isCompleted || isArchived || hasCheckedInSlice || hasDispositionedUnits)
-  ) && {
-    reason: hasCheckedOutSlice
-      ? "Nothing has been checked in yet."
-      : "This booking was never checked out.",
-  };
-
   return (
     <>
-      <Button
-        type="button"
-        variant="link"
-        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
-        width="full"
-        name="generate checkin receipt"
+      {/* The menu row keeps its desktop-only look; the dialog is not built
+          for a phone-width menu. */}
+      <BookingActionTrigger
+        variant={trigger}
+        label="Generate check-in receipt"
+        icon={<ReceiptTextIcon className="size-4" />}
+        className={
+          trigger === "menu-item" ? "hidden text-left md:block" : undefined
+        }
         onClick={handleOpenDialog}
         disabled={disabled}
-      >
-        Generate check-in receipt
-      </Button>
+      />
       <DialogPortal>
         <Dialog
           open={isDialogOpen}
@@ -227,17 +210,16 @@ export const BookingCheckinReceiptPDF = ({
       </DialogPortal>
 
       {/* Only for mobile */}
-      <Button
-        type="button"
-        variant="link"
-        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:hidden"
-        width="full"
-        name="generate checkin receipt"
-        disabled={disabled}
-        onClick={handleOpenDialog}
-      >
-        Generate check-in receipt
-      </Button>
+      {trigger === "menu-item" && (
+        <BookingActionTrigger
+          variant="menu-item"
+          label="Generate check-in receipt"
+          icon={<ReceiptTextIcon className="size-4" />}
+          className="block text-left md:hidden"
+          disabled={disabled}
+          onClick={handleOpenDialog}
+        />
+      )}
     </>
   );
 };

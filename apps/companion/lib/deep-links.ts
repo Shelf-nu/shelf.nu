@@ -2,8 +2,12 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
+import {
+  resolveQrOutcome,
+  type QrLookups,
+  type QrOutcome,
+} from "./link-dispatch";
 import { getScanCoordinates } from "./scan-location";
-import { isSameOrigin } from "./server/contract";
 
 /**
  * Supported deep link patterns:
@@ -117,59 +121,67 @@ function parseDeepLink(url: string): ParsedLink {
 }
 
 /**
- * Resolves a QR code ID in-app and navigates to the matching screen: an asset
- * detail when the QR maps to an asset, or a kit detail when it maps to a kit
- * (kits live in the Assets stack).
- *
- * When the QR can't be resolved in-app (it belongs to another org, is unclaimed,
- * the user isn't authorized, or the lookup errors) we hand off to the web QR
- * resolver, which renders the correct flow (claim, link, contact-owner, login).
- * The hand-off uses an in-app browser via {@link openShelfWebUrl} rather than
- * `Linking.openURL`, because `/qr/*` is now a verified Android App Link and
- * `Linking.openURL` would re-enter the app and loop back here.
- *
- * A link from another origin is handed straight to the web without a lookup:
- * the id belongs to the instance that minted it, so resolving it against the
- * active server would report "not found" for a code that is perfectly valid
- * where it came from.
- *
- * @param qrId - the scanned or linked QR code id
- * @param origin - origin the link carried, when it had one
+ * The real lookups behind {@link resolveQrOutcome}: `scan` records the scan
+ * with its best-effort coordinates (read-only: `getScanCoordinates` never
+ * prompts, returns within about 1.5s, and null records the scan without a
+ * position); `lookup` records nothing.
  */
-async function resolveQrAndNavigate(qrId: string, origin?: string) {
-  if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
-    void openShelfWebUrl(`${origin}/qr/${qrId}`);
+const QR_LOOKUPS: QrLookups = {
+  scan: async (qrId) => api.qr(qrId, undefined, await getScanCoordinates()),
+  lookup: (qrId, orgId) => api.getScannedItem(qrId, orgId),
+};
+
+/**
+ * Resolves a QR code the OS delivered (a camera scan of a label) and opens
+ * its asset or kit, recording the scan like the in-app scanner does.
+ *
+ * A code that does not resolve in the app (another workspace, unclaimed,
+ * not authorized, or a failed lookup), or one from another Shelf server,
+ * opens the web QR page, which renders the right flow (claim, link,
+ * contact-owner, sign-in). It opens in the in-app browser via
+ * {@link openShelfWebUrl}, never `Linking.openURL`: `/qr/*` is a verified
+ * App Link, and `Linking.openURL` would re-enter the app and loop back here.
+ *
+ * @param qrId - The scanned QR code id.
+ * @param origin - The origin the link carried, when it had one.
+ */
+export async function resolveQrAndNavigate(qrId: string, origin?: string) {
+  const outcome = await resolveQrOutcome(
+    qrId,
+    origin,
+    getApiBaseUrl(),
+    { recordScan: true },
+    QR_LOOKUPS
+  );
+  if (outcome.kind === "screen") {
+    pushIntoTab(outcome.tabRoot, outcome.href ?? undefined);
     return;
   }
+  void openShelfWebUrl(outcome.url);
+}
 
-  try {
-    // Best-effort scan geolocation: a /qr deep link usually means the user
-    // physically scanned the label with the OS camera, so the recorded scan
-    // gets the same "where" treatment as the in-app scanner. Read-only:
-    // getScanCoordinates never shows a permission prompt (only the scanner
-    // primes permission), returns within ~1.5s, and null simply means the
-    // scan is recorded without coordinates.
-    const coordinates = await getScanCoordinates();
-    const { data, error } = await api.qr(qrId, undefined, coordinates);
-    if (!error && data?.qr?.asset?.id) {
-      pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
-      return;
-    }
-    // Kit-linked QR: open the kit detail (it lives in the Assets stack). Without
-    // this, scanning a kit's own QR falls through to the scanner instead of the
-    // kit it points at.
-    if (!error && data?.qr?.kitId) {
-      pushIntoTab("/(tabs)/assets", `/(tabs)/assets/kits/${data.qr.kitId}`);
-      return;
-    }
-  } catch {
-    // Fall through to the web resolver below.
-  }
-  // QR resolved to neither an asset nor a kit (other org, unclaimed, error):
-  // hand off to the web resolver. Loop-safe in-app browser via openShelfWebUrl,
-  // NOT Linking.openURL, because /qr/* is a verified App Link and openURL would
-  // re-enter the app and loop back here.
-  void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
+/**
+ * Looks up a QR link tapped in text someone wrote. It is not a scan, so it
+ * records nothing (no scan, location or note), and a code that does not
+ * resolve gets the web-only notice instead of the web login.
+ *
+ * @param qrId - The linked QR code id.
+ * @param origin - The origin of the link.
+ * @param orgId - The workspace on show, which the lookup needs for a SAM id.
+ * @returns Where the code leads.
+ */
+export function resolveTappedQr(
+  qrId: string,
+  origin: string,
+  orgId?: string
+): Promise<QrOutcome> {
+  return resolveQrOutcome(
+    qrId,
+    origin,
+    getApiBaseUrl(),
+    { recordScan: false, orgId },
+    QR_LOOKUPS
+  );
 }
 
 /**

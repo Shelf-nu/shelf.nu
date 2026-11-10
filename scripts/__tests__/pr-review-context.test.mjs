@@ -26,6 +26,14 @@ import {
   httpsRepoUrl,
   editedPrFiles,
   flattenPath,
+  splitDiff,
+  splitSqlStatements,
+  classifySqlStatement,
+  summarizeSchemaDiff,
+  extractDbChanges,
+  createTableColumns,
+  createTableConstraints,
+  scanSql,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -662,4 +670,457 @@ test("artifactDir: artifacts live in .pr-review/<n> at the worktree root", () =>
     ["git rev-parse --show-toplevel", { stdout: "/repo/wt\n" }],
   ]);
   assert.equal(artifactDir(run, 3191), "/repo/wt/.pr-review/3191");
+});
+
+/** Prefixes every line with `+`, as a diff shows a new file's content. */
+const added = (text) =>
+  text
+    .split("\n")
+    .map((line) => `+${line}`)
+    .join("\n");
+
+/** A trimmed copy of the PdfDocument migration, as `gh pr diff` shows a new file. */
+const PDF_MIGRATION_DIFF = `diff --git a/packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql b/packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql
+new file mode 100644
+index 000000000..111111111
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql
+@@ -0,0 +1,30 @@
+${added(`-- PDF documents: saved layouts; a ; in a comment is not a statement end.
+CREATE TYPE "PdfDocumentKind" AS ENUM ('BOOKING');
+
+CREATE TABLE "PdfDocument" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "kind" "PdfDocumentKind" NOT NULL DEFAULT 'BOOKING',
+    "note" TEXT,
+
+    CONSTRAINT "PdfDocument_pkey" PRIMARY KEY ("id")
+);
+
+ALTER TABLE "PdfDocument" ADD CONSTRAINT "PdfDocument_organizationId_fkey"
+    FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "PdfDocument_one_default" ON "PdfDocument"("organizationId", "kind") WHERE "isDefault";
+ALTER TABLE "PdfDocument" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Organization" ADD COLUMN "paidPdfDocumentsSeededAt" TIMESTAMP(3);
+INSERT INTO "PdfDocument" ("id", "name") SELECT gen_random_uuid()::text, 'Check; list' FROM "Organization" o;`)}
+diff --git a/packages/database/prisma/schema.prisma b/packages/database/prisma/schema.prisma
+index 222222222..333333333 100644
+--- a/packages/database/prisma/schema.prisma
++++ b/packages/database/prisma/schema.prisma
+@@ -430,3 +430,12 @@ model Organization {
+   name String
++model PdfDocument {
++  id String @id
++}
++enum PdfDocumentKind {
++  BOOKING
++}
+diff --git a/apps/webapp/app/x.ts b/apps/webapp/app/x.ts
+index 444444444..555555555 100644
+--- a/apps/webapp/app/x.ts
++++ b/apps/webapp/app/x.ts
+@@ -1,1 +1,1 @@
+-const a = 1;
++const a = 2;
+`;
+
+test("splitDiff: per-file added and removed lines, and new or deleted files", () => {
+  const files = splitDiff(PDF_MIGRATION_DIFF);
+  assert.deepEqual(
+    files.map((f) => [f.path, f.status]),
+    [
+      [
+        "packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql",
+        "added",
+      ],
+      ["packages/database/prisma/schema.prisma", "modified"],
+      ["apps/webapp/app/x.ts", "modified"],
+    ]
+  );
+  assert.deepEqual(files[2].added, ["const a = 2;"]);
+  assert.deepEqual(files[2].removed, ["const a = 1;"]);
+});
+
+test("splitSqlStatements: ignores semicolons in comments, quotes and dollar-quoted bodies", () => {
+  const sql = `-- a; b
+SELECT 'x;y';
+CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW.a := 1; RETURN NEW; END; $$ LANGUAGE plpgsql;
+UPDATE "T" SET a = 1`;
+  const statements = splitSqlStatements(sql);
+  assert.equal(statements.length, 3);
+  assert.equal(statements[0], "SELECT 'x;y'");
+  assert.match(statements[1], /^CREATE FUNCTION f\(\).*plpgsql$/s);
+});
+
+test("classifySqlStatement: renames, drops and multi-clause ALTER TABLE are each listed", () => {
+  const one = (sql) => classifySqlStatement(sql);
+  assert.deepEqual(one(`ALTER TABLE "PdfDocument" RENAME TO "PdfTemplate"`), [
+    { action: "rename table", target: "PdfDocument", detail: "to PdfTemplate" },
+  ]);
+  assert.deepEqual(one(`ALTER TABLE "Asset" RENAME COLUMN "a" TO "b"`), [
+    { action: "rename column", target: "Asset.a", detail: "to b" },
+  ]);
+  assert.deepEqual(
+    one(
+      `ALTER TABLE "Asset" DROP COLUMN "old",\nADD COLUMN "new" TEXT NOT NULL`
+    ).map((s) => [s.action, s.target]),
+    [
+      ["drop column", "Asset.old"],
+      ["add column", "Asset.new"],
+    ]
+  );
+  assert.deepEqual(
+    one(`ALTER TYPE "ActivityAction" ADD VALUE IF NOT EXISTS 'X'`),
+    [{ action: "add enum value", target: "ActivityAction", detail: "X" }]
+  );
+  assert.deepEqual(one(`DROP TABLE "Old"`), [
+    { action: "drop table", target: "Old", detail: "" },
+  ]);
+  assert.equal(one(`COMMENT ON TABLE "T" IS 'x'`)[0].action, "other");
+});
+
+test("summarizeSchemaDiff: added and removed blocks, a moved block is not a change", () => {
+  assert.deepEqual(
+    summarizeSchemaDiff({
+      added: ["model New {", "model Moved {", "enum E {", '  @@map("new")'],
+      removed: ["model Gone {", "model Moved {"],
+    }),
+    {
+      modelsAdded: ["New"],
+      modelsRemoved: ["Gone"],
+      enumsAdded: ["E"],
+      enumsRemoved: [],
+      mapsChanged: ['+ @@map("new")'],
+    }
+  );
+});
+
+test("extractDbChanges: lists every statement of the PdfDocument migration", () => {
+  const db = extractDbChanges(PDF_MIGRATION_DIFF);
+  assert.equal(db.migrations.length, 1);
+  assert.equal(db.migrations[0].status, "added");
+  assert.deepEqual(db.editedMigrations, []);
+  assert.deepEqual(
+    db.migrations[0].statements.map((s) => [s.action, s.target]),
+    [
+      ["create enum", "PdfDocumentKind"],
+      ["create table", "PdfDocument"],
+      ["add constraint", "PdfDocument"],
+      ["add foreign key", "PdfDocument(organizationId)"],
+      ["create unique index", "PdfDocument_one_default"],
+      ["row level security", "PdfDocument"],
+      ["add column", "Organization.paidPdfDocumentsSeededAt"],
+      ["insert rows", "PdfDocument"],
+    ]
+  );
+  const [, table, , fk, index] = db.migrations[0].statements;
+  assert.equal(
+    table.detail,
+    "id text, name text, kind PdfDocumentKind, note text null"
+  );
+  assert.equal(
+    fk.detail,
+    "PdfDocument_organizationId_fkey -> Organization, on delete cascade"
+  );
+  assert.equal(
+    index.detail,
+    "on PdfDocument(organizationId, kind) where isDefault"
+  );
+  assert.deepEqual(db.schema.modelsAdded, ["PdfDocument"]);
+  assert.deepEqual(db.schema.enumsAdded, ["PdfDocumentKind"]);
+});
+
+test("extractDbChanges: null without database files; flags an edited existing migration", () => {
+  assert.equal(
+    extractDbChanges("diff --git a/x.ts b/x.ts\n@@ -1 +1 @@\n+a\n"),
+    null
+  );
+  const edited = `diff --git a/packages/database/prisma/migrations/1_x/migration.sql b/packages/database/prisma/migrations/1_x/migration.sql
+index 1..2 100644
+--- a/packages/database/prisma/migrations/1_x/migration.sql
++++ b/packages/database/prisma/migrations/1_x/migration.sql
+@@ -1 +1 @@
+-ALTER TABLE "A" ADD COLUMN "b" TEXT;
++ALTER TABLE "A" ADD COLUMN "c" TEXT;
+`;
+  const db = extractDbChanges(edited);
+  assert.deepEqual(db.editedMigrations, [
+    "packages/database/prisma/migrations/1_x/migration.sql",
+  ]);
+  assert.equal(db.schema, null);
+});
+
+test("collectContext: db is null for a PR without database changes", () => {
+  const { context } = collectContext({
+    run: fakeRun(baseResponses()),
+    startedAt: 1000,
+    marker: "m1",
+  });
+  assert.equal(context.db, null);
+});
+
+test("collectContext: a PR editing an existing migration warns", () => {
+  const diff = `diff --git a/packages/database/prisma/migrations/1_x/migration.sql b/packages/database/prisma/migrations/1_x/migration.sql
+index 1..2 100644
+@@ -1 +1 @@
++UPDATE "A" SET b = 1;
+`;
+  const { context } = collectContext({
+    run: fakeRun([["gh pr diff 3191", { stdout: diff }], ...baseResponses()]),
+    startedAt: 1000,
+    marker: "m1",
+  });
+  assert.equal(context.db.migrations[0].statements[0].action, "update rows");
+  assert.ok(
+    context.warnings.some((w) => w.includes("changes or deletes migrations"))
+  );
+});
+
+test("createTableColumns: name, type, nullability and default per column, constraints skipped", () => {
+  assert.deepEqual(
+    createTableColumns(`
+    "id" TEXT NOT NULL,
+    "kind" "PdfDocumentKind" NOT NULL DEFAULT 'BOOKING',
+    "config" JSONB NOT NULL DEFAULT '{}',
+    "note" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PdfDocument_pkey" PRIMARY KEY ("id")
+`),
+    [
+      { name: "id", type: "text", nullable: false, default: "" },
+      {
+        name: "kind",
+        type: "PdfDocumentKind",
+        nullable: false,
+        default: "'BOOKING'",
+      },
+      { name: "config", type: "jsonb", nullable: false, default: "'{}'" },
+      { name: "note", type: "text", nullable: true, default: "" },
+      {
+        name: "createdAt",
+        type: "timestamp(3)",
+        nullable: false,
+        default: "CURRENT_TIMESTAMP",
+      },
+    ]
+  );
+});
+
+test("createTableConstraints: inline checks and keys are listed, not dropped", () => {
+  const body = `
+    "id" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+
+    CONSTRAINT "LinkPreview_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "LinkPreview_url_length" CHECK (char_length("url") <= 2048)
+`;
+  assert.deepEqual(createTableConstraints("LinkPreview", body), [
+    {
+      action: "add constraint",
+      target: "LinkPreview",
+      detail: "LinkPreview_pkey: PRIMARY KEY (id)",
+    },
+    {
+      action: "add constraint",
+      target: "LinkPreview",
+      detail: "LinkPreview_url_length: CHECK (char_length(url) <= 2048)",
+    },
+  ]);
+  assert.deepEqual(
+    classifySqlStatement(`CREATE TABLE "LinkPreview" (${body})`).map(
+      (s) => s.action
+    ),
+    ["create table", "add constraint", "add constraint"]
+  );
+});
+
+test("createTableColumns: an enum type keeps its name, built-in types are lower case", () => {
+  assert.deepEqual(
+    createTableColumns(
+      `"outcome" "LinkPreviewOutcome",\n"n" INTEGER NOT NULL`
+    ).map((c) => c.type),
+    ["LinkPreviewOutcome", "integer"]
+  );
+});
+
+test("splitSqlStatements: drops a Prisma /* Warnings */ block, including nested comments", () => {
+  const sql = `/*
+  Warnings:
+
+  - A unique constraint covering the columns \`[assetId,teamMemberId]\` will be added; it can fail.
+  /* nested */
+*/
+-- DropIndex
+DROP INDEX "Custody_assetId_key";
+SELECT '/* not a comment */'`;
+  const statements = splitSqlStatements(sql);
+  assert.deepEqual(statements, [
+    'DROP INDEX "Custody_assetId_key"',
+    "SELECT '/* not a comment */'",
+  ]);
+  assert.equal(classifySqlStatement(statements[0])[0].action, "drop index");
+});
+
+test("classifySqlStatement: a WITH-prefixed backfill is a data write on its main table", () => {
+  const [entry] = classifySqlStatement(`WITH candidates AS (
+    SELECT ba.id FROM "BookingAsset" ba JOIN "Asset" a ON (a.id = ba."assetId")
+  )
+  UPDATE "BookingAsset" SET "kitId" = c."kitId" FROM candidates c WHERE "BookingAsset".id = c.id`);
+  assert.equal(entry.action, "update rows");
+  assert.equal(entry.target, "BookingAsset");
+});
+
+test("classifySqlStatement: a write inside a CTE body is still a data write", () => {
+  const [entry] = classifySqlStatement(
+    `WITH gone AS (DELETE FROM "Old" WHERE stale RETURNING id) SELECT count(*) FROM gone`
+  );
+  assert.equal(entry.action, "delete rows");
+  assert.equal(entry.target, "Old");
+});
+
+test("classifySqlStatement: data writes and unknown statements keep their full SQL", () => {
+  const where = `WHERE c."kitCustodyId" IS NULL AND c."locationId" IS NULL AND EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = c."assetId")`;
+  const [entry] = classifySqlStatement(
+    `UPDATE "Custody" AS c\n  SET "sourceUnknown" = true\n  ${where}`
+  );
+  assert.equal(entry.action, "update rows");
+  assert.ok(entry.detail.length <= 160);
+  assert.ok(
+    entry.sql.endsWith(
+      `EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = c."assetId")`
+    )
+  );
+  const [other] = classifySqlStatement(
+    `COMMENT ON TABLE "T" IS '${"x".repeat(200)}'`
+  );
+  assert.equal(other.sql.length > 200, true);
+  assert.equal(classifySqlStatement(`DROP TABLE "Old"`)[0].sql, undefined);
+});
+
+test("classifySqlStatement: a NULLS NOT DISTINCT unique index is an index, not other", () => {
+  assert.deepEqual(
+    classifySqlStatement(
+      `CREATE UNIQUE INDEX "Custody_operator_unique" ON "Custody"("assetId", "teamMemberId") NULLS NOT DISTINCT WHERE "kitCustodyId" IS NULL`
+    ),
+    [
+      {
+        action: "create unique index",
+        target: "Custody_operator_unique",
+        detail:
+          "on Custody(assetId, teamMemberId), nulls not distinct where kitCustodyId IS NULL",
+      },
+    ]
+  );
+});
+
+test("splitSqlStatements: a dollar tag with digits keeps the function body whole", () => {
+  const statements = splitSqlStatements(
+    `CREATE FUNCTION f() RETURNS trigger AS $body1$ BEGIN NEW.a := 1; RETURN NEW; END; $body1$ LANGUAGE plpgsql;\nSELECT 1`
+  );
+  assert.equal(statements.length, 2);
+  assert.match(statements[0], /\$body1\$ LANGUAGE plpgsql$/);
+});
+
+test("splitSqlStatements: a backslash-escaped quote in an E-string cannot hide the next statement", () => {
+  const hidden = splitSqlStatements(
+    `INSERT INTO "Seed" VALUES (E'x\\''); DROP TABLE "Important";`
+  );
+  assert.deepEqual(
+    hidden.flatMap(classifySqlStatement).map((s) => s.action),
+    ["insert rows", "drop table"]
+  );
+  // The DROP is inside the literal here, so Postgres never runs it.
+  const phantom = splitSqlStatements(
+    `INSERT INTO "Seed" VALUES (E'a\\'; DROP TABLE "Important"');`
+  );
+  assert.equal(phantom.length, 1);
+  // A plain string keeps backslashes literal and ends at the next quote.
+  assert.equal(splitSqlStatements(`SELECT 'C:\\'; SELECT 2`).length, 2);
+});
+
+test("classifySqlStatement: sql keeps the statement as written, whitespace in literals included", () => {
+  const [entry] = classifySqlStatement(
+    `UPDATE "T"\n  SET x = 1\n  WHERE code = 'A  B'`
+  );
+  assert.equal(entry.sql, `UPDATE "T"\n  SET x = 1\n  WHERE code = 'A  B'`);
+  assert.equal(entry.detail, `UPDATE "T" SET x = 1 WHERE code = 'A B'`);
+});
+
+test("classifySqlStatement: a WITH that writes to two tables lists both writes, main one first", () => {
+  const sql = `WITH moved AS (DELETE FROM "Old" RETURNING *) INSERT INTO "Archive" SELECT * FROM moved`;
+  const entries = classifySqlStatement(sql);
+  assert.deepEqual(
+    entries.map((e) => [e.action, e.target]),
+    [
+      ["insert rows", "Archive"],
+      ["delete rows", "Old"],
+    ]
+  );
+  assert.ok(entries.every((e) => e.sql === sql));
+});
+
+test("splitSqlStatements: a doubled quote stays inside an E-string", () => {
+  assert.equal(
+    splitSqlStatements(
+      `INSERT INTO "Seed" VALUES (E'a''b\\''); DROP TABLE "Important";`
+    ).length,
+    2
+  );
+  assert.equal(splitSqlStatements(`SELECT 'it''s; fine'`).length, 1);
+});
+
+test("splitSqlStatements: quoted identifiers and $ inside names never open a string or tag", () => {
+  for (const sql of [
+    `CREATE TABLE "foo$tag$" (id int); DROP TABLE "Important";`,
+    `CREATE TABLE foo$tag$bar (id int); DROP TABLE x;`,
+    `CREATE TABLE "it's" (id int); DROP TABLE x;`,
+    `CREATE TABLE "a""b;c" (id int); DROP TABLE x;`,
+  ])
+    assert.equal(splitSqlStatements(sql).length, 2, sql);
+  assert.equal(
+    splitSqlStatements(
+      `CREATE FUNCTION f() RETURNS int AS $fn$ SELECT 1; $fn$ LANGUAGE sql`
+    ).length,
+    1
+  );
+});
+
+test("scanSql: reports when the text ends inside a string, so a confused split is visible", () => {
+  assert.equal(scanSql(`SELECT 1; SELECT 2`).unterminated, false);
+  assert.equal(scanSql(`SELECT 'open; DROP TABLE x;`).unterminated, true);
+  assert.equal(scanSql(`SELECT $x$ body; DROP TABLE y;`).unterminated, true);
+});
+
+test("classifySqlStatement: a statement still holding a second one is flagged, function bodies are not", () => {
+  const [hidden] = classifySqlStatement(
+    `INSERT INTO "Seed" VALUES ('x'); DROP TABLE "Important"`
+  );
+  assert.equal(hidden.hiddenStatement, true);
+  assert.equal(
+    classifySqlStatement(`UPDATE "T" SET a = 1`)[0].hiddenStatement,
+    undefined
+  );
+  assert.equal(
+    classifySqlStatement(
+      `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN UPDATE "T" SET a = 1; DELETE FROM "U"; RETURN NEW; END; $$ LANGUAGE plpgsql`
+    )[0].hiddenStatement,
+    undefined
+  );
+});
+
+test("extractDbChanges: a migration the splitter cannot read cleanly warns and says why", () => {
+  const diff = `diff --git a/packages/database/prisma/migrations/2_x/migration.sql b/packages/database/prisma/migrations/2_x/migration.sql
+new file mode 100644
+--- /dev/null
++++ b/packages/database/prisma/migrations/2_x/migration.sql
+@@ -0,0 +1,2 @@
++INSERT INTO "Log" VALUES ('ran; DROP TABLE y');
++SELECT 'never closed;
+`;
+  const db = extractDbChanges(diff);
+  assert.equal(db.migrations[0].parseWarnings.length, 2);
+  assert.match(db.migrations[0].parseWarnings.join(" "), /ends inside/);
+  assert.match(db.migrations[0].parseWarnings.join(" "), /second statement/);
 });

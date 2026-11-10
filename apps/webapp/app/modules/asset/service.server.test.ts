@@ -5,6 +5,8 @@ import {
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
+import { createCustomField } from "@factories";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
@@ -17,6 +19,10 @@ import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { isModelShortfallMessage } from "~/modules/asset/archive-shortfall";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
+import {
+  applyAssetModelDefaultsToAssets,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
 import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNotes } from "~/modules/booking-note/service.server";
 import { getCategory } from "~/modules/category/service.server";
@@ -40,6 +46,7 @@ import {
 import { getQr } from "~/modules/qr/service.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { bookableListScopeWhere } from "./list-scope.server";
@@ -102,6 +109,11 @@ vitest.mock("~/database/db.server", () => ({
     // why: getAssets resolves its search term to matching asset ids via the
     // shared buildAssetSearchUnion, executed as a raw query.
     $queryRaw: vitest.fn().mockResolvedValue([]),
+    // why: a move's location activity log lines are written in one batch;
+    // the rows handed over are the output the move tests assert.
+    locationNote: {
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
     asset: {
       // why: createAsset's transaction writes the row through this stub, so a
       // test that needs the create to SUCCEED (rather than reject at a guard)
@@ -252,6 +264,11 @@ vitest.mock("~/database/db.server", () => ({
     booking: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
+    // why: bulk linking reads the workspace currency for the defaults-fill
+    // notes, only when the target model has defaults.
+    organization: {
+      findUniqueOrThrow: vitest.fn(),
+    },
   },
 }));
 
@@ -273,6 +290,15 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
 // why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
 // mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
 // the guard's own behaviour is what these suites assert on.
+// why: the defaults fill has its own suite (`asset-model/defaults.server.test.ts`);
+// here the question is only whether bulk linking asks for it, and for which assets.
+vitest.mock("~/modules/asset-model/defaults.server", () => ({
+  getAssetModelDefaults: vitest.fn().mockResolvedValue(null),
+  applyAssetModelDefaultsToAssets: vitest
+    .fn()
+    .mockResolvedValue({ assetsFilled: 0, fieldsFilled: 0 }),
+}));
+
 vitest.mock("~/modules/asset/archive-lock.server", () => ({
   lockAssetsForArchiveGuard: vitest.fn(),
 }));
@@ -463,11 +489,16 @@ vitest.mock("~/modules/location/service.server", () => ({
   createLocationsIfNotExists: vitest.fn().mockResolvedValue([]),
 }));
 
-// why: same as above for the per-location-timeline note writes that
-// `moveAssetLocationUnits` + `placeUnplacedUnits` queue post-tx.
-vitest.mock("~/modules/location-note/service.server", () => ({
-  createSystemLocationNote: vitest.fn().mockResolvedValue({}),
-}));
+// why: same as above for the "placed N units" timeline note
+// `placeUnplacedUnits` queues post-tx. A move's "added / removed" lines run
+// for real and are asserted from `db.locationNote.createMany`.
+vitest.mock(
+  "~/modules/location-note/service.server",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    createSystemLocationNote: vitest.fn().mockResolvedValue({}),
+  })
+);
 
 // why: control custom-field lookup so we can assert org+category scoping
 vitest.mock("~/modules/custom-field/service.server", () => ({
@@ -813,6 +844,47 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+  });
+
+  it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
+    vi.mocked(getActiveCustomFields).mockResolvedValue([
+      createCustomField({ id: "cfmanual", name: "Manual", format: "LINK" }),
+    ]);
+    // why: createAsset proves the custom fields belong to the org.
+    vi.mocked(db.customField.findMany).mockResolvedValueOnce([
+      { id: "cfmanual" },
+    ] as never);
+
+    await duplicateAsset({
+      asset: makeSource({
+        customFields: [
+          {
+            customFieldId: "cfmanual",
+            value: { raw: "see shelf", valueText: "see shelf" },
+          },
+          {
+            customFieldId: "cfinactive",
+            value: { raw: "kept off", valueText: "kept off" },
+          },
+        ] as unknown as SourceAsset["customFields"],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        customFields: {
+          create: [
+            {
+              customFieldId: "cfmanual",
+              value: { raw: "see shelf", valueText: "see shelf" },
+            },
+          ],
+        },
+      }),
+    ]);
   });
 
   it("refuses to copy a quantity-tracked asset with no units in stock", async () => {
@@ -2270,6 +2342,7 @@ describe("bulkDeleteAssets — activity events", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -2334,6 +2407,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -2373,6 +2447,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -2428,6 +2503,7 @@ describe("bulkAssignAssetTags — activity events", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -2512,7 +2588,7 @@ describe("updateAsset cross-org guards", () => {
 
     expect(db.location.findFirst).toHaveBeenCalledWith({
       where: { id: "location-from-org-B", organizationId: "org-A" },
-      select: { id: true },
+      select: { id: true, name: true },
     });
   });
 
@@ -2540,6 +2616,56 @@ describe("updateAsset cross-org guards", () => {
       where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
       select: { id: true },
     });
+  });
+
+  it("rejects a tag from a different organization before writing", async () => {
+    expect.assertions(3);
+    // why: an empty result is how the org-scoped lookup reports a tag that
+    // belongs to another workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([]);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        tags: { set: [{ id: "tag-from-org-B" }] },
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("replaces the asset's tags with tags that belong to the organization", async () => {
+    expect.assertions(2);
+    // why: one matching row is how the org-scoped lookup reports that every
+    // submitted tag belongs to this workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { id: "tag-in-org-A" },
+    ]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      tags: { set: [{ id: "tag-in-org-A" }] },
+    } as any);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-in-org-A"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { set: [{ id: "tag-in-org-A" }] },
+        }),
+      })
+    );
   });
 });
 
@@ -2613,6 +2739,58 @@ describe("createAsset cross-org guards", () => {
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tag from a different organization before writing", async () => {
+    expect.assertions(3);
+    // why: an empty result is how the org-scoped lookup reports a tag that
+    // belongs to another workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([]);
+
+    // The guard's own 400 and message reach the caller, so a stale tag tells
+    // the user what to fix instead of a generic "could not create".
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        tags: { set: [{ id: "tag-from-org-B" }] },
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("selected tags"),
+    });
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("connects tags that belong to the organization", async () => {
+    expect.assertions(2);
+    // why: one matching row is how the org-scoped lookup reports that every
+    // submitted tag belongs to this workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { id: "tag-in-org-A" },
+    ]);
+
+    const created = await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      tags: { set: [{ id: "tag-in-org-A" }] },
+    } as any);
+
+    expect(created).toEqual({ id: "asset-new" });
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { connect: [{ id: "tag-in-org-A" }] },
+        }),
+      })
+    );
   });
 });
 
@@ -2957,10 +3135,9 @@ describe("updateAsset custom-field writes", () => {
     });
   });
 
-  // Regression for Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF: persisting custom
-  // field values must not use a nested `upsert`, which makes Prisma issue a
-  // SELECT-then-write per field (N+1). New values become a single `create`,
-  // existing ones an `updateMany` keyed by the value-row id we already loaded
+  // Custom field values must not use a nested `upsert`, which makes Prisma
+  // issue a SELECT-then-write per field. New values become a single `create`,
+  // existing ones an `updateMany` keyed by the value-row id already loaded
   // (`updateMany` so a concurrently-deleted row matches zero rows instead of
   // throwing P2025 and aborting the whole save).
   it("creates new custom-field values and updates existing ones without a nested upsert", async () => {
@@ -3012,6 +3189,56 @@ describe("updateAsset custom-field writes", () => {
     // Existence info is read in a single query, not once per field.
     expect(db.assetCustomFieldValue.findMany).toHaveBeenCalledTimes(1);
   });
+
+  // The form submits every field. Each nested `updateMany` entry and the
+  // nested `deleteMany` cost Prisma a lookup query, so only real changes may
+  // reach them.
+  it("writes only the fields whose value changed", async () => {
+    expect.assertions(3);
+
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "val-same",
+        customFieldId: "cf-same",
+        value: { raw: "kept", valueText: "kept" },
+        customField: { id: "cf-same", name: "Same", type: "TEXT" },
+      },
+      {
+        id: "val-cleared",
+        customFieldId: "cf-cleared",
+        value: { raw: "gone" },
+        customField: { id: "cf-cleared", name: "Cleared", type: "TEXT" },
+      },
+    ]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ id: "cf-same", name: "Same", type: "TEXT" }]
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      customFieldsValues: [
+        // Same value, keys in a different order.
+        { id: "cf-same", value: { valueText: "kept", raw: "kept" } },
+        // Cleared, and has a stored row.
+        { id: "cf-cleared", value: null },
+        // Empty, and never had a stored row.
+        { id: "cf-never-set", value: null },
+      ],
+    } as any);
+
+    const { customFields } = (db.asset.update as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0].data;
+
+    expect(customFields.updateMany).toBeUndefined();
+    expect(customFields.create).toBeUndefined();
+    expect(customFields.deleteMany).toEqual({
+      customFieldId: { in: ["cf-cleared"] },
+    });
+  });
 });
 
 describe("updateAsset newLocationQuantity", () => {
@@ -3058,6 +3285,363 @@ describe("updateAsset newLocationQuantity", () => {
 
     // Validation fires before db.asset.update, so the update never runs.
     expect(db.asset.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateAsset location activity", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the edit reads the asset several times with different selects
+    // (kit guard, before-state, type); route on the select, as the
+    // asset-model suite above does.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "INDIVIDUAL",
+            quantity: null,
+            assetKits: [],
+          });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve(null);
+      }
+    );
+    // why: both location ids resolve through org-scoped lookups.
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          id: where.id,
+          name: where.id === "loc-old" ? "Old Office" : "New Office",
+        })
+    );
+    const tripod = {
+      id: "asset-1",
+      title: "Tripod",
+      type: "INDIVIDUAL",
+      unitOfMeasure: null,
+    };
+    // The update's `assetLocations` is the pre-rewrite snapshot the log reads.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...tripod,
+      assetLocations: [
+        {
+          locationId: "loc-old",
+          assetKitId: null,
+          quantity: 1,
+          location: { id: "loc-old", name: "Old Office" },
+        },
+      ],
+    });
+    // why: a placement rewrite re-reads the row it just wrote.
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...tripod, assetLocations: [] });
+    // why: the placement rewrite locks the asset row with a raw query.
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: null,
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+  });
+
+  const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+  const oldLoc = '{% link to="/locations/loc-old" text="Old Office" /%}';
+  const newLoc = '{% link to="/locations/loc-new" text="New Office" /%}';
+
+  /** The rows handed to `createMany`, as `[locationId, content]`. */
+  function locationLog() {
+    return (
+      db.locationNote.createMany as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([args]) => args.data)
+      .map((row: { locationId: string; content: string }) => [
+        row.locationId,
+        row.content,
+      ]);
+  }
+
+  it("logs the move on the activity log of both locations", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added ${tripod} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed ${tripod} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+    ]);
+  });
+
+  it("logs a removal only when the location is cleared", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: null,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
+    expect(locationLog()).toEqual([
+      ["loc-old", `${john} removed ${tripod} from ${oldLoc}.`],
+    ]);
+  });
+
+  /** A quantity-tracked "Pens" pool of 10 with these manual placements. */
+  function pensPlacedAt(rows: Array<[string, string, number]>) {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "QUANTITY_TRACKED",
+            quantity: 10,
+            assetKits: [],
+          });
+        if (q?.select?.type)
+          return Promise.resolve({ type: "QUANTITY_TRACKED" });
+        return Promise.resolve(null);
+      }
+    );
+    const pens = {
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+    };
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...pens,
+      assetLocations: rows.map(([id, name, quantity], index) => ({
+        id: `al-${index}`,
+        locationId: id,
+        assetKitId: null,
+        quantity,
+        createdAt: new Date(2026, 0, index + 1),
+        location: { id, name },
+      })),
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...pens, assetLocations: [] });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+    });
+  }
+  const penLink = '{% link to="/assets/asset-1" text="Pens" /%}';
+
+  it("names every location a move empties, not only the current one", async () => {
+    pensPlacedAt([
+      ["loc-old", "Old Office", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 10,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const van = '{% link to="/locations/loc-van" text="Van" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added 10 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}, ${van}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed 6 pcs of ${penLink} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+      [
+        "loc-van",
+        `${john} removed 4 pcs of ${penLink} from ${van}. Moved to ${newLoc}.`,
+      ],
+    ]);
+  });
+
+  it("logs a new quantity at the same location, as the phone route does", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 4]]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-old",
+      newLocationQuantity: 6,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    expect(locationLog()).toEqual([
+      ["loc-old", `${john} added 2 pcs of ${penLink} to ${oldLoc}.`],
+    ]);
+  });
+
+  it("logs the unit count it wrote to the new placement", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 10]]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 7,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const written = (
+      db.assetLocation.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.map(
+      (call) =>
+        (call[0] as { data: { locationId: string; quantity: number } }).data
+    );
+    expect(written).toEqual([
+      expect.objectContaining({ locationId: "loc-new", quantity: 7 }),
+    ]);
+    expect(locationLog()[0]).toEqual([
+      "loc-new",
+      `${john} added 7 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}.`,
+    ]);
+  });
+
+  it("keeps a saved edit when the user lookup for the location log fails", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 4]]);
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    (db.user.findFirst as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        currentLocationId: "loc-old",
+        newLocationId: "loc-old",
+        newLocationQuantity: 6,
+      } as unknown as Parameters<typeof updateAsset>[0])
+    ).resolves.toBeDefined();
+
+    expect(db.locationNote.createMany).not.toHaveBeenCalled();
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
+  it("keeps a saved move when the user lookup for its notes fails", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 10]]);
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    (db.user.findFirst as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        currentLocationId: "loc-old",
+        newLocationId: "loc-new",
+        newLocationQuantity: 10,
+      } as unknown as Parameters<typeof updateAsset>[0])
+    ).resolves.toBeDefined();
+
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
+  it("counts a quantity move the same way the phone route does", async () => {
+    // 10 pens at Old Office; 4 placed at New Office, 6 left unplaced.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "QUANTITY_TRACKED",
+            quantity: 10,
+            assetKits: [],
+          });
+        if (q?.select?.type)
+          return Promise.resolve({ type: "QUANTITY_TRACKED" });
+        return Promise.resolve(null);
+      }
+    );
+    const pens = {
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+    };
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...pens,
+      assetLocations: [
+        {
+          locationId: "loc-old",
+          assetKitId: null,
+          quantity: 10,
+          location: { id: "loc-old", name: "Old Office" },
+        },
+      ],
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...pens, assetLocations: [] });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 4,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const penLink = '{% link to="/assets/asset-1" text="Pens" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added 4 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed 4 pcs of ${penLink} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+      ["loc-old", `${john} removed 6 pcs of ${penLink} from ${oldLoc}.`],
+    ]);
   });
 });
 
@@ -3170,6 +3754,48 @@ describe("replaceAssetPlacements", () => {
       })
     );
   });
+
+  it("logs units that leave one location for another as a move", async () => {
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        locationId: "loc-9",
+        quantity: 40,
+        location: { id: "loc-9", name: "Warehouse" },
+      },
+    ]);
+
+    await replaceAssetPlacements({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      placements: [{ locationId: "loc-1", quantity: 20 }],
+    });
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const pens = '{% link to="/assets/asset-1" text="Pens" /%}';
+    const baghdad = '{% link to="/locations/loc-1" text="Baghdad Store" /%}';
+    const warehouse = '{% link to="/locations/loc-9" text="Warehouse" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-1",
+        `${john} added 20 pcs of ${pens} to ${baghdad}. Moved from ${warehouse}.`,
+      ],
+      [
+        "loc-9",
+        `${john} removed 20 pcs of ${pens} from ${warehouse}. Moved to ${baghdad}.`,
+      ],
+      ["loc-9", `${john} removed 20 pcs of ${pens} from ${warehouse}.`],
+    ]);
+  });
 });
 
 /**
@@ -3189,6 +3815,8 @@ describe("updateAsset stock-lowering guard", () => {
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
       id: "asset-1",
       quantity: 5,
+      // The real update includes the pre-write placements; none here.
+      assetLocations: [],
     });
     // why: a reduction also runs the placement guard, which reads the manual
     // placement rows. `clearAllMocks` keeps implementations, so reset it here
@@ -3967,6 +4595,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   const checkOut = () =>
     bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -3980,6 +4609,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   const checkIn = () =>
     bulkCheckInAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4293,6 +4923,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4341,6 +4972,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4385,6 +5017,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4425,6 +5058,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4465,6 +5099,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         // why: `role` was optional pre-main; main made it required so every
@@ -4628,6 +5263,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4667,6 +5303,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4689,6 +5326,7 @@ describe("bulkUpdateAssetCategory", () => {
     await expect(
       bulkUpdateAssetCategory({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -4696,7 +5334,11 @@ describe("bulkUpdateAssetCategory", () => {
         // @ts-expect-error settings not relevant for this test
         settings: {},
       })
-    ).rejects.toThrow(ShelfError);
+    ).rejects.toMatchObject({
+      status: 404,
+      title: "Category not found",
+      message: expect.stringContaining("does not exist"),
+    });
   });
 });
 
@@ -4743,7 +5385,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -4792,7 +5437,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4831,7 +5479,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4879,7 +5530,10 @@ describe("bulkUpdateAssetModel", () => {
     db.asset.findMany.mockResolvedValue(rows);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4917,7 +5571,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4931,6 +5588,58 @@ describe("bulkUpdateAssetModel", () => {
     });
   });
 
+  it("fills the empty fields of the assets that join the model, in the transaction", async () => {
+    // Joining a model is joining it, whatever the button: the bulk link has to
+    // apply the model's defaults the way the edit form does, to the assets
+    // that actually changed and to no others.
+    const modelDefaults = {
+      id: "model-1",
+      name: "Panasonic PT-VZ580",
+      defaultCategoryId: "cat-1",
+      defaultValuation: null,
+      customFieldDefaults: [],
+    };
+    vitest.mocked(getAssetModelDefaults).mockResolvedValueOnce(modelDefaults);
+    vitest
+      .mocked(applyAssetModelDefaultsToAssets)
+      .mockResolvedValueOnce({ assetsFilled: 1, fieldsFilled: 1 });
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
+      { id: "asset-2", type: "INDIVIDUAL", assetModelId: "model-1" },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      locale: "en-AU",
+      currency: "AUD",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    expect(applyAssetModelDefaultsToAssets).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        model: modelDefaults,
+        // asset-2 was already on the model, so it is not filled.
+        assetIds: ["asset-1"],
+        currency: "AUD",
+        locale: "en-AU",
+      })
+    );
+    // The defaults are read inside the transaction, on its client.
+    expect(getAssetModelDefaults).toHaveBeenCalledWith(
+      { assetModelId: "model-1", organizationId: "org-1" },
+      expect.anything()
+    );
+    expect(result.filled).toBe(1);
+  });
+
   it("links the individually tracked assets and skips quantity-tracked ones", async () => {
     expect.assertions(5);
     //@ts-expect-error mock setup
@@ -4941,7 +5650,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "available",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4958,6 +5670,7 @@ describe("bulkUpdateAssetModel", () => {
       moved: 0,
       skippedQuantityTracked: 1,
       modelName: "Panasonic PT-VZ580",
+      filled: 0,
     });
     // The model is read ONCE. `assertAssetModelBelongsToOrg` returns the row it
     // already had to fetch, so the toast label costs no second round trip —
@@ -4977,6 +5690,8 @@ describe("bulkUpdateAssetModel", () => {
       // The caller's access reaches the resolver unchanged, so a select-all
       // over a last audit date filter works for those allowed to see it.
       lastAuditDateAccess: "available",
+      // The caller's list scope reaches the resolver unchanged too.
+      bookableScope: null,
     });
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
@@ -5000,7 +5715,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -5022,7 +5740,10 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5056,7 +5777,10 @@ describe("bulkUpdateAssetModel", () => {
     // Removing a model from assets that can never have had one is a no-op,
     // not a rule violation. Only the LINK direction rejects.
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5082,7 +5806,10 @@ describe("bulkUpdateAssetModel", () => {
 
     await expect(
       bulkUpdateAssetModel({
+        locale: "en-US",
+        currency: "USD",
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5108,7 +5835,10 @@ describe("bulkUpdateAssetModel", () => {
 
     await expect(
       bulkUpdateAssetModel({
+        locale: "en-US",
+        currency: "USD",
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5136,7 +5866,10 @@ describe("bulkUpdateAssetModel", () => {
     db.asset.findMany.mockResolvedValue([]);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["foreign-asset-1", "foreign-asset-2"],
       organizationId: "org-1",
@@ -5153,7 +5886,10 @@ describe("bulkUpdateAssetModel", () => {
     expect.assertions(2);
 
     const result = await bulkUpdateAssetModel({
+      locale: "en-US",
+      currency: "USD",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: [],
       organizationId: "org-1",
@@ -5169,6 +5905,7 @@ describe("bulkUpdateAssetModel", () => {
       moved: 0,
       skippedQuantityTracked: 0,
       modelName: null,
+      filled: 0,
     });
     expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
@@ -5205,6 +5942,7 @@ describe("bulkAssignAssetTags", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5242,6 +5980,7 @@ describe("bulkAssignAssetTags", () => {
     await expect(
       bulkAssignAssetTags({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5268,6 +6007,7 @@ describe("bulkAssignAssetTags", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5298,6 +6038,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -5333,6 +6074,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: [],
       confirmation: "0",
       organizationId: "org-1",
@@ -5353,6 +6095,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1"],
       confirmation: "1",
       organizationId: "org-1",
@@ -5384,6 +6127,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "me",
         custodyAssign: "self",
@@ -5465,6 +6209,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1", "asset-2"],
@@ -5485,6 +6230,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // is false for the same reason — this must not page anyone.
     const caught = await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -5508,6 +6254,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // the gate itself did not fire and custody insertion was reached.
     await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -5698,6 +6445,36 @@ describe("moveAssetLocationUnits", () => {
       ({ where }: { where: { id: string } }) =>
         Promise.resolve({ id: where.id, name: where.id })
     );
+  });
+
+  it("logs the move on the activity log of both locations", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce(null);
+
+    await moveAssetLocationUnits(baseArgs);
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const cables = '{% link to="/assets/asset-1" text="USB-C Cables" /%}';
+    const from = '{% link to="/locations/loc-from" text="loc-from" /%}';
+    const to = '{% link to="/locations/loc-to" text="loc-to" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-to",
+        `${john} added 25 boxes of ${cables} to ${to}. Moved from ${from}.`,
+      ],
+      [
+        "loc-from",
+        `${john} removed 25 boxes of ${cables} from ${from}. Moved to ${to}.`,
+      ],
+    ]);
   });
 
   it("creates a new destination row when 25/100 are moved to a fresh location", async () => {
@@ -6510,7 +7287,7 @@ describe("archiveAsset", () => {
           expect.objectContaining({
             bookingId: "b1",
             content: expect.stringContaining(
-              "This booking's reservation of **Sony A7** is now 1 unit short for its dates."
+              'This booking\'s reservation of {% name text="Sony A7" /%} is now 1 unit short for its dates.'
             ),
           }),
         ],
@@ -6518,6 +7295,41 @@ describe("archiveAsset", () => {
       },
       expect.anything()
     );
+  });
+
+  it("keeps a URL-shaped model name inside a name tag in the shortfall note", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    // why: a model named like a URL leaves "Shoot" one unit short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: URL_SHAPED_VALUE,
+          short: 1,
+        },
+      ]);
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+      confirmModelShortfall: true,
+    });
+
+    const [{ notes }] = vitest
+      .mocked(createSystemBookingNotes)
+      .mock.calls.at(-1)!;
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("writes an Activity note naming who archived the asset", async () => {
@@ -6843,6 +7655,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2", "a3"],
       settings: {} as never,
@@ -6891,6 +7704,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6918,6 +7732,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -6938,6 +7753,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6968,6 +7784,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6993,6 +7810,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -7020,6 +7838,7 @@ describe("bulkUnarchiveAssets", () => {
 
     await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -7045,6 +7864,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -7066,6 +7886,7 @@ describe("availability writes on archived assets (issue #382)", () => {
       id: "a1",
       organizationId: "org-1",
       availableToBook: false,
+      userId: "user-1",
     });
 
     // The pre-check gives the clear error; the WHERE closes the window where
@@ -7095,6 +7916,7 @@ describe("availability writes on archived assets (issue #382)", () => {
         id: "a1",
         organizationId: "org-1",
         availableToBook: false,
+        userId: "user-1",
       })
     ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
   });
@@ -7118,24 +7940,229 @@ describe("availability writes on archived assets (issue #382)", () => {
         id: "a1",
         organizationId: "org-1",
         availableToBook: false,
+        userId: "user-1",
       })
     ).rejects.not.toMatchObject({ title: "Asset is archived" });
   });
 
   it("skips assets archived after the bulk check", async () => {
+    // why: the before-state read inside the transaction; both assets are
+    // bookable, so both are candidates for the change.
+    vitest.mocked(db.asset.findMany).mockResolvedValueOnce([
+      { id: "a1", availableToBook: true },
+      { id: "a2", availableToBook: true },
+    ] as never);
+
     await bulkMarkAvailability({
+      userId: "user-1",
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       type: "unavailable",
       settings: {} as never,
     });
 
+    // Both the read that picks the rows and the write leave archived rows out.
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ archivedAt: null }),
+      })
+    );
     expect(db.asset.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ archivedAt: null }),
       })
     );
+  });
+});
+
+describe("available for bookings: activity trail", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** The note's actor link for the user the tests act as. */
+  const actorLink = '{% link to="/settings/team/users/user-1" text="Sam" /%}';
+
+  /** Stubs the acting user, read once to build the note's actor link. */
+  function stubActor() {
+    // why: the note names the actor by display name, read from the user table.
+    vitest.mocked(db.user.findFirst).mockResolvedValueOnce({
+      firstName: "Samantha",
+      lastName: "Jones",
+      displayName: "Sam",
+    } as never);
+  }
+
+  it.each([
+    { from: false, to: true, word: "available" },
+    { from: true, to: false, word: "unavailable" },
+  ])(
+    "records one note and one event when the switch goes from $from to $to",
+    async ({ from, to, word }) => {
+      stubActor();
+      // why: the before-read inside the transaction; the asset holds `from`.
+      vitest
+        .mocked(db.asset.findUnique)
+        .mockResolvedValueOnce({ availableToBook: from } as never);
+
+      await updateAssetBookingAvailability({
+        id: "a1",
+        organizationId: "org-1",
+        availableToBook: to,
+        userId: "user-1",
+      });
+
+      expect(db.asset.update).toHaveBeenCalledWith({
+        where: { id: "a1", organizationId: "org-1", archivedAt: null },
+        data: { availableToBook: to },
+      });
+      expect(createNote).toHaveBeenCalledTimes(1);
+      expect(createNote).toHaveBeenCalledWith(
+        {
+          content: `${actorLink} marked the asset as ${word} for bookings.`,
+          type: "UPDATE",
+          userId: "user-1",
+          assetId: "a1",
+          organizationId: "org-1",
+        },
+        // The transaction client: the note commits with the change.
+        expect.anything()
+      );
+      expect(recordEvent).toHaveBeenCalledTimes(1);
+      expect(recordEvent).toHaveBeenCalledWith(
+        {
+          organizationId: "org-1",
+          actorUserId: "user-1",
+          action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+          entityType: "ASSET",
+          entityId: "a1",
+          assetId: "a1",
+          field: "availableToBook",
+          fromValue: from,
+          toValue: to,
+        },
+        expect.anything()
+      );
+    }
+  );
+
+  it("writes no note and no event when the switch is set to the value it holds", async () => {
+    stubActor();
+    // why: the before-read inside the transaction; already available.
+    vitest
+      .mocked(db.asset.findUnique)
+      .mockResolvedValueOnce({ availableToBook: true } as never);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("writes no note and no event when the asset is archived after the pre-check", async () => {
+    stubActor();
+    // why: the before-read inside the transaction excludes archived rows, so
+    // an asset archived after the pre-check reads back as missing.
+    vitest.mocked(db.asset.findUnique).mockResolvedValueOnce(null);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith({
+      where: { id: "a1", organizationId: "org-1", archivedAt: null },
+      select: { availableToBook: true },
+    });
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("records one note and one event per asset the bulk action actually changes", async () => {
+    stubActor();
+    // why: the before-state read inside the transaction. a2 is already
+    // available, so marking the selection available changes a1 and a3 only.
+    vitest.mocked(db.asset.findMany).mockResolvedValueOnce([
+      { id: "a1", availableToBook: false },
+      { id: "a2", availableToBook: true },
+      { id: "a3", availableToBook: false },
+    ] as never);
+
+    await bulkMarkAvailability({
+      userId: "user-1",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      organizationId: "org-1",
+      assetIds: ["a1", "a2", "a3"],
+      type: "available",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["a1", "a3"] },
+        organizationId: "org-1",
+        archivedAt: null,
+      },
+      data: { availableToBook: true },
+    });
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    expect(vitest.mocked(recordEvents).mock.calls[0]).toEqual([
+      ["a1", "a3"].map((assetId) => ({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+        entityType: "ASSET",
+        entityId: assetId,
+        assetId,
+        field: "availableToBook",
+        fromValue: false,
+        toValue: true,
+      })),
+      expect.anything(),
+    ]);
+    expect(createNotes).toHaveBeenCalledTimes(1);
+    expect(createNotes).toHaveBeenCalledWith(
+      {
+        content: `${actorLink} marked the asset as available for bookings.`,
+        type: "UPDATE",
+        userId: "user-1",
+        assetIds: ["a1", "a3"],
+        organizationId: "org-1",
+      },
+      expect.anything()
+    );
+  });
+
+  it("writes nothing when every selected asset already holds the value", async () => {
+    stubActor();
+    // why: the before-state read inside the transaction; already unavailable.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockResolvedValueOnce([{ id: "a1", availableToBook: false }] as never);
+
+    await bulkMarkAvailability({
+      userId: "user-1",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      organizationId: "org-1",
+      assetIds: ["a1"],
+      type: "unavailable",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
   });
 });
 
@@ -7169,6 +8196,7 @@ describe("bulk archive / reinstate — upstream errors", () => {
           assetIds: ["a1"],
           settings: {} as never,
           lastAuditDateAccess: "hidden",
+          bookableScope: null,
         })
       ).rejects.toMatchObject({
         message: "That filter can't be applied.",
@@ -7532,6 +8560,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     // downstream can tell the two cases apart.
     await bulkCheckInAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       custodyAssign: "anyone",
       assetIds: ["asset-1", "asset-2"],
@@ -7553,6 +8582,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     await expect(
       bulkCheckInAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         custodyAssign: "anyone",
         assetIds: ["asset-1", "asset-2"],
@@ -7593,6 +8623,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
 
     await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -7665,12 +8696,9 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       (callback: (tx: unknown) => unknown) => callback(db)
     );
 
-    const { createSystemLocationNote } = await import(
-      "~/modules/location-note/service.server"
-    );
-
     await bulkUpdateAssetLocation({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-individual", "asset-qty"],
       organizationId: "org-1",
@@ -7678,15 +8706,28 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       settings: ASSET_INDEX_SETTINGS,
     });
 
-    const contents = (
-      createSystemLocationNote as ReturnType<typeof vitest.fn>
-    ).mock.calls.map((c) => (c[0] as { content: string }).content);
-
-    expect(contents.length).toBeGreaterThan(0);
-    for (const content of contents) {
-      expect(content).toContain("asset-individual");
-      expect(content).not.toContain("asset-qty");
-    }
+    const rows = (
+      db.locationNote.createMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.flatMap(([args]) =>
+      args.data.map((row: { locationId: string; content: string }) => [
+        row.locationId,
+        row.content,
+      ])
+    );
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const tripod = '{% link to="/assets/asset-individual" text="Tripod" /%}';
+    const oldLoc = '{% link to="/locations/loc-old" text="Old Location" /%}';
+    const newLoc = '{% link to="/locations/loc-new" text="New Location" /%}';
+    expect(rows).toEqual([
+      [
+        "loc-new",
+        `${john} added ${tripod} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed ${tripod} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+    ]);
   });
 });
 
@@ -7710,6 +8751,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
     userId: "user-1",
     settings: {} as never,
     lastAuditDateAccess: "hidden" as const,
+    bookableScope: null,
   };
 
   it("only asks the database for QUANTITY_TRACKED assets in the caller's org", async () => {
@@ -7867,6 +8909,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
         userId: "user-1",
         settings: {} as never,
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         assetIds: ["asset-1"],
         minQuantity: 5,
       })
@@ -7954,5 +8997,35 @@ describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () =>
       preParsedFilters: [],
     });
     expect(sql).toContain('"completedAt"');
+  });
+});
+
+describe("getAdvancedPaginatedAndFilterableAssets - unknown filter value", () => {
+  beforeEach(() => {
+    vi.mocked(db.$queryRaw).mockClear();
+  });
+
+  it("rethrows the filter's 400 with its own message", async () => {
+    const statusFilter: Filter = {
+      name: "status",
+      type: "enum",
+      operator: "is",
+      value: "ARCHIVED",
+    };
+
+    const error = await getAdvancedPaginatedAndFilterableAssets({
+      request: new Request("http://localhost/assets"),
+      organizationId: "org-1",
+      settings: { ...ASSET_INDEX_SETTINGS, mode: "ADVANCED" },
+      filters: "status=is%3AARCHIVED",
+      preParsedFilters: [statusFilter],
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Unknown status "ARCHIVED"'),
+    });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });

@@ -249,13 +249,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    // The migration prompt is for members who may edit assets.
+    // The migration prompt is for members who may edit assets. The
+    // migration rewrites every asset at once, a bulk edit no workspace
+    // switch opens, so the matrix alone decides.
     const needsSequentialIdMigration =
       !currentOrganization.hasSequentialIdsMigrated &&
       (await hasPermission({
         organizationId,
         userId,
         roles: currentOrganizationUserRoles ?? [],
+        workspace: currentOrganization,
+        matrixOnly: true,
         entity: PermissionEntity.asset,
         action: PermissionAction.update,
       }));
@@ -278,6 +282,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
       userId,
       roles: currentOrganizationUserRoles ?? [],
+      // why: no workspace switch grants this action.
+      workspace: null,
       entity: PermissionEntity.asset,
       action: PermissionAction.import,
     })

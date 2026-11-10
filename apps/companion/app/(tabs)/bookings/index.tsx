@@ -22,8 +22,12 @@ import {
   Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useNavigation, useRouter } from "expo-router";
-import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRouter,
+  useFocusEffect,
+  useScrollToTop,
+} from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -42,6 +46,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { BookingListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { pushIntoTab } from "@/lib/navigation";
 import {
   consumeBookingsListDirty,
   markBookingsListDirty,
@@ -609,7 +614,7 @@ function BookingsListContent() {
                 setCurrentOrg(onlyTeam);
               } else {
                 // Several teams: the workspace picker lives in Settings.
-                router.push("/(tabs)/settings");
+                pushIntoTab("/(tabs)/settings");
               }
             }}
             activeOpacity={0.7}
@@ -793,7 +798,7 @@ function BookingsListContent() {
                       style={styles.footer}
                       color={colors.muted}
                     />
-                  ) : null
+                  ) : undefined
                 }
               />
             )}

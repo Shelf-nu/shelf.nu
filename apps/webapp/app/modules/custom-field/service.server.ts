@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { CustomFieldFormat, CustomFieldType, Prisma } from "@prisma/client";
 import type {
   CustomField,
   Organization,
@@ -6,7 +6,10 @@ import type {
   UserOrganization,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import {
+  getDefinitionFromCsvHeader,
+  LINK_FORMAT_NEEDS_TEXT_MESSAGE,
+} from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -46,6 +49,7 @@ export async function createCustomField({
   name,
   helpText,
   type,
+  format,
   required,
   organizationId,
   active,
@@ -60,6 +64,7 @@ export async function createCustomField({
           name,
           helpText,
           type,
+          format,
           required,
           active,
           options,
@@ -304,6 +309,8 @@ export async function updateCustomField(payload: {
   name?: CustomField["name"];
   helpText?: CustomField["helpText"];
   type?: CustomField["type"];
+  /** Allowed only on a TEXT field; refused with a 400 otherwise. */
+  format?: CustomField["format"];
   required?: CustomField["required"];
   active?: CustomField["active"];
   options?: CustomField["options"];
@@ -317,6 +324,7 @@ export async function updateCustomField(payload: {
     id,
     name,
     helpText,
+    format,
     required,
     active,
     options,
@@ -333,6 +341,7 @@ export async function updateCustomField(payload: {
     const data = {
       name,
       helpText,
+      format,
       required,
       active,
       options,
@@ -376,6 +385,21 @@ export async function updateCustomField(payload: {
           });
         }
 
+        if (
+          format === CustomFieldFormat.LINK &&
+          oldField.type !== CustomFieldType.TEXT
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Link format needs a text field",
+            message: LINK_FORMAT_NEEDS_TEXT_MESSAGE,
+            additionalData: { id, organizationId, type: oldField.type },
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
         assertRenamesMatchOptions({
           renames,
           savedOptions: oldField.options,
@@ -391,6 +415,11 @@ export async function updateCustomField(payload: {
         if (renames.length > 0) {
           const rewritten = await tx.$queryRaw<RewrittenOptionValue[]>(
             buildOptionRenameStatement(id, renames)
+          );
+          // Asset model defaults hold the same spellings and move with them,
+          // so a model never fills an option that no longer exists.
+          await tx.$executeRaw(
+            buildModelDefaultOptionRenameStatement(id, renames)
           );
 
           // One event per asset whose stored value changed, shaped like the
@@ -489,32 +518,69 @@ function assertRenamesMatchOptions({
 type RewrittenOptionValue = { assetId: string; from: string; to: string };
 
 /**
+ * The `FROM (VALUES ...)` rename pairs and the `SET "value"` expression that
+ * moves a stored OPTION value from `m."from"` to `m."to"`. `raw` and
+ * `valueOption` hold the same string for OPTION values and change together.
+ * Shared by the asset values and the asset model defaults so both stay in the
+ * same shape.
+ *
+ * @param alias - The alias of the table being updated
+ * @param renames - The renames to apply
+ */
+function optionRenameParts(alias: string, renames: OptionRename[]) {
+  const pairs = Prisma.join(
+    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
+  );
+  const column = Prisma.raw(`${alias}."value"`);
+  const setValue = Prisma.sql`jsonb_set(
+      jsonb_set(${column}::jsonb, '{raw}', to_jsonb(m."to")),
+      '{valueOption}',
+      to_jsonb(m."to")
+    )`;
+  return { pairs, setValue };
+}
+
+/**
  * One statement that rewrites every renamed option value of a field and
  * returns each changed row as a {@link RewrittenOptionValue}. Each row is
  * matched against the value it held before the statement ran, so swapping two
- * spellings in the same save moves each set of assets exactly once. `raw` and
- * `valueOption` hold the same string for OPTION values and change together.
+ * spellings in the same save moves each set of assets exactly once.
  */
 function buildOptionRenameStatement(
   customFieldId: CustomField["id"],
   renames: OptionRename[]
 ) {
-  const pairs = Prisma.join(
-    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
-  );
+  const { pairs, setValue } = optionRenameParts("v", renames);
 
   return Prisma.sql`
     UPDATE "AssetCustomFieldValue" AS v
-    SET "value" = jsonb_set(
-          jsonb_set(v."value"::jsonb, '{raw}', to_jsonb(m."to")),
-          '{valueOption}',
-          to_jsonb(m."to")
-        ),
+    SET "value" = ${setValue},
         "updatedAt" = now()
     FROM (VALUES ${pairs}) AS m("from", "to")
     WHERE v."customFieldId" = ${customFieldId}
       AND v."value"->>'valueOption' = m."from"
     RETURNING v."assetId" AS "assetId", m."from" AS "from", m."to" AS "to"
+  `;
+}
+
+/**
+ * The same rewrite as {@link buildOptionRenameStatement}, for the default
+ * values asset models hold for the field. No events: a model default is not
+ * an asset change.
+ */
+function buildModelDefaultOptionRenameStatement(
+  customFieldId: CustomField["id"],
+  renames: OptionRename[]
+) {
+  const { pairs, setValue } = optionRenameParts("d", renames);
+
+  return Prisma.sql`
+    UPDATE "AssetModelCustomFieldDefault" AS d
+    SET "value" = ${setValue},
+        "updatedAt" = now()
+    FROM (VALUES ${pairs}) AS m("from", "to")
+    WHERE d."customFieldId" = ${customFieldId}
+      AND d."value"->>'valueOption' = m."from"
   `;
 }
 
@@ -777,6 +843,46 @@ export async function createCustomFieldsIfNotExists({
       label,
       /** No need to capture those. They are mostly related to malformed CSV data */
       shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Reads what one asset stores for some of its custom fields. The asset edit
+ * action reads its Link fields' values this way, so a stored value that
+ * predates the Link format can be submitted unchanged.
+ *
+ * @param args.assetId - The asset being edited
+ * @param args.organizationId - The caller's workspace; an asset of another
+ *   workspace yields nothing
+ * @param args.customFieldIds - The fields to read
+ * @returns One row per field the asset has a value for
+ * @throws {ShelfError} When the read fails
+ */
+export async function getAssetCustomFieldValues({
+  assetId,
+  organizationId,
+  customFieldIds,
+}: {
+  assetId: string;
+  organizationId: string;
+  customFieldIds: string[];
+}): Promise<{ customFieldId: string; value: Prisma.JsonValue }[]> {
+  try {
+    return await db.assetCustomFieldValue.findMany({
+      where: {
+        assetId,
+        asset: { organizationId },
+        customFieldId: { in: customFieldIds },
+      },
+      select: { customFieldId: true, value: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reading the asset's custom fields.",
+      additionalData: { assetId, organizationId },
+      label,
     });
   }
 }

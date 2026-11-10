@@ -27,7 +27,7 @@ const label = "Booking";
 /** The models the holder guards read, plus the raw lock. */
 type KitHolderClient = Pick<
   ExtendedPrismaClient,
-  "kit" | "assetKit" | "bookingAsset" | "$queryRaw"
+  "kit" | "assetKit" | "bookingAsset" | "custody" | "$queryRaw"
 >;
 
 /**
@@ -220,7 +220,7 @@ export async function assertKitsCheckoutable(
       label,
       status: 400,
       title: "Kits in custody",
-      message: `Cannot check out booking. Some kits are in custody: ${listKitNames(
+      message: `Cannot check out booking. Some kits are in custody: ${listNames(
         kitsInCustody
       )}. Release their custody first or remove them from the booking.`,
       additionalData: { bookingId, kitIds: kitsInCustody.map((k) => k.id) },
@@ -243,7 +243,7 @@ export async function assertKitsCheckoutable(
       label,
       status: 400,
       title: "Kits checked out elsewhere",
-      message: `Cannot check out booking. Some kits are still checked out on another booking: ${listKitNames(
+      message: `Cannot check out booking. Some kits are still checked out on another booking: ${listNames(
         kitsOut
       )}. Check them in there first or remove them from this booking.`,
       additionalData: { bookingId, kitIds: [...heldElsewhere] },
@@ -253,15 +253,21 @@ export async function assertKitsCheckoutable(
 }
 
 /**
- * Refuses putting a kit in custody while a booking has it out: the reverse of
- * {@link assertKitsCheckoutable}. A kit is one physical unit with one holder.
+ * Refuses putting a kit in custody while a booking has it out, or while one
+ * of its INDIVIDUAL members is already in someone's custody: the reverse of
+ * {@link assertKitsCheckoutable}. A kit is one physical unit with one holder,
+ * and an INDIVIDUAL asset holds at most one custody record.
  *
  * Reads both the kit's status and the booking slices, because `Kit.status`
- * alone can be stale in either direction.
+ * alone can be stale in either direction. Members are judged by their custody
+ * rows, not `Asset.status`, for the same reason. QUANTITY_TRACKED members
+ * never block: the kit takes only their remaining units. Archived members are
+ * left out of kit custody, so their custody does not block either.
  *
  * @param client Pass the active `tx`: the kit rows stay locked until it
  *   commits, so the check holds for the assign that follows.
- * @throws {ShelfError} 400 when any kit is checked out or out on a live booking
+ * @throws {ShelfError} 400 when any kit is checked out or out on a live
+ *   booking, or holds an INDIVIDUAL member already in custody
  */
 export async function assertKitsCustodyAssignable(
   client: KitHolderClient,
@@ -293,10 +299,36 @@ export async function assertKitsCustodyAssignable(
       label: "Kit",
       status: 400,
       title: "Kits checked out",
-      message: `Cannot assign custody. Some kits are checked out on a booking: ${listKitNames(
+      message: `Cannot assign custody. Some kits are checked out on a booking: ${listNames(
         kitsOut
       )}. Check them in first.`,
       additionalData: { kitIds: kitsOut.map((k) => k.id) },
+      shouldBeCaptured: false,
+    });
+  }
+
+  const heldMembers = await client.custody.findMany({
+    where: {
+      asset: {
+        organizationId,
+        type: AssetType.INDIVIDUAL,
+        archivedAt: null,
+        assetKits: { some: { kitId: { in: kitIds } } },
+      },
+    },
+    select: { asset: { select: { id: true, title: true } } },
+  });
+  if (heldMembers.length > 0) {
+    const assets = heldMembers.map((row) => row.asset);
+    throw new ShelfError({
+      cause: null,
+      label: "Kit",
+      status: 400,
+      title: "Assets already in custody",
+      message: `Cannot assign custody. Some assets in the kit are already in custody: ${listNames(
+        assets.map((asset) => ({ name: asset.title }))
+      )}. Release their custody first.`,
+      additionalData: { assetIds: assets.map((asset) => asset.id) },
       shouldBeCaptured: false,
     });
   }
@@ -361,11 +393,11 @@ export async function assertKitsHaveActiveAssets(
   });
 }
 
-/** Up to three kit names, then "and N more", for a refusal message. */
-function listKitNames(kits: { name: string }[]): string {
-  const shown = kits
+/** Up to three names, then "and N more", for a refusal message. */
+function listNames(items: { name: string }[]): string {
+  const shown = items
     .slice(0, 3)
-    .map((kit) => kit.name)
+    .map((item) => item.name)
     .join(", ");
-  return kits.length > 3 ? `${shown} and ${kits.length - 3} more` : shown;
+  return items.length > 3 ? `${shown} and ${items.length - 3} more` : shown;
 }

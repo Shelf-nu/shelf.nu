@@ -11,6 +11,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
+import { readClashRefusal } from "~/modules/booking/extend-horizon";
 import { extendBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -28,11 +29,12 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 /**
  * POST /api/mobile/bookings/extend
  *
- * Moves the end of an ONGOING or OVERDUE booking later, from the Companion app.
+ * Moves the end of an ONGOING or OVERDUE booking, from the Companion app.
  * The mobile twin of the web "extend-booking" intent: it wraps the same
  * `extendBooking` service, which re-checks clashes with reserved bookings and
- * model reservations, flips OVERDUE back to ONGOING, writes the activity note,
- * sends the emails and reschedules the check-in reminder.
+ * model reservations when the end moves later, flips OVERDUE back to ONGOING,
+ * writes the activity note, sends the emails and reschedules the check-in
+ * reminder.
  *
  * PARITY with web:
  * - Gated on `PermissionAction.extend` (BASE holds `booking:update` but not
@@ -44,8 +46,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *   (future date with buffer, working hours, maximum length), with the
  *   booking's stored start as the schema's start date.
  *
- * - The service refuses an end at or before the current end and a write that
- *   races another extension or a close, for web and phone alike.
+ * - The service accepts an earlier or a later end, as long as it is after the
+ *   start and in the future, and refuses a write that races another end-date
+ *   change or a close, for web and phone alike. The Companion app's sheet
+ *   still offers only later ends.
  *
  * `endDate` is a wall clock with no offset, decoded in the `timeZone` the
  * client declares (see `bookings.update.ts`). The response's `to` is read from
@@ -115,7 +119,7 @@ export async function action({ request }: ActionFunctionArgs) {
       booking,
       userId: user.id,
       access,
-      action: "extend",
+      action: "change the end date of",
     });
 
     // Checked before the dates: a closed booking answers with its status, not
@@ -123,7 +127,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
-        message: "Extending booking is not allowed for current status.",
+        message:
+          "Changing the end date is not allowed for the current booking status.",
         label: "Booking",
         status: 400,
         shouldBeCaptured: false,
@@ -167,6 +172,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       newEndDate: parsed.endDate,
       hints,
+      prefs,
       userId: user.id,
       access,
       roles,
@@ -183,8 +189,8 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     // The phone shows only `error.message`, so a clash names the bookings in
-    // the way inside it.
-    const clashing = clashingBookingNames(reason.additionalData);
+    // the way inside it, each with the items it holds.
+    const clashing = clashingBookingLabels(reason.additionalData);
     const message =
       clashing.length > 0
         ? `${reason.message} ${clashing.join(", ")}`
@@ -194,18 +200,18 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 /**
- * Names of the bookings an extension would overlap, read from the service's
- * `additionalData.clashingBookings`.
+ * Labels of the bookings an extension would overlap, read from the service's
+ * `additionalData.clashingBookings`: the booking's name, followed by the
+ * shared items in parentheses when the payload names them.
  *
  * @param additionalData - The error's additional data, of any shape
- * @returns The clashing bookings' names; empty when the error is not a clash
+ * @returns One label per clashing booking; empty when the error is not a clash
  */
-function clashingBookingNames(additionalData: unknown): string[] {
-  if (typeof additionalData !== "object" || additionalData === null) return [];
-  const clashing = (additionalData as { clashingBookings?: unknown })
-    .clashingBookings;
-  if (!Array.isArray(clashing)) return [];
-  return clashing.flatMap((b: { name?: unknown } | null) =>
-    typeof b?.name === "string" ? [b.name] : []
-  );
+function clashingBookingLabels(additionalData: unknown): string[] {
+  const refusal = readClashRefusal(additionalData);
+  if (!refusal) return [];
+  return refusal.clashingBookings.map((b) => {
+    const items = b.items.map((item) => item.name);
+    return items.length > 0 ? `${b.name} (${items.join(", ")})` : b.name;
+  });
 }

@@ -8,8 +8,13 @@ let getOrganizationTierLimitMock = vi.fn();
  * `premiumIsEnabled` is read once at import, so each case needs its own load.
  *
  * @param enablePremium - The `ENABLE_PREMIUM_FEATURES` value for this load
+ * @param database - `"push"` backs the database with the in-memory push store;
+ *   by default no query may run
  */
-async function loadSubscriptionModule(enablePremium: boolean) {
+async function loadSubscriptionModule(
+  enablePremium: boolean,
+  database: "none" | "push" = "none"
+) {
   vi.resetModules();
   getOrganizationTierLimitMock = vi.fn();
   // why: the tier lookup reads the workspace owner's tier from the database
@@ -25,9 +30,13 @@ async function loadSubscriptionModule(enablePremium: boolean) {
   vi.doMock("~/modules/user/service.server", () => ({
     getUserByID: vi.fn(),
   }));
-  // why: no case here may reach the database
-  vi.doMock("~/database/db.server", () => ({
-    db: {},
+  // why: no database in unit tests. The push store evaluates the tier query
+  // the way Postgres would; otherwise an empty client fails any query.
+  vi.doMock("~/database/db.server", async () => ({
+    db:
+      database === "push"
+        ? (await import("@helpers/in-memory-push-db")).pushDb
+        : {},
   }));
 
   // why: premium features are read once at import; each case picks its value
@@ -264,5 +273,144 @@ describe("workspaceCanUseReports and assertUserCanUseReports", () => {
     await expect(workspaceCanUseReports(args)).resolves.toBe(true);
     await expect(assertUserCanUseReports(args)).resolves.toBeUndefined();
     expect(getOrganizationTierLimitMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("filterOrganizationsWithPush", () => {
+  it("keeps the workspaces whose owner's plan includes push, in their order, with one query", async () => {
+    const { filterOrganizationsWithPush } = await loadSubscriptionModule(
+      true,
+      "push"
+    );
+    const { pushDb, pushStore, seedCustomTierLimit, seedOrganization } =
+      await import("@helpers/in-memory-push-db");
+    seedOrganization({ id: "org-free", userId: "owner-free" }, "free");
+    seedOrganization({ id: "org-plus", userId: "owner-plus" }, "tier_1");
+    seedOrganization({ id: "org-custom-on", userId: "owner-on" }, "custom");
+    seedCustomTierLimit("owner-on", true);
+    seedOrganization({ id: "org-custom-off", userId: "owner-off" }, "custom");
+    seedCustomTierLimit("owner-off", false);
+    // A custom tier without its limit row, and a tier without a limit row
+    seedOrganization({ id: "org-no-custom", userId: "owner-none" }, "custom");
+    seedOrganization({ id: "org-no-limit", userId: "owner-gone" }, "tier_2");
+    pushStore.tierPush.delete("tier_2");
+    const findMany = vi.spyOn(pushDb.organization, "findMany");
+
+    const allowed = await filterOrganizationsWithPush([
+      "org-custom-on",
+      "org-free",
+      "org-no-limit",
+      "org-plus",
+      "org-custom-off",
+      "org-no-custom",
+    ]);
+
+    expect(allowed).toEqual(["org-custom-on", "org-plus"]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns every workspace without a query when premium features are disabled", async () => {
+    const { filterOrganizationsWithPush } = await loadSubscriptionModule(false);
+
+    await expect(
+      filterOrganizationsWithPush(["org-free", "org-plus"])
+    ).resolves.toEqual(["org-free", "org-plus"]);
+  });
+});
+
+describe("canUseRecurringReminders", () => {
+  it("returns true when premium features are disabled, whatever the tier says", async () => {
+    const { canUseRecurringReminders } = await loadSubscriptionModule(false);
+
+    expect(canUseRecurringReminders({ canUseRecurringReminders: false })).toBe(
+      true
+    );
+    expect(canUseRecurringReminders(null)).toBe(true);
+  });
+
+  it("returns false when premium is enabled but the tier limit is missing", async () => {
+    const { canUseRecurringReminders } = await loadSubscriptionModule(true);
+
+    expect(canUseRecurringReminders(null)).toBe(false);
+    expect(canUseRecurringReminders(undefined)).toBe(false);
+  });
+
+  it("follows the tier flag when premium is enabled", async () => {
+    const { canUseRecurringReminders } = await loadSubscriptionModule(true);
+
+    expect(canUseRecurringReminders({ canUseRecurringReminders: false })).toBe(
+      false
+    );
+    expect(canUseRecurringReminders({ canUseRecurringReminders: true })).toBe(
+      true
+    );
+  });
+});
+
+describe("assertUserCanUseRecurringReminders", () => {
+  const args = {
+    organizationId: "org-1",
+    organizations: [
+      {
+        id: "org-1",
+        type: "TEAM" as const,
+        name: "Team",
+        imageId: null,
+        userId: "owner-1",
+      },
+    ],
+  };
+
+  it("reads the workspace's plan through the owner's tier lookup", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue({
+      canUseRecurringReminders: true,
+    });
+
+    await expect(
+      assertUserCanUseRecurringReminders(args)
+    ).resolves.toBeUndefined();
+    expect(getOrganizationTierLimitMock).toHaveBeenCalledWith(args);
+  });
+
+  it("refuses a plan without recurring reminders with an uncaptured 403", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue({
+      canUseRecurringReminders: false,
+    });
+
+    const refusal = await assertUserCanUseRecurringReminders(args).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(refusal).toMatchObject({
+      status: 403,
+      title: "Not allowed",
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("refuses when the tier limit cannot be resolved", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue(null);
+
+    await expect(
+      assertUserCanUseRecurringReminders(args)
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("lets every workspace through when premium features are disabled", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(false);
+    getOrganizationTierLimitMock.mockResolvedValue({
+      canUseRecurringReminders: false,
+    });
+
+    await expect(
+      assertUserCanUseRecurringReminders(args)
+    ).resolves.toBeUndefined();
   });
 });

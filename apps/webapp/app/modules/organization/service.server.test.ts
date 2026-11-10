@@ -132,7 +132,9 @@ vi.mock("~/utils/stripe.server", () => ({
 
 // why: tier writes are a subscription-transfer side effect, and these tests run
 // with premiumIsEnabled false to assert only the authorization branch
-vi.mock("../tier/service.server", () => ({ updateUserTierId: vi.fn() }));
+vi.mock("../tier/service.server", () => ({
+  updateUserTierId: vi.fn(),
+}));
 
 const currentOrganization = {
   id: ORG_ID,
@@ -556,6 +558,20 @@ describe("createOrganization logo validation", () => {
         data: expect.objectContaining({ contentType: "image/png" }),
       })
     );
+  });
+
+  it("creates a team workspace with both built-in templates", async () => {
+    await createOrganization(args(null));
+
+    const { data } = dbMock.organization.create.mock.calls[0][0];
+    expect(
+      data.pdfTemplates.createMany.data.map(
+        (t: { name: string; isDefault: boolean }) => [t.name, t.isDefault]
+      )
+    ).toEqual([
+      ["Checklist", true],
+      ["Check-out receipt", false],
+    ]);
   });
 
   it("creates the workspace when no logo is supplied", async () => {

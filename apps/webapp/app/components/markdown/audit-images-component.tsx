@@ -1,5 +1,6 @@
 import React from "react";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
+import { AuditPhoto } from "~/components/audit/audit-photo";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 
@@ -24,6 +25,11 @@ interface AuditImage {
   imageUrl: string;
   thumbnailUrl: string;
   description?: string | null;
+  /** When the photo was taken; null when its EXIF had no date */
+  capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown */
+  captureSource: AuditPhotoCaptureSource | null;
+  createdAt: string;
 }
 
 export const AuditImagesComponent = React.memo(
@@ -32,11 +38,13 @@ export const AuditImagesComponent = React.memo(
     ids,
     disablePortal,
   }: AuditImagesComponentProps) {
-    // Cheap string interpolation — safe to inline (recomputed each render).
-    // `ids` comes from stored note content, so an injected Markdoc tag can put
-    // anything here; encoding stops it appending its own query params. The
-    // endpoint is org-scoped, so this closes the injection rather than a leak.
-    const apiUrl = `/api/audit-images?ids=${encodeURIComponent(ids)}`;
+    // `ids` comes from stored content, so an injected Markdoc tag can put any
+    // value here, including a number (`ids=1`), which Markdoc passes through
+    // despite the String attribute type. Coerce once so the string methods
+    // below can never throw and take the page down. Encoding stops the value
+    // appending its own query params; the endpoint is org-scoped.
+    const idsText = String(ids ?? "");
+    const apiUrl = `/api/audit-images?ids=${encodeURIComponent(idsText)}`;
 
     const { data, isLoading, error } = useApiQuery<{ images: AuditImage[] }>({
       api: apiUrl,
@@ -44,9 +52,9 @@ export const AuditImagesComponent = React.memo(
 
     // Parse expected image IDs
     const { expectedIds, expectedCount } = React.useMemo(() => {
-      const idsArray = ids.split(",").filter(Boolean);
+      const idsArray = idsText.split(",").filter(Boolean);
       return { expectedIds: idsArray, expectedCount: idsArray.length };
-    }, [ids]);
+    }, [idsText]);
     // Note: expectedIds not currently used, but keeping for potential future use
     void expectedIds;
     const images = data?.images || [];
@@ -95,21 +103,13 @@ export const AuditImagesComponent = React.memo(
         <div className="flex flex-wrap items-center gap-2">
           {/* Render actual images */}
           {images.map((image) => (
-            <ImageWithPreview
+            <AuditPhoto
               key={image.id}
-              imageUrl={image.imageUrl}
-              thumbnailUrl={image.thumbnailUrl}
+              image={image}
+              images={images}
               alt={image.description || "Audit image"}
-              withPreview
               className="size-16"
               disablePortal={disablePortal}
-              images={images.map((img) => ({
-                id: img.id,
-                imageUrl: img.imageUrl,
-                thumbnailUrl: img.thumbnailUrl,
-                alt: img.description || "Audit image",
-              }))}
-              currentImageId={image.id}
             />
           ))}
           {/* Render placeholders for deleted images */}

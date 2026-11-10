@@ -23,6 +23,8 @@ import type {
   ICustomFieldValueJson,
   UpdateAssetPayload,
 } from "~/modules/asset/types";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import { buildCustomFieldValue, parseYesNo } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
@@ -159,7 +161,7 @@ export async function buildUpdatePreview({
   // Get org custom fields for header analysis
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, format: true },
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
@@ -323,7 +325,7 @@ export async function applyBulkUpdatesFromImport({
 
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, format: true },
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
@@ -598,6 +600,16 @@ export async function applyBulkUpdatesFromImport({
         )
       : new Map<string, string>();
 
+  /**
+   * Defaults of every model the file moves assets onto, read once. Joining a
+   * model fills the asset's empty fields from them, the same rule as every
+   * other way an asset joins a model.
+   */
+  const modelDefaults = await getAssetModelsDefaults({
+    assetModelIds: [...new Set(assetModelNameToId.values())],
+    organizationId,
+  });
+
   for (const assetPreview of diffs.assetsToUpdate) {
     const { id: matchId, assetDbId, title: assetTitle, changes } = assetPreview;
     // Look up in primary map first, then fallback (matches computeAssetDiffs logic)
@@ -838,8 +850,52 @@ export async function applyBulkUpdatesFromImport({
         }
       }
 
+      const joinedModel = assetModelIdPatch
+        ? modelDefaults.get(assetModelIdPatch)
+        : undefined;
+      if (joinedModel) {
+        const fill = planModelDefaultFill({
+          model: joinedModel,
+          current: {
+            // The file's own cells win; the saved asset decides the rest.
+            categoryId:
+              categoryId === undefined
+                ? existingAsset.categoryId
+                : categoryId === "uncategorized"
+                ? null
+                : categoryId,
+            // A Category cell the file clears is an answer, so the model
+            // neither fills it nor fills fields limited to categories. The
+            // asset form treats "uncategorized" as blank instead (see
+            // `fillAssetFormDataFromModel`): its select cannot tell a choice
+            // from no choice, while an import cell is always typed.
+            categoryCleared: categoryId === "uncategorized",
+            valuation:
+              valuation === undefined ? existingAsset.valuation : valuation,
+            // A cell the file clears is an answer too, so it is not filled.
+            customFieldIdsWithValue: new Set([
+              ...existingAsset.customFields.map(
+                (value) => value.customField.id
+              ),
+              ...customFieldsValues.map((v) => v.id),
+            ]),
+          },
+        });
+        if (fill.categoryId !== undefined) {
+          categoryId = fill.categoryId;
+        }
+        if (fill.valuation !== undefined) valuation = fill.valuation;
+        for (const fieldDefault of fill.customFields) {
+          customFieldsValues.push({
+            id: fieldDefault.customFieldId,
+            value: fieldDefault.value,
+          });
+        }
+      }
+
       // Count actual payload fields (not otherChanges.length, which may include
-      // fields that were silently skipped like invalid numbers)
+      // fields that were silently skipped like invalid numbers). Counted after
+      // the model fill, so fields the model filled are reported too.
       let changesApplied = 0;
       if (title !== undefined) changesApplied++;
       if (description !== undefined) changesApplied++;
@@ -953,6 +1009,7 @@ export async function applyBulkUpdatesFromImport({
               id: assetDbId,
               availableToBook: newBool,
               organizationId,
+              userId,
             });
             changesApplied++;
           }
