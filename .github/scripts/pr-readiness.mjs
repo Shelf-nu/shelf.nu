@@ -252,7 +252,21 @@ export async function run({ github, context, core }) {
     return;
   }
 
-  // Remove every pending request (people and teams), not only the one that
+  // Order matters when a call fails partway: the failure status goes first so
+  // the PR is marked even if a later call errors, and the review is posted
+  // before the requests are removed, so a re-run still finds the pending
+  // request and repeats the whole sequence instead of skipping the notice.
+  const noun = threads.length === 1 ? "thread" : "threads";
+  await github.rest.repos.createCommitStatus({
+    owner,
+    repo,
+    sha: headSha,
+    state: "failure",
+    context: STATUS_CONTEXT,
+    description: `${threads.length} unresolved review ${noun}`,
+  });
+
+  // Every pending request (people and teams) is removed, not only the one that
   // fired this run, so the PR leaves every reviewer's queue.
   const { data: requested } = await github.rest.pulls.listRequestedReviewers({
     owner,
@@ -262,17 +276,9 @@ export async function run({ github, context, core }) {
   const reviewers = requested.users.map((user) => user.login);
   const teamReviewers = requested.teams.map((team) => team.slug);
   // No pending request left means an earlier run for this same request (several
-  // reviewers requested at once fire one event each) already removed them and
-  // posted the review; posting again would only duplicate it.
+  // reviewers requested at once fire one event each) already posted the review
+  // and removed them; posting again would only duplicate it.
   if (reviewers.length > 0 || teamReviewers.length > 0) {
-    await github.rest.pulls.removeRequestedReviewers({
-      owner,
-      repo,
-      pull_number: number,
-      reviewers,
-      team_reviewers: teamReviewers,
-    });
-
     // A new review on every premature request, never an edit of an old one:
     // GitHub notifies the author of a mention only when the text is posted,
     // not when an existing review is edited to include it.
@@ -287,16 +293,15 @@ export async function run({ github, context, core }) {
         repoUrl: `${context.serverUrl}/${owner}/${repo}`,
       }),
     });
+
+    await github.rest.pulls.removeRequestedReviewers({
+      owner,
+      repo,
+      pull_number: number,
+      reviewers,
+      team_reviewers: teamReviewers,
+    });
   }
 
-  const noun = threads.length === 1 ? "thread" : "threads";
-  await github.rest.repos.createCommitStatus({
-    owner,
-    repo,
-    sha: headSha,
-    state: "failure",
-    context: STATUS_CONTEXT,
-    description: `${threads.length} unresolved review ${noun}`,
-  });
   core.setFailed(`${threads.length} unresolved review ${noun}.`);
 }

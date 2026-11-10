@@ -49,9 +49,13 @@ function fakeTools({
   threads = [],
   reviews = [],
   requested = { users: [{ login: "DonKoko" }], teams: [] },
+  failOn = null,
 } = {}) {
   const calls = [];
   const record = (name) => async (params) => {
+    // why: simulates a GitHub API error on one call, to pin what a partial
+    // failure leaves behind
+    if (name === failOn) throw new Error(`${name} failed`);
     calls.push([name, params]);
     return { data: {} };
   };
@@ -203,7 +207,7 @@ describe("run", () => {
     assert.deepEqual(failures, []);
   });
 
-  it("with open threads: removes requests, posts a comment review, fails the status", async () => {
+  it("with open threads: fails the status, posts a comment review, removes requests", async () => {
     const { tools, calls, failures } = fakeTools({
       threads: [thread(), thread({ resolved: true })],
       requested: { users: [{ login: "DonKoko" }], teams: [{ slug: "core" }] },
@@ -212,18 +216,33 @@ describe("run", () => {
 
     assert.deepEqual(
       calls.map(([name]) => name),
-      ["removeRequestedReviewers", "createReview", "createCommitStatus"]
+      ["createCommitStatus", "createReview", "removeRequestedReviewers"]
     );
-    assert.deepEqual(calls[0][1].reviewers, ["DonKoko"]);
-    assert.deepEqual(calls[0][1].team_reviewers, ["core"]);
+    assert.equal(calls[0][1].state, "failure");
+    assert.equal(calls[0][1].sha, "abc123");
+    assert.equal(calls[0][1].context, STATUS_CONTEXT);
     // A comment review, never REQUEST_CHANGES: the bot cannot dismiss a
     // verdict on main, so one would block the merge for good.
     assert.equal(calls[1][1].event, "COMMENT");
     assert.match(calls[1][1].body, /@contributor/);
-    assert.equal(calls[2][1].state, "failure");
-    assert.equal(calls[2][1].sha, "abc123");
-    assert.equal(calls[2][1].context, STATUS_CONTEXT);
+    assert.deepEqual(calls[2][1].reviewers, ["DonKoko"]);
+    assert.deepEqual(calls[2][1].team_reviewers, ["core"]);
     assert.equal(failures.length, 1);
+  });
+
+  it("when posting the review fails: the PR stays marked failed and keeps its request", async () => {
+    const { tools, calls } = fakeTools({
+      threads: [thread()],
+      failOn: "createReview",
+    });
+    await assert.rejects(run(tools), /createReview failed/);
+    // The request is still pending, so a re-run repeats the whole sequence
+    // and the author is still notified.
+    assert.deepEqual(
+      calls.map(([name]) => name),
+      ["createCommitStatus"]
+    );
+    assert.equal(calls[0][1].state, "failure");
   });
 
   it("with open threads and an earlier gate review: posts a new one so the author is notified", async () => {
