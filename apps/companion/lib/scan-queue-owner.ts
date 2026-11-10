@@ -44,3 +44,53 @@ export function resolveQueueAccess(
     mayUse: resolved !== null && signedIn === resolved,
   };
 }
+
+/** The queue's ownership rules, as the scan-queue hook applies them. */
+export type QueueGate = {
+  /**
+   * Reports the account signed in now. The first account seen becomes the
+   * owner and never changes.
+   *
+   * @param userId - The signed-in account, or undefined
+   */
+  observe: (userId: string | undefined) => void;
+  /** The owner, or null while no account has been seen. */
+  owner: () => string | null;
+  /** Saving to the owner's draft is allowed (an owner is known). */
+  maySave: () => boolean;
+  /**
+   * Adding a scan, or sending one, is allowed: the screen is open and the
+   * owner is the account signed in now. Refused while nobody is signed in.
+   */
+  mayUse: () => boolean;
+  /** The scan screen closed: sending stops. */
+  stop: () => void;
+  /** The scan screen opened (again). */
+  start: () => void;
+};
+
+/**
+ * Creates the ownership controller for one scan queue.
+ *
+ * @returns The gate, with no owner, nobody signed in, and started
+ */
+export function createQueueGate(): QueueGate {
+  let owner: string | null = null;
+  let signedIn: string | undefined;
+  let stopped = false;
+  return {
+    observe(userId) {
+      signedIn = userId;
+      owner = resolveQueueAccess(owner, userId).owner;
+    },
+    owner: () => owner,
+    maySave: () => owner !== null,
+    mayUse: () => !stopped && resolveQueueAccess(owner, signedIn).mayUse,
+    stop() {
+      stopped = true;
+    },
+    start() {
+      stopped = false;
+    },
+  };
+}

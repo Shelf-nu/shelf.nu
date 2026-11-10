@@ -121,9 +121,10 @@ async function trySignOut(
  * to null), because a forced teardown emits no auth event.
  *
  * @param client - The live Supabase client
- * @param removePersistedSession - Deletes the stored session for that client;
- *   a throw counts as a failed delete
- * @param options - `stillCurrent` (see its doc) and `checkTimeoutMs`, the cap
+ * @param removePersistedSession - Deletes the stored session for that client
+ *   and verifies it; a throw counts as a failed, unverified delete
+ * @param options - `stillCurrent` and `blockStoredSession` (see their docs)
+ *   and `checkTimeoutMs`, the cap
  *   on each session check (tests shorten it)
  * @returns How far the teardown went. Never rejects.
  */
@@ -133,6 +134,7 @@ export async function endSessionOnDevice(
   {
     stillCurrent = () => true,
     checkTimeoutMs = SESSION_CHECK_TIMEOUT_MS,
+    blockStoredSession = async () => {},
   }: {
     /**
      * False when another session replaced this one while the teardown ran (a
@@ -141,6 +143,12 @@ export async function endSessionOnDevice(
      */
     stillCurrent?: () => boolean;
     checkTimeoutMs?: number;
+    /**
+     * Refuses the stored session from now on. Called on an "incomplete"
+     * outcome, before the after-session-end tasks, so nothing that runs
+     * between can read and cache the old session's token.
+     */
+    blockStoredSession?: () => Promise<void>;
   } = {}
 ): Promise<SessionEndOutcome> {
   let outcome: SessionEndOutcome = "revoked";
@@ -160,14 +168,26 @@ export async function endSessionOnDevice(
       // then check under the lock, and delete again if it came back.
       let stored = true;
       for (let check = 0; check <= FORCED_TEARDOWN_CHECKS && stored; check++) {
+        let removed = true;
         try {
           await removePersistedSession();
         } catch {
-          // Checked below; the in-memory teardown still runs either way.
+          // An unverifiable delete proves nothing: the session counts as
+          // still stored whatever a session read says (the storage adapter
+          // reads a failing store as "nothing stored").
+          removed = false;
         }
-        stored = await sessionStillStored(client, checkTimeoutMs);
+        const checkedStored = await sessionStillStored(client, checkTimeoutMs);
+        stored = !removed || checkedStored;
       }
-      if (stored) outcome = "incomplete";
+      if (stored) {
+        outcome = "incomplete";
+        try {
+          await blockStoredSession();
+        } catch {
+          // Reported by the caller through the "incomplete" outcome.
+        }
+      }
     }
   }
   if (stillCurrent()) runAfterSessionEnd();

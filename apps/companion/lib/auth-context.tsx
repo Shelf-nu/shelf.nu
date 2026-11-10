@@ -17,13 +17,14 @@ import {
 } from "./server";
 import { reportSignOutIncomplete } from "./sentry";
 import {
-  allowStoredSession,
   blockStoredSession,
   currentSessionStorageKey,
   getSupabase,
   getSupabaseClientUrl,
   persistedSessionRemover,
+  prepareStoredSessionForSignIn,
 } from "./supabase";
+import { signInWithPreparedSession } from "./session-storage";
 
 type AuthState = {
   session: Session | null;
@@ -107,25 +108,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // here inspects the email — a login is only ever sent where the user
     // already connected the app.
     //
-    // A session a past sign-out could not delete is refused on read; the new
-    // one is written under the same key, so lift that block first.
+    // A session a past sign-out could not delete stays refused until it is
+    // verifiably removed (`prepareStoredSessionForSignIn`).
     const serverAtStart = getServerVersion();
-    const restoreBlock = await allowStoredSession();
-    if (getServerVersion() !== serverAtStart) {
-      await restoreBlock();
-      return { error: "The server changed during sign-in. Please try again." };
-    }
-    try {
-      const { error } = await getSupabase().auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) await restoreBlock();
-      return { error: error?.message ?? null };
-    } catch (cause) {
-      await restoreBlock();
-      throw cause;
-    }
+    return signInWithPreparedSession({
+      prepare: prepareStoredSessionForSignIn,
+      serverUnchanged: () => getServerVersion() === serverAtStart,
+      signIn: async () => {
+        const { error } = await getSupabase().auth.signInWithPassword({
+          email,
+          password,
+        });
+        return { error: error?.message ?? null };
+      },
+    });
   }, []);
 
   // Signing out deliberately KEEPS the active server: the user almost always
@@ -156,13 +152,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await runBeforeSessionEnd();
     const outcome = await endSessionOnDevice(client, removeStoredSession, {
       stillCurrent: () => getServerVersion() === serverAtStart,
+      // A stored session that survives every delete is refused from then on,
+      // so a restart cannot restore the previous person.
+      blockStoredSession: async () => {
+        if (storageKeyAtStart) await blockStoredSession(storageKeyAtStart);
+      },
     });
-    if (outcome === "incomplete") {
-      // The stored session survived every delete: refuse it from now on, so
-      // a restart cannot restore the previous person.
-      if (storageKeyAtStart) await blockStoredSession(storageKeyAtStart);
-      reportSignOutIncomplete(serverUrlAtStart);
-    }
+    if (outcome === "incomplete") reportSignOutIncomplete(serverUrlAtStart);
 
     // A forced sign-out emits no auth event, so the state is cleared here,
     // unless someone signed in or the server changed while it ran.

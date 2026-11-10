@@ -349,6 +349,75 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
   }
 }
 
+/**
+ * Adopts a draft saved by an older build (no owning account, stored under the
+ * audit id alone) into the signed-in account's draft for that audit, so its
+ * unsent scans go through the normal recovery prompt.
+ *
+ * Call it only when the signed-in account may scan this audit: the scans can
+ * only have come from someone working on it, and the server records them
+ * against whoever replays them. A draft is adopted only when it still holds
+ * unsent scans and the account has no draft of its own for this audit.
+ *
+ * @param userId - The signed-in account, allowed to scan the audit
+ * @param auditId - The audit being opened
+ * @returns True when a draft was adopted
+ */
+export async function adoptUnownedDraft(
+  userId: string,
+  auditId: string
+): Promise<boolean> {
+  try {
+    const legacyKey = `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
+    const raw = await AsyncStorage.getItem(legacyKey);
+    if (!raw) return false;
+    if (await AsyncStorage.getItem(storageKey(userId, auditId))) return false;
+    const legacy = JSON.parse(raw) as Partial<PersistedScanState> | null;
+    if (!legacy || legacy.auditId !== auditId) return false;
+    const pendingQueue = legacy.pendingQueue ?? [];
+    const failedQueue = legacy.failedQueue ?? [];
+    if (pendingQueue.length + failedQueue.length === 0) return false;
+    const adopted = await saveAuditScanState(
+      userId,
+      auditId,
+      legacy.scannedItems ?? [],
+      pendingQueue,
+      failedQueue
+    );
+    // The adopted copy is validated by the normal loader; the legacy key goes
+    // only once the copy is on disk.
+    if (adopted) await AsyncStorage.removeItem(legacyKey);
+    return adopted;
+  } catch (e) {
+    if (__DEV__) console.warn("[AuditPersistence] adopt failed:", e);
+    return false;
+  }
+}
+
+/**
+ * Guards the recovery alert's buttons. A native alert can stay on screen after
+ * the scanner that raised it is gone (the audit, workspace or account
+ * changed); a button pressed then must do nothing, or it would resume old
+ * scans into a new scanner or discard someone else's draft.
+ *
+ * @param isCancelled - True once the load that raised the alert was cancelled
+ * @param actions - What Resume and Discard do while the alert is current
+ * @returns The guarded button handlers
+ */
+export function guardRecoveryActions(
+  isCancelled: () => boolean,
+  actions: { resume: () => void; discard: () => void }
+): { onResume: () => void; onDiscard: () => void } {
+  return {
+    onResume: () => {
+      if (!isCancelled()) actions.resume();
+    },
+    onDiscard: () => {
+      if (!isCancelled()) actions.discard();
+    },
+  };
+}
+
 // ── Debounced saver ──────────────────────────────────────
 
 /**

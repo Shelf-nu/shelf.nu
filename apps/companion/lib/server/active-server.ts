@@ -227,15 +227,13 @@ async function clearServerScopedState(): Promise<void> {
 async function endSessionOnOutgoingClient(): Promise<void> {
   await runBeforeSessionEnd();
   const storageKey = currentSessionStorageKey();
-  const outcome = await endSessionOnDevice(
-    getSupabase(),
-    persistedSessionRemover()
-  );
-  // The stored session survived every delete: refuse it from now on, so
+  // A stored session that survives every delete is refused from then on, so
   // reconnecting to this server later cannot restore it.
-  if (outcome === "incomplete" && storageKey) {
-    await blockStoredSession(storageKey);
-  }
+  await endSessionOnDevice(getSupabase(), persistedSessionRemover(), {
+    blockStoredSession: async () => {
+      if (storageKey) await blockStoredSession(storageKey);
+    },
+  });
 }
 
 /**

@@ -58,20 +58,31 @@ export type SessionBlock = {
  */
 export function createSessionBlock(store: BlockStore): SessionBlock {
   let blocked: Set<string> | null = null;
+  /** Keys blocked or unblocked before the store could be read. */
+  const pending = new Set<string>();
 
   async function load(): Promise<Set<string>> {
     if (blocked) return blocked;
+    let raw: string | null;
     try {
-      const raw = await store.getItem(BLOCKED_SESSION_KEYS);
-      const parsed: unknown = raw ? JSON.parse(raw) : [];
-      blocked = new Set(
-        Array.isArray(parsed)
-          ? parsed.filter((k): k is string => typeof k === "string")
-          : []
-      );
+      raw = await store.getItem(BLOCKED_SESSION_KEYS);
     } catch {
-      blocked = new Set();
+      // Not cached: the next call reads the store again. Keys blocked in this
+      // app session stay in `pending` meanwhile.
+      return new Set(pending);
     }
+    let parsed: unknown = [];
+    try {
+      parsed = raw ? JSON.parse(raw) : [];
+    } catch {
+      parsed = [];
+    }
+    blocked = new Set([
+      ...(Array.isArray(parsed)
+        ? parsed.filter((k): k is string => typeof k === "string")
+        : []),
+      ...pending,
+    ]);
     return blocked;
   }
 
@@ -85,13 +96,17 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
 
   return {
     async block(storageKey) {
+      pending.add(storageKey);
       const keys = await load();
       keys.add(storageKey);
-      await save(keys);
+      // Only a list read from the store is written back, so a failed read
+      // can never overwrite the stored list with a partial one.
+      if (blocked) await save(keys);
     },
     async unblock(storageKey) {
+      pending.delete(storageKey);
       const keys = await load();
-      if (keys.delete(storageKey)) await save(keys);
+      if (keys.delete(storageKey) && blocked) await save(keys);
     },
     async isBlocked(key) {
       const keys = await load();

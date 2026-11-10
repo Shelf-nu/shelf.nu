@@ -90,6 +90,55 @@ describe("endSessionOnDevice", () => {
     assert.equal(state.stored, false);
   });
 
+  it("treats an unverifiable delete as still stored, whatever the read says", async () => {
+    const { client } = stubClient("error", "error");
+    // The read side reports nothing stored (a failing store reads as null).
+    client.auth.getSession = async () => ({ data: { session: null } });
+
+    const outcome = await endSessionOnDevice(client, async () => {
+      throw new Error("keychain delete");
+    });
+
+    assert.equal(outcome, "incomplete");
+  });
+
+  it("blocks the stored session before the after-session-end tasks run", async () => {
+    const { client } = stubClient("error", "error");
+    const order: string[] = [];
+    const unregister = onAfterSessionEnd(() => {
+      order.push("cleanup");
+    });
+
+    await endSessionOnDevice(
+      client,
+      async () => {
+        throw new Error("keychain delete");
+      },
+      {
+        blockStoredSession: async () => {
+          order.push("block");
+        },
+      }
+    );
+    unregister();
+
+    assert.deepEqual(order, ["block", "cleanup"]);
+  });
+
+  it("does not block when the session was removed", async () => {
+    const { client, removeStored } = stubClient("error", "error");
+    let blocked = false;
+
+    const outcome = await endSessionOnDevice(client, removeStored, {
+      blockStoredSession: async () => {
+        blocked = true;
+      },
+    });
+
+    assert.equal(outcome, "forced");
+    assert.equal(blocked, false);
+  });
+
   it("stops background refresh before a forced delete", async () => {
     const { client, state, removeStored } = stubClient("error", "error");
     const order: string[] = [];

@@ -71,4 +71,42 @@ describe("createSessionBlock", () => {
     await failing.block("sb-abcd-auth-token");
     assert.equal(await failing.isBlocked("sb-abcd-auth-token"), true);
   });
+
+  it("retries the read after a failure instead of caching an empty list", async () => {
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: JSON.stringify(["sb-abcd-auth-token"]),
+    });
+    let failReads = true;
+    const block = createSessionBlock({
+      getItem: async (key) => {
+        if (failReads) throw new Error("disk");
+        return store.getItem(key);
+      },
+      setItem: store.setItem,
+    });
+
+    assert.equal(await block.isBlocked("sb-abcd-auth-token"), false);
+    failReads = false;
+    assert.equal(await block.isBlocked("sb-abcd-auth-token"), true);
+  });
+
+  it("never overwrites the stored list from a failed read", async () => {
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: JSON.stringify(["sb-abcd-auth-token"]),
+    });
+    let failReads = true;
+    const block = createSessionBlock({
+      getItem: async (key) => {
+        if (failReads) throw new Error("disk");
+        return store.getItem(key);
+      },
+      setItem: store.setItem,
+    });
+
+    await block.block("sb-other-auth-token");
+    failReads = false;
+
+    assert.equal(await block.isBlocked("sb-abcd-auth-token"), true);
+    assert.equal(await block.isBlocked("sb-other-auth-token"), true);
+  });
 });

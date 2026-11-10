@@ -313,3 +313,77 @@ describe("draft queue fields", () => {
     );
   });
 });
+
+describe("adoptUnownedDraft", () => {
+  it("offers an older build's unsent scans to the auditor who opens the audit", async () => {
+    store.set(
+      `${prefix}au_1`,
+      JSON.stringify({
+        version: 1,
+        auditId: "au_1",
+        savedAt: ITEM.scannedAt,
+        scannedItems: [ITEM],
+        pendingQueue: [ENTRY],
+      })
+    );
+
+    assert.equal(await persistence.adoptUnownedDraft("user_a", "au_1"), true);
+
+    const draft = await persistence.loadAuditScanState("user_a", "au_1");
+    assert.deepEqual(draft?.pendingQueue, [ENTRY]);
+    assert.equal(store.has(`${prefix}au_1`), false);
+  });
+
+  it("never replaces the auditor's own draft, and leaves synced ones alone", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    store.set(
+      `${prefix}au_1`,
+      JSON.stringify({ version: 1, auditId: "au_1", pendingQueue: [ENTRY] })
+    );
+    assert.equal(await persistence.adoptUnownedDraft("user_a", "au_1"), false);
+
+    store.set(
+      `${prefix}au_2`,
+      JSON.stringify({ version: 1, auditId: "au_2", pendingQueue: [] })
+    );
+    assert.equal(await persistence.adoptUnownedDraft("user_a", "au_2"), false);
+  });
+});
+
+describe("guardRecoveryActions", () => {
+  it("does nothing once the load that raised the alert was cancelled", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
+    let cancelled = false;
+    let resumed = false;
+    const recovery = persistence.guardRecoveryActions(() => cancelled, {
+      resume: () => {
+        resumed = true;
+      },
+      discard: () => void persistence.clearAuditScanState("user_a", "au_1"),
+    });
+
+    cancelled = true; // the scanner unmounted while the alert was open
+    recovery.onDiscard();
+    recovery.onResume();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.notEqual(
+      await persistence.loadAuditScanState("user_a", "au_1"),
+      null
+    );
+    assert.equal(resumed, false);
+  });
+
+  it("runs the buttons while the alert is current", () => {
+    const calls: string[] = [];
+    const recovery = persistence.guardRecoveryActions(() => false, {
+      resume: () => calls.push("resume"),
+      discard: () => calls.push("discard"),
+    });
+
+    recovery.onResume();
+    recovery.onDiscard();
+
+    assert.deepEqual(calls, ["resume", "discard"]);
+  });
+});

@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  classifyResourcePath,
   isPlainRecordId,
   matchResourcePath,
   queryIdsArePlain,
@@ -208,4 +209,26 @@ test("an id-named query value must be a plain record id too", () => {
     nativeRouteForLink("https://app.shelf.nu/audits/scan?auditId=a%2Fb"),
     "/"
   );
+});
+
+test("tracking and other non-id query values are not checked", () => {
+  const fbclid = "A.b-c_".repeat(34).slice(0, 200);
+  assert.equal(
+    nativeRouteForLink(`https://app.shelf.nu/assets/as_1?fbclid=${fbclid}`),
+    `/assets/as_1?fbclid=${fbclid}`
+  );
+  assert.equal(queryIdsArePlain("gclid=x.y&uuid=a.b&valid=1.0"), true);
+  assert.equal(
+    nativeRouteForLink("https://app.shelf.nu/assets/new?qrId=qr.1"),
+    "/"
+  );
+});
+
+test("a known resource with a bad id is refused, not unknown", () => {
+  assert.equal(classifyResourcePath(["assets", "as_1%3Fx"]), "refused");
+  assert.equal(classifyResourcePath(["locations", "lc_1"]), null);
+  assert.deepEqual(classifyResourcePath(["scanner", "v1.2"]), {
+    resource: "scanner",
+    id: null,
+  });
 });

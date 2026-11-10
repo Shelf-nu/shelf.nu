@@ -20,7 +20,8 @@ import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { getApiBaseUrl } from "./api";
 import { getServerVersion } from "./server";
-import { allowStoredSession, getSupabase } from "./supabase";
+import { getSupabase, prepareStoredSessionForSignIn } from "./supabase";
+import { signInWithPreparedSession } from "./session-storage";
 
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
@@ -182,29 +183,21 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
       return { error: "The server changed during sign-in. Please try again." };
     }
 
-    // A session a past sign-out could not delete is refused on read; the new
-    // one is written under the same key, so lift that block first.
-    const restoreBlock = await allowStoredSession();
-    if (getServerVersion() !== serverVersionAtStart) {
-      await restoreBlock();
-      return { error: "The server changed during sign-in. Please try again." };
-    }
-    let error: { message: string } | null;
-    try {
-      ({ error } = await getSupabase().auth.setSession({
-        access_token: payload.accessToken,
-        refresh_token: payload.refreshToken,
-      }));
-    } catch (cause) {
-      await restoreBlock();
-      throw cause;
-    }
-    if (error) {
-      await restoreBlock();
-      return { error: error.message };
-    }
+    const { accessToken, refreshToken } = payload;
 
-    return { error: null };
+    // A session a past sign-out could not delete stays refused until it is
+    // verifiably removed (`prepareStoredSessionForSignIn`).
+    return await signInWithPreparedSession({
+      prepare: prepareStoredSessionForSignIn,
+      serverUnchanged: () => getServerVersion() === serverVersionAtStart,
+      signIn: async () => {
+        const { error } = await getSupabase().auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        return { error: error?.message ?? null };
+      },
+    });
   } catch (cause) {
     return {
       error:

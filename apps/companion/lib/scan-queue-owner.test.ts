@@ -4,9 +4,9 @@
  * @see ./scan-queue-owner.ts
  */
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, it, test } from "node:test";
 
-import { resolveQueueAccess } from "./scan-queue-owner";
+import { createQueueGate, resolveQueueAccess } from "./scan-queue-owner";
 
 test("the first signed-in account becomes the owner", () => {
   assert.deepEqual(resolveQueueAccess(null, "user_a"), {
@@ -37,5 +37,48 @@ test("after sign-out the queue is still saved to its owner's draft", () => {
     owner: "user_a",
     maySave: true,
     mayUse: false,
+  });
+});
+
+describe("createQueueGate", () => {
+  it("makes the first account seen the owner, for good", () => {
+    const gate = createQueueGate();
+    gate.observe("user_a");
+    gate.observe("user_b");
+
+    assert.equal(gate.owner(), "user_a");
+  });
+
+  it("refuses adding and sending for another account or nobody", () => {
+    const gate = createQueueGate();
+    gate.observe("user_a");
+    assert.equal(gate.mayUse(), true);
+
+    gate.observe("user_b");
+    assert.equal(gate.mayUse(), false);
+    gate.observe(undefined);
+    assert.equal(gate.mayUse(), false);
+    assert.equal(gate.maySave(), true);
+
+    gate.observe("user_a");
+    assert.equal(gate.mayUse(), true);
+  });
+
+  it("stops when the screen closes", () => {
+    const gate = createQueueGate();
+    gate.observe("user_a");
+    gate.stop();
+
+    assert.equal(gate.mayUse(), false);
+    gate.start();
+    assert.equal(gate.mayUse(), true);
+  });
+
+  it("saves nothing before any account is seen", () => {
+    const gate = createQueueGate();
+    gate.observe(undefined);
+
+    assert.equal(gate.maySave(), false);
+    assert.equal(gate.mayUse(), false);
   });
 });

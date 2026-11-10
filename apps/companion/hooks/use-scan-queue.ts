@@ -7,7 +7,7 @@ import {
   drainScanQueue,
   dropSupersededCounts,
 } from "@/lib/audit-scan-queue";
-import { resolveQueueAccess } from "@/lib/scan-queue-owner";
+import { createQueueGate, type QueueGate } from "@/lib/scan-queue-owner";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
 // ── Constants ────────────────────────────────────────────
@@ -76,48 +76,30 @@ export function useScanQueue({
   const failedQueueRef = useRef<ScanQueueEntry[]>([]);
   const isProcessingQueueRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** The account this queue belongs to; set once, on first sight. */
-  const ownerRef = useRef<string | null>(null);
-  /** The account signed in right now, read by the send loop between requests. */
-  const signedInRef = useRef(userId);
-  /** True once the screen is gone: a send loop still running stops. */
-  const stoppedRef = useRef(false);
+  /**
+   * The queue's ownership rules (`lib/scan-queue-owner.ts`, tested): the first
+   * account seen owns it; scans are added and sent only while that account is
+   * signed in and the screen is open; drafts always go to the owner.
+   */
+  const gateRef = useRef<QueueGate | null>(null);
+  if (!gateRef.current) gateRef.current = createQueueGate();
+  const gate = gateRef.current;
 
-  /** Records the owner and returns what the queue may do right now. */
-  const access = useCallback(() => {
-    const resolved = resolveQueueAccess(ownerRef.current, userId);
-    ownerRef.current = resolved.owner;
-    return resolved;
-  }, [userId]);
-
-  // Record the owner as soon as an account is known, before the first scan, so
-  // the queue never runs ownerless.
+  // Record the owner as soon as an account is known, before the first scan.
   useEffect(() => {
-    signedInRef.current = userId;
-    access();
-  }, [userId, access]);
+    gate.observe(userId);
+  }, [gate, userId]);
 
   useEffect(() => {
-    stoppedRef.current = false;
-    return () => {
-      stoppedRef.current = true;
-    };
-  }, []);
-
-  /** Whether the loop may send the next request for the owner. */
-  const maySendNow = useCallback(
-    () =>
-      !stoppedRef.current &&
-      ownerRef.current !== null &&
-      signedInRef.current === ownerRef.current,
-    []
-  );
+    gate.start();
+    return () => gate.stop();
+  }, [gate]);
 
   /** Saves the queues as the owner's draft; nothing while no owner is known. */
   const saveDraft = useCallback(
     (auditSessionId: string) => {
-      const { owner, maySave } = access();
-      if (!maySave || !owner) return;
+      const owner = gate.owner();
+      if (!gate.maySave() || !owner) return;
       void saveAuditScanState(
         owner,
         auditSessionId,
@@ -126,14 +108,14 @@ export function useScanQueue({
         failedQueueRef.current
       );
     },
-    [access, scannedItemsRef]
+    [gate, scannedItemsRef]
   );
 
   const processQueue = useCallback(async () => {
     if (isProcessingQueueRef.current || !orgId) return;
     if (scanQueueRef.current.length === 0) return;
     // Another account's queue stays in its owner's draft, unsent.
-    if (!access().mayUse) return;
+    if (!gate.mayUse()) return;
 
     isProcessingQueueRef.current = true;
 
@@ -150,7 +132,7 @@ export function useScanQueue({
       // Each request goes out with the token of whoever is signed in when it
       // is sent, so the drain stops (scans stay in the owner's draft) once the
       // screen is gone or someone else is signed in.
-      mayContinue: maySendNow,
+      mayContinue: gate.mayUse,
       onSynced: onScanSynced,
       onFailed: (entry) => {
         onScanFailed?.(entry.assetId);
@@ -184,21 +166,14 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [
-    orgId,
-    scannedItemsRef,
-    onScanSynced,
-    onScanFailed,
-    access,
-    saveDraft,
-    maySendNow,
-  ]);
+  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, saveDraft, gate]);
 
   const enqueueScan = useCallback(
     (incoming: ScanQueueEntry) => {
       // A different account never adds to another account's queue.
-      const { owner } = access();
-      if (userId && owner && userId !== owner) return;
+      // Only the owner, signed in, adds scans: never another account, and
+      // never a signed-out scanner into the previous owner's draft.
+      if (!gate.mayUse()) return;
       const queued = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
       // A new count replaces any older count for the same asset still
       // waiting. The request in flight (queue head while processing) stays:
@@ -233,7 +208,7 @@ export function useScanQueue({
       saveDraft(entry.auditSessionId);
       processQueue();
     },
-    [processQueue, saveDraft, access, userId]
+    [processQueue, saveDraft, gate]
   );
 
   const retryFailedScans = useCallback(() => {
