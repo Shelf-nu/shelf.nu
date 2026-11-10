@@ -46,6 +46,8 @@ export default function ApproveBookingDialog({
   const disabled = isBusy || isSubmitting;
 
   function handleOpenDialog() {
+    // A post still in flight keeps the button off through `isBusy`.
+    setIsSubmitting(false);
     setIsDialogOpen(true);
   }
 
