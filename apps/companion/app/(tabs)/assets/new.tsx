@@ -194,6 +194,7 @@ export default function CreateAssetScreen() {
       // No complete list for this workspace yet: show what did load, and
       // never another workspace's list.
       setLocations(rows);
+      completeLocationsOrgRef.current = null;
     }
     // Otherwise a later page failed: keep the complete list already shown.
     setIsLocationsLoading(false);
