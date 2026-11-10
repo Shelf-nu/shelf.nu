@@ -1242,6 +1242,12 @@ export type BookingDetailResponse = {
     canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
+    /**
+     * Whether the caller may discard this draft (archive a DRAFT): offered to
+     * members who may archive but not delete. Optional: servers that predate
+     * the flag omit it, and an absent flag hides the action.
+     */
+    canDiscardDraft?: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
     /**
@@ -1579,6 +1585,15 @@ export type AuditExpectedAsset = {
   name: string;
   auditAssetId: string;
   /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
+  /**
    * Evidence recorded against this asset, whether or not anyone scanned it —
    * a note or photo can be attached to an expected asset directly.
    *
@@ -1643,6 +1658,15 @@ export type AuditScanData = {
    * Absent on servers that predate archiving.
    */
   archivedAt?: string | null;
+  /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
 };
 
 export type AuditDetailResponse = {
@@ -1762,6 +1786,9 @@ export type RecordScanResponse = {
   auditAssetId: string | null;
   foundAssetCount: number;
   unexpectedAssetCount: number;
+  /** The row's counts after this scan. Absent on servers without audit counts. */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
 };
 
 /**

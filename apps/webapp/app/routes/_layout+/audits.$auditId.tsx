@@ -26,6 +26,7 @@ import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
+  getAuditUnitTotals,
   updateAuditSession,
   cancelAuditSession,
   archiveAuditSession,
@@ -265,12 +266,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // Calculate stats for dynamic button text
-    const scanCount = await db.auditScan.count({
-      where: { auditSessionId: auditId },
-    });
-    const hasScans = scanCount > 0;
-
     const stats = {
       expectedCount: session.expectedAssetCount,
       foundCount: session.foundAssetCount,
@@ -297,20 +292,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
     const header = { title: `${session.name} · Overview` };
 
-    // Fetch team members for audit assignment (used in edit dialog)
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        organizationId,
-        deletedAt: null,
-        userId: { not: null }, // Only team members with user accounts
-      },
-      select: {
-        id: true,
-        name: true,
-        userId: true,
-      },
-      orderBy: { name: "asc" },
-    });
+    // Read together: the scan count (dynamic button text), the units line of
+    // the header's Complete Audit dialog (the overview reads it from here
+    // too), and the team members for the edit dialog's assignment.
+    const [scanCount, unitTotals, teamMembers] = await Promise.all([
+      db.auditScan.count({ where: { auditSessionId: auditId } }),
+      getAuditUnitTotals(auditId),
+      db.teamMember.findMany({
+        where: {
+          organizationId,
+          deletedAt: null,
+          userId: { not: null }, // Only team members with user accounts
+        },
+        select: {
+          id: true,
+          name: true,
+          userId: true,
+        },
+        orderBy: { name: "asc" },
+      }),
+    ]);
+    const hasScans = scanCount > 0;
 
     return data(
       payload({
@@ -320,6 +322,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         canManageOthersAudits: access.policy.audits.manageOthers,
         hasScans,
         stats,
+        unitTotals,
         userId,
         teamMembers,
       })
@@ -337,6 +340,7 @@ export default function AuditDetailsPage() {
     canManageOthersAudits,
     hasScans,
     stats,
+    unitTotals,
     userId,
   } = useLoaderData<typeof loader>();
   const roles = useOrganizationRoles();
@@ -417,7 +421,11 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog auditName={session.name} stats={stats} />
+              <CompleteAuditDialog
+                auditName={session.name}
+                stats={stats}
+                units={unitTotals}
+              />
             )}
         </div>
       </Header>

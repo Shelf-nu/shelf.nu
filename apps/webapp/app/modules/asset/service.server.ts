@@ -1373,6 +1373,17 @@ export async function createAsset({
           await assertLocationBelongsToOrg({ locationId, organizationId }, tx);
         }
 
+        // SECURITY (cross-org IDOR): the tag ids come from form/CSV input and
+        // are connected by the nested create above with no org scoping of
+        // their own. Prove they belong to this org before the write, so every
+        // caller of createAsset is covered, not only the ones that check first.
+        if (tags?.set?.length) {
+          await assertTagsBelongToOrg(
+            { tagIds: tags.set.map((tag) => tag.id), organizationId },
+            tx
+          );
+        }
+
         // The value already matches (that is how the orphan was found), so
         // only the type needs to follow the import. Org-scoped: the ids come
         // from an org-scoped lookup, and this keeps the write that way too.
@@ -1453,6 +1464,12 @@ export async function createAsset({
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
+      // A deliberate client error from a guard inside the transaction (a tag,
+      // category, kit or location outside this workspace) carries its own
+      // actionable message. The constraint wrapper below would replace it with
+      // a generic one, so pass it straight through.
+      rethrowIfClientError(cause);
+
       // Check for sequential ID unique constraint violation and retry
       if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
         const prismaError = cause as any;
@@ -1723,6 +1740,9 @@ export async function bulkCreateAssetsFromModel({
     await assertLocationBelongsToOrg({ locationId, organizationId });
   }
 
+  // createAsset proves tags again inside each create transaction. This check
+  // still runs first so a foreign tag refuses the whole batch with a thrown
+  // 400 before any asset is written, rather than as a failure at index 0.
   if (tags?.set && tags.set.length > 0) {
     await assertTagsBelongToOrg({
       tagIds: tags.set.map((t) => t.id),
@@ -2111,7 +2131,10 @@ export async function updateAsset({
     /** disconnecting location relation if a user clears locations */
     // (no-op here too; the pivot deleteMany happens in the tx below.)
 
-    /** If a tags is passed, link the category to the asset. */
+    /**
+     * If tags are passed, replace the asset's tags with them. Their org
+     * ownership is asserted at the top of the write transaction below.
+     */
     if (isTagUpdate) {
       Object.assign(data, {
         tags,
@@ -2358,6 +2381,16 @@ export async function updateAsset({
       ReturnType<typeof rehomeCustodyForPlacementChange>
     > | null = null;
     const asset = await db.$transaction(async (tx) => {
+      // SECURITY (cross-org IDOR): the tag ids come from form input and the
+      // `tags.set` in the update below connects them with no org scoping of
+      // its own. Prove they belong to this org inside the write transaction.
+      if (isTagUpdate) {
+        await assertTagsBelongToOrg(
+          { tagIds: (tags?.set ?? []).map((tag) => tag.id), organizationId },
+          tx
+        );
+      }
+
       /** Custody sources before a placement rewrite, for the re-home. */
       let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
         null;
