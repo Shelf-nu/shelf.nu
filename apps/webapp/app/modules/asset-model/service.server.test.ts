@@ -388,6 +388,66 @@ describe("getAssetModels", () => {
     expect(result.totalAssetModels).toBe(150);
   });
 
+  it("gives the included model its defaults and active count", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    const ownModel = {
+      ...createAssetModelFactory({ id: "model-own", name: "Old Model" }),
+      _count: { assets: 4 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(150);
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(ownModel);
+    // why: one of the included model's four assets is archived.
+    // @ts-expect-error mock setup
+    db.asset.groupBy.mockResolvedValueOnce([
+      { assetModelId: "model-own", _count: { _all: 1 } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModelCustomFieldDefault.findMany.mockResolvedValueOnce([
+      {
+        assetModelId: "model-own",
+        customFieldId: "brand",
+        value: { raw: "Westermo" },
+      },
+    ]);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      perPage: 100,
+      withCustomFieldDefaults: true,
+      includeId: "model-own",
+    });
+
+    // Both lookups cover the included model, not only the page.
+    expect(db.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetModelId: { in: expect.arrayContaining(["model-own"]) },
+        }),
+      })
+    );
+    expect(db.assetModelCustomFieldDefault.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetModelId: { in: expect.arrayContaining(["model-own"]) },
+        },
+      })
+    );
+    expect(result.assetModels[0]).toMatchObject({
+      id: "model-own",
+      activeAssetCount: 3,
+      customFieldDefaults: [
+        { customFieldId: "brand", value: { raw: "Westermo" } },
+      ],
+    });
+  });
+
   it("does not look up a model for an asset without one", async () => {
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue([]);
