@@ -7,7 +7,7 @@
  *
  * @see {@link file://./../../../routes/_layout+/bookings.$bookingId.tsx}
  */
-import { useState, type ReactNode } from "react";
+import { useReducer, type ReactNode } from "react";
 import { BookingStatus, type Booking } from "@prisma/client";
 import { useDisabled } from "~/hooks/use-disabled";
 import { Dialog, DialogPortal } from "../../layout/dialog";
@@ -19,6 +19,38 @@ type ApproveBookingDialogProps = {
    *  vs dropdown row). */
   trigger?: (openDialog: () => void) => ReactNode;
 };
+
+type DialogState = {
+  isDialogOpen: boolean;
+  /** Set on the first submit, so a double click posts once. */
+  isSubmitting: boolean;
+};
+
+type DialogAction =
+  | { type: "open" }
+  | { type: "submit" }
+  | { type: "close"; isBusy: boolean };
+
+const CLOSED: DialogState = { isDialogOpen: false, isSubmitting: false };
+
+/**
+ * Opening re-arms the dialog (a post still in flight keeps the button off
+ * through `useDisabled`). Closing re-arms it only once nothing is in flight,
+ * so closing mid-post does not allow a second post.
+ */
+function dialogReducer(state: DialogState, action: DialogAction): DialogState {
+  switch (action.type) {
+    case "open":
+      return { isDialogOpen: true, isSubmitting: false };
+    case "submit":
+      return { ...state, isSubmitting: true };
+    case "close":
+      return {
+        isDialogOpen: false,
+        isSubmitting: action.isBusy ? state.isSubmitting : false,
+      };
+  }
+}
 
 /**
  * Renders the approval trigger and its confirmation dialog.
@@ -38,23 +70,19 @@ export default function ApproveBookingDialog({
   booking,
   trigger,
 }: ApproveBookingDialogProps) {
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  // Set on the first submit so a double click posts once; reset when the
-  // dialog closes, so a failed approval can be tried again.
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [{ isDialogOpen, isSubmitting }, dispatch] = useReducer(
+    dialogReducer,
+    CLOSED
+  );
   const isBusy = useDisabled();
   const disabled = isBusy || isSubmitting;
 
   function handleOpenDialog() {
-    // A post still in flight keeps the button off through `isBusy`.
-    setIsSubmitting(false);
-    setIsDialogOpen(true);
+    dispatch({ type: "open" });
   }
 
   function handleCloseDialog() {
-    setIsDialogOpen(false);
-    // Only once nothing is in flight: closing mid-post must not re-arm it.
-    if (!isBusy) setIsSubmitting(false);
+    dispatch({ type: "close", isBusy });
   }
 
   return (
@@ -93,7 +121,7 @@ export default function ApproveBookingDialog({
             <form
               method="post"
               className="flex w-full items-center gap-4"
-              onSubmit={() => setIsSubmitting(true)}
+              onSubmit={() => dispatch({ type: "submit" })}
             >
               <input type="hidden" name="intent" value="approve-booking" />
               <Button
