@@ -291,6 +291,28 @@ describe("assetUtilizationReport", () => {
     expect(result.rows[0].bookingCount).toBe(2);
   });
 
+  it("caps instantaneous in-use units when quantity-pool bookings are staggered", async () => {
+    // 8 units Apr 1–11 and 8 units Apr 6–16 on a 10-unit pool.
+    // Apr 1–6: 8 units, Apr 6–11: min(16, 10) = 10, Apr 11–16: 8.
+    // 5 * 8 + 5 * 10 + 5 * 8 = 130 unit-days out of 300 -> 43%.
+    // A global cap would give min(160, 150) = 150 -> 50%.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      quantityAsset("pool-1", 10, [
+        slice("b-1", "2026-04-01T00:00:00Z", "2026-04-11T00:00:00Z", 8),
+        slice("b-2", "2026-04-06T00:00:00Z", "2026-04-16T00:00:00Z", 8),
+      ]),
+    ] as any);
+
+    const result = await assetUtilizationReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows[0].utilizationRate).toBe(43);
+    expect(result.rows[0].daysInUse).toBe(15);
+    expect(result.rows[0].bookingCount).toBe(2);
+  });
+
   it("reconstructs historical pool capacity from stock-ledger changes", async () => {
     // Pool had 10 units during Apr 1-16 (all 10 booked), then all 10 units were
     // consumed on Apr 16 leaving live quantity = 0 today. Historical utilization
