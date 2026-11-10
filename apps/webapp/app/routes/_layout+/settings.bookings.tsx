@@ -301,7 +301,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // No sweep of existing reservations: every reservation written while
         // a switch is off carries `approvedAt` from `reserveBooking`, and the
         // bookings that predate the feature were stamped by migration
-        // 20261102150100. Only genuine requests (made while a switch was on
+        // 20261110120000. Only genuine requests (made while a switch was on
         // and never decided) have no stamp, and those are pending again the
         // moment a switch comes back on, which is what they are.
         await updateBookingSettings({

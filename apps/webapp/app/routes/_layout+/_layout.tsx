@@ -1,5 +1,4 @@
 import type { Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
 import { Roles } from "@prisma/client";
 import { useAtom } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
@@ -44,7 +43,6 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
-import { db } from "~/database/db.server";
 import { getActiveAssetImport } from "~/modules/asset-import/service.server";
 import type {
   AssetImportNoticePayload,
@@ -56,6 +54,7 @@ import {
 } from "~/modules/asset-import/viewer-payload";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
+import { getPendingApprovalCount } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
   getSelectedOrganization,
@@ -67,7 +66,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { isBookingApprovalEnabled } from "~/utils/bookings";
 import {
   expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
@@ -310,13 +308,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         );
         return null;
       });
+    const bookingSettingsPromise = getBookingSettingsForOrganization(
+      currentOrganization.id
+    );
     const [
       bookingSettings,
       workingHours,
       unreadUpdatesCount,
       activeAssetImport,
+      pendingApprovalCount,
     ] = await Promise.all([
-      getBookingSettingsForOrganization(currentOrganization.id),
+      bookingSettingsPromise,
       getWorkingHoursForOrganization(currentOrganization.id),
       (() => {
         // Same audience rule as the updates page (announcementRole), so the
@@ -329,34 +331,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // The import in flight (or just finished for the starter), shown by
       // the floating card and the assets index notice.
       activeAssetImportPromise,
+      // Reservation requests waiting for a decision, counted on the Bookings
+      // menu for the people who can decide them.
+      bookingSettingsPromise.then((settings) =>
+        getPendingApprovalCount({
+          organizationId,
+          userId,
+          roles: currentOrganizationUserRoles ?? [],
+          settings,
+        })
+      ),
     ]);
-
-    /**
-     * Reservation requests waiting for a decision, shown as a count on the
-     * Bookings menu for the people who can decide them. Zero when the
-     * workspace does not require approval or the viewer cannot approve, so
-     * nobody sees a number they cannot act on.
-     */
-    const pendingApprovalCount =
-      isBookingApprovalEnabled(bookingSettings) &&
-      (await hasPermission({
-        organizationId,
-        userId,
-        roles: currentOrganizationUserRoles ?? [],
-        entity: PermissionEntity.booking,
-        action: PermissionAction.approve,
-      }))
-        ? await db.booking.count({
-            where: {
-              organizationId,
-              status: BookingStatus.RESERVED,
-              approvedAt: null,
-              // A request whose end date passed is dead, not waiting: the
-              // Expired option lists it, the count does not.
-              to: { gte: new Date() },
-            },
-          })
-        : 0;
 
     return data(
       payload({

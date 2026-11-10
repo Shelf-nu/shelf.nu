@@ -108,9 +108,9 @@ export function ApprovalSettings({
                 Self service users check gear out and back in themselves. Off,
                 their reservation is final at once. On, an administrator or
                 manager must approve it first; after that they still check out
-                on their own. Requests still waiting when you switch this off
-                can be checked out meanwhile, and need a decision again if you
-                switch it back on.
+                on their own. Switching this off makes new reservations final;
+                requests already waiting stay pending while either switch is on,
+                so approve them, or switch both off to release them.
               </div>
             }
             className="border-b-0 pb-[10px]"

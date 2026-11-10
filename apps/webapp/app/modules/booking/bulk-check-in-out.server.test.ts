@@ -21,6 +21,7 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import {
   bulkCheckinBookings,
   bulkCheckoutBookings,
@@ -147,6 +148,8 @@ function processed(id: string, assetIds: string[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Back to "may not approve": a test that grants it must not leak.
+  vi.mocked(hasPermission).mockResolvedValue(false);
   settingsMock.mockResolvedValue(NO_EXPLICIT_SCAN as never);
   questionsMock.mockResolvedValue([]);
   vi.mocked(getBulkBookingsWhereInput).mockResolvedValue({});
@@ -277,11 +280,8 @@ describe("bulkCheckoutBookings", () => {
   it("does not refuse a pending request to a caller who may approve", async () => {
     // why: the approver's check-out approves the request (the service stamps
     // it), so the batch rule only guards callers who cannot decide.
-    const { hasPermission } = await import(
-      "~/utils/permissions/permission.validator.server"
-    );
-    vi.mocked(hasPermission).mockResolvedValueOnce(true);
-    settingsMock.mockResolvedValueOnce(
+    vi.mocked(hasPermission).mockResolvedValue(true);
+    settingsMock.mockResolvedValue(
       createBookingSettings({
         requireApprovalForBase: true,
         requireApprovalForSelfService: true,

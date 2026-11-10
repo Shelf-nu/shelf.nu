@@ -795,6 +795,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.approve,
       }),

@@ -25935,9 +25935,7 @@ describe("getPendingApprovalCount", () => {
     vitest.useFakeTimers();
     vitest.setSystemTime(new Date("2026-11-10T12:00:00Z"));
     try {
-      await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(
-        3
-      );
+      await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(3);
     } finally {
       vitest.useRealTimers();
     }
@@ -25977,7 +25975,10 @@ describe("getPendingApprovalCount", () => {
   it("is zero while approval is off in the workspace", async () => {
     await expect(
       getPendingApprovalCount(
-        args({ requireApprovalForBase: false, requireApprovalForSelfService: false })
+        args({
+          requireApprovalForBase: false,
+          requireApprovalForSelfService: false,
+        })
       )
     ).resolves.toBe(0);
     await expect(getPendingApprovalCount(args(null))).resolves.toBe(0);
