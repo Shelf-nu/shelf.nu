@@ -20,10 +20,24 @@
  */
 
 /**
- * The segment sent in place of an id that cannot be one: it names no record,
- * so the request comes back "not found".
+ * The segment sent in place of a record id that cannot be one: no record id
+ * has this form, so the request comes back "not found". A free-text value
+ * such as a barcode could equal it, so those are refused before the request
+ * with {@link isUnroutableSegment} instead.
  */
 export const INVALID_ID_SEGMENT = "invalid-id";
+
+/**
+ * Whether a value cannot be sent as one path segment: URL parsing drops or
+ * resolves an empty value, `.` and `..`, so the request would reach the
+ * parent path.
+ *
+ * @param value - The value to send as a segment
+ * @returns True for `""`, `"."` and `".."`
+ */
+export function isUnroutableSegment(value: string): boolean {
+  return value === "" || value === "." || value === "..";
+}
 
 /**
  * Encodes one value as a single path segment.
@@ -37,9 +51,7 @@ export const INVALID_ID_SEGMENT = "invalid-id";
  *   percent-encoded, or {@link INVALID_ID_SEGMENT}
  */
 export function pathSegment(value: string): string {
-  if (value === "" || value === "." || value === "..") {
-    return INVALID_ID_SEGMENT;
-  }
+  if (isUnroutableSegment(value)) return INVALID_ID_SEGMENT;
   return encodeURIComponent(value);
 }
 

@@ -35,6 +35,22 @@ describe("createSessionBlock", () => {
     assert.equal(await block.isBlocked("sb-abcd-auth-tokenX"), false);
   });
 
+  it("does not block another server's key that shares the prefix", async () => {
+    const block = createSessionBlock(mapStore());
+    await block.block("sb-x-auth-token");
+
+    assert.equal(await block.isBlocked("sb-x-auth-token-code-verifier"), true);
+    assert.equal(await block.isBlocked("sb-x-auth-token-user"), true);
+    assert.equal(
+      await block.isBlocked("sb-x-auth-token-prod-auth-token"),
+      false
+    );
+    assert.equal(
+      await block.isBlocked("sb-x-auth-token-prod-auth-token-user"),
+      false
+    );
+  });
+
   it("survives a restart through the store", async () => {
     const store = mapStore();
     await createSessionBlock(store).block("sb-abcd-auth-token");
@@ -59,6 +75,25 @@ describe("createSessionBlock", () => {
       await createSessionBlock(store).isBlocked("sb-abcd-auth-token"),
       true
     );
+  });
+
+  it("keeps the block in memory when only the parked list cannot be cleared", async () => {
+    const key = "sb-abcd-auth-token";
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: JSON.stringify([key]),
+      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify([key]),
+    });
+    const write = store.setItem;
+    store.setItem = async (k: string, v: string) => {
+      if (k === BLOCKED_SESSION_KEYS_PENDING) throw new Error("storage full");
+      await write(k, v);
+    };
+    const block = createSessionBlock(store);
+
+    assert.equal(await block.unblock(key), false);
+
+    // A second sign-in in the same run must still go through unblock.
+    assert.equal(await block.isBlocked(key), true);
   });
 
   it("unblock lifts it, for the next sign-in", async () => {

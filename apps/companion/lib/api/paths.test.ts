@@ -7,7 +7,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { INVALID_ID_SEGMENT, mobilePaths, pathSegment } from "./paths";
+import {
+  INVALID_ID_SEGMENT,
+  isUnroutableSegment,
+  mobilePaths,
+  pathSegment,
+} from "./paths";
 
 /** Ids that would reshape a path or query if spliced in raw. */
 const RESHAPING_IDS = [
@@ -165,5 +170,19 @@ describe("mobilePaths", () => {
     );
     assert.deepEqual(params.getAll("orgId"), ["org_1"]);
     assert.deepEqual(params.getAll("assetId"), ["as_1&orgId=other"]);
+  });
+});
+
+describe("isUnroutableSegment", () => {
+  it("flags the values that cannot stay one path segment", () => {
+    for (const value of ["", ".", ".."]) {
+      assert.equal(isUnroutableSegment(value), true, JSON.stringify(value));
+    }
+  });
+
+  it("passes every other value, dotted ones included", () => {
+    for (const value of ["invalid-id", "...", "a.b", "ABC 123"]) {
+      assert.equal(isUnroutableSegment(value), false, value);
+    }
   });
 });

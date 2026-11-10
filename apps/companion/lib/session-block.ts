@@ -16,6 +16,7 @@
  * @see {@link file://./session-block.test.ts}
  * @see {@link file://./supabase.ts}
  */
+import { sessionStorageKeys } from "./session-storage-keys";
 
 /** Key, in the injected store, of the list of blocked session keys. */
 export const BLOCKED_SESSION_KEYS = "shelf_blocked_session_keys";
@@ -37,7 +38,8 @@ export type BlockStore = {
 /** The set of blocked session keys. */
 export type SessionBlock = {
   /**
-   * Blocks a session storage key and every key derived from it.
+   * Blocks a session storage key and the keys supabase-js derives from it
+   * (`sessionStorageKeys`).
    *
    * @param storageKey - The client's session storage key
    */
@@ -55,7 +57,8 @@ export type SessionBlock = {
    * Whether a storage key read must be refused.
    *
    * @param key - The key being read (the session key or a derived one)
-   * @returns True when it is a blocked session key or derived from one
+   * @returns True when it is a blocked session key or one of the keys
+   *   supabase-js derives from it
    */
   isBlocked: (key: string) => Promise<boolean>;
 };
@@ -179,14 +182,24 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
         pending.add(storageKey);
         return false;
       }
+      // A parked entry that is still stored comes back on the next launch, so
+      // the block stays in memory and in the main list too: the next sign-in
+      // then goes through `unblock` again instead of writing a session the
+      // next launch refuses.
+      if (!parkedCleared) {
+        if (listed) keys.add(storageKey);
+        return false;
+      }
       const saved = listed ? await save(keys) : true;
       if (!saved) keys.add(storageKey);
-      return saved && parkedCleared;
+      return saved;
     },
     async isBlocked(key) {
       const keys = await load();
+      // Only the exact keys supabase-js derives: another server's key can
+      // share the prefix (`sb-x-auth-token-prod-auth-token`).
       for (const base of keys) {
-        if (key === base || key.startsWith(`${base}-`)) return true;
+        if (sessionStorageKeys(base).includes(key)) return true;
       }
       return false;
     },

@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import { mobilePaths } from "./paths";
+import { isUnroutableSegment, mobilePaths } from "./paths";
 import { cachedApiFetch } from "./cache";
 import { scanContextHeaders, type ScanContext } from "../scan-context";
 import type {
@@ -194,10 +194,21 @@ export const assetsApi = {
    *   as an audit scan with no Activity note (see `lib/scan-context.ts`); omit
    *   from the normal scanner.
    */
-  barcode: (value: string, orgId: string, context?: ScanContext) =>
-    apiFetch<BarcodeResponse>(mobilePaths.barcode(value, orgId), {
+  barcode: async (value: string, orgId: string, context?: ScanContext) => {
+    // A barcode can be any text, so no placeholder segment is safe for one
+    // that cannot be sent (`.`, `..`, empty): it is answered as not found
+    // without a request, the same answer the server gives.
+    if (isUnroutableSegment(value)) {
+      return {
+        data: null,
+        error: "This barcode was not found in your workspace.",
+        status: 404,
+      };
+    }
+    return apiFetch<BarcodeResponse>(mobilePaths.barcode(value, orgId), {
       headers: scanContextHeaders(context),
-    }),
+    });
+  },
 
   /** Get team members for an organization (for custody picker) */
   teamMembers: (
