@@ -13,6 +13,8 @@ Never write, anywhere in this repo or on its GitHub pages:
 - a customer's or lead's name, email address, phone number or company name
 - their workspace or organization name or id, record names from their account,
   or numbers about their account (asset counts, plan, revenue)
+- counts from production data ("59 workspaces have more than 50 locations"):
+  write "real workspaces have more than 50 locations" instead
 - quotes from their emails, chats or support tickets
 - details of an unfixed security weakness (that stays in the private tracker)
 
