@@ -5,9 +5,10 @@ characters allowed), the Google Play text into Play (500). The last section is
 internal and must not reach a store listing.
 
 Every line below is an ancestor of both 1.8.0 build commits: Android
-`e49568afa` and iOS `a9c66ec8c` (checked with `git merge-base --is-ancestor`,
-STORE-RELEASE.md step 2). The only change between the two is the iOS
-microphone purpose string (#3383), so both stores ship the same features. Work
+`e49568afa` and iOS `c376ffcda` (checked with `git merge-base --is-ancestor`,
+STORE-RELEASE.md step 2). The only changes between the two are the iOS
+microphone and motion purpose strings (#3383, #3384), so both stores ship the
+same features. Work
 still in review when the builds were cut is left out and ships later.
 
 ---
