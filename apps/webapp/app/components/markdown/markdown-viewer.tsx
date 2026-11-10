@@ -58,6 +58,15 @@ interface Props {
    * writers mark the values that may, with the `name` tag's `chips`).
    */
   linkChips?: boolean;
+  /**
+   * Render Shelf's Markdoc tags (`{% date %}`, `{% audit_images %}`, ...).
+   * Turn off for free text a member typed outside the note editor, such as a
+   * description: it is Markdown only, so any tag in it is dropped instead of
+   * rendering a forged badge or a component fed values it does not expect.
+   * Applies to string `content` only; a pre-parsed tree was already
+   * transformed by its caller, so pass free text as a string.
+   */
+  withTags?: boolean;
 }
 
 // Default components map including our custom components
@@ -100,6 +109,7 @@ export const MarkdownViewer = ({
   disablePortal,
   allowExternalLinks = false,
   linkChips = false,
+  withTags = true,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
@@ -130,14 +140,14 @@ export const MarkdownViewer = ({
   const parsedContent = React.useMemo(() => {
     const tree =
       typeof content === "string"
-        ? parseMarkdownToReact(content, markdocConfig)
+        ? parseMarkdownToReact(content, withTags ? markdocConfig : {})
         : content;
 
     const sanitized = sanitizeMarkdocTree(tree, { allowExternalLinks });
     return linkChips && allowExternalLinks
       ? chipBareUrls(sanitized)
       : sanitized;
-  }, [content, allowExternalLinks, linkChips]);
+  }, [content, allowExternalLinks, linkChips, withTags]);
 
   return (
     <div className={styles}>

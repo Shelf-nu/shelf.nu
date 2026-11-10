@@ -32,9 +32,9 @@ import {
  *
  * Body: multipart/form-data with `image` (required) and optional `content`
  * (note text). `content` is read from the SAME bounded parse that streams
- * the file (`uploadAuditImage` -> `parseFileFormData`, `maxFileSize`
- * enforced; `@remix-run/form-data-parser` passes text fields through) —
- * never via an unbounded `request.clone().formData()`.
+ * the file (`uploadAuditImage` -> `parseFileFormData` with
+ * `AUDIT_IMAGE_TEXT_FIELDS`, `maxFileSize` enforced), never via an unbounded
+ * `request.clone().formData()`.
  *
  * @param args - Remix action args; `request` carries bearer auth, the
  *   query params, and the multipart body
@@ -111,11 +111,11 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Single bounded parse: the file stream AND the optional `content`
-    // text field come from `parseFileFormData` (maxFileSize enforced;
-    // @remix-run/form-data-parser passes text fields through). No separate
-    // `request.clone().formData()` — that buffered the whole upload
-    // unbounded before any size check (closed DoS vector).
+    // Single bounded parse: the file stream AND the optional `content` text
+    // field come from `parseFileFormData`, which returns `content` because it
+    // is listed in AUDIT_IMAGE_TEXT_FIELDS. Never a separate
+    // `request.clone().formData()`: that buffers the whole upload before any
+    // size check.
     const { image, formData } = await uploadAuditImage({
       request,
       auditSessionId,

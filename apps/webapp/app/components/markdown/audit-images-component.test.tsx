@@ -100,4 +100,24 @@ describe("AuditImagesComponent", () => {
     expect(captions[0].textContent).toContain("Old photo");
     expect(captions[1].textContent).not.toMatch(/Old photo|No date/);
   });
+
+  it("renders a numeric ids value from an injected tag instead of throwing", () => {
+    useApiQueryMock.mockReturnValue({
+      data: { images: [] },
+      isLoading: false,
+      error: null,
+    });
+
+    // Markdoc passes `ids=1` through as a number despite the String attribute
+    // type, so stored content can hand the component a non-string.
+    expect(() =>
+      render(
+        <AuditImagesComponent
+          count={1}
+          ids={1 as unknown as string}
+          disablePortal
+        />
+      )
+    ).not.toThrow();
+  });
 });
