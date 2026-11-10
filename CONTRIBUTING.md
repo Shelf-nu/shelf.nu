@@ -102,6 +102,12 @@ When the list above is done:
 A PR that is still a draft, or has no review request, is not in the review
 queue and will not be reviewed.
 
+Every review request runs the **PR readiness** check. If the PR still has
+unresolved review threads, the check fails, removes the review request (so the
+PR leaves the queue) and posts a "Changes requested" review that lists the
+open threads. Resolve them, then request the review again: that runs the check
+again, and once every thread is resolved it passes and dismisses its review.
+
 You can keep pushing after this point. Each push gets a new CodeRabbit review,
 so the "Get it ready" list still applies to every new commit.
 
