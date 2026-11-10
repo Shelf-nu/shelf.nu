@@ -73,6 +73,14 @@ type ParsedLink =
   | { type: "scanner" }
   | { type: "unknown" };
 
+/**
+ * Reads the link kind and id out of a custom-scheme or HTTPS link. Matches on
+ * path segments only, so it works for any Shelf host.
+ *
+ * @param url - the raw URL the OS delivered
+ * @returns the parsed link, or `{ type: "unknown" }` when it names nothing
+ *   the app opens
+ */
 function parseDeepLink(url: string): ParsedLink {
   try {
     const parsed = Linking.parse(url);
@@ -198,6 +206,12 @@ export function resolveTappedQr(
  */
 export function useDeepLinkHandler() {
   useEffect(() => {
+    /**
+     * Opens a link that arrives while the app is running, unless the router
+     * opens it itself.
+     *
+     * @param event - the `url` event from expo-linking
+     */
     function handleUrl(event: { url: string }) {
       const link = parseDeepLink(event.url);
       if (
@@ -213,6 +227,12 @@ export function useDeepLinkHandler() {
       navigateToLink(link);
     }
 
+    /**
+     * Opens the screen a parsed link names, anchored in its tab so "back"
+     * returns to the list. QR links resolve through the API first.
+     *
+     * @param link - the link parsed by `parseDeepLink`
+     */
     function navigateToLink(link: ParsedLink) {
       switch (link.type) {
         case "asset":
