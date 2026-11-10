@@ -89,7 +89,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": false,
+          "microphonePermission": "Shelf does not record audio. iOS asks for this text because the library that plays the scan sound can also record.",
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
