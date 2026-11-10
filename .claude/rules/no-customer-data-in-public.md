@@ -27,5 +27,7 @@ Say who asked in neutral words instead.
 The same goes for test data, fixtures and screenshots: use made-up names
 (`ZZ Test Kit`, `test@example.com`), and crop or blur real account data.
 
-If you find customer data already published, remove it from the text, then ask
-a maintainer to delete the old revision from the edit history.
+If you find customer data already published in a PR description, issue or
+comment, remove it from the text, then delete the old revisions from the edit
+history. If it is in a committed file or commit message, a later commit does
+not remove it: tell a maintainer, who handles the Git history cleanup.
