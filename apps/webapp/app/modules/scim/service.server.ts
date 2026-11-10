@@ -4,6 +4,10 @@ import { OrganizationRoles } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  caseInsensitiveEmailFilter,
+  pickUserForEmail,
+} from "~/modules/invite/helpers";
 import { createTeamMember } from "~/modules/team-member/service.server";
 import {
   createUser,
@@ -319,29 +323,58 @@ function parseScimActiveValue(value: unknown): boolean | undefined {
 }
 
 /**
- * Applies the SHARED, cross-org identity fields — email (+ Supabase auth) and
- * first/last name — but ONLY when this org is the user's sole membership.
+ * Decides whether a SCIM client scoped to one org may rewrite a user's shared,
+ * cross-org identity (the global `User` email and names, and the Supabase auth
+ * email).
+ *
+ * Allowed only when the user is an active member of the calling org AND has no
+ * membership anywhere else, i.e. the calling org is the user's sole workspace.
+ *
+ * A user with no membership at all is refused. A SCIM mapping does not prove
+ * which org created the `User` row: `createScimUser` can adopt an existing
+ * account with `active: false`, which creates a mapping and no membership, so
+ * a zero-membership user may be someone this org never provisioned. Such a
+ * user's global identity changes once the IdP activates them here.
+ *
+ * @param isMemberOfCallingOrg - Whether the user has a membership in the calling org
+ * @param totalMembershipCount - The user's memberships across every org
+ * @returns `true` when the calling org may mutate the global identity
+ */
+function mayMutateGlobalIdentity(
+  isMemberOfCallingOrg: boolean,
+  totalMembershipCount: number
+): boolean {
+  return isMemberOfCallingOrg && totalMembershipCount === 1;
+}
+
+/**
+ * Applies the SHARED, cross-org identity fields: email (+ Supabase auth) and
+ * first/last name, but ONLY when {@link mayMutateGlobalIdentity} allows it.
  *
  * The global `User` row and Supabase auth identity are shared by every org the
  * user belongs to. A SCIM client scoped to one org must never rewrite them for
- * a user who also belongs to another org: doing so would re-identify that user
- * for the other org (the review item #1 vulnerability). For a multi-org user
- * the write is skipped and logged; org-scoped attributes (team member name,
- * external id, membership) are the caller's responsibility and always applied.
+ * a user who belongs to another org, or who is not an active member of the
+ * calling org: doing so would re-identify that user for everyone else. When
+ * refused, the write is skipped and logged and the SCIM request still
+ * succeeds; org-scoped attributes (team member name, external id, membership)
+ * are the caller's responsibility and always applied.
  *
- * This is the single owner of the "sole-org" predicate so it can't drift
- * between the PUT and PATCH paths. PUT vs PATCH semantics are expressed through
- * the field values:
- *  - `undefined` → leave the field untouched (PATCH omits unchanged fields);
- *  - `null` / string → write it (PUT replaces all attributes, clearing to null).
+ * This is the single owner of the predicate so it can't drift between the PUT
+ * and PATCH paths. PUT vs PATCH semantics are expressed through the field
+ * values:
+ *  - `undefined`: leave the field untouched (PATCH omits unchanged fields);
+ *  - `null` / string: write it (PUT replaces all attributes, clearing to null).
  *
- * @returns `true` when this org may mutate the global identity (sole-org), so
- *   the caller can treat a supplied `newEmail` as the user's effective email.
+ * @returns `true` when this org may mutate the global identity, so the caller
+ *   can treat a supplied `newEmail` as the user's effective email.
  */
 async function applyGlobalIdentity(args: {
   userId: string;
   organizationId: string;
   currentEmail: string;
+  /** Whether the user has a membership in the calling org */
+  isMemberOfCallingOrg: boolean;
+  /** The user's memberships across every org */
   orgMembershipCount: number;
   newEmail?: string;
   newFirstName?: string | null;
@@ -352,6 +385,7 @@ async function applyGlobalIdentity(args: {
     userId,
     organizationId,
     currentEmail,
+    isMemberOfCallingOrg,
     orgMembershipCount,
     newEmail,
     newFirstName,
@@ -359,7 +393,10 @@ async function applyGlobalIdentity(args: {
     operation,
   } = args;
 
-  const canMutateGlobalIdentity = orgMembershipCount <= 1;
+  const canMutateGlobalIdentity = mayMutateGlobalIdentity(
+    isMemberOfCallingOrg,
+    orgMembershipCount
+  );
 
   if (!canMutateGlobalIdentity) {
     if (
@@ -368,7 +405,7 @@ async function applyGlobalIdentity(args: {
       newLastName !== undefined
     ) {
       Logger.info(
-        `SCIM ${operation} for org ${organizationId}: skipping global identity mutation for user ${userId} who belongs to multiple organizations`
+        `SCIM ${operation} for org ${organizationId}: skipping global identity mutation for user ${userId} (member of calling org: ${isMemberOfCallingOrg}, total memberships: ${orgMembershipCount})`
       );
     }
     return canMutateGlobalIdentity;
@@ -528,9 +565,11 @@ export async function createScimUser(
   // working access. Absent `active` means active, per the spec's default.
   const shouldBeActive = input.active !== false;
 
-  // Check if user already exists in Shelf DB
-  const existingUser = await db.user.findUnique({
-    where: { email },
+  // Check if the user already exists in Shelf DB, whatever case the stored
+  // address has: an exact match would miss a row with capitals and then fail
+  // (or duplicate the person) on create.
+  const matchingUsers = await db.user.findMany({
+    where: { email: caseInsensitiveEmailFilter(email) },
     select: {
       ...scimUserSelect(organizationId),
       userOrganizations: {
@@ -538,7 +577,9 @@ export async function createScimUser(
         select: { id: true },
       },
     },
+    orderBy: { createdAt: "asc" },
   });
+  const existingUser = pickUserForEmail(matchingUsers, email);
 
   if (existingUser) {
     // Already SCIM-provisioned in this org (has a mapping) -> 409 conflict.
@@ -658,12 +699,14 @@ export async function replaceScimUser(
     await assertEmailAllowedForOrg(organizationId, newEmail);
   }
 
-  // Apply the shared global identity only for a sole-org user (see helper).
-  // PUT replace semantics: names are always written (null clears them).
+  // Apply the shared global identity only when the calling org is the user's
+  // sole membership (see helper). PUT replace semantics: names are always
+  // written (null clears them).
   const canMutateGlobalIdentity = await applyGlobalIdentity({
     userId: user.id,
     organizationId,
     currentEmail: user.email,
+    isMemberOfCallingOrg: user.userOrganizations.length > 0,
     orgMembershipCount: user._count.userOrganizations,
     newEmail,
     newFirstName: firstName,
@@ -671,8 +714,8 @@ export async function replaceScimUser(
     operation: "PUT",
   });
 
-  // The new email only takes effect for a sole-org user; otherwise the global
-  // email is unchanged.
+  // The new email only takes effect when the global identity was writable;
+  // otherwise the global email is unchanged.
   const effectiveEmail = (canMutateGlobalIdentity && newEmail) || user.email;
   const displayName =
     [firstName, lastName].filter(Boolean).join(" ") || effectiveEmail;
@@ -799,12 +842,14 @@ export async function patchScimUser(
     await assertEmailAllowedForOrg(organizationId, newEmail);
   }
 
-  // Apply the shared global identity only for a sole-org user (see helper).
-  // PATCH partial semantics: only fields present in the ops are written.
+  // Apply the shared global identity only when the calling org is the user's
+  // sole membership (see helper). PATCH partial semantics: only fields
+  // present in the ops are written.
   const canMutateGlobalIdentity = await applyGlobalIdentity({
     userId: user.id,
     organizationId,
     currentEmail: user.email,
+    isMemberOfCallingOrg: user.userOrganizations.length > 0,
     orgMembershipCount: user._count.userOrganizations,
     newEmail,
     newFirstName,
@@ -902,8 +947,13 @@ async function updateUserEmail(
 
   const conflictDetail = `Email "${newEmail}" is already in use`;
 
-  const conflict = await db.user.findUnique({
-    where: { email: newEmail },
+  // Any other account holding the address in any letter case is a conflict:
+  // two rows that differ only by case resolve to one person at sign-in.
+  const conflict = await db.user.findFirst({
+    where: {
+      email: caseInsensitiveEmailFilter(newEmail),
+      id: { not: userId },
+    },
     select: { id: true },
   });
 

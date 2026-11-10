@@ -87,7 +87,7 @@ import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.ser
 import { defaultUserCategories } from "../category/default-categories";
 import {
   caseInsensitiveEmailFilter,
-  normalizeInviteEmail,
+  pickUserForEmail,
 } from "../invite/helpers";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
@@ -224,30 +224,6 @@ export async function findUserById(id: User["id"]) {
       label,
     });
   }
-}
-
-/**
- * Picks the account an email address resolves to among rows that match it
- * without regard to letter case.
- *
- * Stored addresses can carry capitals from before every path lowercased them,
- * so one person can have rows that differ only by case. The row stored in
- * lowercase wins, since that is what every path writes today; otherwise the
- * oldest, so the same address always resolves to the same account.
- *
- * @param users - Matching rows, ordered oldest first
- * @param email - The address being resolved
- * @returns The account to use, or null when there is none
- */
-function pickUserForEmail<T extends { email: string }>(
-  users: T[],
-  email: string
-): T | null {
-  return (
-    users.find((user) => user.email === normalizeInviteEmail(email)) ??
-    users[0] ??
-    null
-  );
 }
 
 /**
