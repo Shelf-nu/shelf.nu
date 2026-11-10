@@ -18,6 +18,9 @@ vi.mock("~/hooks/use-organization-roles", () => ({
   useOrganizationRoles: () => caller.roles,
 }));
 
+// The forms load lazily from ./inline-entity-creation-forms, which imports the
+// modules mocked below, so the mocks apply there.
+
 // why: Mock NewCategoryForm to avoid router dependencies and test dialog behavior in isolation
 vi.mock("../category/new-category-form", () => ({
   default: ({ onSuccess, onCancel }: any) => (
@@ -70,6 +73,12 @@ vi.mock("../location/form", () => ({
       </button>
     </div>
   ),
+}));
+
+// why: the asset model form pulls in the markdown editor, slow to compile on
+// the first lazy load; its own tests cover it.
+vi.mock("../asset-model/form", () => ({
+  default: () => <div data-testid="asset-model-form" />,
 }));
 
 describe("InlineEntityCreationDialog", () => {
@@ -233,7 +242,7 @@ describe("InlineEntityCreationDialog", () => {
 
       // Click the save button in the mocked form
       await act(async () => {
-        await user.click(screen.getByRole("button", { name: "Save" }));
+        await user.click(await screen.findByRole("button", { name: "Save" }));
       });
 
       await waitFor(() => {
@@ -247,6 +256,27 @@ describe("InlineEntityCreationDialog", () => {
           },
         });
       });
+    });
+  });
+
+  describe("Asset model creation flow", () => {
+    it("loads the asset model form when the dialog opens", async () => {
+      render(
+        <InlineEntityCreationDialog
+          title="Create Model"
+          buttonLabel="+ New Model"
+          type="assetModel"
+        />
+      );
+
+      expect(screen.queryByTestId("asset-model-form")).toBeNull();
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button", { name: "+ New Model" }));
+      });
+
+      expect(await screen.findByTestId("asset-model-form")).toBeInTheDocument();
     });
   });
 
@@ -293,7 +323,7 @@ describe("InlineEntityCreationDialog", () => {
 
       // Click the save button in the mocked form
       await act(async () => {
-        await user.click(screen.getByRole("button", { name: "Save" }));
+        await user.click(await screen.findByRole("button", { name: "Save" }));
       });
 
       await waitFor(() => {
@@ -370,7 +400,7 @@ describe("InlineEntityCreationDialog", () => {
       });
 
       // Click cancel button (mocked form's cancel button)
-      const cancelButton = screen.getByText("Cancel");
+      const cancelButton = await screen.findByText("Cancel");
       await act(async () => {
         await user.click(cancelButton);
       });
