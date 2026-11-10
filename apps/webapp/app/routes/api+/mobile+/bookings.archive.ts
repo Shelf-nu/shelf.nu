@@ -24,24 +24,30 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Archives a booking (→ ARCHIVED) from the Companion app — the mobile twin of
  * the web "archive" intent. Wraps the shared `archiveBooking` service, which
  * enforces the archivable-status rule (COMPLETE, or RESERVED already past its
- * end date — see `isBookingArchivable`) and cancels any scheduler.
+ * end date, see `isBookingArchivable`) and cancels any scheduler.
+ *
+ * With `discardDraft: true` it is the twin of the web "discard-draft" intent:
+ * it archives a DRAFT and nothing else. That is how members without
+ * `booking:delete` drop a draft (the detail endpoint's `canDiscardDraft`).
  *
  * PARITY: gate on `PermissionAction.archive` (the web ActionsDropdown shows the
- * archive action via `userHasPermission(archive)`). BASE has `booking:update`
- * but NOT `booking:archive`, so the looser `update` gate would let a BASE user
- * archive via the API even though the UI/permission map deny it. We also add the
+ * archive action via `userHasPermission(archive)`). `booking:update` is not the
+ * gate: roles without archive hold it too. We also add the
  * shared `validateBookingOwnership` guard (no-op when the caller's access
  * writes every booking; creator-or-custodian otherwise) since the web relies on
  * the page loader's read-filter that a direct POST bypasses. Mobile must never
  * be more permissive.
  *
- * Body: { bookingId: string }
+ * Body: { bookingId: string, discardDraft?: boolean }
  * Query: ?orgId=...
  *
  * @see {@link file://../../_layout+/bookings.$bookingId.overview.tsx} web twin (archive intent)
  */
 
-const BodySchema = z.object({ bookingId: z.string().min(1) });
+const BodySchema = z.object({
+  bookingId: z.string().min(1),
+  discardDraft: z.boolean().optional(),
+});
 
 export async function action({ request }: ActionFunctionArgs) {
   let userId: string | undefined;
@@ -62,7 +68,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
+    const { bookingId, discardDraft } = await parseMobileBody(
+      BodySchema,
+      request,
+      "Booking"
+    );
 
     const { access } = await getMobileUserContext(user.id, organizationId);
 
@@ -82,14 +92,16 @@ export async function action({ request }: ActionFunctionArgs) {
       booking,
       userId: user.id,
       access,
-      action: "archive",
+      action: discardDraft ? "discard" : "archive",
     });
 
-    // archiveBooking enforces the archivable-status rule itself.
+    // archiveBooking enforces the status rule itself: archivable, or DRAFT
+    // when discarding.
     const archived = await archiveBooking({
       id: bookingId,
       organizationId,
       userId: user.id,
+      discardDraft: discardDraft === true,
     });
 
     return data({
