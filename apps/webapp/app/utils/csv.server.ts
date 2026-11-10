@@ -289,6 +289,9 @@ async function resolveExportAssets({
     // params), so the ids alone decide: an archived row the user ticked in
     // the Archived or All view is exported, not dropped by the Active default.
     archivedFilter: takeAll ? undefined : "all",
+    // `asset: export` is held only by roles that see all custody, so the
+    // search matches every custodian, as on the index the export came from.
+    custodySearchScope: "all",
   });
 
   return { assets };

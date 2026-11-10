@@ -4,6 +4,7 @@ import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations
 import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { buildLabelsCsv } from "~/modules/qr/labels-csv.server";
@@ -112,6 +113,10 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         currentSearchParams: searchParams.toString(),
         settings,
         timeZone,
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         /**
          * `qr: read` is held by BASE and SELF_SERVICE, so this endpoint is
          * reachable by roles that may not see other people's custody. An

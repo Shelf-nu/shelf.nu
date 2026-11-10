@@ -2,6 +2,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -164,6 +165,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           ),
           bookableScope: resolveBookableListScope({ access, userId }),
           timeZone,
+          custodySearchScope: custodySearchScopeFor({
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+          }),
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
           // select-all custodian filter to the caller's own custody, otherwise a
           // self-service user could act on exactly the set a colleague holds.

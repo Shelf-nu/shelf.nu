@@ -28,6 +28,7 @@ import {
   resolveAssetImage,
   serializeImageExpiration,
 } from "~/modules/asset/image-resolution";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import {
   ASSET_IMAGE_RESIGN_LIMITS,
   getPaginatedAndFilterableAssets,
@@ -39,6 +40,7 @@ import {
 } from "~/modules/barcode/display";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 
 /**
  * Page size this endpoint requests when the client doesn't specify one.
@@ -96,30 +98,30 @@ const MOBILE_PICKER_MAX_PAGE_SIZE = 100;
  * `bookedQuantity`, which reveals what it holds, so a booking the caller may
  * not see (or that is in another workspace) is treated as not named.
  *
+ * @param args.access - The caller's resolved reach, from `getMobileUserContext`
  * @returns the booking id, or `undefined` when absent or not visible
  */
 async function resolveVisibleBookingId({
   bookingId,
   organizationId,
   userId,
+  access,
 }: {
   bookingId: string | undefined;
   organizationId: string;
   userId: string;
+  access: RoleAccess;
 }): Promise<string | undefined> {
   const id = bookingId?.trim();
   if (!id) return undefined;
-  const [booking, { access }] = await Promise.all([
-    db.booking.findFirst({
-      where: { id, organizationId },
-      select: {
-        id: true,
-        custodianUserId: true,
-        custodianTeamMember: { select: { userId: true } },
-      },
-    }),
-    getMobileUserContext(userId, organizationId),
-  ]);
+  const booking = await db.booking.findFirst({
+    where: { id, organizationId },
+    select: {
+      id: true,
+      custodianUserId: true,
+      custodianTeamMember: { select: { userId: true } },
+    },
+  });
   return booking && canSeeBooking({ access, booking, userId })
     ? booking.id
     : undefined;
@@ -132,7 +134,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Bookings are a TEAM-tier (premium) feature — gate this booking-availability
     // read like the mutation routes so PERSONAL workspaces can't query it.
-    await assertMobileCanUseBookings(organizationId);
+    const [, { access }] = await Promise.all([
+      assertMobileCanUseBookings(organizationId),
+      getMobileUserContext(user.id, organizationId),
+    ]);
 
     // The web booking-asset picker (manage-assets) does NOT scope by
     // self-service custody — any bookable asset is selectable, and the
@@ -160,6 +165,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       bookingId: pickerParams.get("unhideAssetsBookigIds")?.split(",")[0],
       organizationId,
       userId: user.id,
+      access,
     });
     pickerParams.delete("unhideAssetsBookigIds");
     if (excludeBookingId) {
@@ -178,6 +184,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // Mobile asset picker: ignores the custodian-filter seed, so scope it
       // rather than fetch a roster the response never returns.
       canSeeAllCustody: false,
+      // The search still matches custodian names only on custody the caller
+      // may see.
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody: access.custody.seeAll,
+        userId: user.id,
+      }),
       filters: pickerParams.toString(),
     });
 

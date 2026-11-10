@@ -339,3 +339,29 @@ describe("GET /api/mobile/bookings/available-assets: the list's un-hidden bookin
     expect(unhiddenBookingIds()).toEqual([BOOKING_ID]);
   });
 });
+
+describe("GET /api/mobile/bookings/available-assets: custodian-name search", () => {
+  it("limits a custodian-name match to the caller's own custody when they may not see all custody", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+
+    await rows();
+
+    expect(listMock.mock.calls[0][0].custodySearchScope).toEqual({
+      userId: CALLER_ID,
+    });
+  });
+
+  it("matches every custodian for a caller who sees all custody", async () => {
+    await rows();
+
+    expect(listMock.mock.calls[0][0].custodySearchScope).toBe("all");
+  });
+
+  it("resolves the caller's access once per request", async () => {
+    await rows();
+
+    expect(getMobileUserContext).toHaveBeenCalledTimes(1);
+  });
+});

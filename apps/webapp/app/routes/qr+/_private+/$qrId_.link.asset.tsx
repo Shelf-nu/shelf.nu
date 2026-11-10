@@ -39,6 +39,7 @@ import {
   useSearchParamHasValue,
 } from "~/hooks/search-params";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import {
   getPaginatedAndFilterableAssets,
   relinkAssetQrCode,
@@ -86,7 +87,7 @@ export const loader = async ({
       });
     }
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.qr,
@@ -113,6 +114,11 @@ export const loader = async ({
       // This route ignores the custodian-filter seed, so scope it: no reason to
       // fetch a roster nobody renders.
       canSeeAllCustody: false,
+      // The search matches custodian names only on custody the caller may see.
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
     });
 
     if (totalPages !== 0 && page > totalPages) {
