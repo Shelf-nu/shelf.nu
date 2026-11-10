@@ -306,14 +306,12 @@ export function assertCanAddBookingItems({
 /**
  * Refuses deleting a booking the caller may not delete.
  *
- * Ownership first ({@link validateBookingOwnership}), then the policy's draft
- * rule: roles with `bookings.deleteOnlyDrafts` delete only DRAFT bookings.
- * Every singular delete path runs this (the web booking page and the mobile
- * endpoint), and bulk delete applies the same draft rule to its whole
- * selection.
+ * `booking:delete` is checked by the route first; this adds ownership
+ * ({@link validateBookingOwnership}). Every singular delete path runs it (the
+ * web booking page and the mobile endpoint).
  *
  * @param params.access - The caller's access
- * @param params.booking - Ownership links and status of the booking
+ * @param params.booking - Ownership links of the booking
  * @param params.userId - The caller
  * @throws {ShelfError} 403 when the caller may not delete this booking
  */
@@ -326,22 +324,10 @@ export function assertCanDeleteBooking({
   booking: {
     creatorId: string | null;
     custodianUserId: string | null;
-    status: BookingStatusName;
   };
   userId: string;
 }): void {
   validateBookingOwnership({ booking, userId, access, action: "delete" });
-
-  if (access.policy.bookings.deleteOnlyDrafts && booking.status !== "DRAFT") {
-    throw new ShelfError({
-      cause: null,
-      label: "Booking",
-      message:
-        "You are not authorized to delete this booking. Only draft bookings can be deleted.",
-      status: 403,
-      shouldBeCaptured: false,
-    });
-  }
 }
 
 /**

@@ -599,6 +599,10 @@ describe("partialCheckoutBooking", () => {
 
   it("flips a RESERVED booking to ONGOING and scanned assets to CHECKED_OUT on the first partial scan", async () => {
     expect.assertions(4);
+    // The row lock still reads the booking RESERVED.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.RESERVED },
+    ]);
 
     // First lookup loads the still-RESERVED booking; the post-update re-fetch
     // (which becomes the returned booking) reflects the ONGOING transition.
@@ -659,8 +663,64 @@ describe("partialCheckoutBooking", () => {
     });
   });
 
+  it.each([BookingStatus.ARCHIVED, BookingStatus.CANCELLED])(
+    "refuses the scan when the booking turned %s after it was read, writing nothing",
+    async (lockedStatus) => {
+      // Read RESERVED before the transaction; a concurrent archive or
+      // cancellation committed before the row lock was taken.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(reservedBooking);
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: lockedStatus },
+      ]);
+
+      await expect(
+        partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+      ).rejects.toMatchObject({ status: 400 });
+      expect(db.booking.update).not.toHaveBeenCalled();
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses the scan when the booking was reverted to draft after it was read", async () => {
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.DRAFT },
+    ]);
+
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("leaves the status alone when a concurrent first scan already checked the booking out", async () => {
+    // Read RESERVED before the transaction, ONGOING under the lock.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.ONGOING },
+    ]);
+
+    await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] });
+
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: expect.anything() }),
+      })
+    );
+  });
+
   it("adjusts the booking start date on the first early partial scan when the user opts to adjust", async () => {
     expect.assertions(1);
+    // The row lock still reads the booking RESERVED.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.RESERVED },
+    ]);
 
     // reservedBooking.from is in the future, so this is an early checkout.
     (
@@ -714,6 +774,10 @@ describe("partialCheckoutBooking", () => {
 
     it("lands in OVERDUE with the dates untouched when scanned out as overdue", async () => {
       expect.assertions(1);
+      // The row lock still reads the booking RESERVED.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue(expiredReservation);
@@ -964,6 +1028,10 @@ describe("partialCheckoutBooking", () => {
 
   it("records BOOKING_STATUS_CHANGED RESERVED → ONGOING on the batch that checks the booking out", async () => {
     expect.assertions(1);
+    // The row lock still reads the booking RESERVED.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.RESERVED },
+    ]);
 
     // The post-update re-fetch carries the status the batch wrote.
     (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)

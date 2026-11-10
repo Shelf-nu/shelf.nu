@@ -14,6 +14,8 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { AuditUnitTotals } from "~/modules/audit/quantity";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 
 type CompleteAuditDialogProps = {
   /** Whether the button should be disabled */
@@ -29,6 +31,8 @@ type CompleteAuditDialogProps = {
     missingCount: number;
     unexpectedCount: number;
   };
+  /** Unit totals of the audit's quantity-tracked rows; null when it has none. */
+  units?: AuditUnitTotals | null;
 };
 
 /**
@@ -45,6 +49,7 @@ export default function CompleteAuditDialog({
   auditName,
   portalContainer,
   stats,
+  units = null,
 }: CompleteAuditDialogProps) {
   const [open, setOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -131,6 +136,11 @@ export default function CompleteAuditDialog({
                     </span>
                   </div>
                 </div>
+                {units ? (
+                  <p className="mt-3 text-sm text-gray-600">
+                    {describeAuditUnits(units)}
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
