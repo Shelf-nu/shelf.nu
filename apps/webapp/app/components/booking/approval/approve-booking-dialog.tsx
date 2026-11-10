@@ -39,7 +39,11 @@ export default function ApproveBookingDialog({
   trigger,
 }: ApproveBookingDialogProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const disabled = useDisabled();
+  // A native post never changes the router's navigation state, so
+  // `useDisabled` alone would leave the button live while it runs. The
+  // document load that answers the post resets this.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const disabled = useDisabled() || isSubmitting;
 
   function handleOpenDialog() {
     setIsDialogOpen(true);
@@ -82,7 +86,11 @@ export default function ApproveBookingDialog({
               checked out.
             </p>
 
-            <form method="post" className="flex w-full items-center gap-4">
+            <form
+              method="post"
+              className="flex w-full items-center gap-4"
+              onSubmit={() => setIsSubmitting(true)}
+            >
               <input type="hidden" name="intent" value="approve-booking" />
               <Button
                 variant="secondary"

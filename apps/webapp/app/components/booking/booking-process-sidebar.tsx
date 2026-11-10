@@ -2,7 +2,8 @@ import { Close } from "@radix-ui/react-dialog";
 import type { LucideIcon } from "lucide-react";
 import { ArrowLeft, ArrowRight, ClockIcon, InfoIcon } from "lucide-react";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
-import { isBookingApprovalEnabled } from "~/utils/bookings";
+import { useRoleAccess } from "~/hooks/use-role-access";
+import { roleReservesAsRequest } from "~/utils/bookings";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -67,7 +68,12 @@ const ADMIN_REVIEW_WITH_APPROVAL =
 export default function BookingProcessSidebar({
   className,
 }: BookingProcessSidebarProps) {
-  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
+  // The viewer's own switch: with only the other role's switch on, their
+  // reservation is final and the softer review copy is the true one.
+  const requireBookingApproval = roleReservesAsRequest({
+    approvalSetting: useRoleAccess().policy.bookings.approvalSetting,
+    settings: useBookingSettings(),
+  });
 
   const items = ITEMS.map((item) =>
     item.id === "admin-review" && requireBookingApproval
