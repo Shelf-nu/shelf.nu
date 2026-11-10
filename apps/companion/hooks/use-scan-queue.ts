@@ -96,6 +96,14 @@ export function useScanQueue({
   const gateRef = useRef<QueueGate | null>(null);
   if (!gateRef.current) gateRef.current = createQueueGate();
   const gate = gateRef.current;
+  /** False once the screen is gone: no new retry timer starts after that. */
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   /** Saves the queues as the owner's draft; nothing while no owner is known. */
   const saveDraft = useCallback(
@@ -132,8 +140,9 @@ export function useScanQueue({
       maxRetries: MAX_QUEUE_RETRIES,
       persist,
       // Each request goes out with the token of whoever is signed in when it
-      // is sent, so the drain stops (scans stay in the owner's draft) once the
-      // screen is gone or someone else is signed in.
+      // is sent, so the drain stops (scans stay in the owner's draft) as soon
+      // as the owner's session is over. It keeps sending after the screen
+      // closes, within that session.
       mayContinue: drainMayContinue(gate, accountGeneration),
       onSynced: onScanSynced,
       onFailed: (entry) => {
@@ -164,7 +173,11 @@ export function useScanQueue({
       // unmount (post-unmount work / double-record).
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       const delay = RETRY_DELAYS[backoffAttempt - 1] ?? 15_000;
-      retryTimerRef.current = setTimeout(() => processQueue(), delay);
+      // After the screen closed, nothing could clear a new timer: the scans
+      // stay in the owner's draft and are sent when the audit is reopened.
+      if (mountedRef.current) {
+        retryTimerRef.current = setTimeout(() => processQueue(), delay);
+      }
     }
 
     isProcessingQueueRef.current = false;
@@ -175,7 +188,7 @@ export function useScanQueue({
   // nobody or someone else is signed in), resume sending the queue.
   useEffect(() => {
     const wasAllowed = gate.mayUse();
-    gate.observe(userId);
+    gate.observe(userId, accountGeneration.current());
     // Only a change from refused to allowed restarts sending; a retry backoff
     // already scheduled keeps its own timing.
     if (

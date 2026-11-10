@@ -154,3 +154,21 @@ describe("apiFetch when the account changes during the token read", () => {
     assert.equal(authErrors, 0);
   });
 });
+
+describe("a read whose own refresh ends the session", () => {
+  it("is reported as an expired session, not a changed one", async () => {
+    let authErrors = 0;
+    const unregister = client.onAuthError(() => {
+      authErrors += 1;
+    });
+
+    const request = client.apiFetch("/api/mobile/dashboard?orgId=org_1");
+    emit("SIGNED_OUT", null); // the refresh inside getSession failed
+    answerRead(null);
+    const result = await request;
+    unregister();
+
+    assert.equal(result.error, "Session expired. Please sign in again.");
+    assert.equal(authErrors, 1);
+  });
+});

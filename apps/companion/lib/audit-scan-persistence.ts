@@ -388,10 +388,16 @@ export async function adoptUnownedDraft(
       pendingQueue,
       failedQueue
     );
-    // The adopted copy is validated by the normal loader; the legacy key goes
-    // only once the copy is on disk.
-    if (adopted) await AsyncStorage.removeItem(legacyKey);
-    return adopted;
+    if (!adopted) return false;
+    // The legacy key goes only once the copy is on disk AND reads back as a
+    // valid draft; a malformed one is dropped again and the legacy key kept,
+    // so it is never stranded where nothing offers or prunes it.
+    if (!(await loadAuditScanState(userId, auditId))) {
+      await clearAuditScanState(userId, auditId);
+      return false;
+    }
+    await AsyncStorage.removeItem(legacyKey);
+    return true;
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] adopt failed:", e);
     return false;

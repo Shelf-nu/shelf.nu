@@ -118,11 +118,12 @@ export function createSessionStorage({
   /**
    * Writes a value, chunking it when long. Throws on a store error.
    *
-   * The new value overwrites in place wherever it can, so a write that fails
-   * part-way leaves the previous session readable rather than nothing at all:
-   * a short value replaces the direct key (old chunks are dropped first,
-   * since a direct value wins on read anyway); a long value writes its chunks
-   * and count, and only then drops the direct key that would shadow them.
+   * Matches the layout reads expect, and the order the previous adapter
+   * used: a short value replaces the direct key in place (old chunks are
+   * dropped first, since a direct value wins on read anyway); a long value
+   * first deletes the direct key, which would otherwise shadow the chunks,
+   * and stops right there if that delete fails, so a stale short session can
+   * never win a later read.
    */
   async function writeStrict(key: string, value: string): Promise<void> {
     if (value.length <= chunkSize) {
@@ -130,6 +131,7 @@ export function createSessionStorage({
       await store.setItemAsync(key, value);
       return;
     }
+    await store.deleteItemAsync(key);
     const chunks = Math.ceil(value.length / chunkSize);
     for (let i = 0; i < chunks; i++) {
       await store.setItemAsync(
@@ -138,7 +140,6 @@ export function createSessionStorage({
       );
     }
     await store.setItemAsync(`${key}_chunks`, String(chunks));
-    await store.deleteItemAsync(key);
   }
 
   const adapter: SessionStorageAdapter = {

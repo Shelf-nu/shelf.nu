@@ -98,23 +98,53 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
       parked = [];
     }
     blocked = new Set([...parseKeys(raw), ...parked, ...pending]);
-    if (parked.length > 0) {
-      // Fold the keys parked during a failed read into the main list.
-      await save(blocked);
+    if (parked.length > 0 && (await save(blocked))) {
+      // The parked keys are in the main list now; clear the parked list only
+      // once that write succeeded, so a block is never in neither list.
       try {
         await store.setItem(BLOCKED_SESSION_KEYS_PENDING, "[]");
       } catch {
-        // Harmless: the parked keys are in the main list now.
+        // Harmless: the next good read folds them in again.
       }
     }
     return blocked;
   }
 
-  async function save(keys: Set<string>): Promise<void> {
+  /**
+   * Rewrites the parked list as what it holds now plus `add`, minus `remove`,
+   * so a write never drops keys parked by an earlier app run.
+   */
+  async function updateParked(change: {
+    add?: string;
+    remove?: string;
+  }): Promise<void> {
+    try {
+      let parked: string[] = [];
+      try {
+        parked = parseKeys(await store.getItem(BLOCKED_SESSION_KEYS_PENDING));
+      } catch {
+        parked = [];
+      }
+      const next = new Set(parked);
+      if (change.add) next.add(change.add);
+      if (change.remove) next.delete(change.remove);
+      await store.setItem(
+        BLOCKED_SESSION_KEYS_PENDING,
+        JSON.stringify([...next])
+      );
+    } catch {
+      // The in-memory state still holds for this app session.
+    }
+  }
+
+  /** Writes the main list. Returns false when the write failed. */
+  async function save(keys: Set<string>): Promise<boolean> {
     try {
       await store.setItem(BLOCKED_SESSION_KEYS, JSON.stringify([...keys]));
+      return true;
     } catch {
       // The in-memory block still holds for this app session.
+      return false;
     }
   }
 
@@ -129,34 +159,15 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
       // never overwrite the stored list with a partial one. When the read
       // still fails, the block is parked in a separate list that the next
       // good read merges in, so it survives a restart.
-      if (blocked) {
-        await save(keys);
-        return;
-      }
-      try {
-        await store.setItem(
-          BLOCKED_SESSION_KEYS_PENDING,
-          JSON.stringify([...pending])
-        );
-      } catch {
-        // The in-memory block still holds for this app session.
-      }
+      if (blocked && (await save(keys))) return;
+      await updateParked({ add: storageKey });
     },
     async unblock(storageKey) {
       pending.delete(storageKey);
       const keys = await load();
       if (keys.delete(storageKey) && blocked) await save(keys);
-      if (!blocked) {
-        // A parked block for this key must not come back on the next read.
-        try {
-          await store.setItem(
-            BLOCKED_SESSION_KEYS_PENDING,
-            JSON.stringify([...pending])
-          );
-        } catch {
-          // Nothing more to do; the key is unblocked for this app session.
-        }
-      }
+      // A parked block for this key must not come back on the next read.
+      if (!blocked) await updateParked({ remove: storageKey });
     },
     async isBlocked(key) {
       const keys = await load();

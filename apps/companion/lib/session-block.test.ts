@@ -161,4 +161,80 @@ describe("createSessionBlock", () => {
       "sb-abcd-auth-token",
     ]);
   });
+
+  it("a parked block unblocked before storage recovers stays unblocked", async () => {
+    const store = mapStore();
+    let failMainReads = true;
+    const flaky = {
+      getItem: async (key: string) => {
+        if (failMainReads && key === BLOCKED_SESSION_KEYS) {
+          throw new Error("disk");
+        }
+        return store.getItem(key);
+      },
+      setItem: store.setItem,
+    };
+    const block = createSessionBlock(flaky);
+    await block.block("sb-abcd-auth-token");
+
+    await block.unblock("sb-abcd-auth-token");
+    failMainReads = false;
+
+    assert.equal(
+      await createSessionBlock(flaky).isBlocked("sb-abcd-auth-token"),
+      false
+    );
+  });
+
+  it("clears the parked list only after folding it into the main list", async () => {
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify(["sb-abcd-auth-token"]),
+    });
+    let failWrites = true;
+    const flaky = {
+      getItem: store.getItem,
+      setItem: async (key: string, value: string) => {
+        if (failWrites && key === BLOCKED_SESSION_KEYS) {
+          throw new Error("disk");
+        }
+        return store.setItem(key, value);
+      },
+    };
+
+    await createSessionBlock(flaky).isBlocked("sb-abcd-auth-token");
+    assert.deepEqual(
+      JSON.parse(store.data.get(BLOCKED_SESSION_KEYS_PENDING)!),
+      ["sb-abcd-auth-token"]
+    );
+
+    failWrites = false;
+    await createSessionBlock(flaky).isBlocked("sb-abcd-auth-token");
+    assert.deepEqual(
+      JSON.parse(store.data.get(BLOCKED_SESSION_KEYS_PENDING)!),
+      []
+    );
+    assert.deepEqual(JSON.parse(store.data.get(BLOCKED_SESSION_KEYS)!), [
+      "sb-abcd-auth-token",
+    ]);
+  });
+
+  it("a later run's parked write keeps keys parked by an earlier run", async () => {
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify(["sb-first-auth-token"]),
+    });
+    const flaky = {
+      getItem: async (key: string) => {
+        if (key === BLOCKED_SESSION_KEYS) throw new Error("disk");
+        return store.getItem(key);
+      },
+      setItem: store.setItem,
+    };
+
+    await createSessionBlock(flaky).block("sb-second-auth-token");
+
+    assert.deepEqual(
+      JSON.parse(store.data.get(BLOCKED_SESSION_KEYS_PENDING)!).sort(),
+      ["sb-first-auth-token", "sb-second-auth-token"]
+    );
+  });
 });

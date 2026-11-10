@@ -97,4 +97,19 @@ describe("createAccountGeneration", () => {
 
     assert.equal(changes, 0);
   });
+
+  it("one failing listener does not stop the others", () => {
+    const app = fakeApp();
+    let changes = 0;
+    app.account.onChange(() => {
+      throw new Error("listener");
+    });
+    app.account.onChange(() => {
+      changes += 1;
+    });
+
+    app.endSession();
+
+    assert.equal(changes, 1);
+  });
 });

@@ -140,15 +140,15 @@ function guardSessionServerMatch(): { data: null; error: string } | null {
  * Returns a valid access token for the ACTIVE server, using cache when
  * possible.
  *
- * Reading a session is slow — `getSession()` reassembles several chunked
- * SecureStore entries — and a server switch can complete in that window. The
+ * Reading a session is slow (`getSession()` reassembles several chunked
+ * SecureStore entries), and a server switch can complete in that window. The
  * token then belongs to the server that was active when it was requested, so
  * it is discarded rather than returned, and above all is NOT written to the
  * cache: `setActiveServer` clears the cache as it switches, and writing here
  * afterwards would resurrect the previous server's token for the whole TTL.
  *
- * @returns The token, or `null` when there is no session or the active server
- *   changed while it was being read.
+ * @returns The token, or `null` when there is no session, or when the active
+ *   server or the signed-in account changed while it was being read.
  */
 export async function getAccessToken(): Promise<string | null> {
   const read = await readAccessToken();
@@ -177,6 +177,9 @@ async function readAccessToken(): Promise<
 
   if (getServerVersion() !== versionAtStart) return { changed: true };
   if (accountGeneration.current() !== generationAtStart) {
+    // No session after the read means the read itself ended it (a refresh
+    // that failed signs out): an expired session, not someone else's.
+    if (!session) return { token: null };
     return { changed: true };
   }
 

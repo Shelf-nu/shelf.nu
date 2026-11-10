@@ -27,6 +27,7 @@ import { api, type AuditExpectedAsset } from "@/lib/api";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
+import { queueThenRecord } from "@/lib/scan-queue-owner";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
@@ -754,69 +755,81 @@ function AuditScannerContent() {
       if (!auditId) return;
       try {
         // 4. Queue the server write first: the scan counts as recorded only
-        // once the queue has taken it. A refused scan (nobody, or another
-        // account than the queue's owner, is signed in) is not counted, and
-        // the operator is told so.
-        const queued = enqueueScan({
-          auditSessionId: auditId,
-          qrId: codeId,
-          assetId: asset.id,
-          isExpected,
-          ...(count ? { foundQuantity: count.foundQuantity } : {}),
-        });
+        // once the queue has taken it (`queueThenRecord`). A refused scan
+        // (nobody, or another account than the queue's owner, is signed in) is
+        // not counted, and the operator is told so.
+        const queued = queueThenRecord(
+          enqueueScan,
+          {
+            auditSessionId: auditId,
+            qrId: codeId,
+            assetId: asset.id,
+            isExpected,
+            ...(count ? { foundQuantity: count.foundQuantity } : {}),
+          },
+          {
+            refuse: () => {
+              flashFrame("error");
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              showToast("error", asset.title, SCAN_NOT_RECORDED);
+            },
+            record: () => {
+              // 5. Optimistic update: instant feedback
+              scannedAssetIdsRef.current.add(asset.id);
+
+              // why: an expected asset's full record is already in memory, so the
+              // row can show WHERE it belongs immediately. An unexpected asset has
+              // no such record; its location fills in on the next audit load.
+              const newItem: ScannedItem = {
+                assetId: asset.id,
+                name: asset.title,
+                isExpected,
+                scannedAt: new Date().toISOString(),
+                locationName: expectedRecord?.locationName ?? null,
+                thumbnailImage:
+                  expectedRecord?.thumbnailImage ??
+                  expectedRecord?.mainImage ??
+                  null,
+                ...(count ? count : {}),
+              };
+              setScannedItems((prev) => {
+                const next = [newItem, ...prev];
+                scannedItemsRef.current = next;
+                return next;
+              });
+
+              if (isExpected) {
+                // Found an expected asset
+                const newFound = foundCount + 1;
+                setFoundCount(newFound);
+                animateProgress(newFound);
+                flashFrame("found");
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success
+                );
+                playScanSound();
+                announce("Asset found");
+                showToast(
+                  "found",
+                  asset.title,
+                  count
+                    ? `Counted ${count.foundQuantity} of ${count.expectedQuantity} · ${newFound}/${expectedTotal}`
+                    : `Found · ${newFound}/${expectedTotal}`
+                );
+              } else {
+                // Unexpected asset
+                setUnexpectedCount((prev) => prev + 1);
+                flashFrame("unexpected");
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                announce("Asset not in audit");
+                showToast("unexpected", asset.title, "Unexpected asset");
+              }
+            },
+          }
+        );
         if (!queued) {
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast("error", asset.title, SCAN_NOT_RECORDED);
           finalizeScan();
           return;
-        }
-
-        // 5. Optimistic update: instant feedback
-        scannedAssetIdsRef.current.add(asset.id);
-
-        // why: an expected asset's full record is already in memory, so the
-        // row can show WHERE it belongs immediately. An unexpected asset has
-        // no such record; its location fills in on the next audit load.
-        const newItem: ScannedItem = {
-          assetId: asset.id,
-          name: asset.title,
-          isExpected,
-          scannedAt: new Date().toISOString(),
-          locationName: expectedRecord?.locationName ?? null,
-          thumbnailImage:
-            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
-          ...(count ? count : {}),
-        };
-        setScannedItems((prev) => {
-          const next = [newItem, ...prev];
-          scannedItemsRef.current = next;
-          return next;
-        });
-
-        if (isExpected) {
-          // Found an expected asset
-          const newFound = foundCount + 1;
-          setFoundCount(newFound);
-          animateProgress(newFound);
-          flashFrame("found");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          playScanSound();
-          announce("Asset found");
-          showToast(
-            "found",
-            asset.title,
-            count
-              ? `Counted ${count.foundQuantity} of ${count.expectedQuantity} · ${newFound}/${expectedTotal}`
-              : `Found · ${newFound}/${expectedTotal}`
-          );
-        } else {
-          // Unexpected asset
-          setUnexpectedCount((prev) => prev + 1);
-          flashFrame("unexpected");
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          announce("Asset not in audit");
-          showToast("unexpected", asset.title, "Unexpected asset");
         }
 
         // 6. Persist to disk for crash recovery (debounced)
@@ -871,35 +884,40 @@ function AuditScannerContent() {
 
       // The server replaces the count of a scan it already has. The row shows
       // the new count only once the queue has taken it.
-      const queued = enqueueScan(
+      const queued = queueThenRecord(
+        enqueueScan,
         recountQueueEntry({
           auditSessionId: auditId,
           qrId: request.codeId,
           assetId: request.assetId,
           isExpected: request.isExpected,
           foundQuantity,
-        })
+        }),
+        {
+          refuse: () =>
+            showToast("error", request.assetTitle, SCAN_NOT_RECORDED),
+          record: () => {
+            setScannedItems((prev) => {
+              const next = prev.map((item) =>
+                item.assetId === request.assetId
+                  ? {
+                      ...item,
+                      expectedQuantity: request.expectedQuantity,
+                      foundQuantity,
+                      unitOfMeasure: request.unitOfMeasure,
+                    }
+                  : item
+              );
+              scannedItemsRef.current = next;
+              return next;
+            });
+          },
+        }
       );
       if (!queued) {
-        showToast("error", request.assetTitle, SCAN_NOT_RECORDED);
         finalizeScan();
         return;
       }
-
-      setScannedItems((prev) => {
-        const next = prev.map((item) =>
-          item.assetId === request.assetId
-            ? {
-                ...item,
-                expectedQuantity: request.expectedQuantity,
-                foundQuantity,
-                unitOfMeasure: request.unitOfMeasure,
-              }
-            : item
-        );
-        scannedItemsRef.current = next;
-        return next;
-      });
       // The result toast waits for the server's answer (handleScanSynced).
       pendingRecountsRef.current.set(request.assetId, {
         assetTitle: request.assetTitle,

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import * as Linking from "expo-linking";
-import { api, getApiBaseUrl } from "./api";
+import { accountGeneration, api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
@@ -12,7 +12,6 @@ import {
   queryIdsArePlain,
   splitLinkUrl,
 } from "./resource-path";
-import { sessionEndCount } from "./server/session-end";
 import { getScanCoordinates } from "./scan-location";
 
 /**
@@ -167,7 +166,7 @@ const QR_LOOKUPS: QrLookups = {
  * @param origin - The origin the link carried, when it had one.
  */
 export async function resolveQrAndNavigate(qrId: string, origin?: string) {
-  const sessionsEndedAtStart = sessionEndCount();
+  const accountAtStart = accountGeneration.current();
   const outcome = await resolveQrOutcome(
     qrId,
     origin,
@@ -175,9 +174,9 @@ export async function resolveQrAndNavigate(qrId: string, origin?: string) {
     { source: "os-link" },
     QR_LOOKUPS
   );
-  // A sign-out or server switch during the lookup ends the session the link
-  // was resolved for: open nothing over the login screen.
-  if (sessionEndCount() !== sessionsEndedAtStart) return;
+  // A sign-out, another account or a server switch during the lookup ends
+  // the session the link was resolved for: open nothing over the login screen.
+  if (accountGeneration.current() !== accountAtStart) return;
   if (outcome.kind === "screen") {
     pushIntoTab(outcome.tabRoot, outcome.href ?? undefined);
     return;

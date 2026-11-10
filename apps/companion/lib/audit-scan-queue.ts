@@ -416,8 +416,8 @@ export type DrainScanQueueArgs<
   onFailed?: (entry: E) => void;
   /**
    * Checked before every send; false stops the drain with the rest of the
-   * queue left in place (no backoff). The hook uses it to stop once the scan
-   * screen is gone or another account is signed in.
+   * queue left in place (no backoff). The hook uses it to stop once the queue
+   * owner's session is over (a sign-out, another account, a server switch).
    */
   mayContinue?: () => boolean;
 };

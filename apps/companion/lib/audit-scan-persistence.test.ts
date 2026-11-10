@@ -367,6 +367,27 @@ describe("adoptUnownedDraft", () => {
   });
 });
 
+describe("adoptUnownedDraft validation", () => {
+  it("keeps a malformed legacy draft where it was instead of stranding it", async () => {
+    store.set(
+      `${prefix}au_1`,
+      JSON.stringify({
+        version: 1,
+        auditId: "au_1",
+        scannedItems: [ITEM],
+        pendingQueue: [{ ...ENTRY, foundQuantity: null }],
+      })
+    );
+
+    assert.equal(
+      await persistence.adoptUnownedDraft("user_a", "au_1", { mayScan: true }),
+      false
+    );
+    assert.equal(store.has(`${prefix}au_1`), true);
+    assert.equal(store.has(`${prefix}user_a:au_1`), false);
+  });
+});
+
 describe("adoptUnownedDraft permission", () => {
   it("never adopts for an account that may not scan the audit", async () => {
     store.set(

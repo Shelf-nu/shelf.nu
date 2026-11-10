@@ -168,4 +168,24 @@ describe("useScanQueue", () => {
 
     assert.deepEqual(server.sent, ["a-1"]);
   });
+
+  it("resumes sending when the owner signs back in", async () => {
+    const queue = renderQueue("user_a");
+    server.hold = true;
+    queue.latest.current!.enqueueScan(entry("a-1"));
+    queue.latest.current!.enqueueScan(entry("a-2"));
+
+    accountGeneration += 1; // the owner's session ends
+    queue.rerender(undefined);
+    server.hold = false;
+    server.pending.shift()!(); // the request in flight completes
+    await flush();
+    assert.deepEqual(server.sent, ["a-1"]); // the drain stopped
+
+    accountGeneration += 1; // the owner signs back in
+    queue.rerender("user_a");
+    await flush();
+
+    assert.deepEqual(server.sent, ["a-1", "a-2"]);
+  });
 });

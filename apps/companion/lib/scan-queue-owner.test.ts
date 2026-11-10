@@ -9,6 +9,7 @@ import { describe, it, test } from "node:test";
 import {
   createQueueGate,
   drainMayContinue,
+  queueThenRecord,
   resolveQueueAccess,
 } from "./scan-queue-owner";
 import { drainScanQueue } from "./audit-scan-queue";
@@ -48,30 +49,30 @@ test("after sign-out the queue is still saved to its owner's draft", () => {
 describe("createQueueGate", () => {
   it("makes the first account seen the owner, for good", () => {
     const gate = createQueueGate();
-    gate.observe("user_a");
-    gate.observe("user_b");
+    gate.observe("user_a", 0);
+    gate.observe("user_b", 0);
 
     assert.equal(gate.owner(), "user_a");
   });
 
   it("refuses adding and sending for another account or nobody", () => {
     const gate = createQueueGate();
-    gate.observe("user_a");
+    gate.observe("user_a", 0);
     assert.equal(gate.mayUse(), true);
 
-    gate.observe("user_b");
+    gate.observe("user_b", 0);
     assert.equal(gate.mayUse(), false);
-    gate.observe(undefined);
+    gate.observe(undefined, 0);
     assert.equal(gate.mayUse(), false);
     assert.equal(gate.maySave(), true);
 
-    gate.observe("user_a");
+    gate.observe("user_a", 0);
     assert.equal(gate.mayUse(), true);
   });
 
   it("saves nothing before any account is seen", () => {
     const gate = createQueueGate();
-    gate.observe(undefined);
+    gate.observe(undefined, 0);
 
     assert.equal(gate.maySave(), false);
     assert.equal(gate.mayUse(), false);
@@ -108,7 +109,7 @@ describe("drainMayContinue", () => {
 
   it("keeps sending for the owner after the scan screen closes", async () => {
     const gate = createQueueGate();
-    gate.observe("user_a");
+    gate.observe("user_a", 0);
     const account = { current: () => 0 };
 
     // The screen unmounting changes nothing the guard reads: the gate keeps
@@ -120,7 +121,7 @@ describe("drainMayContinue", () => {
 
   it("stops once the account changes, even after the screen is gone", async () => {
     const gate = createQueueGate();
-    gate.observe("user_a");
+    gate.observe("user_a", 0);
     let generation = 0;
     const account = { current: () => generation };
 
@@ -132,5 +133,58 @@ describe("drainMayContinue", () => {
     });
 
     assert.deepEqual(sent, ["a-1"]);
+  });
+});
+
+describe("drainMayContinue after the account moved", () => {
+  it("refuses a drain started after the owner's session ended", () => {
+    const gate = createQueueGate();
+    let generation = 0;
+    gate.observe("user_a", generation);
+    const account = { current: () => generation };
+
+    generation += 1; // A signs out (screen already closed: no observe)
+    generation += 1; // B signs in
+
+    const mayContinue = drainMayContinue(gate, account);
+    assert.equal(mayContinue(), false);
+  });
+
+  it("allows sending again once the owner is seen signed in again", () => {
+    const gate = createQueueGate();
+    let generation = 0;
+    gate.observe("user_a", generation);
+    const account = { current: () => generation };
+
+    generation += 1;
+    gate.observe(undefined, generation); // signed out, screen still open
+    generation += 1;
+    gate.observe("user_a", generation); // the owner is back
+
+    assert.equal(drainMayContinue(gate, account)(), true);
+  });
+});
+
+describe("queueThenRecord", () => {
+  it("records a queued scan", () => {
+    const calls: string[] = [];
+    const queued = queueThenRecord(() => true, "scan", {
+      record: () => calls.push("record"),
+      refuse: () => calls.push("refuse"),
+    });
+
+    assert.equal(queued, true);
+    assert.deepEqual(calls, ["record"]);
+  });
+
+  it("never counts a refused scan, and says so", () => {
+    const calls: string[] = [];
+    const queued = queueThenRecord(() => false, "scan", {
+      record: () => calls.push("record"),
+      refuse: () => calls.push("refuse"),
+    });
+
+    assert.equal(queued, false);
+    assert.deepEqual(calls, ["refuse"]);
   });
 });

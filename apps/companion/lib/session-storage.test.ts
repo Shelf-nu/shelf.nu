@@ -231,4 +231,17 @@ describe("adapter writes", () => {
     assert.equal(await storage.adapter.getItem(KEY), "another-long-value");
     assert.equal(store.data.has(KEY), false);
   });
+
+  it("never leaves a short old value shadowing a new long one", async () => {
+    await storage.adapter.setItem(KEY, "short");
+    store.fail.delete = true;
+
+    await storage.adapter.setItem(KEY, "a-much-longer-new-session");
+    store.fail.delete = false;
+
+    // The write stopped before writing chunks: the old value is still the one
+    // read, and no half-written chunk set is left behind.
+    assert.equal(await storage.adapter.getItem(KEY), "short");
+    assert.equal(store.data.has(`${KEY}_chunks`), false);
+  });
 });

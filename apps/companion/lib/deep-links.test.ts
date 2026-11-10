@@ -24,6 +24,9 @@ const calls = {
   web: [] as string[],
 };
 
+/** The app's account counter, moved by hand. */
+let accountGeneration = 0;
+
 // why: the API layer reaches the network through Supabase and SecureStore.
 // `qr` is the recording resolve; the fake counts calls to it.
 mock.module(pathToFileURL(join(__dirname, "api.ts")).href, {
@@ -40,6 +43,7 @@ mock.module(pathToFileURL(join(__dirname, "api.ts")).href, {
       },
     },
     getApiBaseUrl: () => "https://app.shelf.test",
+    accountGeneration: { current: () => accountGeneration },
   },
 });
 
@@ -189,10 +193,8 @@ describe("parseDeepLink", () => {
 describe("resolveQrAndNavigate across a sign-out", () => {
   it("opens nothing when the session ends during the lookup", async () => {
     lookupResult = { data: { qr: { asset: { id: "as_1" } } }, error: null };
-    const { runAfterSessionEnd } = await import("./server/session-end");
-
     const pending = deepLinks.resolveQrAndNavigate("qr_1");
-    runAfterSessionEnd();
+    accountGeneration += 1; // signed out (or another account) mid-lookup
     await pending;
 
     assert.deepEqual(calls.pushed, []);
