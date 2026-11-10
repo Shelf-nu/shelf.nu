@@ -77,10 +77,12 @@ export default function ApproveBookingDialog({
   const isBusy = useDisabled();
   const disabled = isBusy || isSubmitting;
 
+  /** Opens the confirmation dialog, re-armed for a new submit. */
   function handleOpenDialog() {
     dispatch({ type: "open" });
   }
 
+  /** Closes the dialog; a post still in flight keeps Approve disabled. */
   function handleCloseDialog() {
     dispatch({ type: "close", isBusy });
   }
