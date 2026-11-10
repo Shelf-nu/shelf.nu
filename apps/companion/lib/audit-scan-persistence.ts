@@ -428,6 +428,32 @@ export function guardRecoveryActions(
   };
 }
 
+/** What the scan screen does with the stored draft when it closes. */
+export type DraftOnClose = "flush" | "clear" | "keep";
+
+/**
+ * Decides what happens to the stored draft when the scan screen closes.
+ *
+ * A draft waiting on the "Resume Previous Session?" prompt is kept untouched:
+ * the screen's queues are still empty because Resume has not run, so neither
+ * clearing nor flushing them may replace the draft. It is offered again the
+ * next time the audit opens.
+ *
+ * @param state - Whether an audit is open, whether the screen's queues hold
+ *   unsent scans, and whether a recovery prompt is still unanswered
+ * @returns `keep` while a prompt is pending, `flush` to save unsent scans,
+ *   otherwise `clear` (everything synced)
+ */
+export function draftActionOnClose(state: {
+  hasAudit: boolean;
+  hasUnsyncedScans: boolean;
+  recoveryPending: boolean;
+}): DraftOnClose {
+  if (state.recoveryPending) return "keep";
+  if (state.hasAudit && state.hasUnsyncedScans) return "flush";
+  return "clear";
+}
+
 // ── Debounced saver ──────────────────────────────────────
 
 /**

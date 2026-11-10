@@ -19,6 +19,15 @@ import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 const MAX_QUEUE_RETRIES = 3;
 const RETRY_DELAYS = [2_000, 5_000, 15_000];
 
+/**
+ * Mount number of the newest scan screen. A drain whose screen has closed
+ * stops writing drafts once a newer screen is open: that screen loaded the
+ * draft and owns it now, and an older snapshot written over it would drop the
+ * scans made since. Scans the old drain already sent and that stay in the
+ * draft are sent again on resume, and the server keeps one scan per asset.
+ */
+let newestScreen = 0;
+
 // ── Hook ─────────────────────────────────────────────────
 
 type UseScanQueueParams = {
@@ -98,18 +107,26 @@ export function useScanQueue({
   const gate = gateRef.current;
   /** False once the screen is gone: no new retry timer starts after that. */
   const mountedRef = useRef(true);
+  /** This screen's mount number, compared with {@link newestScreen}. */
+  const screenRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
+    newestScreen += 1;
+    screenRef.current = newestScreen;
     return () => {
       mountedRef.current = false;
     };
   }, []);
 
-  /** Saves the queues as the owner's draft; nothing while no owner is known. */
+  /**
+   * Saves the queues as the owner's draft; nothing while no owner is known,
+   * or once this screen has closed and a newer one is open.
+   */
   const saveDraft = useCallback(
     (auditSessionId: string) => {
       const owner = gate.owner();
       if (!gate.maySave() || !owner) return;
+      if (!mountedRef.current && screenRef.current !== newestScreen) return;
       void saveAuditScanState(
         owner,
         auditSessionId,
@@ -176,7 +193,12 @@ export function useScanQueue({
       // After the screen closed, nothing could clear a new timer: the scans
       // stay in the owner's draft and are sent when the audit is reopened.
       if (mountedRef.current) {
-        retryTimerRef.current = setTimeout(() => processQueue(), delay);
+        // The ref is emptied when the timer fires, so "a backoff is
+        // scheduled" stays true only while one is actually waiting.
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          void processQueue();
+        }, delay);
       }
     }
 

@@ -46,8 +46,11 @@ export type SessionBlock = {
    * Lifts the block on a session storage key, before a sign-in.
    *
    * @param storageKey - The client's session storage key
+   * @returns True only when the lift is stored, so the key is not blocked
+   *   again after a restart. On false the key stays blocked, and a new session
+   *   written under it would be refused on the next launch.
    */
-  unblock: (storageKey: string) => Promise<void>;
+  unblock: (storageKey: string) => Promise<boolean>;
   /**
    * Whether a storage key read must be refused.
    *
@@ -117,7 +120,7 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
   async function updateParked(change: {
     add?: string;
     remove?: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     try {
       let parked: string[] = [];
       try {
@@ -132,8 +135,10 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
         BLOCKED_SESSION_KEYS_PENDING,
         JSON.stringify([...next])
       );
+      return true;
     } catch {
       // The in-memory state still holds for this app session.
+      return false;
     }
   }
 
@@ -165,9 +170,18 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
     async unblock(storageKey) {
       pending.delete(storageKey);
       const keys = await load();
-      if (keys.delete(storageKey) && blocked) await save(keys);
+      const listed = keys.delete(storageKey);
       // A parked block for this key must not come back on the next read.
-      if (!blocked) await updateParked({ remove: storageKey });
+      const parkedCleared = await updateParked({ remove: storageKey });
+      if (!blocked) {
+        // The main list could not be read, so the lift cannot be stored:
+        // the key stays blocked for this run too.
+        pending.add(storageKey);
+        return false;
+      }
+      const saved = listed ? await save(keys) : true;
+      if (!saved) keys.add(storageKey);
+      return saved && parkedCleared;
     },
     async isBlocked(key) {
       const keys = await load();

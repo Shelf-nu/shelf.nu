@@ -441,3 +441,38 @@ describe("guardRecoveryActions", () => {
     assert.deepEqual(calls, ["resume", "discard"]);
   });
 });
+
+describe("draftActionOnClose", () => {
+  it("keeps a draft whose Resume prompt is still unanswered", () => {
+    assert.equal(
+      persistence.draftActionOnClose({
+        hasAudit: true,
+        hasUnsyncedScans: false,
+        recoveryPending: true,
+      }),
+      "keep"
+    );
+  });
+
+  it("flushes unsent scans", () => {
+    assert.equal(
+      persistence.draftActionOnClose({
+        hasAudit: true,
+        hasUnsyncedScans: true,
+        recoveryPending: false,
+      }),
+      "flush"
+    );
+  });
+
+  it("clears when everything is synced", () => {
+    assert.equal(
+      persistence.draftActionOnClose({
+        hasAudit: true,
+        hasUnsyncedScans: false,
+        recoveryPending: false,
+      }),
+      "clear"
+    );
+  });
+});

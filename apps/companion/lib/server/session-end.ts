@@ -15,6 +15,7 @@
  * @see {@link file://./session-end.test.ts}
  * @see {@link file://../settle-within.ts} the time cap
  */
+import { callEach } from "../call-each";
 import { settleWithin } from "../settle-within";
 
 /** Work that must run while the outgoing session is still valid. */
@@ -90,11 +91,5 @@ export function onAfterSessionEnd(task: () => void): () => void {
  * Never throws.
  */
 export function runAfterSessionEnd(): void {
-  for (const task of afterSessionEndTasks) {
-    try {
-      task();
-    } catch {
-      // One failing cleanup must not stop the others.
-    }
-  }
+  callEach(afterSessionEndTasks);
 }

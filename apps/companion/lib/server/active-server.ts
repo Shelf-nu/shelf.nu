@@ -24,6 +24,7 @@ import {
   persistedSessionRemover,
   rebuildSupabase,
 } from "../supabase";
+import { callEach } from "../call-each";
 import { endSessionOnDevice } from "./end-session";
 import { runBeforeSessionEnd } from "./session-end";
 import {
@@ -69,13 +70,9 @@ const listeners = new Set<() => void>();
 /** Notifies subscribers that the active server changed. */
 function notifyServerChange(): void {
   version += 1;
-  listeners.forEach((listener) => {
-    try {
-      listener();
-    } catch (e) {
-      // One bad subscriber must not abort the rest of the switch.
-      if (__DEV__) console.error("[Server] change listener failed:", e);
-    }
+  // One bad subscriber must not abort the rest of the switch.
+  callEach(listeners, (e) => {
+    if (__DEV__) console.error("[Server] change listener failed:", e);
   });
 }
 

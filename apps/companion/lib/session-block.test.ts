@@ -44,12 +44,29 @@ describe("createSessionBlock", () => {
     assert.equal(await afterRestart.isBlocked("sb-abcd-auth-token"), true);
   });
 
+  it("unblock reports a lift it could not store, and keeps the block", async () => {
+    const store = mapStore();
+    const block = createSessionBlock(store);
+    await block.block("sb-abcd-auth-token");
+    store.setItem = async () => {
+      throw new Error("storage full");
+    };
+
+    assert.equal(await block.unblock("sb-abcd-auth-token"), false);
+
+    assert.equal(await block.isBlocked("sb-abcd-auth-token"), true);
+    assert.equal(
+      await createSessionBlock(store).isBlocked("sb-abcd-auth-token"),
+      true
+    );
+  });
+
   it("unblock lifts it, for the next sign-in", async () => {
     const store = mapStore();
     const block = createSessionBlock(store);
     await block.block("sb-abcd-auth-token");
 
-    await block.unblock("sb-abcd-auth-token");
+    assert.equal(await block.unblock("sb-abcd-auth-token"), true);
 
     assert.equal(await block.isBlocked("sb-abcd-auth-token"), false);
     assert.equal(

@@ -28,6 +28,7 @@ import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { queueThenRecord } from "@/lib/scan-queue-owner";
+import { draftActionOnClose } from "@/lib/audit-scan-persistence";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
@@ -239,6 +240,16 @@ function AuditScannerContent() {
   // result toast waits for the server: a finished audit keeps its count.
   const pendingRecountsRef = useRef(new Map<string, PendingRecount>());
 
+  // The queue keeps sending after this screen closes; its answers then update
+  // the rows only, with no haptic or toast over whatever screen is open.
+  const screenOpenRef = useRef(true);
+  useEffect(() => {
+    screenOpenRef.current = true;
+    return () => {
+      screenOpenRef.current = false;
+    };
+  }, []);
+
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
     (
@@ -269,6 +280,10 @@ function AuditScannerContent() {
           ? { ...prev, auditAssetId }
           : prev
       );
+      if (!screenOpenRef.current) {
+        pendingRecountsRef.current.delete(assetId);
+        return;
+      }
       // A recount from this device: report what the server stored.
       const pending = pendingRecountsRef.current.get(assetId);
       const recountToast = pending
@@ -346,6 +361,7 @@ function AuditScannerContent() {
     setScannedItems,
     scannedItemsRef,
     debouncedSaverRef,
+    recoveryPendingRef,
   } = useAuditInit({
     auditId,
     orgId: currentOrg?.id,
@@ -643,20 +659,30 @@ function AuditScannerContent() {
         clearTimeout(frameHighlightTimer.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
       // On exit, only clear persisted state if EVERYTHING has synced. If any
       // scans are still pending or failed, flush the latest snapshot and KEEP
-      // it — clearing here would discard scans the worker saw as "Found",
-      // which the server then marks MISSING on completion.
-      const hasUnsyncedScans =
-        scanQueueRef.current.length > 0 || failedQueueRef.current.length > 0;
-      if (auditId && hasUnsyncedScans) {
+      // it: clearing here would discard scans the worker saw as "Found",
+      // which the server then marks MISSING on completion. A draft still
+      // waiting on the Resume prompt is left as it is (`draftActionOnClose`).
+      const action = draftActionOnClose({
+        hasAudit: Boolean(auditId),
+        hasUnsyncedScans:
+          scanQueueRef.current.length > 0 || failedQueueRef.current.length > 0,
+        recoveryPending: recoveryPendingRef.current,
+      });
+      if (action === "flush") {
         debouncedSaverRef.current?.flush(
           scannedItemsRef.current,
           scanQueueRef.current,
           failedQueueRef.current
         );
-      } else {
+      } else if (action === "clear") {
         void debouncedSaverRef.current?.clear();
+      } else {
+        // A pending debounced write would replace the draft with the
+        // screen's empty queues.
+        debouncedSaverRef.current?.cancel();
       }
       /* eslint-enable react-hooks/exhaustive-deps */
     };
@@ -668,6 +694,7 @@ function AuditScannerContent() {
     scanQueueRef,
     failedQueueRef,
     scannedItemsRef,
+    recoveryPendingRef,
   ]);
 
   // ── Persist on background, resume on foreground ──────

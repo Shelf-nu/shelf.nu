@@ -174,13 +174,15 @@ async function readAccessToken(): Promise<
   const generationAtStart = accountGeneration.current();
   const {
     data: { session },
+    error,
   } = await getSupabase().auth.getSession();
 
   if (getServerVersion() !== versionAtStart) return { changed: true };
   if (accountGeneration.current() !== generationAtStart) {
-    // No session after the read means the read itself ended it (a refresh
-    // that failed signs out): an expired session, not someone else's.
-    if (!session) return { token: null };
+    // A read that failed and left no session ended the session itself (a
+    // refresh that fails signs out): an expired session. Any other move is a
+    // sign-out or another account landing during the read.
+    if (!session && error) return { token: null };
     return { changed: true };
   }
 
@@ -262,17 +264,27 @@ export type ApiFetchOptions = RequestInit & { retry?: boolean };
  *   "no answer", where `status` is absent.
  * - Detects 401/session-expired and notifies global auth listeners.
  * - Enforces a request timeout to avoid hanging on slow networks.
+ * - Its automatic retry never crosses an account change: a retry after the
+ *   signed-in account moved returns the session-changed error instead of
+ *   resending with the next person's token.
  */
 export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {},
-  _retryCount = 0
+  _retryCount = 0,
+  /** Account generation of the first attempt; set only by the retry. */
+  _generation: number = accountGeneration.current()
 ): Promise<{
   data: T | null;
   error: string | null;
   errorDetails?: ApiErrorDetails | null;
   status?: number;
 }> {
+  // A retry belongs to the account that made the first attempt.
+  if (_retryCount > 0 && accountGeneration.current() !== _generation) {
+    return { data: null, error: SESSION_CHANGED_ERROR };
+  }
+
   // Declared outside try so catch block can read it
   let timedOut = false;
 
@@ -396,7 +408,7 @@ export async function apiFetch<T>(
 
     if (willRetry) {
       if (__DEV__) console.log("[API] Retrying…", path);
-      return apiFetch<T>(path, options, _retryCount + 1);
+      return apiFetch<T>(path, options, _retryCount + 1, _generation);
     }
 
     if (err instanceof Error && err.name === "AbortError") {

@@ -10,16 +10,22 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { before, beforeEach, describe, it, mock } from "node:test";
 
+// why: React Native defines `__DEV__`; the request path logs behind it.
+(globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+
 /** The fake client's auth listener and pending session reads. */
 const auth = {
   listener: null as null | ((event: string, session: unknown) => void),
-  reads: [] as Array<(token: string | null) => void>,
+  reads: [] as ((token: string | null, error?: Error) => void)[],
   readCount: 0,
 };
 
-/** Resolves the oldest pending session read with this access token. */
-function answerRead(token: string | null) {
-  auth.reads.shift()!(token);
+/**
+ * Resolves the oldest pending session read with this access token, and the
+ * error supabase-js reports when its own refresh failed.
+ */
+function answerRead(token: string | null, error?: Error) {
+  auth.reads.shift()!(token, error);
 }
 
 /** An auth event as supabase-js delivers it. */
@@ -42,9 +48,10 @@ mock.module(pathToFileURL(join(__dirname, "..", "supabase.ts")).href, {
         getSession: () => {
           auth.readCount += 1;
           return new Promise((resolve) => {
-            auth.reads.push((token) =>
+            auth.reads.push((token, error) =>
               resolve({
                 data: { session: token ? { access_token: token } : null },
+                error: error ?? null,
               })
             );
           });
@@ -164,11 +171,53 @@ describe("a read whose own refresh ends the session", () => {
 
     const request = client.apiFetch("/api/mobile/dashboard?orgId=org_1");
     emit("SIGNED_OUT", null); // the refresh inside getSession failed
-    answerRead(null);
+    answerRead(null, new Error("Invalid Refresh Token"));
     const result = await request;
     unregister();
 
     assert.equal(result.error, "Session expired. Please sign in again.");
     assert.equal(authErrors, 1);
+  });
+});
+
+describe("a sign-out that lands during the token read", () => {
+  it("is reported as a changed session, not an expired one", async () => {
+    let authErrors = 0;
+    const unregister = client.onAuthError(() => {
+      authErrors += 1;
+    });
+
+    const request = client.apiFetch("/api/mobile/dashboard?orgId=org_1");
+    emit("SIGNED_OUT", null); // the person tapped Sign out
+    answerRead(null);
+    const result = await request;
+    unregister();
+
+    assert.equal(result.error, "Your session changed. Please try again.");
+    assert.equal(authErrors, 0);
+  });
+});
+
+describe("apiFetch's automatic retry", () => {
+  it("is not sent when another account signed in during the first attempt", async () => {
+    const realFetch = globalThis.fetch;
+    let sends = 0;
+    // why: the network is the boundary under test; the first attempt fails
+    // with a network error after another person signed in on the phone.
+    globalThis.fetch = (async () => {
+      sends += 1;
+      emit("SIGNED_IN", "user_b");
+      throw new TypeError("Network request failed");
+    }) as typeof fetch;
+    try {
+      const request = client.apiFetch("/api/mobile/audits/record-scan?orgId=o");
+      answerRead("token-a");
+      const result = await request;
+
+      assert.equal(result.error, "Your session changed. Please try again.");
+      assert.equal(sends, 1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

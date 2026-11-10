@@ -118,8 +118,8 @@ export function createSessionStorage({
   /**
    * Writes a value, chunking it when long. Throws on a store error.
    *
-   * Matches the layout reads expect, and the order the previous adapter
-   * used: a short value replaces the direct key in place (old chunks are
+   * Matches the layout reads expect, which sessions already stored on phones
+   * use too: a short value replaces the direct key in place (old chunks are
    * dropped first, since a direct value wins on read anyway); a long value
    * first deletes the direct key, which would otherwise shadow the chunks,
    * and stops right there if that delete fails, so a stale short session can
@@ -191,7 +191,12 @@ export function createSessionStorage({
       onError("prepareSignIn", storageKey, error);
       return false; // the old session may still be stored: keep it refused
     }
-    await block.unblock(storageKey);
+    // A lift that is not stored would refuse the new session on the next
+    // launch, signing the person out: stop here instead.
+    if (!(await block.unblock(storageKey))) {
+      onError("prepareSignIn", storageKey, new Error("block not lifted"));
+      return false;
+    }
     return true;
   }
 

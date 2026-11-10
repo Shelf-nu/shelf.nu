@@ -18,6 +18,7 @@
  * @see {@link file://./account-generation.test.ts}
  * @see {@link file://./auth-generation.ts} the counting rule
  */
+import { callEach } from "../call-each";
 import { createAuthGeneration } from "./auth-generation";
 
 /** Read access to the account counter, as its consumers use it. */
@@ -61,15 +62,7 @@ export function createAccountGeneration({
   const generation = createAuthGeneration();
   const listeners = new Set<() => void>();
 
-  const notify = () => {
-    for (const listener of listeners) {
-      try {
-        listener();
-      } catch {
-        // One failing listener must not stop the others.
-      }
-    }
-  };
+  const notify = () => callEach(listeners);
 
   const observe = (userId: string | null) => {
     if (generation.observe(userId)) notify();

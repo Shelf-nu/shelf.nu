@@ -43,24 +43,28 @@ function fakeStore() {
   };
 }
 
-/** A Map-backed block-list store (AsyncStorage). */
+/** A Map-backed block-list store (AsyncStorage); writes can be made to fail. */
 function blockStore() {
   const data = new Map<string, string>();
   return {
+    failWrites: false,
     getItem: async (key: string) => data.get(key) ?? null,
-    setItem: async (key: string, value: string) => {
+    async setItem(key: string, value: string) {
+      if (this.failWrites) throw new Error("storage full");
       data.set(key, value);
     },
   };
 }
 
 let store: ReturnType<typeof fakeStore>;
+let blocks: ReturnType<typeof blockStore>;
 let block: ReturnType<typeof createSessionBlock>;
 let storage: ReturnType<typeof createSessionStorage>;
 
 beforeEach(() => {
   store = fakeStore();
-  block = createSessionBlock(blockStore());
+  blocks = blockStore();
+  block = createSessionBlock(blocks);
   storage = createSessionStorage({ store, block, chunkSize: 10 });
 });
 
@@ -147,6 +151,16 @@ describe("prepareSignIn", () => {
     assert.equal(await block.isBlocked(KEY), true);
     store.fail.delete = false;
     assert.equal(await storage.adapter.getItem(KEY), null);
+  });
+
+  it("stops the sign-in when the lift of the block cannot be stored", async () => {
+    await storage.adapter.setItem(KEY, "previous person");
+    await block.block(KEY);
+    blocks.failWrites = true;
+
+    assert.equal(await storage.prepareSignIn(KEY), false);
+
+    assert.equal(await block.isBlocked(KEY), true);
   });
 
   it("does nothing for a key that is not blocked", async () => {

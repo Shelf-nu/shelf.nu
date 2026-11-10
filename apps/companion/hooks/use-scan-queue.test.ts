@@ -20,6 +20,8 @@ const server = {
   pending: [] as Array<() => void>,
   /** When true, each request waits until the test releases it. */
   hold: false,
+  /** How many of the next requests fail with a network error. */
+  failNext: 0,
 };
 /** The app's account counter, moved by hand. */
 let accountGeneration = 0;
@@ -38,6 +40,11 @@ mock.module(lib("api.ts"), {
             server.sent.push(entry.assetId);
             resolve({ data: { auditAssetId: `row-${entry.assetId}` } });
           };
+          if (server.failNext > 0) {
+            server.failNext -= 1;
+            resolve({ error: "Network request failed" });
+            return;
+          }
           if (server.hold) server.pending.push(answer);
           else answer();
         }),
@@ -48,8 +55,19 @@ mock.module(lib("api.ts"), {
 
 // why: drafts are written to AsyncStorage (native); the hook's draft rules are
 // tested in audit-scan-persistence.test.ts.
+const draftWrites: string[] = [];
 mock.module(lib("audit-scan-persistence.ts"), {
-  namedExports: { saveAuditScanState: async () => true },
+  namedExports: {
+    saveAuditScanState: async (
+      _owner: string,
+      _auditId: string,
+      _items: unknown[],
+      queue: { assetId: string }[]
+    ) => {
+      draftWrites.push(queue.map((e) => e.assetId).join(","));
+      return true;
+    },
+  },
 });
 
 // why: Sentry is native; durability reports are not under test here.
@@ -67,6 +85,8 @@ beforeEach(() => {
   server.sent.length = 0;
   server.pending.length = 0;
   server.hold = false;
+  server.failNext = 0;
+  draftWrites.length = 0;
   accountGeneration = 0;
 });
 
@@ -187,5 +207,42 @@ describe("useScanQueue", () => {
     await flush();
 
     assert.deepEqual(server.sent, ["a-1", "a-2"]);
+  });
+
+  it("resumes sending when the owner is back after a retry backoff fired", async () => {
+    const queue = renderQueue("user_a");
+    server.failNext = 1;
+    queue.latest.current!.enqueueScan(entry("a-1"));
+    await flush();
+    assert.deepEqual(server.sent, []); // failed: a 2s backoff is scheduled
+
+    queue.rerender(undefined); // the owner's session pauses
+    // The backoff fires while nobody is signed in, so it sends nothing.
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    await flush();
+    assert.deepEqual(server.sent, []);
+
+    queue.rerender("user_a");
+    await flush();
+
+    assert.deepEqual(server.sent, ["a-1"]);
+    queue.unmount();
+  });
+
+  it("a closed screen's drain stops writing the draft once a newer screen opens", async () => {
+    const first = renderQueue("user_a");
+    server.hold = true;
+    first.latest.current!.enqueueScan(entry("a-1"));
+    first.unmount(); // the auditor leaves while a-1 is in flight
+
+    const second = renderQueue("user_a"); // and reopens the audit
+    draftWrites.length = 0;
+    server.hold = false;
+    server.pending.shift()!(); // the old drain's request completes
+    await flush();
+
+    assert.deepEqual(server.sent, ["a-1"]);
+    assert.deepEqual(draftWrites, []); // the new screen's draft is untouched
+    second.unmount();
   });
 });

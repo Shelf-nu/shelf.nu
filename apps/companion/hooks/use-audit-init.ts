@@ -120,6 +120,11 @@ export type AuditInitResult = {
   debouncedSaverRef: React.MutableRefObject<ReturnType<
     typeof createDebouncedSaver
   > | null>;
+  /**
+   * True while the "Resume Previous Session?" prompt is unanswered. The
+   * stored draft must then survive the screen closing.
+   */
+  recoveryPendingRef: React.MutableRefObject<boolean>;
 };
 
 export function useAuditInit({
@@ -153,6 +158,7 @@ export function useAuditInit({
   const debouncedSaverRef = useRef<ReturnType<
     typeof createDebouncedSaver
   > | null>(null);
+  const recoveryPendingRef = useRef(false);
 
   useEffect(() => {
     if (!auditId || !orgId || !userId) return;
@@ -160,6 +166,7 @@ export function useAuditInit({
     // A load that finishes after the audit, workspace or account changed
     // belongs to the old ones: it must not install its saver or state.
     let cancelled = false;
+    recoveryPendingRef.current = false;
 
     (async () => {
       setIsInitializing(true);
@@ -301,8 +308,12 @@ export function useAuditInit({
           // changed): both buttons then do nothing, so old scans never reach
           // a new scanner and one account never discards another's draft.
           const recovery = guardRecoveryActions(() => cancelled, {
-            discard: () => void clearAuditScanState(userId, auditId),
+            discard: () => {
+              recoveryPendingRef.current = false;
+              void clearAuditScanState(userId, auditId);
+            },
             resume: () => {
+              recoveryPendingRef.current = false;
               // A queued scan may have no recovered display item: the
               // eager persist can save a queue entry before the list state
               // commits. Rebuild display rows for those (name from the
@@ -404,6 +415,7 @@ export function useAuditInit({
               );
             },
           });
+          recoveryPendingRef.current = true;
           Alert.alert(
             "Resume Previous Session?",
             adopted
@@ -453,5 +465,6 @@ export function useAuditInit({
     setScannedItems,
     scannedItemsRef,
     debouncedSaverRef,
+    recoveryPendingRef,
   };
 }
