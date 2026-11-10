@@ -15,6 +15,8 @@ function fakeApp() {
   let unsubscribed = 0;
   const sessionEndTasks: Array<() => void> = [];
   const serverChangeTasks: Array<() => void> = [];
+  /** The live client; a real switch replaces it. */
+  let client = {};
   const account = createAccountGeneration({
     subscribeAuth: (listener) => {
       listeners.push(listener);
@@ -24,13 +26,19 @@ function fakeApp() {
     },
     onSessionEnd: (task) => sessionEndTasks.push(task),
     onServerChange: (task) => serverChangeTasks.push(task),
+    currentClient: () => client,
   });
   return {
     account,
     /** Emits an auth event on the live (latest) client. */
     emit: (userId: string | null) => listeners[listeners.length - 1](userId),
     endSession: () => sessionEndTasks.forEach((task) => task()),
-    switchServer: () => serverChangeTasks.forEach((task) => task()),
+    switchServer: () => {
+      client = {};
+      serverChangeTasks.forEach((task) => task());
+    },
+    /** A server change notice that keeps the client (a rename). */
+    renameServer: () => serverChangeTasks.forEach((task) => task()),
     get listenerCount() {
       return listeners.length;
     },
@@ -111,5 +119,16 @@ describe("createAccountGeneration", () => {
     app.endSession();
 
     assert.equal(changes, 1);
+  });
+
+  it("ignores a server change notice that keeps the same client", () => {
+    const app = fakeApp();
+    app.emit("user_a");
+
+    app.renameServer();
+
+    assert.equal(app.account.current(), 0);
+    assert.equal(app.listenerCount, 1);
+    assert.equal(app.unsubscribed, 0);
   });
 });

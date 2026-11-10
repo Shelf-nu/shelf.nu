@@ -22,6 +22,8 @@ function harness() {
   const listeners: Array<(userId: string | null) => void> = [];
   const sessionEndTasks: Array<() => void> = [];
   const serverChangeTasks: Array<() => void> = [];
+  /** The live client; a real switch replaces it. */
+  let client = {};
   const account = createAccountGeneration({
     subscribeAuth: (listener) => {
       listeners.push(listener);
@@ -29,6 +31,7 @@ function harness() {
     },
     onSessionEnd: (task) => sessionEndTasks.push(task),
     onServerChange: (task) => serverChangeTasks.push(task),
+    currentClient: () => client,
   });
   const pending: Array<(data: unknown) => void> = [];
   let fetches = 0;
@@ -47,7 +50,12 @@ function harness() {
     cached,
     emit: (userId: string | null) => listeners[listeners.length - 1](userId),
     endSession: () => sessionEndTasks.forEach((task) => task()),
-    switchServer: () => serverChangeTasks.forEach((task) => task()),
+    switchServer: () => {
+      client = {};
+      serverChangeTasks.forEach((task) => task());
+    },
+    /** A server change notice that keeps the client (a rename). */
+    renameServer: () => serverChangeTasks.forEach((task) => task()),
     answer: (data: unknown) => pending.shift()!(data),
     advance: (ms: number) => {
       clock += ms;
@@ -181,5 +189,18 @@ describe("createAccountCachedFetch", () => {
     assert.equal(app.fetches, 2);
     app.answer(["roster"]);
     await again;
+  });
+
+  it("a rename of the server keeps the cache and in-flight responses", async () => {
+    const app = harness();
+    app.emit("user_a");
+    const inFlight = app.cached.cachedFetch(ROSTER_PATH, TTL);
+
+    app.renameServer();
+    app.answer(["roster"]);
+
+    assert.deepEqual(await inFlight, { data: ["roster"], error: null });
+    await app.cached.cachedFetch(ROSTER_PATH, TTL);
+    assert.equal(app.fetches, 1);
   });
 });

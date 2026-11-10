@@ -40,17 +40,23 @@ export type AccountGeneration = {
  *   reporting each event's user id (null when signed out); returns an
  *   unsubscribe function. Called again after every server switch.
  * @param options.onSessionEnd - Registers a task for the end of any session
- * @param options.onServerChange - Registers a task for a server switch
+ * @param options.onServerChange - Registers a task for a server change
+ *   notice, which also fires when only the server's display details change
+ * @param options.currentClient - The live Supabase client; a server change
+ *   that leaves it in place (a rename, a refreshed sign-in option) is not an
+ *   account change
  * @returns The counter
  */
 export function createAccountGeneration({
   subscribeAuth,
   onSessionEnd,
   onServerChange,
+  currentClient,
 }: {
   subscribeAuth: (listener: (userId: string | null) => void) => () => void;
   onSessionEnd: (task: () => void) => void;
   onServerChange: (task: () => void) => void;
+  currentClient: () => unknown;
 }): AccountGeneration {
   const generation = createAuthGeneration();
   const listeners = new Set<() => void>();
@@ -70,8 +76,13 @@ export function createAccountGeneration({
   };
 
   let unsubscribe = subscribeAuth(observe);
+  let subscribedClient = currentClient();
 
   onServerChange(() => {
+    // Only a rebuilt client is a new server session; a notice that leaves the
+    // client in place changes nothing the counter stands for.
+    if (currentClient() === subscribedClient) return;
+    subscribedClient = currentClient();
     generation.bump();
     generation.forgetUser();
     unsubscribe();

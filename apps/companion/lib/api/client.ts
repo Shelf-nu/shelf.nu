@@ -96,6 +96,7 @@ export const accountGeneration = createAccountGeneration({
   onServerChange: (task) => {
     subscribeToServerChange(task);
   },
+  currentClient: () => getSupabase(),
 });
 
 // A session read that started before the account changed belongs to the
