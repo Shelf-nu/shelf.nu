@@ -46,6 +46,7 @@ import {
 import { getQr } from "~/modules/qr/service.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { bookableListScopeWhere } from "./list-scope.server";
@@ -108,6 +109,11 @@ vitest.mock("~/database/db.server", () => ({
     // why: getAssets resolves its search term to matching asset ids via the
     // shared buildAssetSearchUnion, executed as a raw query.
     $queryRaw: vitest.fn().mockResolvedValue([]),
+    // why: a move's location activity log lines are written in one batch;
+    // the rows handed over are the output the move tests assert.
+    locationNote: {
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
     asset: {
       // why: createAsset's transaction writes the row through this stub, so a
       // test that needs the create to SUCCEED (rather than reject at a guard)
@@ -483,11 +489,16 @@ vitest.mock("~/modules/location/service.server", () => ({
   createLocationsIfNotExists: vitest.fn().mockResolvedValue([]),
 }));
 
-// why: same as above for the per-location-timeline note writes that
-// `moveAssetLocationUnits` + `placeUnplacedUnits` queue post-tx.
-vitest.mock("~/modules/location-note/service.server", () => ({
-  createSystemLocationNote: vitest.fn().mockResolvedValue({}),
-}));
+// why: same as above for the "placed N units" timeline note
+// `placeUnplacedUnits` queues post-tx. A move's "added / removed" lines run
+// for real and are asserted from `db.locationNote.createMany`.
+vitest.mock(
+  "~/modules/location-note/service.server",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    createSystemLocationNote: vitest.fn().mockResolvedValue({}),
+  })
+);
 
 // why: control custom-field lookup so we can assert org+category scoping
 vitest.mock("~/modules/custom-field/service.server", () => ({
@@ -2577,7 +2588,7 @@ describe("updateAsset cross-org guards", () => {
 
     expect(db.location.findFirst).toHaveBeenCalledWith({
       where: { id: "location-from-org-B", organizationId: "org-A" },
-      select: { id: true },
+      select: { id: true, name: true },
     });
   });
 
@@ -2605,6 +2616,56 @@ describe("updateAsset cross-org guards", () => {
       where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
       select: { id: true },
     });
+  });
+
+  it("rejects a tag from a different organization before writing", async () => {
+    expect.assertions(3);
+    // why: an empty result is how the org-scoped lookup reports a tag that
+    // belongs to another workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([]);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        tags: { set: [{ id: "tag-from-org-B" }] },
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("replaces the asset's tags with tags that belong to the organization", async () => {
+    expect.assertions(2);
+    // why: one matching row is how the org-scoped lookup reports that every
+    // submitted tag belongs to this workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { id: "tag-in-org-A" },
+    ]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      tags: { set: [{ id: "tag-in-org-A" }] },
+    } as any);
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-in-org-A"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { set: [{ id: "tag-in-org-A" }] },
+        }),
+      })
+    );
   });
 });
 
@@ -2678,6 +2739,58 @@ describe("createAsset cross-org guards", () => {
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tag from a different organization before writing", async () => {
+    expect.assertions(3);
+    // why: an empty result is how the org-scoped lookup reports a tag that
+    // belongs to another workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([]);
+
+    // The guard's own 400 and message reach the caller, so a stale tag tells
+    // the user what to fix instead of a generic "could not create".
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        tags: { set: [{ id: "tag-from-org-B" }] },
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("selected tags"),
+    });
+
+    expect(db.tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("connects tags that belong to the organization", async () => {
+    expect.assertions(2);
+    // why: one matching row is how the org-scoped lookup reports that every
+    // submitted tag belongs to this workspace.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { id: "tag-in-org-A" },
+    ]);
+
+    const created = await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      tags: { set: [{ id: "tag-in-org-A" }] },
+    } as any);
+
+    expect(created).toEqual({ id: "asset-new" });
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { connect: [{ id: "tag-in-org-A" }] },
+        }),
+      })
+    );
   });
 });
 
@@ -3175,6 +3288,363 @@ describe("updateAsset newLocationQuantity", () => {
   });
 });
 
+describe("updateAsset location activity", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the edit reads the asset several times with different selects
+    // (kit guard, before-state, type); route on the select, as the
+    // asset-model suite above does.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "INDIVIDUAL",
+            quantity: null,
+            assetKits: [],
+          });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve(null);
+      }
+    );
+    // why: both location ids resolve through org-scoped lookups.
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          id: where.id,
+          name: where.id === "loc-old" ? "Old Office" : "New Office",
+        })
+    );
+    const tripod = {
+      id: "asset-1",
+      title: "Tripod",
+      type: "INDIVIDUAL",
+      unitOfMeasure: null,
+    };
+    // The update's `assetLocations` is the pre-rewrite snapshot the log reads.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...tripod,
+      assetLocations: [
+        {
+          locationId: "loc-old",
+          assetKitId: null,
+          quantity: 1,
+          location: { id: "loc-old", name: "Old Office" },
+        },
+      ],
+    });
+    // why: a placement rewrite re-reads the row it just wrote.
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...tripod, assetLocations: [] });
+    // why: the placement rewrite locks the asset row with a raw query.
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: null,
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+  });
+
+  const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+  const oldLoc = '{% link to="/locations/loc-old" text="Old Office" /%}';
+  const newLoc = '{% link to="/locations/loc-new" text="New Office" /%}';
+
+  /** The rows handed to `createMany`, as `[locationId, content]`. */
+  function locationLog() {
+    return (
+      db.locationNote.createMany as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([args]) => args.data)
+      .map((row: { locationId: string; content: string }) => [
+        row.locationId,
+        row.content,
+      ]);
+  }
+
+  it("logs the move on the activity log of both locations", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added ${tripod} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed ${tripod} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+    ]);
+  });
+
+  it("logs a removal only when the location is cleared", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: null,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const tripod = '{% link to="/assets/asset-1" text="Tripod" /%}';
+    expect(locationLog()).toEqual([
+      ["loc-old", `${john} removed ${tripod} from ${oldLoc}.`],
+    ]);
+  });
+
+  /** A quantity-tracked "Pens" pool of 10 with these manual placements. */
+  function pensPlacedAt(rows: Array<[string, string, number]>) {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "QUANTITY_TRACKED",
+            quantity: 10,
+            assetKits: [],
+          });
+        if (q?.select?.type)
+          return Promise.resolve({ type: "QUANTITY_TRACKED" });
+        return Promise.resolve(null);
+      }
+    );
+    const pens = {
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+    };
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...pens,
+      assetLocations: rows.map(([id, name, quantity], index) => ({
+        id: `al-${index}`,
+        locationId: id,
+        assetKitId: null,
+        quantity,
+        createdAt: new Date(2026, 0, index + 1),
+        location: { id, name },
+      })),
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...pens, assetLocations: [] });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+    });
+  }
+  const penLink = '{% link to="/assets/asset-1" text="Pens" /%}';
+
+  it("names every location a move empties, not only the current one", async () => {
+    pensPlacedAt([
+      ["loc-old", "Old Office", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 10,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const van = '{% link to="/locations/loc-van" text="Van" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added 10 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}, ${van}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed 6 pcs of ${penLink} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+      [
+        "loc-van",
+        `${john} removed 4 pcs of ${penLink} from ${van}. Moved to ${newLoc}.`,
+      ],
+    ]);
+  });
+
+  it("logs a new quantity at the same location, as the phone route does", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 4]]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-old",
+      newLocationQuantity: 6,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    expect(locationLog()).toEqual([
+      ["loc-old", `${john} added 2 pcs of ${penLink} to ${oldLoc}.`],
+    ]);
+  });
+
+  it("logs the unit count it wrote to the new placement", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 10]]);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 7,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const written = (
+      db.assetLocation.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.map(
+      (call) =>
+        (call[0] as { data: { locationId: string; quantity: number } }).data
+    );
+    expect(written).toEqual([
+      expect.objectContaining({ locationId: "loc-new", quantity: 7 }),
+    ]);
+    expect(locationLog()[0]).toEqual([
+      "loc-new",
+      `${john} added 7 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}.`,
+    ]);
+  });
+
+  it("keeps a saved edit when the user lookup for the location log fails", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 4]]);
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    (db.user.findFirst as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        currentLocationId: "loc-old",
+        newLocationId: "loc-old",
+        newLocationQuantity: 6,
+      } as unknown as Parameters<typeof updateAsset>[0])
+    ).resolves.toBeDefined();
+
+    expect(db.locationNote.createMany).not.toHaveBeenCalled();
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
+  it("keeps a saved move when the user lookup for its notes fails", async () => {
+    pensPlacedAt([["loc-old", "Old Office", 10]]);
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    (db.user.findFirst as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("connection reset")
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        currentLocationId: "loc-old",
+        newLocationId: "loc-new",
+        newLocationQuantity: 10,
+      } as unknown as Parameters<typeof updateAsset>[0])
+    ).resolves.toBeDefined();
+
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
+  it("counts a quantity move the same way the phone route does", async () => {
+    // 10 pens at Old Office; 4 placed at New Office, 6 left unplaced.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits)
+          return Promise.resolve({
+            type: "QUANTITY_TRACKED",
+            quantity: 10,
+            assetKits: [],
+          });
+        if (q?.select?.type)
+          return Promise.resolve({ type: "QUANTITY_TRACKED" });
+        return Promise.resolve(null);
+      }
+    );
+    const pens = {
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+    };
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...pens,
+      assetLocations: [
+        {
+          locationId: "loc-old",
+          assetKitId: null,
+          quantity: 10,
+          location: { id: "loc-old", name: "Old Office" },
+        },
+      ],
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...pens, assetLocations: [] });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      newLocationQuantity: 4,
+    } as unknown as Parameters<typeof updateAsset>[0]);
+
+    const penLink = '{% link to="/assets/asset-1" text="Pens" /%}';
+    expect(locationLog()).toEqual([
+      [
+        "loc-new",
+        `${john} added 4 pcs of ${penLink} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed 4 pcs of ${penLink} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+      ["loc-old", `${john} removed 6 pcs of ${penLink} from ${oldLoc}.`],
+    ]);
+  });
+});
+
 /**
  * `replaceAssetPlacements` — the manage-placements dialog's write path.
  *
@@ -3284,6 +3754,48 @@ describe("replaceAssetPlacements", () => {
       })
     );
   });
+
+  it("logs units that leave one location for another as a move", async () => {
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        locationId: "loc-9",
+        quantity: 40,
+        location: { id: "loc-9", name: "Warehouse" },
+      },
+    ]);
+
+    await replaceAssetPlacements({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      placements: [{ locationId: "loc-1", quantity: 20 }],
+    });
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const pens = '{% link to="/assets/asset-1" text="Pens" /%}';
+    const baghdad = '{% link to="/locations/loc-1" text="Baghdad Store" /%}';
+    const warehouse = '{% link to="/locations/loc-9" text="Warehouse" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-1",
+        `${john} added 20 pcs of ${pens} to ${baghdad}. Moved from ${warehouse}.`,
+      ],
+      [
+        "loc-9",
+        `${john} removed 20 pcs of ${pens} from ${warehouse}. Moved to ${baghdad}.`,
+      ],
+      ["loc-9", `${john} removed 20 pcs of ${pens} from ${warehouse}.`],
+    ]);
+  });
 });
 
 /**
@@ -3303,6 +3815,8 @@ describe("updateAsset stock-lowering guard", () => {
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
       id: "asset-1",
       quantity: 5,
+      // The real update includes the pre-write placements; none here.
+      assetLocations: [],
     });
     // why: a reduction also runs the placement guard, which reads the manual
     // placement rows. `clearAllMocks` keeps implementations, so reset it here
@@ -5933,6 +6447,36 @@ describe("moveAssetLocationUnits", () => {
     );
   });
 
+  it("logs the move on the activity log of both locations", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce(null);
+
+    await moveAssetLocationUnits(baseArgs);
+
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const cables = '{% link to="/assets/asset-1" text="USB-C Cables" /%}';
+    const from = '{% link to="/locations/loc-from" text="loc-from" /%}';
+    const to = '{% link to="/locations/loc-to" text="loc-to" /%}';
+    expect(
+      (db.locationNote.createMany as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([args]) => args.data)
+        .map((row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ])
+    ).toEqual([
+      [
+        "loc-to",
+        `${john} added 25 boxes of ${cables} to ${to}. Moved from ${from}.`,
+      ],
+      [
+        "loc-from",
+        `${john} removed 25 boxes of ${cables} from ${from}. Moved to ${to}.`,
+      ],
+    ]);
+  });
+
   it("creates a new destination row when 25/100 are moved to a fresh location", async () => {
     // Source row has 100; no existing destination row.
     mockAssetLocationFindFirst
@@ -8152,10 +8696,6 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       (callback: (tx: unknown) => unknown) => callback(db)
     );
 
-    const { createSystemLocationNote } = await import(
-      "~/modules/location-note/service.server"
-    );
-
     await bulkUpdateAssetLocation({
       lastAuditDateAccess: "hidden",
       bookableScope: null,
@@ -8166,15 +8706,28 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       settings: ASSET_INDEX_SETTINGS,
     });
 
-    const contents = (
-      createSystemLocationNote as ReturnType<typeof vitest.fn>
-    ).mock.calls.map((c) => (c[0] as { content: string }).content);
-
-    expect(contents.length).toBeGreaterThan(0);
-    for (const content of contents) {
-      expect(content).toContain("asset-individual");
-      expect(content).not.toContain("asset-qty");
-    }
+    const rows = (
+      db.locationNote.createMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.flatMap(([args]) =>
+      args.data.map((row: { locationId: string; content: string }) => [
+        row.locationId,
+        row.content,
+      ])
+    );
+    const john = '{% link to="/settings/team/users/user-1" text="John Doe" /%}';
+    const tripod = '{% link to="/assets/asset-individual" text="Tripod" /%}';
+    const oldLoc = '{% link to="/locations/loc-old" text="Old Location" /%}';
+    const newLoc = '{% link to="/locations/loc-new" text="New Location" /%}';
+    expect(rows).toEqual([
+      [
+        "loc-new",
+        `${john} added ${tripod} to ${newLoc}. Moved from ${oldLoc}.`,
+      ],
+      [
+        "loc-old",
+        `${john} removed ${tripod} from ${oldLoc}. Moved to ${newLoc}.`,
+      ],
+    ]);
   });
 });
 

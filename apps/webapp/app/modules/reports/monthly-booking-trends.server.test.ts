@@ -57,7 +57,7 @@ describe("monthlyBookingTrendsReport", () => {
     vi.mocked(db.booking.findMany).mockResolvedValue([] as any);
   });
 
-  it("excludes DRAFT and CANCELLED bookings from the volume scan", async () => {
+  it("excludes DRAFT, CANCELLED and never-checked-out archived bookings from the volume scan", async () => {
     await monthlyBookingTrendsReport({
       organizationId: "org-1",
       timeframe: TIMEFRAME,
@@ -66,8 +66,10 @@ describe("monthlyBookingTrendsReport", () => {
     const args = vi.mocked(db.booking.findMany).mock.calls[0][0] as any;
     // "Total Bookings" here must mean the same thing it means in the
     // top-booked reports: real bookings, not plans (DRAFT) or bookings that
-    // never happened (CANCELLED).
+    // never happened (CANCELLED), and not bookings archived before any
+    // check-out (a discarded draft or an unused reservation).
     expect(args.where.status).toEqual({ notIn: ["DRAFT", "CANCELLED"] });
+    expect(args.where.archivedWithoutCheckin).toBe(false);
     // The row projection carries what the aggregation reads: the archive
     // origin flag and the pivot's asset ids.
     expect(args.select.archivedWithoutCheckin).toBe(true);

@@ -59,8 +59,6 @@ type RolePolicyShape = {
      * "none" = this role's reservations are approved on the spot.
      */
     approvalSetting: "base" | "selfService" | "none";
-    /** Delete is limited to DRAFT bookings. */
-    deleteOnlyDrafts: boolean;
     /** The booking custodian picker is fixed to the user themself. */
     custodianPicker: "anyone" | "self";
     /** The bookings-index bulk-actions menu is shown. */
@@ -172,7 +170,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       bypassTimeLimits: true,
       explicitScanSetting: "none",
       approvalSetting: "none",
-      deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -215,7 +212,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
       approvalSetting: "none",
-      deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -263,7 +259,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
       approvalSetting: "none",
-      deleteOnlyDrafts: false,
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -308,7 +303,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       bypassTimeLimits: false,
       explicitScanSetting: "selfService",
       approvalSetting: "selfService",
-      deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,
@@ -351,7 +345,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       bypassTimeLimits: false,
       explicitScanSetting: "none",
       approvalSetting: "base",
-      deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,

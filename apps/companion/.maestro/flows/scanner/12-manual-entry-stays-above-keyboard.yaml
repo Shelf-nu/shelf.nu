@@ -1,9 +1,9 @@
-# Scanner — manual code entry opens in the top strip, above the keyboard
+# Scanner - manual code entry opens in the camera control row, above the keyboard
 #
-# "Enter code" opens the text field under the status bar, focused, so the
-# keyboard rising from the bottom never covers it. The lookup still runs on
-# Enter. Then, in a batch action, four typed codes grow the drawer until the
-# bottom strip has no room, and the closed pill moves to the top strip.
+# "Enter code" opens the text field in place of the pill, in the control row
+# under the mode pills, focused, so the keyboard rising from the bottom never
+# covers it. The lookup still runs on Enter. Then, in a batch action, four
+# typed codes grow the drawer, and the closed pill stays reachable above it.
 #
 # Fixture: SAM-0001..SAM-0004 exist in GRANULAR WORKSPACE.
 # No login step: runs against the session already on the simulator.
@@ -61,7 +61,7 @@ appId: com.shelf.companion.carlos
     timeout: 5000
 - tapOn: "Close manual entry"
 
-# ── 2. Batch mode: four scanned items push the pill to the top strip ──
+# ── 2. Batch mode: four scanned items, the pill stays above the drawer ──
 # The pill's label carries a state suffix once selected, and an earlier run
 # may have left items in the drawer.
 - tapOn: "Scanner action: Assign.*"
@@ -106,8 +106,8 @@ appId: com.shelf.companion.carlos
     visible: "4 items scanned"
     timeout: 15000
 - tapOn: "Close manual entry"
-# With four items the drawer leaves no room in the bottom strip, so the
-# closed pill sits in the top strip and stays reachable.
+# The drawer is capped below the control row, so the closed pill stays
+# reachable however long the list grows.
 - assertVisible:
     id: "dev-scan-toggle"
-- takeScreenshot: manual-entry-pill-in-top-strip-with-drawer
+- takeScreenshot: manual-entry-pill-above-drawer

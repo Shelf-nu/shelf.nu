@@ -455,7 +455,7 @@ function LinkQrContent() {
                 color={colors.muted}
                 accessibilityLabel="Loading more assets"
               />
-            ) : null
+            ) : undefined
           }
         />
       )}

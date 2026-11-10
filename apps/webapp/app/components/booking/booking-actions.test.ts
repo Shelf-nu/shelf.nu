@@ -49,6 +49,7 @@ const ALL_KEYS: BookingActionKey[] = [
   "extend",
   "cancel",
   "archive",
+  "discardDraft",
   "duplicate",
   "bookingDocument",
   "checkinReceipt",
@@ -277,7 +278,7 @@ describe("resolveBookingActions: who may act", () => {
     expect(actions.duplicate.visible).toBe(true);
   });
 
-  it("never offers Base check out, check in, extend, cancel or archive", () => {
+  it("never offers Base check out, check in, extend, cancel or delete", () => {
     const statuses = Object.values(BookingStatus);
     for (const status of statuses) {
       const actions = resolveFor(
@@ -295,11 +296,48 @@ describe("resolveBookingActions: who may act", () => {
         "checkIn",
         "extend",
         "cancel",
-        "archive",
+        "delete",
       ] as const) {
         expect(actions[key].visible, `${key} while ${status}`).toBe(false);
       }
     }
+  });
+
+  it("offers a Base custodian Archive on their own archivable booking only", () => {
+    const roles = [OrganizationRoles.BASE];
+    const past = new Date("2020-01-01T00:00:00Z");
+
+    expect(
+      resolveFor(
+        buildBooking({ custodianUserId: ME, status: BookingStatus.COMPLETE }),
+        { roles }
+      ).archive.visible
+    ).toBe(true);
+    expect(
+      resolveFor(
+        buildBooking({
+          custodianUserId: ME,
+          status: BookingStatus.RESERVED,
+          to: past,
+        }),
+        { roles }
+      ).archive.visible
+    ).toBe(true);
+    expect(
+      resolveFor(
+        buildBooking({ custodianUserId: ME, status: BookingStatus.DRAFT }),
+        { roles }
+      ).archive.visible
+    ).toBe(false);
+    expect(
+      resolveFor(
+        buildBooking({
+          custodianUserId: OTHER,
+          status: BookingStatus.COMPLETE,
+        }),
+        { roles }
+      ).archive.visible
+    ).toBe(false);
   });
 
   it("still offers a Base custodian Duplicate and the booking document", () => {
@@ -311,20 +349,40 @@ describe("resolveBookingActions: who may act", () => {
     expect(actions.bookingDocument.visible).toBe(true);
   });
 
-  it("limits a Self Service custodian's Delete to drafts", () => {
-    const own = { custodianUserId: ME };
-    const roles = [OrganizationRoles.SELF_SERVICE];
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "never offers a %s custodian Delete, and offers Discard draft on a draft instead",
+    (role) => {
+      const own = { custodianUserId: ME };
+      for (const status of Object.values(BookingStatus)) {
+        const actions = resolveFor(buildBooking({ ...own, status }), {
+          roles: [role],
+        });
+        expect(actions.delete.visible, `delete while ${status}`).toBe(false);
+        expect(
+          actions.discardDraft.visible,
+          `discardDraft while ${status}`
+        ).toBe(status === BookingStatus.DRAFT);
+      }
+    }
+  );
 
-    expect(
-      resolveFor(buildBooking({ ...own, status: BookingStatus.DRAFT }), {
-        roles,
-      }).delete.visible
-    ).toBe(true);
-    expect(
-      resolveFor(buildBooking({ ...own, status: BookingStatus.RESERVED }), {
-        roles,
-      }).delete.visible
-    ).toBe(false);
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "keeps Discard draft off a %s viewer's view of someone else's draft",
+    (role) => {
+      const actions = resolveFor(
+        buildBooking({ custodianUserId: OTHER, status: BookingStatus.DRAFT }),
+        { roles: [role] }
+      );
+      expect(actions.discardDraft.visible).toBe(false);
+    }
+  );
+
+  it("offers a role that may delete Delete on a draft, not Discard draft", () => {
+    const actions = resolveFor(buildBooking({ status: BookingStatus.DRAFT }), {
+      roles: [OrganizationRoles.MANAGER],
+    });
+    expect(actions.delete.visible).toBe(true);
+    expect(actions.discardDraft.visible).toBe(false);
   });
 
   it("offers the PDFs to a role that writes every booking on someone else's booking", () => {

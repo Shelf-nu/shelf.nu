@@ -29,7 +29,7 @@ import {
   type ReactNode,
 } from "react";
 import { Alert, AppState } from "react-native";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "expo-router";
 import { api } from "@/lib/api";
 import {
   derivePushScreenState,

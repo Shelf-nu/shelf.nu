@@ -137,6 +137,7 @@ import {
   roleReservesAsRequest,
   BOOKING_APPROVAL_SWITCHES_SELECT,
   BOOKING_APPROVAL_ENABLED_WHERE,
+  type BookingApprovalSwitches,
 } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -670,6 +671,9 @@ export function getActionTextFromTransition(
     case "COMPLETE->ARCHIVED":
     case "RESERVED->ARCHIVED":
       return "archived the booking";
+    // "Discard draft": members who may not delete drop a draft by archiving it.
+    case "DRAFT->ARCHIVED":
+      return "discarded the draft";
     default:
       return "changed the booking status";
   }
@@ -3173,6 +3177,171 @@ async function readFullCheckoutDepartures(
 }
 
 /**
+ * Whether the acting user approves a pending request by checking it out.
+ *
+ * An administrator or manager is both the approver and the person handing the
+ * gear over, so making them click Approve before Check out would be two steps
+ * for one decision. A custodian who may not approve (Self service, Base) is
+ * refused by the caller instead.
+ *
+ * @param actorUserId - The acting user; a scheduler-driven check-out has none
+ * @param organizationId - The booking's organization
+ * @returns The approver and the moment of approval, or `null` when the actor
+ * may not approve
+ */
+async function approvalOnCheckout({
+  actorUserId,
+  organizationId,
+}: {
+  actorUserId: User["id"] | null | undefined;
+  organizationId: Organization["id"];
+}) {
+  if (!actorUserId) return null;
+  const mayApprove = await hasPermission({
+    userId: actorUserId,
+    organizationId,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.approve,
+  });
+  if (!mayApprove) return null;
+  const approver = await getUserByID(actorUserId, {
+    select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
+  });
+  return { approver, approvedAt: new Date() };
+}
+
+/**
+ * The audit trail of an approval made by checking the request out: the same
+ * system note and `BOOKING_APPROVED` event `approveBooking` writes, inside the
+ * check-out's transaction.
+ */
+async function recordApprovalOnCheckout(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  {
+    bookingId,
+    organizationId,
+    approver,
+  }: {
+    bookingId: Booking["id"];
+    organizationId: Organization["id"];
+    approver: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
+  }
+) {
+  await createSystemBookingNote(
+    {
+      bookingId,
+      organizationId,
+      content: `${wrapUserLinkForNote(
+        approver
+      )} approved the booking request by checking it out`,
+    },
+    tx
+  );
+  await recordEvent(
+    {
+      organizationId,
+      actorUserId: approver.id,
+      action: "BOOKING_APPROVED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+    },
+    tx
+  );
+}
+
+/** What {@link approvalOnCheckout} resolved for the acting user. */
+type CheckoutApproval = Awaited<ReturnType<typeof approvalOnCheckout>>;
+
+/**
+ * The approval gate every check-out runs inside its transaction, after the
+ * booking row lock: a pending request is approved by an approver's check-out
+ * and refused for anyone else. Both reads go through `tx`, so a revert that
+ * cleared the approval after the caller's pre-transaction read is seen here.
+ *
+ * @param tx - Prisma transaction client holding the booking row lock
+ * @param args.bookingId - Booking being checked out
+ * @param args.organizationId - The booking's organization
+ * @param args.actorUserId - The acting user; a scheduler-driven check-out has none
+ * @param args.resolvedApproval - The actor's approval, when the caller already
+ *   resolved it before the transaction; left out, it is resolved here only if
+ *   the booking turns out to be pending
+ * @returns The approval fields to write with the status change; empty when the
+ *   booking needs no approval
+ * @throws {ShelfError} 404 when the booking is gone
+ * @throws {ShelfError} 403 when the booking is pending and the actor may not approve
+ */
+async function settleApprovalWithinTx(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  {
+    bookingId,
+    organizationId,
+    actorUserId,
+    resolvedApproval,
+  }: {
+    bookingId: Booking["id"];
+    organizationId: Organization["id"];
+    actorUserId: User["id"] | null | undefined;
+    resolvedApproval?: CheckoutApproval;
+  }
+): Promise<Pick<Prisma.BookingUpdateInput, "approvedAt" | "approvedBy">> {
+  const approvalSwitches = await tx.bookingSettings.findUnique({
+    where: { organizationId },
+    select: BOOKING_APPROVAL_SWITCHES_SELECT,
+  });
+  if (!isBookingApprovalEnabled(approvalSwitches)) return {};
+
+  const approvalRow = await tx.booking.findUnique({
+    where: { id: bookingId, organizationId },
+    select: { status: true, approvedAt: true },
+  });
+  if (!approvalRow) {
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      additionalData: { bookingId, organizationId },
+      label,
+      status: 404,
+    });
+  }
+  if (
+    !isBookingPendingApproval({
+      status: approvalRow.status,
+      approvedAt: approvalRow.approvedAt ?? null,
+      requireBookingApproval: true,
+    })
+  ) {
+    return {};
+  }
+
+  const approval =
+    resolvedApproval !== undefined
+      ? resolvedApproval
+      : await approvalOnCheckout({ actorUserId, organizationId });
+  if (!approval) {
+    assertBookingIsApproved({
+      status: approvalRow.status,
+      approvedAt: approvalRow.approvedAt ?? null,
+      requireBookingApproval: true,
+      bookingId,
+    });
+    return {};
+  }
+
+  await recordApprovalOnCheckout(tx, {
+    bookingId,
+    organizationId,
+    approver: approval.approver,
+  });
+  return {
+    approvedAt: approval.approvedAt,
+    approvedBy: { connect: { id: approval.approver.id } },
+  };
+}
+
+/**
  * Transaction-body helper shared by {@link checkoutBooking} and
  * {@link fulfilModelRequestsAndCheckout}.
  *
@@ -3209,94 +3378,17 @@ async function readFullCheckoutDepartures(
  * @param args.hasKits - Whether the kit update should fire
  * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
  * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
+ * @param args.resolvedApproval - The actor's approval, if already resolved before the transaction
  * @returns `departedSlices`: every slice whose units left in this call, each
  *   with its asset, read before the stamps made them indistinguishable from
  *   slices an earlier batch sent out. Callers name these assets in the
  *   post-commit "checked out" line.
  * @throws {ShelfError} 400 when the booking holds no items to check out
+ * @throws {ShelfError} 403 when the booking is a pending request and the actor may not approve
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-/**
- * Whether the acting user approves a pending request by checking it out.
- *
- * An administrator or manager is both the approver and the person handing the
- * gear over, so making them click Approve before Check out would be two steps
- * for one decision. A custodian who may not approve (Self service, Base) is
- * refused by the caller instead.
- *
- * @param actorUserId - The acting user; a scheduler-driven check-out has none
- * @param organizationId - The booking's organization
- * @returns The approver and the moment of approval, or `null` when the actor
- * may not approve
- */
-async function approvalOnCheckout({
-  actorUserId,
-  organizationId,
-}: {
-  actorUserId: User["id"] | null | undefined;
-  organizationId: Organization["id"];
-}) {
-  if (!actorUserId) return null;
-  const mayApprove = await hasPermission({
-    userId: actorUserId,
-    organizationId,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.approve,
-  });
-  if (!mayApprove) return null;
-  const approver = await getUserByID(actorUserId, {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      displayName: true,
-    } satisfies Prisma.UserSelect,
-  });
-  return { approver, approvedAt: new Date() };
-}
-
-/**
- * The audit trail of an approval made by checking the request out: the same
- * system note and `BOOKING_APPROVED` event `approveBooking` writes, inside the
- * check-out's transaction.
- */
-async function recordApprovalOnCheckout(
-  tx: any,
-  {
-    bookingId,
-    organizationId,
-    approver,
-  }: {
-    bookingId: Booking["id"];
-    organizationId: Organization["id"];
-    approver: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
-  }
-) {
-  await createSystemBookingNote(
-    {
-      bookingId,
-      organizationId,
-      content: `${wrapUserLinkForNote(
-        approver
-      )} approved the booking request by checking it out`,
-    },
-    tx
-  );
-  await recordEvent(
-    {
-      organizationId,
-      actorUserId: approver.id,
-      action: "BOOKING_APPROVED",
-      entityType: "BOOKING",
-      entityId: bookingId,
-      bookingId,
-    },
-    tx
-  );
-}
-
 async function checkoutBookingWritesWithinTx(
   tx: any,
   {
@@ -3315,9 +3407,15 @@ async function checkoutBookingWritesWithinTx(
     sourceLocations,
     hints,
     revealOtherBookings = false,
+    resolvedApproval,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
+    /**
+     * The actor's approval when the caller resolved it before the
+     * transaction, so it is not resolved again while the row lock is held.
+     */
+    resolvedApproval?: CheckoutApproval;
     /** Acting user's locale and time zone, for the day a pool refusal names. */
     hints?: ClientHint;
     /**
@@ -3386,51 +3484,18 @@ async function checkoutBookingWritesWithinTx(
     });
   }
 
-  // Approval gate, re-read through `tx` so it is authoritative (same doctrine
-  // as the locked status check): a pending reservation request must not reach
-  // ONGOING through EITHER full-checkout path (checkoutBooking or
-  // fulfilModelRequestsAndCheckout), no matter what the pre-tx reads said.
-  const approvalGate = await tx.bookingSettings.findUnique({
-    where: { organizationId },
-    select: BOOKING_APPROVAL_SWITCHES_SELECT,
-  });
-  if (isBookingApprovalEnabled(approvalGate)) {
-    const approvalRow = await tx.booking.findUnique({
-      where: { id: bookingId, organizationId },
-      select: { status: true, approvedAt: true },
-    });
-    if (
-      approvalRow &&
-      isBookingPendingApproval({
-        status: approvalRow.status,
-        approvedAt: approvalRow.approvedAt,
-        requireBookingApproval: true,
-      })
-    ) {
-      // Someone who may approve the request approves it by checking it out:
-      // the hand-over is the decision, in one step. Anyone else is refused.
-      const approval = await approvalOnCheckout({
-        actorUserId: checkedOutById,
-        organizationId,
-      });
-      if (!approval) {
-        assertBookingIsApproved({
-          status: approvalRow.status,
-          approvedAt: approvalRow.approvedAt,
-          requireBookingApproval: true,
-          bookingId,
-        });
-      } else {
-        dataToUpdate.approvedAt = approval.approvedAt;
-        dataToUpdate.approvedBy = { connect: { id: approval.approver.id } };
-        await recordApprovalOnCheckout(tx, {
-          bookingId,
-          organizationId,
-          approver: approval.approver,
-        });
-      }
-    }
-  }
+  // Approval gate under the row lock: a pending request must not reach
+  // ONGOING through either full check-out path, whatever the pre-transaction
+  // reads said.
+  Object.assign(
+    dataToUpdate,
+    await settleApprovalWithinTx(tx, {
+      bookingId,
+      organizationId,
+      actorUserId: checkedOutById,
+      resolvedApproval,
+    })
+  );
 
   // In the transaction that stamps the kits, so a kit put in custody or taken
   // out elsewhere since the caller's read is still refused.
@@ -4375,6 +4440,9 @@ export async function checkoutBooking({
       where: { organizationId },
       select: BOOKING_APPROVAL_SWITCHES_SELECT,
     });
+    // Resolved once here and handed to the transaction, which re-checks the
+    // pending state under the row lock without resolving the approver again.
+    let resolvedApproval: CheckoutApproval | undefined;
     if (
       isBookingPendingApproval({
         status: bookingFound.status,
@@ -4382,15 +4450,20 @@ export async function checkoutBooking({
         requireBookingApproval: isBookingApprovalEnabled(
           checkoutApprovalSettings
         ),
-      }) &&
-      !(await approvalOnCheckout({ actorUserId: userId, organizationId }))
+      })
     ) {
-      assertBookingIsApproved({
-        status: bookingFound.status,
-        approvedAt: bookingFound.approvedAt,
-        requireBookingApproval: true,
-        bookingId: id,
+      resolvedApproval = await approvalOnCheckout({
+        actorUserId: userId,
+        organizationId,
       });
+      if (!resolvedApproval) {
+        assertBookingIsApproved({
+          status: bookingFound.status,
+          approvedAt: bookingFound.approvedAt,
+          requireBookingApproval: true,
+          bookingId: id,
+        });
+      }
     }
 
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
@@ -4747,6 +4820,7 @@ export async function checkoutBooking({
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
+          resolvedApproval,
         }));
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -10801,6 +10875,33 @@ export async function partialCheckoutBooking({
 
     const result = await db.$transaction(
       async (tx) => {
+        // Authoritative status check, under a row lock held until this
+        // transaction commits. The status read above happens outside it, so a
+        // concurrent archive, cancellation or revert to draft could otherwise
+        // commit in between and this write would land assets out on a closed
+        // booking (or overwrite an ARCHIVED one back to ONGOING/OVERDUE).
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
+        assertBookingIsOpen({
+          status: lockedStatus,
+          operation: "check out",
+          bookingId: id,
+        });
+        if (lockedStatus === BookingStatus.DRAFT) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it out. Reload it and try again.",
+            additionalData: { bookingId: id },
+          });
+        }
+
         /**
          * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
          * row-lock pattern — lock → re-read remaining inside tx → enforce cap →
@@ -11652,131 +11753,50 @@ export async function partialCheckoutBooking({
         }
 
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
+        // Decided on the locked status: a concurrent first scan may already
+        // have moved it on.
         let bookingStatusChanged = false;
-        if (bookingFound.status === BookingStatus.RESERVED) {
-          // The pre-tx snapshot said RESERVED. Decide the transition on the
-          // row as it is NOW, under a lock held until commit: a revert to
-          // DRAFT or a cancellation that committed since the snapshot must
-          // refuse this scan, and a first scan that already moved the booking
-          // to ONGOING must not be repeated. A plain re-read takes no lock
-          // under READ COMMITTED, so it could still race the update below.
-          const lockedStatus = await lockBookingForStatusCheck(
-            tx,
-            id,
-            organizationId
-          );
+        if (lockedStatus === BookingStatus.RESERVED) {
+          // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
+          // The approval gate lives here, not only in the web dialog, because
+          // this is the phone scanner's way into ONGOING.
+          const transitionData: Prisma.BookingUpdateInput = {
+            status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+            ...(await settleApprovalWithinTx(tx, {
+              bookingId: id,
+              organizationId,
+              actorUserId: userId,
+            })),
+          };
+
+          // Early checkout: if the booking hasn't started yet and the user chose
+          // to adjust the date (via the early-checkout dialog), move `from` to now
+          // and preserve the original start in `originalFrom`. Mirrors the
+          // all-at-once checkoutBooking path so a partial early checkout doesn't
+          // leave a future start time while custody has already begun.
           if (
-            lockedStatus !== BookingStatus.RESERVED &&
-            lockedStatus !== BookingStatus.ONGOING &&
-            lockedStatus !== BookingStatus.OVERDUE
+            bookingFound.from &&
+            isBookingEarlyCheckout(bookingFound.from) &&
+            intentChoice === CheckoutIntentEnum["with-adjusted-date"]
           ) {
-            throw new ShelfError({
-              cause: null,
-              status: 400,
-              label,
-              message:
-                "This booking can't be checked out in its current status. Only reserved, ongoing, or overdue bookings can have items checked out.",
-              additionalData: { bookingId: id, status: lockedStatus },
-              shouldBeCaptured: false,
-            });
+            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
+            const fromDateStr = DateTime.fromJSDate(new Date(), {
+              zone: hints.timeZone,
+            }).toFormat(DATE_TIME_FORMAT);
+            transitionData.from = DateTime.fromFormat(
+              fromDateStr,
+              DATE_TIME_FORMAT,
+              { zone: hints.timeZone }
+            ).toJSDate();
           }
-          // A concurrent first scan may already have moved the booking on;
-          // then this batch only checks out its items.
-          if (lockedStatus === BookingStatus.RESERVED) {
-            // Approval gate: a pending reservation request cannot start its
-            // checkout. This is the mobile scanner's entry point into ONGOING,
-            // so the guard must live here, not just in the web dialog. Both
-            // reads run on `tx` after the row lock above, so a revert that
-            // cleared the approval after the pre-tx snapshot is seen here and
-            // nothing falls back to that snapshot.
-            const [partialApprovalGate, approvalRow] = await Promise.all([
-              tx.bookingSettings.findUnique({
-                where: { organizationId },
-                select: BOOKING_APPROVAL_SWITCHES_SELECT,
-              }),
-              tx.booking.findUnique({
-                where: { id, organizationId },
-                select: { status: true, approvedAt: true },
-              }),
-            ]);
-            if (!approvalRow) {
-              throw new ShelfError({
-                cause: null,
-                message: "Booking not found",
-                additionalData: { bookingId: id, organizationId },
-                label,
-                status: 404,
-              });
-            }
-            // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
-            const transitionData: Prisma.BookingUpdateInput = {
-              status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
-            };
 
-            if (
-              isBookingPendingApproval({
-                status: approvalRow.status,
-                approvedAt: approvalRow.approvedAt ?? null,
-                requireBookingApproval:
-                  isBookingApprovalEnabled(partialApprovalGate),
-              })
-            ) {
-              // An approver's first scan approves the request in the same
-              // step; anyone else is refused.
-              const approval = await approvalOnCheckout({
-                actorUserId: userId,
-                organizationId,
-              });
-              if (!approval) {
-                assertBookingIsApproved({
-                  status: approvalRow.status,
-                  approvedAt: approvalRow.approvedAt ?? null,
-                  requireBookingApproval: true,
-                  bookingId: id,
-                });
-              } else {
-                transitionData.approvedAt = approval.approvedAt;
-                transitionData.approvedBy = {
-                  connect: { id: approval.approver.id },
-                };
-                await recordApprovalOnCheckout(tx, {
-                  bookingId: id,
-                  organizationId,
-                  approver: approval.approver,
-                });
-              }
-            }
-
-            // Early checkout: if the booking hasn't started yet and the user chose
-            // to adjust the date (via the early-checkout dialog), move `from` to now
-            // and preserve the original start in `originalFrom`. Mirrors the
-            // all-at-once checkoutBooking path so a partial early checkout doesn't
-            // leave a future start time while custody has already begun.
-            if (
-              bookingFound.from &&
-              isBookingEarlyCheckout(bookingFound.from) &&
-              intentChoice === CheckoutIntentEnum["with-adjusted-date"]
-            ) {
-              transitionData.originalFrom =
-                plannedStartToPreserve(bookingFound);
-              const fromDateStr = DateTime.fromJSDate(new Date(), {
-                zone: hints.timeZone,
-              }).toFormat(DATE_TIME_FORMAT);
-              transitionData.from = DateTime.fromFormat(
-                fromDateStr,
-                DATE_TIME_FORMAT,
-                { zone: hints.timeZone }
-              ).toJSDate();
-            }
-
-            await tx.booking.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
-              where: { id },
-              data: transitionData,
-              select: { id: true },
-            });
-            bookingStatusChanged = true;
-          }
+          await tx.booking.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
+            where: { id },
+            data: transitionData,
+            select: { id: true },
+          });
+          bookingStatusChanged = true;
         }
 
         // BOOKING ACTIVITY LOG: Log partial check-out activity.
@@ -13144,12 +13164,31 @@ export async function createKitBookingNote({
   }
 }
 
+/**
+ * Moves a booking to ARCHIVED.
+ *
+ * Two entry points share this write. A plain archive takes a booking that is
+ * done ({@link isBookingArchivable}). "Discard draft" (`discardDraft: true`)
+ * takes only a DRAFT: it is how members without `booking:delete` drop a draft
+ * from their list while the record stays in the workspace history. Either way
+ * the caller has already checked `booking:archive` and ownership.
+ *
+ * @param args.id - The booking to archive
+ * @param args.organizationId - The caller's workspace; the booking must be in it
+ * @param args.userId - The actor, for the activity note and event
+ * @param args.discardDraft - Accept a DRAFT and nothing else
+ * @returns The archived booking
+ * @throws {ShelfError} 404 when the booking is not in the workspace, 400 when
+ *   its status cannot be archived through this entry point
+ */
 export async function archiveBooking({
   id,
   organizationId,
   userId,
+  discardDraft = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId?: string;
+  discardDraft?: boolean;
 }) {
   try {
     const booking = await db.booking
@@ -13179,7 +13218,19 @@ export async function archiveBooking({
      * ONGOING/OVERDUE are rejected — their assets are still CHECKED_OUT.
      * @see {@link isBookingArchivable}
      */
-    if (!isBookingArchivable({ status: booking.status, to: booking.to })) {
+    if (discardDraft) {
+      if (booking.status !== BookingStatus.DRAFT) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          message: "Only draft bookings can be discarded.",
+        });
+      }
+    } else if (
+      !isBookingArchivable({ status: booking.status, to: booking.to })
+    ) {
       throw new ShelfError({
         cause: null,
         label,
@@ -13189,10 +13240,14 @@ export async function archiveBooking({
     }
 
     /**
-     * A booking archived straight from RESERVED was never checked in, so flag
-     * it: return-behaviour reports (Booking Compliance) exclude these.
+     * A booking archived before any check-out (a past-due RESERVED, or a
+     * discarded DRAFT) was never returned, so flag it: return-behaviour
+     * reports (Booking Compliance, returned-booking counts) and the lifecycle
+     * progress bar exclude these.
      */
-    const archivedWithoutCheckin = booking.status === BookingStatus.RESERVED;
+    const archivedWithoutCheckin =
+      booking.status === BookingStatus.RESERVED ||
+      booking.status === BookingStatus.DRAFT;
 
     /**
      * Guard the write on the status we just read. If a concurrent checkout
@@ -13475,6 +13530,51 @@ export async function cancelBooking({
 }
 
 /**
+ * How many reservation requests wait for a decision, for the count on the
+ * Bookings menu. Zero when the workspace does not require approval or the
+ * viewer cannot approve, so nobody sees a number they cannot act on.
+ *
+ * @param args.organizationId - The current workspace
+ * @param args.userId - The viewer
+ * @param args.roles - The viewer's roles in the workspace
+ * @param args.settings - The workspace's approval switches
+ * @returns The number of pending requests whose end date has not passed
+ */
+export async function getPendingApprovalCount({
+  organizationId,
+  userId,
+  roles,
+  settings,
+}: {
+  organizationId: Organization["id"];
+  userId: User["id"];
+  roles: OrganizationRoles[];
+  settings: Partial<BookingApprovalSwitches> | null | undefined;
+}): Promise<number> {
+  if (!isBookingApprovalEnabled(settings)) return 0;
+  const mayApprove = await hasPermission({
+    organizationId,
+    userId,
+    roles,
+    // why: no workspace switch grants this action.
+    workspace: null,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.approve,
+  });
+  if (!mayApprove) return 0;
+  return db.booking.count({
+    where: {
+      organizationId,
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+      // A request whose end date passed is dead, not waiting: the Expired
+      // option lists it, the count does not.
+      to: { gte: new Date() },
+    },
+  });
+}
+
+/**
  * Approves a pending booking reservation request.
  *
  * Only meaningful in orgs with approval on for a role: stamps
@@ -13557,12 +13657,7 @@ export async function approveBooking({
     // Resolved before the write so the note can be composed inside the same
     // transaction as the approval.
     const approver = await getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      } satisfies Prisma.UserSelect,
+      select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
     });
 
     /**
@@ -13628,14 +13723,7 @@ export async function approveBooking({
         // Only "no row matched" means someone else approved first. Anything
         // else (a lost connection, a failed note write) is a real failure and
         // must surface as one rather than as a reassuring race message.
-        if (
-          cause &&
-          typeof cause === "object" &&
-          "code" in cause &&
-          (cause as { code?: string }).code === "P2025"
-        ) {
-          return null;
-        }
+        if (isNotFoundError(cause)) return null;
         throw cause;
       });
 
@@ -13760,20 +13848,43 @@ export async function revertBookingToDraft({
       });
     }
 
-    const draftBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
-      where: { id: booking.id },
-      // Clear any earlier approval: a reverted request must be re-approved
-      // after it is edited and re-reserved.
-      data: {
-        status: BookingStatus.DRAFT,
-        approvedAt: null,
-        approvedById: null,
-      },
-      // The custodian (and other notification recipients) are emailed below,
-      // so pull the same payload the other lifecycle emails use.
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    });
+    /**
+     * Guard the write on the RESERVED status just read. If a concurrent archive
+     * or check-out moved the booking on in between, the update matches no row
+     * and the revert is refused, instead of pulling an archived or checked-out
+     * booking back to DRAFT (where its `archivedWithoutCheckin` flag would
+     * linger on a booking that later goes out).
+     */
+    const draftBooking = await db.booking
+      .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id, status: BookingStatus.RESERVED },
+        // Clear any earlier approval: a reverted request must be re-approved
+        // after it is edited and re-reserved.
+        data: {
+          status: BookingStatus.DRAFT,
+          approvedAt: null,
+          approvedById: null,
+        },
+        // The custodian (and other notification recipients) are emailed below,
+        // so pull the same payload the other lifecycle emails use.
+        include: BOOKING_INCLUDE_FOR_EMAIL,
+      })
+      .catch((cause: unknown) => {
+        if (isNotFoundError(cause)) {
+          // `cause: null`: a not-found cause would set the status to 404.
+          throw new ShelfError({
+            cause: null,
+            label,
+            message:
+              "This booking's status changed before it could be reverted to draft. Please refresh and try again.",
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: { id, organizationId },
+          });
+        }
+        throw cause;
+      });
 
     // Add activity log for booking revert to draft
     if (userId) {
@@ -16109,21 +16220,15 @@ export async function assertBookingDeleteConfirmed({
  * @param booking - Org-scoped booking identifier
  * @param hints - Client hints used to format email subject lines and times
  * @param userId - Optional editor user id, used to skip notifying the actor
- * @param options.onlyIfDraft - The caller's policy allows deleting drafts only
- *          (`access.policy.bookings.deleteOnlyDrafts`). The delete then
- *          matches a DRAFT row only, so a booking reserved after the caller's
- *          check is refused instead of deleted.
  * @returns The deleted booking row (with the includes needed for email
  *          rendering and the post-tx caller).
- * @throws {ShelfError} 404 if the booking does not exist; 403 when
- *          `onlyIfDraft` is set and the booking is no longer a draft; otherwise
- *          wraps any underlying Prisma/email failure.
+ * @throws {ShelfError} 404 if the booking does not exist; otherwise wraps any
+ *          underlying Prisma/email failure.
  */
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint,
-  userId?: string,
-  options: { onlyIfDraft?: boolean } = {}
+  userId?: string
 ) {
   const { id, organizationId } = booking;
   const currentBooking = await db.booking.findUnique({
@@ -16188,41 +16293,18 @@ export async function deleteBooking(
      * atomicity rationale.
      */
     const b = await db.$transaction(async (tx) => {
-      const deleted = await tx.booking
-        .delete({
-          where: {
-            id,
-            organizationId,
-            ...(options.onlyIfDraft ? { status: BookingStatus.DRAFT } : {}),
-          },
-          include: {
-            ...BOOKING_COMMON_INCLUDE,
-            ...BOOKING_INCLUDE_FOR_EMAIL,
-            bookingAssets: {
-              include: {
-                asset: { select: { id: true } },
-              },
+      const deleted = await tx.booking.delete({
+        where: { id, organizationId },
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true } },
             },
           },
-        })
-        .catch((cause: unknown) => {
-          // With `onlyIfDraft`, no matching row means the booking stopped
-          // being a draft after the caller's check.
-          if (options.onlyIfDraft && isNotFoundError(cause)) {
-            // `cause: null`: a not-found cause would set the status to 404.
-            throw new ShelfError({
-              cause: null,
-              label,
-              message:
-                "You are not authorized to delete this booking. Only draft bookings can be deleted.",
-              status: 403,
-              shouldBeCaptured: false,
-              additionalData: { id, organizationId },
-            });
-          }
-          throw cause;
-        });
-
+        },
+      });
       /** Assets that were checked out on an ONGOING/OVERDUE booking need
        * terminal-status reconciliation, NOT a blanket flip to AVAILABLE.
        * The cascade above has already removed this booking's
@@ -16597,8 +16679,8 @@ export async function getBookingsForCalendar(params: {
         page: 1,
         bookingFrom: startDate,
         bookingTo: endDate,
-        // Calendar events carry no asset data — the mapping below projects
-        // booking scalars, two names and the tags — so the per-booking asset
+        // Calendar events carry no asset data (the mapping below projects
+        // booking scalars, two names and the tags), so the per-booking asset
         // subtree is pure transfer cost here.
         includeAssets: false,
         // Only `bookings` is read below; skip the COUNT companion query.
@@ -17589,10 +17671,8 @@ export async function assertSelectAllWithinOwnership({
  *
  * The selection is the explicit ids, or with select-all every booking the
  * list shows for its filters, and in both cases only the bookings the caller
- * may act on (see {@link getBulkBookingsWhereInput}). Roles whose
- * policy limits delete to drafts are refused the whole
- * request when the selection contains any non-draft booking, the same rule
- * `assertCanDeleteBooking` applies to a single delete.
+ * may act on (see {@link getBulkBookingsWhereInput}). The route has already
+ * checked `booking:delete`, which only roles that may delete any status hold.
  *
  * @param params.bookingIds - Selected booking ids, or the select-all key
  * @param params.organizationId - The caller's workspace
@@ -17701,24 +17781,6 @@ export async function bulkDeleteBookings({
       label,
     });
 
-    // Roles whose policy limits delete to drafts may not delete a selection
-    // that contains anything else. The whole request is refused rather than
-    // silently deleting part of it.
-    if (
-      access.policy.bookings.deleteOnlyDrafts &&
-      bookings.some((booking) => booking.status !== BookingStatus.DRAFT)
-    ) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
-        status: 403,
-        shouldBeCaptured: false,
-        additionalData: { bookingIds, organizationId },
-      });
-    }
-
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
@@ -17730,36 +17792,13 @@ export async function bulkDeleteBookings({
     );
 
     await db.$transaction(async (tx) => {
-      /**
-       * Deleting all selected bookings. For a drafts-only role the write
-       * re-checks the status itself: a booking reserved after the read above
-       * matches nothing, and a short count refuses the whole request so the
-       * transaction rolls back before any note, reconciliation or email.
-       */
-      const { count } = await tx.booking.deleteMany({
+      /** Deleting all selected bookings */
+      await tx.booking.deleteMany({
         where: {
           id: { in: bookings.map((booking) => booking.id) },
           organizationId,
-          ...(access.policy.bookings.deleteOnlyDrafts
-            ? { status: BookingStatus.DRAFT }
-            : {}),
         },
       });
-
-      if (
-        access.policy.bookings.deleteOnlyDrafts &&
-        count !== bookings.length
-      ) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message:
-            "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
-          status: 403,
-          shouldBeCaptured: false,
-          additionalData: { bookingIds, organizationId },
-        });
-      }
 
       /** Making assets and kits available */
       if (overdueOrOngoingBookings.length > 0) {

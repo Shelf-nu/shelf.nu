@@ -171,9 +171,15 @@ describe("AssetImage thumbnail resilience", () => {
     // The expired preview asset triggers refresh-main-image, not the thumbnail
     // endpoint — and the 429 must be swallowed without crashing.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain(
-      "/api/asset/refresh-main-image"
+    const refreshUrl = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://localhost"
     );
+    expect(refreshUrl.pathname).toBe("/api/asset/refresh-main-image");
+    // The server signs the image stored on the asset row, so only the id is
+    // sent; a path in the query string would only reach URLs and logs.
+    expect(refreshUrl.searchParams.get("assetId")).toBeTruthy();
+    expect(refreshUrl.searchParams.has("mainImage")).toBe(false);
     expect(screen.getAllByAltText("My asset").length).toBeGreaterThan(0);
   });
 

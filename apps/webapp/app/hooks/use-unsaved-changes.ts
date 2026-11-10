@@ -5,7 +5,8 @@
  * with, and guards leaving the page while it does.
  *
  * Dirty state is a diff of two `FormData` snapshots: a baseline read one
- * frame after mount (and again after a successful save or a Discard), and
+ * frame after mount (and again after a successful save, a Discard, or a
+ * navigation that leaves the form showing another record), and
  * the current values, re-read after any input/change/click/keyup and on a
  * one-second interval. Widgets that submit through hidden inputs are
  * covered without per-input wiring. Comparisons pause while a navigation
@@ -222,6 +223,15 @@ export function useUnsavedChanges({
   /** Set when a re-baseline is asked for mid-navigation; runs on idle. */
   const pendingCleanRef = useRef(false);
 
+  /**
+   * The form's page (see `formPagePathname`) when the baseline was read.
+   * React Router keeps a route component mounted when only its params
+   * change, so the same form element can go on to show another record (the
+   * next booking, or the copy a duplicate redirects to). The baseline
+   * belongs to the page it was read on.
+   */
+  const baselinePageRef = useRef<string | null>(null);
+
   const markClean = useCallback(() => {
     setIsDirty(false);
     // why: inputs are disabled until the navigation settles, so a baseline
@@ -232,6 +242,7 @@ export function useUnsavedChanges({
     }
     const form = formRef.current;
     baselineRef.current = form ? serializeFormSnapshot(form, ignored) : null;
+    baselinePageRef.current = formPagePathname(form, "");
   }, [formRef, ignored]);
 
   useEffect(() => {
@@ -279,13 +290,28 @@ export function useUnsavedChanges({
   useLayoutEffect(() => {
     navigatingRef.current = navigation.state !== "idle";
     if (navigatingRef.current) return;
+    if (
+      baselinePageRef.current !== null &&
+      formPagePathname(formRef.current, "") !== baselinePageRef.current
+    ) {
+      // why: the form now shows another record. A navigation away from a
+      // dirty form is blocked, so reaching here means its changes were
+      // left behind. Pause comparisons and re-read one frame later, as on
+      // mount, so widgets that rewrite hidden values on mount have run.
+      baselineRef.current = null;
+      baselinePageRef.current = null;
+      pendingCleanRef.current = false;
+      setIsDirty(false);
+      requestAnimationFrame(markClean);
+      return;
+    }
     if (pendingCleanRef.current) {
       pendingCleanRef.current = false;
       markClean();
     } else {
       check();
     }
-  }, [navigation.state, check, markClean]);
+  }, [navigation.state, check, markClean, formRef]);
 
   /**
    * What this form held when it last fired `submit`. A navigation is this

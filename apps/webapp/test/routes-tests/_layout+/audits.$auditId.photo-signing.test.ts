@@ -42,10 +42,16 @@ vi.mock("~/modules/audit/service.server", () => ({
   removeAuditScan: vi.fn(),
 }));
 
-// why: overview reads audit images in the same Promise.all as the session;
-// its result is not under test.
-vi.mock("~/modules/audit/image.service.server", () => ({
-  getAuditImages: vi.fn().mockResolvedValue([]),
+// why: overview reads its first page of findings after the session; its
+// result is not under test.
+vi.mock("~/modules/audit/findings.server", () => ({
+  getAuditFindingsPage: vi.fn().mockResolvedValue({
+    findings: [],
+    page: 1,
+    totalFindings: 0,
+    hasMore: false,
+  }),
+  getAuditWideFindings: vi.fn().mockResolvedValue({ notes: [], images: [] }),
 }));
 
 // why: activity reads notes after the session; its result is not under test.

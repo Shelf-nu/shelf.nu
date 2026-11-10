@@ -17,7 +17,6 @@ import {
   Modal,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { releaseCategory, isLowStock } from "@shelf/quantity-control";
@@ -68,12 +67,14 @@ import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { AssetBookingsSection } from "@/components/asset-detail/asset-bookings-section";
 import { InfoRow } from "@/components/shared/info-row";
+import { ImageZoomModal } from "@/components/shared/image-zoom-modal";
 import { ArchivedNotice } from "@/components/shared/archived-notice";
 import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
@@ -778,9 +779,13 @@ export default function AssetDetailScreen() {
             </View>
           )}
 
-          {asset.description && (
-            <Text style={styles.description}>{asset.description}</Text>
-          )}
+          {asset.description ? (
+            <LinkedParagraph
+              text={asset.description}
+              style={styles.description}
+              containerStyle={styles.descriptionBlock}
+            />
+          ) : null}
 
           {/* ── Quantity (QUANTITY_TRACKED assets only) ── */}
           {isQtyTracked && totalQuantityLabel && (
@@ -1221,30 +1226,13 @@ export default function AssetDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Image Zoom Modal ──────────────────────────── */}
+      {/* ── Image zoom ─────────────────────────────── */}
       {asset.mainImage && (
-        <Modal
+        <ImageZoomModal
+          uri={asset.mainImage}
           visible={showImageZoom}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowImageZoom(false)}
-        >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
-            <TouchableOpacity
-              style={styles.zoomCloseBtn}
-              onPress={() => setShowImageZoom(false)}
-              accessibilityLabel="Close image viewer"
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: asset.mainImage }}
-              style={styles.zoomImage}
-              contentFit="contain"
-            />
-          </View>
-        </Modal>
+          onClose={() => setShowImageZoom(false)}
+        />
       )}
 
       {/* ── Modals ────────────────────────────────────── */}
@@ -1553,6 +1541,8 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  descriptionBlock: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
@@ -1707,30 +1697,4 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   tagText: { fontSize: fontSize.sm, color: colors.gray700 },
-
-  // Image zoom modal
-  zoomOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomCloseBtn: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  // Sized against the full-screen overlay rather than a window size read when
-  // the styles are built, so the image follows a rotation or a window resize.
-  zoomImage: {
-    width: "100%",
-    height: "70%",
-  },
 }));

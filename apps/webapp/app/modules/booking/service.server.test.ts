@@ -61,7 +61,6 @@ import {
 import * as noteService from "~/modules/note/service.server";
 import { sendPush } from "~/modules/push/service.server";
 import { ShelfError } from "~/utils/error";
-import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
@@ -94,6 +93,7 @@ import {
   computeBookingKitDrift,
   revertBookingToDraft,
   approveBooking,
+  getPendingApprovalCount,
   extendBooking,
   removeAssets,
   addScannedAssetsToBooking,
@@ -8837,6 +8837,71 @@ describe("archiveBooking", () => {
       archiveBooking({ id: "booking-1", organizationId: "org-1" })
     ).rejects.toThrow(ShelfError);
   });
+
+  it("refuses a DRAFT on a plain archive", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+    });
+
+    await expect(
+      archiveBooking({ id: "booking-1", organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("discards a DRAFT by archiving it, flagged as never checked out", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.ARCHIVED,
+    });
+
+    await archiveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      discardDraft: true,
+    });
+
+    // A discarded draft never went out, so return reports must skip it.
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1", status: BookingStatus.DRAFT },
+      data: { status: BookingStatus.ARCHIVED, archivedWithoutCheckin: true },
+    });
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+  ])("refuses to discard a %s booking", async (status) => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status,
+      to: new Date("2020-01-01T00:00:00Z"),
+    });
+
+    await expect(
+      archiveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        discardDraft: true,
+      })
+    ).rejects.toThrow("Only draft bookings can be discarded.");
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("cancelBooking", () => {
@@ -9111,41 +9176,6 @@ describe("cancelBooking", () => {
 describe("deleteBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-  });
-
-  it("refuses to delete a booking that stopped being a draft when only drafts may be deleted", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue({
-      ...mockBookingData,
-      status: BookingStatus.DRAFT,
-    });
-    // The row was reserved between the read and the write: the draft-only
-    // delete matches nothing and Prisma reports P2025.
-    //@ts-expect-error missing vitest type
-    db.booking.delete.mockRejectedValueOnce(
-      Object.assign(new Error("Record to delete does not exist."), {
-        code: "P2025",
-      })
-    );
-
-    await expect(
-      deleteBooking(
-        { id: "booking-1", organizationId: "org-1" },
-        mockClientHints,
-        "user-1",
-        { onlyIfDraft: true }
-      )
-    ).rejects.toMatchObject({ status: 403 });
-    expect(db.booking.delete).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: "booking-1",
-          organizationId: "org-1",
-          status: BookingStatus.DRAFT,
-        },
-      })
-    );
-    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("should delete booking successfully", async () => {
@@ -10831,8 +10861,10 @@ describe("revertBookingToDraft", () => {
       hints: mockClientHints,
     });
 
+    // Guarded on the status read: a concurrent archive or check-out makes
+    // the write match nothing.
     expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
+      where: { id: "booking-1", status: BookingStatus.RESERVED },
       // Reverting also clears any earlier approval: a re-reserved request
       // must be approved again.
       data: {
@@ -10843,6 +10875,32 @@ describe("revertBookingToDraft", () => {
       include: expect.any(Object),
     });
     expect(result).toEqual(draftBooking);
+  });
+
+  it("refuses the revert when the booking left RESERVED before the write", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+    });
+    // Archived (or checked out) between the read and the guarded write.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockRejectedValueOnce(
+      Object.assign(new Error("Record to update not found."), {
+        code: "P2025",
+      })
+    );
+
+    await expect(
+      revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("status changed"),
+    });
   });
 
   it("rejects a revert from a non-RESERVED state as a handled 400, not a captured 500 (SHELF-WEBAPP-23W)", async () => {
@@ -14366,6 +14424,12 @@ describe("wrapBookingStatusForNote", () => {
 });
 
 describe("getActionTextFromTransition", () => {
+  it("names a DRAFT->ARCHIVED transition as discarding the draft", () => {
+    expect(
+      getActionTextFromTransition(BookingStatus.DRAFT, BookingStatus.ARCHIVED)
+    ).toBe("discarded the draft");
+  });
+
   it("should return correct action text for DRAFT->RESERVED transition", () => {
     const result = getActionTextFromTransition(
       BookingStatus.DRAFT,
@@ -18600,79 +18664,7 @@ describe("bulkDeleteBookings", () => {
     _count: { bookingAssets: 0 },
   });
 
-  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-    "refuses a %s selection that includes a non-draft booking, deleting nothing",
-    async (role) => {
-      //@ts-expect-error missing vitest type
-      db.booking.findMany.mockResolvedValue([
-        row("bk-draft", BookingStatus.DRAFT),
-        row("bk-reserved", BookingStatus.RESERVED),
-      ]);
-
-      await expect(
-        bulkDeleteBookings({
-          bookingIds: ["bk-draft", "bk-reserved"],
-          confirmation: "2",
-          organizationId: "org-1",
-          userId: "user-1",
-          access: accessFor([role]),
-          hints: mockClientHints,
-        })
-      ).rejects.toMatchObject({ status: 403 });
-      expect(db.$transaction).not.toHaveBeenCalled();
-    }
-  );
-
-  it("refuses a SELF_SERVICE select-all whose resolved rows include a non-draft booking", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findMany.mockResolvedValue([
-      row("bk-draft", BookingStatus.DRAFT),
-      row("bk-ongoing", BookingStatus.ONGOING),
-    ]);
-
-    await expect(
-      bulkDeleteBookings({
-        bookingIds: [ALL_SELECTED_KEY],
-        list: { kind: "index" },
-        currentSearchParams: "status=ALL",
-        organizationId: "org-1",
-        userId: "user-1",
-        access: accessFor([OrganizationRoles.SELF_SERVICE]),
-        hints: mockClientHints,
-        // Both resolved rows, so the drafts-only rule is what refuses.
-        confirmation: "2",
-      })
-    ).rejects.toMatchObject({ status: 403 });
-    expect(db.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("refuses the whole request when a draft stops being a draft before the delete", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findMany.mockResolvedValue([
-      row("bk-draft", BookingStatus.DRAFT),
-    ]);
-    // The row was reserved between the read and the write, so the draft-only
-    // delete matches nothing.
-    //@ts-expect-error missing vitest type
-    db.booking.deleteMany.mockResolvedValueOnce({ count: 0 });
-
-    await expect(
-      bulkDeleteBookings({
-        bookingIds: ["bk-draft"],
-        confirmation: "1",
-        organizationId: "org-1",
-        userId: "user-1",
-        access: accessFor([OrganizationRoles.SELF_SERVICE]),
-        hints: mockClientHints,
-      })
-    ).rejects.toMatchObject({ status: 403 });
-    expect(db.booking.deleteMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ status: BookingStatus.DRAFT }),
-    });
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
-  it("does not narrow the delete to drafts for a role that may delete any status", async () => {
+  it("deletes every selected booking whatever its status", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findMany.mockResolvedValue([
       row("bk-reserved", BookingStatus.RESERVED),
@@ -18696,31 +18688,6 @@ describe("bulkDeleteBookings", () => {
     const [args] = (db.booking.deleteMany as ReturnType<typeof vitest.fn>).mock
       .calls[0];
     expect(args.where).not.toHaveProperty("status");
-  });
-
-  it("lets SELF_SERVICE bulk-delete a selection of its own drafts", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findMany.mockResolvedValue([
-      row("bk-draft", BookingStatus.DRAFT),
-    ]);
-    // The draft-only delete still matches the one draft that was read.
-    //@ts-expect-error missing vitest type
-    db.booking.deleteMany.mockResolvedValueOnce({ count: 1 });
-    (
-      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([]);
-    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
-
-    await bulkDeleteBookings({
-      bookingIds: ["bk-draft"],
-      confirmation: "1",
-      organizationId: "org-1",
-      userId: "user-1",
-      access: accessFor([OrganizationRoles.SELF_SERVICE]),
-      hints: mockClientHints,
-    });
-
-    expect(db.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it("lets ADMIN bulk-delete a selection that includes non-draft bookings", async () => {
@@ -25927,5 +25894,93 @@ describe("resolveExpiredCheckoutState", () => {
         allowReschedule: false,
       })
     ).toThrow(/Use Check out on the booking page/);
+  });
+});
+
+describe("getPendingApprovalCount", () => {
+  const SWITCHES_ON = {
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: false,
+  };
+  const args = (settings: typeof SWITCHES_ON | null) => ({
+    organizationId: "org-1",
+    userId: "user-1",
+    roles: [OrganizationRoles.ADMIN],
+    settings,
+  });
+
+  beforeEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    //@ts-expect-error missing vitest type
+    db.booking.count.mockResolvedValue(3);
+  });
+
+  afterEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest
+      .mocked(hasPermission)
+      .mockImplementation(({ action }: { action: string }) =>
+        Promise.resolve(action !== "approve")
+      );
+    //@ts-expect-error missing vitest type
+    db.booking.count.mockResolvedValue(0);
+  });
+
+  it("counts open requests for an approver", async () => {
+    vitest.useFakeTimers();
+    vitest.setSystemTime(new Date("2026-11-10T12:00:00Z"));
+    try {
+      await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(
+        3
+      );
+    } finally {
+      vitest.useRealTimers();
+    }
+    expect(db.booking.count).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        to: { gte: new Date("2026-11-10T12:00:00Z") },
+      },
+    });
+  });
+
+  it("asks for the approve permission without workspace switches", async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    await getPendingApprovalCount(args(SWITCHES_ON));
+    expect(hasPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: "booking",
+        action: "approve",
+        workspace: null,
+      })
+    );
+  });
+
+  it("is zero for a viewer who may not approve", async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(false);
+    await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(0);
+    expect(db.booking.count).not.toHaveBeenCalled();
+  });
+
+  it("is zero while approval is off in the workspace", async () => {
+    await expect(
+      getPendingApprovalCount(
+        args({ requireApprovalForBase: false, requireApprovalForSelfService: false })
+      )
+    ).resolves.toBe(0);
+    await expect(getPendingApprovalCount(args(null))).resolves.toBe(0);
+    expect(db.booking.count).not.toHaveBeenCalled();
   });
 });

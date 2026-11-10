@@ -10,8 +10,7 @@ import {
   Animated,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AuditListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -690,7 +689,7 @@ function AuditsListContent() {
                     style={styles.footer}
                     color={colors.muted}
                   />
-                ) : null
+                ) : undefined
               }
             />
           )}

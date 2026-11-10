@@ -1,4 +1,6 @@
 import { apiFetch, apiUpload } from "./client";
+import type { PhotoCapture } from "../audit-photo-exif";
+import { appendAuditImageUpload } from "../audit-photo-exif";
 import type {
   AuditsResponse,
   AuditDetailResponse,
@@ -102,7 +104,11 @@ export const auditsApi = {
       { signal }
     ),
 
-  /** Record a scan during an audit (idempotent) */
+  /**
+   * Record a scan during an audit (idempotent). A quantity-tracked asset
+   * carries `foundQuantity`, the units counted; sending it for an asset that
+   * is already scanned replaces the count.
+   */
   recordAuditScan: (
     orgId: string,
     payload: {
@@ -110,6 +116,7 @@ export const auditsApi = {
       qrId: string;
       assetId: string;
       isExpected: boolean;
+      foundQuantity?: number;
     }
   ) =>
     apiFetch<RecordScanResponse>(
@@ -207,6 +214,9 @@ export const auditsApi = {
    * @param imageUri Local file URI from expo-image-picker
    * @param mimeType Image MIME type (defaults to image/jpeg)
    * @param content Optional note text to accompany the image
+   * @param capture How and when the photo was taken, from the picker: the
+   *   source (camera or library) and the EXIF date, which the server uses when
+   *   the file itself no longer carries EXIF
    */
   uploadImage: (
     orgId: string,
@@ -214,19 +224,11 @@ export const auditsApi = {
     auditAssetId: string,
     imageUri: string,
     mimeType: string = "image/jpeg",
-    content?: string
+    content?: string,
+    capture: PhotoCapture | null = null
   ) => {
     const formData = new FormData();
-    // React Native FormData accepts objects with uri/type/name for file uploads
-    formData.append("image", {
-      uri: imageUri,
-      type: mimeType,
-      name: `audit-photo.${mimeType === "image/png" ? "png" : "jpg"}`,
-    } as any);
-
-    if (content) {
-      formData.append("content", content);
-    }
+    appendAuditImageUpload(formData, { imageUri, mimeType, content, capture });
 
     const params = new URLSearchParams({
       orgId,

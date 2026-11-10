@@ -1516,6 +1516,45 @@ describe("manage-assets loader — Models tab payload", () => {
     // so dropping it would change which assets read as available.
     expect(result.items[0].custody).toHaveLength(1);
   });
+
+  it("hands each picker row its placements from the shared ordered include", async () => {
+    const warehouse = {
+      id: "loc-warehouse",
+      name: "Warehouse",
+      parentId: null,
+      _count: { children: 2 },
+    };
+    const placements = [
+      { quantity: 1, assetKitId: null, assetKit: null, location: warehouse },
+    ];
+    // why: the list query is a DB read; the fixture mirrors the
+    // `assetLocations` shape `assetIndexFields()` selects (oldest first).
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
+      ...mockPaginatedAssets,
+      assets: [
+        {
+          id: "placed",
+          title: "Camera",
+          type: "INDIVIDUAL",
+          custody: [],
+          assetLocations: placements,
+        },
+      ],
+    } as any);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The Location column reads `getPrimaryLocation(item)`, the first of
+    // these placements, so the rows must arrive with them untouched.
+    expect(result.items[0].assetLocations).toEqual(placements);
+    // The shared include orders `assetLocations` oldest first, so the column
+    // matches the assets index. Overriding it here would drop that ordering.
+    expect(
+      vi.mocked(assetService.getPaginatedAndFilterableAssets).mock.calls[0][0]
+    ).not.toHaveProperty("extraInclude");
+  });
 });
 
 /**

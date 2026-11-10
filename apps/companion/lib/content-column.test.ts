@@ -5,8 +5,10 @@ import {
   CONTENT_MAX_WIDTH,
   FORM_MAX_WIDTH,
   contentGutter,
+  TAB_SIDEBAR_WIDTH,
   isTabletScreen,
   showsTabSidebar,
+  tabScreenWidth,
 } from "./content-column";
 
 describe("contentGutter", () => {
@@ -49,6 +51,16 @@ describe("isTabletScreen", () => {
     // iPad mini, the smallest iPad.
     assert.equal(isTabletScreen(744, 1133), true);
   });
+
+  it("counts a foldable's inner display as a tablet and its outer as a phone", () => {
+    // iPhone Duo: inner display open sideways and upright, then the outer.
+    assert.equal(isTabletScreen(951, 669), true);
+    assert.equal(isTabletScreen(669, 951), true);
+    assert.equal(isTabletScreen(466, 678), false);
+    // Pixel 9 Pro Fold: inner screen, then the outer.
+    assert.equal(isTabletScreen(852, 883), true);
+    assert.equal(isTabletScreen(443, 994), false);
+  });
 });
 
 describe("showsTabSidebar", () => {
@@ -56,15 +68,46 @@ describe("showsTabSidebar", () => {
     assert.equal(showsTabSidebar(430), false);
     // iPad Air 11" and Pixel Tablet, upright.
     assert.equal(showsTabSidebar(820), false);
+    assert.equal(showsTabSidebar(834), false);
     assert.equal(showsTabSidebar(800), false);
   });
 
+  it("keeps the bottom tab bar on an upright Duo, a Fold and split windows", () => {
+    assert.equal(showsTabSidebar(669), false);
+    // Pixel 9 Pro Fold inner screen, either way round.
+    assert.equal(showsTabSidebar(852), false);
+    assert.equal(showsTabSidebar(883), false);
+    // Duo Split View (left window) and Fold split screen.
+    assert.equal(showsTabSidebar(469), false);
+    assert.equal(showsTabSidebar(426), false);
+  });
+
+  it("shows the sidebar on an iPhone Duo opened sideways", () => {
+    assert.equal(showsTabSidebar(951), true);
+  });
+
+  it("switches to the sidebar at 900 points", () => {
+    assert.equal(showsTabSidebar(899), false);
+    assert.equal(showsTabSidebar(900), true);
+  });
+
   it("shows the sidebar on tablets held sideways", () => {
+    assert.equal(showsTabSidebar(1133), true);
     assert.equal(showsTabSidebar(1180), true);
     assert.equal(showsTabSidebar(1280), true);
   });
 
   it("shows the sidebar on a 13-inch iPad held upright", () => {
     assert.equal(showsTabSidebar(1024), true);
+  });
+});
+
+describe("tabScreenWidth", () => {
+  it("is the window's width below the sidebar threshold", () => {
+    assert.equal(tabScreenWidth(883), 883);
+  });
+
+  it("leaves out the sidebar once it shows", () => {
+    assert.equal(tabScreenWidth(951), 951 - TAB_SIDEBAR_WIDTH);
   });
 });

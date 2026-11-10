@@ -10,6 +10,8 @@
  * @see {@link file://../../../app/routes/_layout+/reports.export.$fileName[.csv].tsx}
  * @see {@link file://../../../app/utils/csv-utf8.ts}
  */
+import { HARDCODED_DEFAULT_PREFS } from "@shelf/datetime";
+import { parse } from "csv-parse/sync";
 import type { LoaderFunctionArgs } from "react-router";
 import type { Mock } from "vitest";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,6 +41,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: verifying export encoding without executing real permission checks
@@ -71,6 +74,8 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   assetInventoryReport: vi.fn(),
   assetUtilizationReport: vi.fn(),
   assetActivityReport: vi.fn(),
+  // A tiny ceiling, so the ceiling case needs no 200,000-row file.
+  ACTIVITY_EXPORT_MAX_ROWS: 2,
   monthlyBookingTrendsReport: vi.fn(),
 }));
 
@@ -429,6 +434,7 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         query: "asset=asset-1&category=cat-1",
         mock: vi.mocked(assetActivityReport),
         expected: {
+          allRows: true,
           assetId: "asset-1",
           assetFilter: filterCarrying({ categoryIds: ["cat-1"] }),
         },
@@ -631,6 +637,43 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     });
   });
 
+  describe("asset-activity archive rows", () => {
+    it("names archive and reinstate events in the Activity Type column", async () => {
+      vi.mocked(assetActivityReport).mockResolvedValue({
+        rows: ["ARCHIVED", "REINSTATED"].map((activityType) => ({
+          // Dates are covered elsewhere; this test is about the type cell.
+          occurredAt: null,
+          assetId: "classet1",
+          assetName: "Pallet 17",
+          activityType,
+          description: activityType === "ARCHIVED" ? "Archived" : "Reinstated",
+          performedBy: "Sam Operative",
+        })),
+        totalRows: 2,
+      } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
+          ),
+          params: { fileName: "asset-activity" },
+          context,
+        })
+      )) as unknown as Response;
+      const lines = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      // Read the cell by its header, so added columns leave this check alone.
+      const typeColumn = lines[0].split(",").indexOf("Activity Type");
+      expect(lines.slice(1).map((line) => line.split(",")[typeColumn])).toEqual(
+        ["Archived", "Reinstated"]
+      );
+    });
+  });
+
   describe("asset-inventory", () => {
     it("writes the URL each QR code encodes next to its id", async () => {
       vi.mocked(assetInventoryReport).mockResolvedValue({
@@ -684,6 +727,99 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       ).toBe(true);
       // An asset without a code leaves both cells empty.
       expect(rows[2].endsWith(",,")).toBe(true);
+    });
+  });
+  describe("asset-activity", () => {
+    /** Runs the activity export over `rows` and returns the file's lines. */
+    const exportLines = async (rows: object[], totalRows = rows.length) => {
+      // The file-wide prefs mock carries placeholder formats; these cases
+      // print dates, so they use the real default preferences.
+      vi.mocked(resolveUserFormatPrefsById).mockResolvedValueOnce(
+        HARDCODED_DEFAULT_PREFS
+      );
+      vi.mocked(assetActivityReport).mockResolvedValue({
+        rows,
+        totalRows,
+      } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
+          ),
+          params: { fileName: "asset-activity" },
+          context,
+        })
+      )) as unknown as Response;
+      return (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+    };
+
+    const moveRow = {
+      occurredAt: new Date("2026-08-20T09:30:00.000Z"),
+      assetId: "classet1",
+      samId: "SAM-0042",
+      qrId: "cm4qr42",
+      assetName: "Pallet 17",
+      activityType: "LOCATION_CHANGED",
+      description: "Location changed: Leeds unit → Hull depot",
+      changedFrom: "Leeds unit",
+      changedTo: "Hull depot",
+      performedBy: "Sam Operative",
+    };
+
+    it("writes readable references and the names on both sides of a change", async () => {
+      const lines = await exportLines([
+        moveRow,
+        {
+          occurredAt: new Date("2026-08-19T08:00:00.000Z"),
+          assetId: "classet2",
+          samId: null,
+          qrId: null,
+          assetName: "Pallet 18",
+          activityType: "CREATED",
+          description: "Asset created",
+          changedFrom: null,
+          changedTo: null,
+          performedBy: null,
+        },
+      ]);
+
+      expect(lines[0]).toBe(
+        "Date,Asset ID,SAM ID,QR Code ID,Asset Name,Activity Type,Description,From,To,Performed By"
+      );
+      expect(lines[1]).toBe(
+        '"08/20/2026, 9:30 AM",classet1,SAM-0042,cm4qr42,Pallet 17,Location changed,Location changed: Leeds unit → Hull depot,Leeds unit,Hull depot,Sam Operative'
+      );
+      // No change, no references: those cells stay empty.
+      expect(lines[2]).toBe(
+        '"08/19/2026, 8:00 AM",classet2,,,Pallet 18,Asset created,Asset created,,,System'
+      );
+      expect(lines).toHaveLength(3);
+    });
+
+    it("ends a file cut at the ceiling with a line saying so", async () => {
+      const lines = await exportLines([moveRow, moveRow], 250_000);
+
+      // Full width, sentence under Description: strict parsers keep the file.
+      expect(lines.at(-1)).toBe(
+        ',,,,,,"Export stopped at 2 of 250,000 rows. Narrow the date range to export the rest.",,,'
+      );
+      // A strict parser (no ragged rows) reads the whole file.
+      const records = parse(lines.join("\n"), {
+        relax_column_count: false,
+      }) as string[][];
+      expect(records.at(-1)).toHaveLength(10);
+    });
+
+    it("says so when a file below the ceiling holds a different number of rows than counted", async () => {
+      const lines = await exportLines([moveRow], 3);
+
+      expect(lines.at(-1)).toBe(
+        ",,,,,,Rows in this file: 1. Rows counted when the export started: 3. Assets changed while it ran; export again for a matching file.,,,"
+      );
     });
   });
 });

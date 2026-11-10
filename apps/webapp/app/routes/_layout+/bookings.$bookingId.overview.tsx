@@ -1489,6 +1489,7 @@ const INTENT_VERB = {
   checkOutRemaining: "check out",
   checkIn: "check in",
   archive: "archive",
+  "discard-draft": "discard",
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
@@ -1532,6 +1533,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkOutRemaining",
           "checkIn",
           "archive",
+          "discard-draft",
           "cancel",
           "removeKit",
           "revert-to-draft",
@@ -1570,10 +1572,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      // archive/cancel have dedicated permissions, and BASE deliberately holds
-      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
-      // user archive or cancel bookings the role was never granted.
+      // archive/cancel have dedicated permissions. `update` is not their gate:
+      // every role that writes bookings holds it, including roles without
+      // archive or cancel. Discarding a draft archives it, so it asks for
+      // archive too.
       archive: PermissionAction.archive,
+      "discard-draft": PermissionAction.archive,
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
@@ -1614,13 +1618,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * so we must not call findUniqueOrThrow before this.
      */
     if (intent === "delete") {
-      // A caller who writes every booking and may delete any status needs no
-      // lookup. Everyone else is held to their own bookings, and roles whose
-      // policy limits delete to drafts are held to drafts.
-      if (
-        !access.bookings.writeAll ||
-        access.policy.bookings.deleteOnlyDrafts
-      ) {
+      // A caller who writes every booking needs no lookup. Everyone else is
+      // held to their own bookings.
+      if (!access.bookings.writeAll) {
         const b = await getBooking({ id, organizationId, request });
         assertCanDeleteBooking({ access, booking: b, userId });
       }
@@ -1633,9 +1633,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const deletedBooking = await deleteBooking(
         { id, organizationId },
         getClientHint(request),
-        userId,
-        // Re-checked at write time: the booking may have left DRAFT since.
-        { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
+        userId
       );
 
       const actor = wrapUserLinkForNote({ ...user, id: userId });
@@ -2118,6 +2116,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         sendNotification({
           title: "Booking archived",
           message: "Your booking has been archived successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }), { headers });
+      }
+      case "discard-draft": {
+        await archiveBooking({
+          id,
+          organizationId,
+          userId: user.id,
+          discardDraft: true,
+        });
+
+        sendNotification({
+          title: "Draft discarded",
+          message:
+            "Your draft has been archived. You can still find it under archived bookings.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

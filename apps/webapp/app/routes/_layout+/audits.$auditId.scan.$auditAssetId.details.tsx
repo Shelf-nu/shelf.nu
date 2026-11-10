@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { auditCountLabel } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import { MessageSquare, ImageIcon } from "lucide-react";
 import type {
@@ -40,6 +41,7 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { auditRowHeading } from "~/modules/audit/quantity";
 import {
   assertAuditAcceptsComments,
   assertAuditAcceptsCommentsOnLockedRow,
@@ -48,6 +50,7 @@ import {
   requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -100,6 +103,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           select: {
             id: true,
             title: true,
+            unitOfMeasure: true,
           },
         },
         auditSession: {
@@ -176,15 +180,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: true,
         imageUrl: true,
         thumbnailUrl: true,
+        capturedAt: true,
+        captureSource: true,
+        createdAt: true,
       },
       orderBy: {
         createdAt: "desc",
       },
     });
 
+    // Quantity rows lead with their count, e.g. "Counted: 8 of 14 pcs", or
+    // with "Not counted" / "14 pcs expected" when there is no count. An
+    // unexpected row's label already says "8 pcs counted".
+    const countLabel = auditCountLabel(
+      auditAsset,
+      auditAsset.asset.unitOfMeasure
+    );
     const header = {
       title: auditAsset.asset.title,
-      subHeading: "Notes and images",
+      subHeading: auditRowHeading(countLabel, auditAsset),
     };
 
     return payload({
@@ -441,6 +455,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 
@@ -584,6 +601,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 

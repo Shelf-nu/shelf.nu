@@ -47,6 +47,7 @@ export type BookingActionKey =
   | "extend"
   | "cancel"
   | "archive"
+  | "discardDraft"
   | "duplicate"
   | "bookingDocument"
   | "checkinReceipt"
@@ -212,11 +213,12 @@ function state(
  * | extend              | extendable status and `booking:extend`                         | never                        |
  * | cancel              | RESERVED/ONGOING/OVERDUE and `booking:cancel`                  | never                        |
  * | archive             | archivable and `booking:archive`                               | never                        |
+ * | discardDraft        | DRAFT, `booking:archive` and no `booking:delete`               | never                        |
  * | duplicate           | always                                                         | never                        |
  * | bookingDocument     | documents allowed for the viewer                               | no assets                    |
  * | checkinReceipt      | documents allowed                                              | receipt not available        |
  * | revertToDraft       | RESERVED                                                       | never                        |
- * | delete              | the role may delete any booking, or the booking is a DRAFT     | never                        |
+ * | delete              | `booking:delete`                                               | never                        |
  * | manageNotifications | the role manages recipients and the booking is not closed      | never                        |
  *
  * Every action is hidden when {@link canActOnBooking} is false.
@@ -243,6 +245,7 @@ export function resolveBookingActions({
       extend: HIDDEN,
       cancel: HIDDEN,
       archive: HIDDEN,
+      discardDraft: HIDDEN,
       duplicate: HIDDEN,
       bookingDocument: HIDDEN,
       checkinReceipt: HIDDEN,
@@ -310,6 +313,13 @@ export function resolveBookingActions({
       isBookingArchivable({ status, to: booking.to }) &&
         can(PermissionAction.archive)
     ),
+    // A member who may not delete drops a draft by archiving it. Members who
+    // may delete keep Delete on drafts and are not offered both.
+    discardDraft: state(
+      status === BookingStatus.DRAFT &&
+        can(PermissionAction.archive) &&
+        !can(PermissionAction.delete)
+    ),
     duplicate: SHOWN,
     bookingDocument: state(
       canUseDocuments,
@@ -326,9 +336,7 @@ export function resolveBookingActions({
           }
     ),
     revertToDraft: state(isReserved),
-    delete: state(
-      !access.policy.bookings.deleteOnlyDrafts || status === BookingStatus.DRAFT
-    ),
+    delete: state(can(PermissionAction.delete)),
     manageNotifications: state(
       access.policy.notifications.manageBookingRecipients && !isClosed
     ),

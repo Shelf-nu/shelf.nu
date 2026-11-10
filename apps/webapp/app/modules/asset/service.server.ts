@@ -167,7 +167,6 @@ import { Logger } from "~/utils/logger";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
-  wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
   wrapLinkForNote,
   wrapNameForNote,
@@ -266,7 +265,11 @@ import {
   recordStockChanges,
 } from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
-import { createSystemLocationNote } from "../location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  createSystemLocationNote,
+  placementChangeMoves,
+} from "../location-note/service.server";
 import {
   buildAssetModelChangeNote,
   buildAvailableToBookChangeNote,
@@ -1370,6 +1373,17 @@ export async function createAsset({
           await assertLocationBelongsToOrg({ locationId, organizationId }, tx);
         }
 
+        // SECURITY (cross-org IDOR): the tag ids come from form/CSV input and
+        // are connected by the nested create above with no org scoping of
+        // their own. Prove they belong to this org before the write, so every
+        // caller of createAsset is covered, not only the ones that check first.
+        if (tags?.set?.length) {
+          await assertTagsBelongToOrg(
+            { tagIds: tags.set.map((tag) => tag.id), organizationId },
+            tx
+          );
+        }
+
         // The value already matches (that is how the orphan was found), so
         // only the type needs to follow the import. Org-scoped: the ids come
         // from an org-scoped lookup, and this keeps the write that way too.
@@ -1450,6 +1464,12 @@ export async function createAsset({
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
+      // A deliberate client error from a guard inside the transaction (a tag,
+      // category, kit or location outside this workspace) carries its own
+      // actionable message. The constraint wrapper below would replace it with
+      // a generic one, so pass it straight through.
+      rethrowIfClientError(cause);
+
       // Check for sequential ID unique constraint violation and retry
       if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
         const prismaError = cause as any;
@@ -1720,6 +1740,9 @@ export async function bulkCreateAssetsFromModel({
     await assertLocationBelongsToOrg({ locationId, organizationId });
   }
 
+  // createAsset proves tags again inside each create transaction. This check
+  // still runs first so a foreign tag refuses the whole batch with a thrown
+  // 400 before any asset is written, rather than as a failure at index 0.
   if (tags?.set && tags.set.length > 0) {
     await assertTagsBelongToOrg({
       tagIds: tags.set.map((t) => t.id),
@@ -2072,6 +2095,12 @@ export async function updateAsset({
       });
     }
 
+    /**
+     * The destination as the org-scoped check below read it, reused for the
+     * location activity log so the log needs no lookup of its own.
+     */
+    let newLocationRow: { id: string; name: string } | null = null;
+
     /** Connect the new location id */
     if (newLocationId) {
       // why: same IDOR concern as category — verify the location is in this
@@ -2079,7 +2108,7 @@ export async function updateAsset({
       // paginated assets and is too heavy here.
       const orgLocation = await db.location.findFirst({
         where: { id: newLocationId, organizationId },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       if (!orgLocation) {
         throw new ShelfError({
@@ -2093,6 +2122,7 @@ export async function updateAsset({
           shouldBeCaptured: false,
         });
       }
+      newLocationRow = orgLocation;
       // We can't inline a `connect` on `data` for location anymore — the
       // AssetLocation pivot write happens in the $transaction below
       // alongside the asset update.
@@ -2101,7 +2131,10 @@ export async function updateAsset({
     /** disconnecting location relation if a user clears locations */
     // (no-op here too; the pivot deleteMany happens in the tx below.)
 
-    /** If a tags is passed, link the category to the asset. */
+    /**
+     * If tags are passed, replace the asset's tags with them. Their org
+     * ownership is asserted at the top of the write transaction below.
+     */
     if (isTagUpdate) {
       Object.assign(data, {
         tags,
@@ -2313,6 +2346,24 @@ export async function updateAsset({
     // captured `assetLocations`). Captured inside the tx so the removal qty
     // survives the deleteMany below. `null` for INDIVIDUAL via the helpers.
     let locationChangeQuantity: number | null = null;
+    /**
+     * The manual placements as they stood before a placement rewrite, read
+     * inside the transaction, so the location activity log can say what left
+     * each location.
+     */
+    let manualPlacementsBefore: Array<{
+      location: { id: string; name: string };
+      quantity: number;
+    }> = [];
+    /**
+     * The manual placement the rewrite wrote, with the unit count exactly as
+     * written, so the location activity log never shows a guessed count.
+     * `null` when the rewrite clears the location.
+     */
+    let writtenPlacement: {
+      location: { id: string; name: string };
+      quantity: number;
+    } | null = null;
 
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
@@ -2330,6 +2381,16 @@ export async function updateAsset({
       ReturnType<typeof rehomeCustodyForPlacementChange>
     > | null = null;
     const asset = await db.$transaction(async (tx) => {
+      // SECURITY (cross-org IDOR): the tag ids come from form input and the
+      // `tags.set` in the update below connects them with no org scoping of
+      // its own. Prove they belong to this org inside the write transaction.
+      if (isTagUpdate) {
+        await assertTagsBelongToOrg(
+          { tagIds: (tags?.set ?? []).map((tag) => tag.id), organizationId },
+          tx
+        );
+      }
+
       /** Custody sources before a placement rewrite, for the re-home. */
       let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
         null;
@@ -2482,6 +2543,20 @@ export async function updateAsset({
       });
 
       if (shouldUpdatePlacement) {
+        // `updated.assetLocations` is the pre-delete snapshot.
+        // Oldest first, as the mobile route reads them, so both surfaces pair
+        // the same moves.
+        manualPlacementsBefore = updated.assetLocations
+          .filter((al) => al.assetKitId == null)
+          .sort(
+            (a, b) =>
+              a.createdAt.getTime() - b.createdAt.getTime() ||
+              a.id.localeCompare(b.id)
+          )
+          .map((al) => ({
+            location: { id: al.location.id, name: al.location.name },
+            quantity: al.quantity,
+          }));
         if (newLocationId) {
           locationChangeQuantity = resolveNewLocationQuantity(
             updated,
@@ -2509,17 +2584,24 @@ export async function updateAsset({
           where: { assetId: id, assetKitId: null },
         });
         if (newLocationId) {
+          const writtenQuantity = resolveNewLocationQuantity(
+            updated,
+            newLocationQuantity
+          );
           await tx.assetLocation.create({
             data: {
               assetId: id,
               locationId: newLocationId,
               organizationId,
-              quantity: resolveNewLocationQuantity(
-                updated,
-                newLocationQuantity
-              ),
+              quantity: writtenQuantity,
             },
           });
+          if (newLocationRow) {
+            writtenPlacement = {
+              location: newLocationRow,
+              quantity: writtenQuantity,
+            };
+          }
         }
 
         /**
@@ -2713,122 +2795,131 @@ export async function updateAsset({
        * Here we actually need to query the locations so we can print their names
        * */
 
-      const user = await loadUserForNotes();
+      /**
+       * The edit is already saved, so a failed lookup or write here is
+       * logged and never turns the saved edit into an error response.
+       */
+      try {
+        const user = await loadUserForNotes();
 
-      // why: cross-org safety for the location IDs is already enforced
-      // *before* the write — `newLocationId` is hard-validated at the
-      // org-scoped findFirst guard above (it throws 404 before connecting),
-      // and `currentLocationId` only drives a `disconnect` (value unused by
-      // Prisma) plus the org-scoped name lookups below (a foreign id resolves
-      // to null, never leaks). A post-write assert here previously threw a
-      // 404 *after* db.asset.update had already committed — removed.
-      const currentLocation = currentLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: currentLocationId,
-              organizationId,
-            },
-          })
-        : null;
+        // why: cross-org safety for the location IDs is enforced *before* the
+        // write: `newLocationId` is hard-validated at the org-scoped findFirst
+        // guard above (it throws 404 before connecting), and `currentLocationId`
+        // only drives a `disconnect` (value unused by Prisma) plus the
+        // org-scoped name lookups below (a foreign id resolves to null, never
+        // leaks). The edit is already committed here, so this block must never
+        // throw an org check of its own.
+        const currentLocation = currentLocationId
+          ? await db.location.findFirst({
+              where: {
+                id: currentLocationId,
+                organizationId,
+              },
+            })
+          : null;
 
-      const newLocation = newLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: newLocationId,
-              organizationId,
-            },
-          })
-        : null;
+        const newLocation = newLocationId
+          ? await db.location.findFirst({
+              where: {
+                id: newLocationId,
+                organizationId,
+              },
+            })
+          : null;
 
-      await createLocationChangeNote({
-        currentLocation,
-        newLocation,
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        displayName: user.displayName,
-        assetId: asset.id,
-        userId,
-        organizationId,
-        isRemoving: newLocationId === null,
-        // Qty-tracked: name the units placed / moved / removed at this
-        // location (sourced from the affected pivot row). INDIVIDUAL keeps
-        // the original phrasing via `formatUnitCount`.
-        type: asset.type,
-        unitOfMeasure: asset.unitOfMeasure,
-        quantity: locationChangeQuantity,
-      });
-
-      // Activity event for the asset-level location change.
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "ASSET_LOCATION_CHANGED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
-        locationId: newLocation?.id ?? undefined,
-        field: "locationId",
-        fromValue: currentLocation?.id ?? null,
-        toValue: newLocation?.id ?? null,
-        // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
-        // INDIVIDUAL.
-        meta: assetQtyMeta(asset, locationChangeQuantity),
-      });
-
-      // Create location activity notes
-      const userLink = wrapUserLinkForNote({ ...user, id: userId });
-      // Single-asset location-timeline note. `wrapAssetWithCountForNote`
-      // prefixes the qty-tracked unit count ("50 units of {asset}");
-      // INDIVIDUAL renders the bare link, so phrasing is unchanged.
-      const assetForCount = {
-        id: asset.id,
-        title: asset.title,
-        type: asset.type,
-        unitOfMeasure: asset.unitOfMeasure,
-      };
-
-      if (newLocation) {
-        const newLocLink = wrapLinkForNote(
-          `/locations/${newLocation.id}`,
-          newLocation.name
-        );
-        const assetMarkup = wrapAssetWithCountForNote(
-          assetForCount,
-          locationChangeQuantity
-        );
-        const movedFrom = currentLocation
-          ? ` Moved from ${wrapLinkForNote(
-              `/locations/${currentLocation.id}`,
-              currentLocation.name
-            )}.`
-          : "";
-        await createSystemLocationNote({
-          locationId: newLocation.id,
-          content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
+        await createLocationChangeNote({
+          currentLocation,
+          newLocation,
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          displayName: user.displayName,
+          assetId: asset.id,
           userId,
+          organizationId,
+          isRemoving: newLocationId === null,
+          // Qty-tracked: name the units placed / moved / removed at this
+          // location (sourced from the affected pivot row). INDIVIDUAL keeps
+          // the original phrasing via `formatUnitCount`.
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: locationChangeQuantity,
         });
+
+        // Activity event for the asset-level location change.
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          locationId: newLocation?.id ?? undefined,
+          field: "locationId",
+          fromValue: currentLocation?.id ?? null,
+          toValue: newLocation?.id ?? null,
+          // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
+          // INDIVIDUAL.
+          meta: assetQtyMeta(asset, locationChangeQuantity),
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to record the location change note and event",
+            additionalData: {
+              assetId: asset.id,
+              newLocationId,
+              currentLocationId,
+            },
+            label,
+          })
+        );
       }
+    }
 
-      if (currentLocation && currentLocation.id !== newLocation?.id) {
-        const prevLocLink = wrapLinkForNote(
-          `/locations/${currentLocation.id}`,
-          currentLocation.name
-        );
-        const assetMarkup = wrapAssetWithCountForNote(
-          assetForCount,
-          locationChangeQuantity
-        );
-        const movedTo = newLocation
-          ? ` Moved to ${wrapLinkForNote(
-              `/locations/${newLocation.id}`,
-              newLocation.name
-            )}.`
-          : "";
-        await createSystemLocationNote({
-          locationId: currentLocation.id,
-          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
-          userId,
+    if (shouldUpdatePlacement) {
+      /**
+       * The rewrite collapses every manual placement into at most one, so the
+       * location log reads each location's amount before and after, the same
+       * way the mobile route does. This covers a move, a cleared location and
+       * a new quantity at the same location. The edit is already saved, so a
+       * failure here is logged and never fails the request.
+       */
+      try {
+        if (newLocationId && !writtenPlacement) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "A placement was written without its location, so the location activity log was skipped",
+            additionalData: { assetId: asset.id, newLocationId },
+            label,
+          });
+        }
+        const user = await loadUserForNotes();
+        await createAssetLocationMoveNotes({
+          moves: placementChangeMoves({
+            asset: {
+              id: asset.id,
+              title: asset.title,
+              type: asset.type,
+              unitOfMeasure: asset.unitOfMeasure,
+            },
+            before: manualPlacementsBefore,
+            after: writtenPlacement ? [writtenPlacement] : [],
+          }),
+          actor: { ...user, id: userId },
         });
+      } catch (cause) {
+        Logger.error(
+          cause instanceof ShelfError
+            ? cause
+            : new ShelfError({
+                cause,
+                message: "Failed to write the location activity log",
+                additionalData: { assetId: asset.id },
+                label,
+              })
+        );
       }
     }
 
@@ -4591,6 +4682,8 @@ export async function replaceAssetPlacements({
        */
       const lockedManual = await tx.assetLocation.findMany({
         where: { assetId, assetKitId: null },
+        // Oldest first, so the location log pairs moves the same way each time.
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           locationId: true,
           quantity: true,
@@ -4832,6 +4925,19 @@ export async function replaceAssetPlacements({
           })
         ),
         ...qtyChangeNoteCalls,
+        createAssetLocationMoveNotes({
+          // Each location's amount before and after the save, so units that
+          // left one location for another read as one move.
+          moves: placementChangeMoves({
+            asset,
+            before: [...manualByLocation.values()],
+            after: placements.flatMap((p) => {
+              const location = submittedLocations.get(p.locationId);
+              return location ? [{ location, quantity: p.quantity }] : [];
+            }),
+          }),
+          actor: { ...user, id: userId },
+        }),
       ]);
     }
 
@@ -7998,78 +8104,19 @@ export async function bulkUpdateAssetLocation({
       }
     });
 
-    // Create location activity notes
-    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     /**
-     * The rows the transaction above actually wrote — quantity-tracked assets
-     * are filtered out of this path entirely, and an asset already at the
-     * target moves nowhere. A location's timeline must not claim either of
-     * them arrived, so these notes read the set the transaction wrote rather
-     * than re-deriving one from every selected asset.
+     * Location activity reads the rows the transaction above actually wrote:
+     * quantity-tracked assets are filtered out of this path, and an asset
+     * already at the target moves nowhere.
      */
-    const assetData = assetsToUpdate.map((a) => ({
-      id: a.id,
-      title: a.title,
-    }));
-
-    // Group assets by their previous (primary) location
-    const byPrevLocation = new Map<
-      string,
-      { name: string; assets: typeof assetData }
-    >();
-    for (const asset of assetsToUpdate) {
-      const prev = getPrimaryLocation(asset);
-      if (!prev) continue;
-      const existing = byPrevLocation.get(prev.id);
-      if (existing) {
-        existing.assets.push({ id: asset.id, title: asset.title });
-      } else {
-        byPrevLocation.set(prev.id, {
-          name: prev.name,
-          assets: [{ id: asset.id, title: asset.title }],
-        });
-      }
-    }
-
-    // Note on the new location
-    if (newLocation && assetData.length > 0) {
-      const newLocLink = wrapLinkForNote(
-        `/locations/${newLocation.id}`,
-        newLocation.name
-      );
-      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
-
-      const prevLocLinks = [...byPrevLocation.entries()].map(([id, { name }]) =>
-        wrapLinkForNote(`/locations/${id}`, name)
-      );
-      const movedFromSuffix =
-        prevLocLinks.length > 0
-          ? ` Moved from ${prevLocLinks.join(", ")}.`
-          : "";
-
-      await createSystemLocationNote({
-        locationId: newLocation.id,
-        content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
-        userId,
-      });
-    }
-
-    // Removal notes on previous locations
-    for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
-      const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
-      const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
-      const movedToSuffix = newLocation
-        ? ` Moved to ${wrapLinkForNote(
-            `/locations/${newLocation.id}`,
-            newLocation.name
-          )}.`
-        : "";
-      await createSystemLocationNote({
-        locationId: locId,
-        content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
-        userId,
-      });
-    }
+    await createAssetLocationMoveNotes({
+      moves: assetsToUpdate.map((asset) => ({
+        asset,
+        from: getPrimaryLocation(asset),
+        to: newLocation,
+      })),
+      actor: { ...user, id: userId },
+    });
 
     return true;
   } catch (cause) {
@@ -11287,42 +11334,17 @@ export async function moveAssetLocationUnits(
         quantity,
       });
 
-      // Per-location timeline notes (one each side) — same shape as
-      // the single-location update path at ~line 2596.
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        displayName,
-        firstName,
-        lastName,
+      await createAssetLocationMoveNotes({
+        moves: [
+          {
+            asset: { id: assetId, ...txResult.assetSnapshot },
+            from: fromLocation,
+            to: toLocation,
+            quantity,
+          },
+        ],
+        actor: { ...user, id: userId },
       });
-      const assetForCount = {
-        id: assetId,
-        title: txResult.assetSnapshot.title,
-        type: txResult.assetSnapshot.type,
-        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
-      };
-      const assetMarkup = wrapAssetWithCountForNote(assetForCount, quantity);
-      const fromLink = wrapLinkForNote(
-        `/locations/${fromLocation.id}`,
-        fromLocation.name
-      );
-      const toLink = wrapLinkForNote(
-        `/locations/${toLocation.id}`,
-        toLocation.name
-      );
-
-      await Promise.all([
-        createSystemLocationNote({
-          locationId: fromLocation.id,
-          content: `${userLink} removed ${assetMarkup} from ${fromLink}. Moved to ${toLink}.`,
-          userId,
-        }),
-        createSystemLocationNote({
-          locationId: toLocation.id,
-          content: `${userLink} added ${assetMarkup} to ${toLink}. Moved from ${fromLink}.`,
-          userId,
-        }),
-      ]);
     }
 
     await createCustodyRehomeNote({
