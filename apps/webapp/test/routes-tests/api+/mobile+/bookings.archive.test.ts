@@ -40,15 +40,21 @@ vi.mock("~/modules/booking/service.server", () => ({
   archiveBooking: vi.fn(),
 }));
 
-import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
+import {
+  getMobileUserContext,
+  requireMobilePermission,
+} from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { archiveBooking } from "~/modules/booking/service.server";
 import { action } from "~/routes/api+/mobile+/bookings.archive";
 
 // @vitest-environment node
 
-/** POSTs `{ bookingId: "booking-1" }` to the endpoint as user-1 in org-1. */
-function post() {
+/**
+ * POSTs `{ bookingId: "booking-1", ...extra }` to the endpoint as user-1 in
+ * org-1.
+ */
+function post(extra: Record<string, unknown> = {}) {
   return action({
     request: new Request(
       "http://localhost/api/mobile/bookings/archive?orgId=org-1",
@@ -58,7 +64,7 @@ function post() {
           "Content-Type": "application/json",
           Authorization: "Bearer t",
         },
-        body: JSON.stringify({ bookingId: "booking-1" }),
+        body: JSON.stringify({ bookingId: "booking-1", ...extra }),
       }
     ),
     params: {},
@@ -106,5 +112,65 @@ describe("POST /api/mobile/bookings/archive: ownership", () => {
 
     expect(response.status).toBe(200);
     expect(archiveBooking).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/mobile/bookings/archive: discard draft", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(archiveBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "B",
+      status: "ARCHIVED",
+    } as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.BASE] }) as never
+    );
+  });
+
+  it("asks the service to discard when the body says so, on the caller's own booking", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+    } as never);
+
+    const response = await post({ discardDraft: true });
+
+    expect(response.status).toBe(200);
+    // A discard archives, so it is gated on booking:archive, which BASE holds.
+    expect(requireMobilePermission).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: "booking", action: "archive" })
+    );
+    expect(archiveBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "booking-1", discardDraft: true })
+    );
+  });
+
+  it("keeps a plain archive a plain archive when the flag is absent", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+    } as never);
+
+    await post();
+
+    expect(archiveBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ discardDraft: false })
+    );
+  });
+
+  it("refuses to discard someone else's draft", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    } as never);
+
+    const response = await post({ discardDraft: true });
+
+    expect(response.status).toBe(403);
+    expect(archiveBooking).not.toHaveBeenCalled();
   });
 });

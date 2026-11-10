@@ -50,6 +50,7 @@ import {
   KIT_IN_USE_REINSTATE_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
+  auditCountLabel,
   auditDeletedAssetLabel,
   isAuditCompleted,
   kitMemberCustodyBlockedReason,
@@ -832,4 +833,59 @@ test("the printed key names every way a photo can reach Shelf", () => {
       label
     );
   }
+});
+
+test("auditCountLabel: individual assets get no label", () => {
+  assert.equal(
+    auditCountLabel({ status: "FOUND", expectedQuantity: null }),
+    null
+  );
+});
+
+test("auditCountLabel: words each state of a quantity row", () => {
+  const row = { expectedQuantity: 14, foundQuantity: 8 };
+  assert.equal(
+    auditCountLabel({ ...row, status: "FOUND" }, "pcs"),
+    "8 of 14 pcs"
+  );
+  assert.equal(
+    auditCountLabel({ ...row, status: "UNEXPECTED" }, "pcs"),
+    "8 pcs counted"
+  );
+  assert.equal(
+    auditCountLabel({
+      status: "FOUND",
+      expectedQuantity: 14,
+      foundQuantity: null,
+    }),
+    "Not counted"
+  );
+  assert.equal(
+    auditCountLabel({ status: "MISSING", expectedQuantity: 14 }, "pcs"),
+    "0 of 14 pcs"
+  );
+  assert.equal(
+    auditCountLabel({ status: "PENDING", expectedQuantity: 14 }),
+    "14 units expected"
+  );
+});
+
+test("auditCountLabel: the default unit literal is no unit, zero is a count", () => {
+  assert.equal(
+    auditCountLabel(
+      { status: "FOUND", expectedQuantity: 14, foundQuantity: 0 },
+      "units"
+    ),
+    "0 of 14"
+  );
+});
+
+test("auditCountLabel: a surplus says how many more than expected", () => {
+  assert.equal(
+    auditCountLabel(
+      { status: "FOUND", expectedQuantity: 14, foundQuantity: 16 },
+      "pcs"
+    ),
+    "16 of 14 pcs (+2)"
+  );
 });
