@@ -424,8 +424,12 @@ export default function DynamicSelect({
                 // Fit the room left on the side Radix placed it, so the footer
                 // and the create entry stay on screen: the option list is the
                 // part that shrinks. On phones the panel is pinned 20px from
-                // the top (MOBILE_POPPER_CSS), so it caps against the viewport.
-                "max-h-[calc(100dvh-40px)] sm:max-h-[var(--radix-popover-content-available-height)]",
+                // the top (MOBILE_POPPER_CSS), so it caps against the viewport:
+                // `vh` for browsers in the support floor without `dvh` (Chrome
+                // and Edge before 108, Firefox before 101), `dvh` where it works.
+                // The `dvh` cap is a variant, not a second plain class, because
+                // `tw` merges two plain `max-h-*` classes down to the last one.
+                "max-h-[calc(100vh-40px)] supports-[height:100dvh]:max-sm:max-h-[calc(100dvh-40px)] sm:max-h-[var(--radix-popover-content-available-height)]",
                 className
               )}
               style={{
