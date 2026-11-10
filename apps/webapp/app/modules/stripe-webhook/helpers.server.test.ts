@@ -35,23 +35,27 @@ vi.mock(import("~/utils/env"), async (importOriginal) => {
 
 // why: Stripe SDK makes external API calls; we need a controllable
 // constructEventAsync and the real StripeSignatureVerificationError class
-const { mockConstructEventAsync, mockGetCustomerSubscriptions } = vi.hoisted(
-  () => ({
-    mockConstructEventAsync: vi.fn(),
-    mockGetCustomerSubscriptions: vi.fn(),
-  })
-);
-
-vi.mock("~/utils/stripe.server", () => ({
-  stripe: {
-    webhooks: {
-      constructEventAsync: mockConstructEventAsync,
-    },
-  },
-  getCustomerSubscriptionsWithProducts: mockGetCustomerSubscriptions,
-  subscriptionStatusGrantsPlan: (status: string) =>
-    status === "active" || status === "trialing" || status === "past_due",
+const {
+  mockConstructEventAsync,
+  mockGetCustomerSubscriptions,
+  mockSubscriptionsList,
+} = vi.hoisted(() => ({
+  mockConstructEventAsync: vi.fn(),
+  mockGetCustomerSubscriptions: vi.fn(),
+  mockSubscriptionsList: vi.fn(),
 }));
+
+vi.mock(import("~/utils/stripe.server"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    stripe: {
+      webhooks: { constructEventAsync: mockConstructEventAsync },
+      subscriptions: { list: mockSubscriptionsList },
+    } as never,
+    getCustomerSubscriptionsWithProducts: mockGetCustomerSubscriptions,
+  };
+});
 
 // why: Database module connects to Prisma during import
 const { mockFindFirstOrThrow, mockUserFindUnique, mockOrgFindMany } =
@@ -93,11 +97,18 @@ const { FakeStripeSignatureVerificationError } = vi.hoisted(() => {
 });
 
 vi.mock("stripe", () => ({
-  default: {
-    errors: {
-      StripeSignatureVerificationError: FakeStripeSignatureVerificationError,
-    },
-  },
+  // A constructible `function`: the real `~/utils/stripe.server` module calls
+  // `new Stripe(...)` when it loads.
+  default: Object.assign(
+    vi.fn().mockImplementation(function () {
+      return {};
+    }),
+    {
+      errors: {
+        StripeSignatureVerificationError: FakeStripeSignatureVerificationError,
+      },
+    }
+  ),
 }));
 
 import {
@@ -487,6 +498,15 @@ describe("findAddonsAwaitingWorkspace", () => {
     };
   }
 
+  /** Makes Stripe hold these subscriptions, for both the plain list and the expanded read. */
+  function stripeHolds(...subscriptions: ReturnType<typeof subscription>[]) {
+    mockSubscriptionsList.mockResolvedValue({
+      data: subscriptions,
+      has_more: false,
+    });
+    mockGetCustomerSubscriptions.mockResolvedValue(subscriptions);
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUserFindUnique.mockResolvedValue({ customerId: "cus_1" });
@@ -496,9 +516,7 @@ describe("findAddonsAwaitingWorkspace", () => {
   });
 
   it("links the add-ons of a subscription without a workspace to the user's first Team workspace", async () => {
-    mockGetCustomerSubscriptions.mockResolvedValue([
-      subscription([TEAM, AUDITS, BARCODES]),
-    ]);
+    stripeHolds(subscription([TEAM, AUDITS, BARCODES]));
 
     await expect(
       findAddonsAwaitingWorkspace({
@@ -513,13 +531,13 @@ describe("findAddonsAwaitingWorkspace", () => {
   });
 
   it("links them next to workspaces that already have their own plan subscription", async () => {
-    mockGetCustomerSubscriptions.mockResolvedValue([
+    stripeHolds(
       subscription([TEAM], {
         id: "sub_0",
         metadata: { organizationId: "org-old" },
       }),
-      subscription([TEAM, BARCODES]),
-    ]);
+      subscription([TEAM, BARCODES])
+    );
     mockOrgFindMany.mockResolvedValue([
       { id: "org-old", name: "ZZ Old" },
       { id: "org-new", name: "ZZ New" },
@@ -534,9 +552,7 @@ describe("findAddonsAwaitingWorkspace", () => {
   });
 
   it("links nothing when another Team workspace of the user could also be meant", async () => {
-    mockGetCustomerSubscriptions.mockResolvedValue([
-      subscription([TEAM, AUDITS]),
-    ]);
+    stripeHolds(subscription([TEAM, AUDITS]));
     mockOrgFindMany.mockResolvedValue([
       { id: "org-old", name: "ZZ Old" },
       { id: "org-new", name: "ZZ New" },
@@ -551,12 +567,12 @@ describe("findAddonsAwaitingWorkspace", () => {
   });
 
   it("ignores add-ons already linked to a workspace or on a subscription that is not live", async () => {
-    mockGetCustomerSubscriptions.mockResolvedValue([
+    stripeHolds(
       subscription([TEAM, AUDITS], {
         metadata: { organizationId: "org-old" },
       }),
-      subscription([TEAM, BARCODES], { id: "sub_2", status: "canceled" }),
-    ]);
+      subscription([TEAM, BARCODES], { id: "sub_2", status: "canceled" })
+    );
 
     await expect(
       findAddonsAwaitingWorkspace({
@@ -569,6 +585,69 @@ describe("findAddonsAwaitingWorkspace", () => {
 
   it("reads nothing from Stripe for a user without a customer", async () => {
     mockUserFindUnique.mockResolvedValue({ customerId: null });
+
+    await expect(
+      findAddonsAwaitingWorkspace({
+        userId: "user-1",
+        organizationId: "org-new",
+      })
+    ).resolves.toEqual({ audits: false, barcodes: false });
+    expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("findAddonsAwaitingWorkspace, ambiguous and cheap cases", () => {
+  const TEAM = { id: "prod_team", metadata: { shelf_tier: "tier_2" } };
+  const AUDITS = {
+    id: "prod_audits",
+    metadata: { product_type: "addon", addon_type: "audits" },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUserFindUnique.mockResolvedValue({ customerId: "cus_1" });
+    mockOrgFindMany.mockResolvedValue([{ id: "org-new", name: "ZZ New" }]);
+  });
+
+  it("links nothing while a second live plan subscription names no workspace", async () => {
+    const subs = [
+      {
+        id: "sub_checkout",
+        status: "active",
+        metadata: {},
+        items: { data: [{ price: { product: TEAM } }] },
+      },
+      {
+        id: "sub_invoice",
+        status: "active",
+        metadata: {},
+        items: {
+          data: [{ price: { product: TEAM } }, { price: { product: AUDITS } }],
+        },
+      },
+    ];
+    mockSubscriptionsList.mockResolvedValue({ data: subs, has_more: false });
+    mockGetCustomerSubscriptions.mockResolvedValue(subs);
+
+    await expect(
+      findAddonsAwaitingWorkspace({
+        userId: "user-1",
+        organizationId: "org-new",
+      })
+    ).resolves.toEqual({ audits: false, barcodes: false });
+  });
+
+  it("makes one Stripe call when every live subscription already names a workspace", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      data: [
+        {
+          id: "sub_1",
+          status: "active",
+          metadata: { organizationId: "org-1" },
+        },
+      ],
+      has_more: false,
+    });
 
     await expect(
       findAddonsAwaitingWorkspace({

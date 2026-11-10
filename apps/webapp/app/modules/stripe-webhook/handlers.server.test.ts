@@ -32,20 +32,17 @@ vi.mock(import("~/utils/env"), async (importOriginal) => {
 });
 
 // why: Database module connects to Prisma during import
-const { mockUserUpdate, mockOrgUpdate, mockOrgFindMany, mockOrgCount } =
-  vi.hoisted(() => ({
-    mockUserUpdate: vi.fn(),
-    mockOrgUpdate: vi.fn(),
-    mockOrgFindMany: vi.fn(),
-    mockOrgCount: vi.fn(),
-  }));
+const { mockUserUpdate, mockOrgUpdate, mockOrgFindMany } = vi.hoisted(() => ({
+  mockUserUpdate: vi.fn(),
+  mockOrgUpdate: vi.fn(),
+  mockOrgFindMany: vi.fn(),
+}));
 vi.mock("~/database/db.server", () => ({
   db: {
     user: { update: mockUserUpdate },
     organization: {
       update: mockOrgUpdate,
       findMany: mockOrgFindMany,
-      count: mockOrgCount,
     },
   },
 }));
@@ -144,8 +141,11 @@ vi.mock("~/emails/stripe/unpaid-invoice", () => ({
 vi.mock("~/emails/stripe/welcome-to-trial", () => ({
   sendTeamTrialWelcomeEmail: vi.fn(),
 }));
+const { mockCaptureServerEvent } = vi.hoisted(() => ({
+  mockCaptureServerEvent: vi.fn(),
+}));
 vi.mock("~/integrations/posthog/client.server", () => ({
-  captureServerEvent: vi.fn(),
+  captureServerEvent: mockCaptureServerEvent,
 }));
 vi.mock("~/modules/addon-trial/scheduler.server", () => ({
   scheduleTrialEndsTomorrowEmail: vi.fn(),
@@ -314,7 +314,6 @@ beforeEach(() => {
   // unless a test says otherwise.
   mockSubscriptionsList.mockResolvedValue({ data: [], has_more: false });
   mockOrgFindMany.mockResolvedValue([]);
-  mockOrgCount.mockResolvedValue(0);
   mockProductsRetrieve.mockImplementation((productId: string) => {
     const product = PRODUCTS[productId];
     return product
@@ -395,7 +394,6 @@ describe("handleSubscriptionCreated", () => {
       mockOrgFindMany.mockResolvedValue([
         { id: "org-9", name: "ZZ Test Team" },
       ]);
-      mockOrgCount.mockResolvedValue(1);
 
       await handleSubscriptionCreated(
         buildEvent("customer.subscription.created", unlinked()),
@@ -420,12 +418,33 @@ describe("handleSubscriptionCreated", () => {
       );
     });
 
+    it("leaves a subscription that is not live yet unlinked", async () => {
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent(
+          "customer.subscription.created",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            status: "incomplete",
+            metadata: {},
+          })
+        ),
+        user
+      );
+
+      expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+      expect(adminEmailSubjects()).toEqual([]);
+    });
+
     it("asks the admin to pick when the customer owns several Team workspaces", async () => {
       mockOrgFindMany.mockResolvedValue([
         { id: "org-8", name: "ZZ Test Team A" },
         { id: "org-9", name: "ZZ Test Team B" },
       ]);
-      mockOrgCount.mockResolvedValue(2);
 
       await handleSubscriptionCreated(
         buildEvent("customer.subscription.created", unlinked()),
@@ -494,6 +513,52 @@ describe("handleSubscriptionCreated", () => {
       expect(adminEmailSubjects()).toEqual([
         "Needs you: customer owns 2 Team workspaces, pick one in Stripe metadata",
       ]);
+    });
+
+    it("asks the admin instead of linking while another live plan subscription names no workspace", async () => {
+      // A Team plan bought through Checkout names no workspace, so it may be
+      // the one paying for the only workspace the user owns.
+      stripeHolds(
+        storedSubscription([TEAM_PRODUCT], { id: "sub_checkout" }),
+        storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT])
+      );
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+      expect(adminEmailSubjects()).toEqual([
+        "Needs you: customer owns 1 Team workspaces, pick one in Stripe metadata",
+      ]);
+      expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
+        expect.objectContaining({ needsTeamWorkspace: false })
+      );
+    });
+
+    it("keeps the metadata Stripe holds now when linking", async () => {
+      stripeHolds(
+        storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT], {
+          metadata: { po_number: "PO-1" },
+        })
+      );
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+        metadata: { po_number: "PO-1", organizationId: "org-9" },
+      });
     });
 
     it("leaves a subscription alone that Stripe already shows linked (a retried event)", async () => {
@@ -701,6 +766,8 @@ describe("handleSubscriptionDeleted", () => {
     expect(mockUserUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { tierId: "tier_1" } })
     );
+    // A plan is left, so this is not churn.
+    expect(mockCaptureServerEvent).not.toHaveBeenCalled();
   });
 
   it("lowers the user to Free when no other subscription grants a plan", async () => {
@@ -714,6 +781,9 @@ describe("handleSubscriptionDeleted", () => {
 
     expect(mockUserUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { tierId: "free" } })
+    );
+    expect(mockCaptureServerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "subscription_cancelled" })
     );
   });
 
@@ -763,6 +833,22 @@ describe("handleSubscriptionUpdated", () => {
         organizationId: "org-9",
       })
     );
+  });
+
+  it("does not look for a workspace when a failed renewal recovers", async () => {
+    mockOrgFindMany.mockResolvedValue([{ id: "org-9", name: "ZZ Test Team" }]);
+
+    await handleSubscriptionUpdated(
+      buildEvent(
+        "customer.subscription.updated",
+        buildSubscription({ metadata: {} }),
+        { status: "past_due" }
+      ),
+      user
+    );
+
+    expect(mockOrgFindMany).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });
 
   it("does not look for a workspace on an update of a subscription that was already live", async () => {

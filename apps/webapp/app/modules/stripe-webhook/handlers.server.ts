@@ -34,13 +34,13 @@ import {
 
 import { resolveUserGreetingName } from "~/utils/user";
 import {
-  findTeamWorkspacesWithoutPlan,
   highestPlanTier,
   isAddonSubscription,
   isHigherOrEqualTier,
   isHigherTier,
   isTierId,
   liveTierOf,
+  resolveTeamWorkspaceForPlan,
   sendAdminInvoiceEmail,
   sendAdminPickWorkspaceEmail,
   sendAdminWorkspaceLinkedEmail,
@@ -488,21 +488,23 @@ function buildUpgradeCompletedProps(
 }
 
 /**
- * Links a Team subscription that names no workspace to the one Team workspace
- * its customer could mean, then switches its bundled add-ons on there.
+ * Links a Team subscription that names no workspace to the Team workspace its
+ * customer means, then switches its bundled add-ons on there.
  *
  * Invoice-billed subscriptions are created in the Stripe dashboard, so they
- * carry no `metadata.organizationId`. The candidates are the Team workspaces
- * the user owns that no other live plan subscription is linked to
- * (`findTeamWorkspacesWithoutPlan`):
- * - none: the subscription stays unlinked, and the next Team workspace the
- *   user creates picks its add-ons up (`findAddonsAwaitingWorkspace`);
- * - one: the subscription is linked to it and the admin is told;
- * - several: nothing is guessed and the admin is asked to pick one.
+ * carry no `metadata.organizationId`. `resolveTeamWorkspaceForPlan` decides:
+ * - no candidate workspace: the subscription stays unlinked, and the next
+ *   Team workspace the user creates picks its add-ons up
+ *   (`findAddonsAwaitingWorkspace`);
+ * - one certain workspace: the add-ons switch on there, the subscription's
+ *   metadata names it, and the admin is told;
+ * - anything else: nothing is guessed and the admin is asked to pick.
  *
  * Runs only for a Team (or higher) plan subscription that is active or
  * trialing. The subscription is read again from Stripe first, so a retried or
- * late event for a subscription linked since is left alone.
+ * late event for a subscription linked since is left alone. The add-ons are
+ * switched on before the metadata is written: if the write fails, the retried
+ * event still finds the subscription unlinked and does it all again.
  *
  * @param args.eventType - The Stripe event type being handled
  * @param args.subscription - The subscription from the event
@@ -512,8 +514,11 @@ function buildUpgradeCompletedProps(
  * @param args.hasBarcodeAddon - Whether the subscription carries a Barcodes item
  * @param args.loadSubscriptions - The event's shared read of the customer's
  *   subscriptions (`createCustomerSubscriptionsLoader`)
+ * @returns `"unplaced"` when the user owns no Team workspace the subscription
+ *   could belong to, `"linked"` or `"ask"` after acting, and `"skipped"` when
+ *   the subscription is not one to link
  */
-async function linkSubscriptionToOnlyTeamWorkspace({
+async function linkSubscriptionToTeamWorkspace({
   eventType,
   subscription,
   tierId,
@@ -529,41 +534,43 @@ async function linkSubscriptionToOnlyTeamWorkspace({
   hasAuditAddon: boolean;
   hasBarcodeAddon: boolean;
   loadSubscriptions: () => Promise<Stripe.Subscription[]>;
-}) {
-  if (subscription.metadata?.organizationId) return;
-  if (!isTierId(tierId) || !isHigherOrEqualTier(tierId, TierId.tier_2)) return;
+}): Promise<"skipped" | "unplaced" | "linked" | "ask"> {
+  if (subscription.metadata?.organizationId) return "skipped";
+  if (!isTierId(tierId) || !isHigherOrEqualTier(tierId, TierId.tier_2)) {
+    return "skipped";
+  }
   if (subscription.status !== "active" && subscription.status !== "trialing") {
-    return;
+    return "skipped";
   }
 
   const subscriptions = await loadSubscriptions();
   const current = subscriptions.find((sub) => sub.id === subscription.id);
-  if (current?.metadata?.organizationId) return;
+  if (current?.metadata?.organizationId) return "skipped";
 
-  const workspaces = await findTeamWorkspacesWithoutPlan({
-    userId: user.id,
-    subscriptions,
-    exceptSubscriptionId: subscription.id,
-  });
-  if (workspaces.length === 0) return;
-  if (workspaces.length > 1) {
+  const { ownedCount, candidates, workspace } =
+    await resolveTeamWorkspaceForPlan({ userId: user.id, subscriptions });
+  if (candidates.length === 0) return "unplaced";
+  if (!workspace) {
     sendAdminPickWorkspaceEmail({
       user,
       subscriptionId: subscription.id,
-      workspaces,
+      ownedCount,
+      candidates,
     });
-    return;
+    return "ask";
   }
 
-  const [workspace] = workspaces;
-  const metadata = { ...subscription.metadata, organizationId: workspace.id };
-  await stripe.subscriptions.update(subscription.id, { metadata });
+  const metadata = {
+    ...(current?.metadata ?? subscription.metadata),
+    organizationId: workspace.id,
+  };
   await syncBundledAddons({
     eventType,
     subscription: { ...subscription, metadata },
     hasAuditAddon,
     hasBarcodeAddon,
   });
+  await stripe.subscriptions.update(subscription.id, { metadata });
 
   sendAdminWorkspaceLinkedEmail({
     user,
@@ -574,6 +581,7 @@ async function linkSubscriptionToOnlyTeamWorkspace({
       ...(hasBarcodeAddon ? ["Barcodes"] : []),
     ],
   });
+  return "linked";
 }
 
 /**
@@ -780,7 +788,7 @@ export async function handleSubscriptionCreated(
       hasBarcodeAddon,
     });
   }
-  await linkSubscriptionToOnlyTeamWorkspace({
+  const workspaceLink = await linkSubscriptionToTeamWorkspace({
     eventType: event.type,
     subscription,
     tierId,
@@ -804,14 +812,9 @@ export async function handleSubscriptionCreated(
       user,
     });
     const subscriptionName = product?.name || "Shelf Subscription";
-    // A Team plan is used in a Team workspace, so a customer without one is
-    // sent to create it.
-    const needsTeamWorkspace =
-      isTierId(tierId) &&
-      isHigherOrEqualTier(tierId, TierId.tier_2) &&
-      (await db.organization.count({
-        where: { userId: user.id, type: "TEAM" },
-      })) === 0;
+    // A Team plan is used in a Team workspace, so a customer with no
+    // workspace the subscription could belong to is sent to create one.
+    const needsTeamWorkspace = workspaceLink === "unplaced";
 
     for (const email of emailsToNotify) {
       sendEmail({
@@ -971,14 +974,11 @@ export async function handleSubscriptionUpdated(
       | { status?: Stripe.Subscription.Status }
       | undefined
   )?.status;
-  // A subscription that just went live (from `incomplete` or `paused`, for
-  // instance) is linked the same way as one created live.
-  if (
-    previousStatus &&
-    previousStatus !== "active" &&
-    previousStatus !== "trialing"
-  ) {
-    await linkSubscriptionToOnlyTeamWorkspace({
+  // A subscription that just started (its first payment cleared, or it was
+  // resumed) is linked the same way as one created live. A recovered failed
+  // renewal (`past_due`) was live all along and is left alone.
+  if (previousStatus === "incomplete" || previousStatus === "paused") {
+    await linkSubscriptionToTeamWorkspace({
       eventType: event.type,
       subscription,
       tierId,
