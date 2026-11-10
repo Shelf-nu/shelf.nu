@@ -399,24 +399,25 @@ describe("getAssetModels", () => {
     expect(db.assetModel.findFirst).not.toHaveBeenCalled();
   });
 
-  it("does not fetch the included model again when it is on the page", async () => {
+  it("does not list the included model twice when it is on the page", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
     // @ts-expect-error mock setup
-    db.assetModel.findMany.mockResolvedValue([
-      {
-        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
-        _count: { assets: 1 },
-      },
-    ]);
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
     // @ts-expect-error mock setup
     db.assetModel.count.mockResolvedValue(1);
+    // why: the lookup runs alongside the page query, so it returns the same row.
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(pageModel);
 
     const result = await getAssetModels({
       organizationId: "org-123",
       includeId: "model-1",
     });
 
-    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
-    expect(result.assetModels).toHaveLength(1);
+    expect(result.assetModels.map((m) => m.id)).toEqual(["model-1"]);
   });
 
   it("does not read defaults unless asked for them", async () => {

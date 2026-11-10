@@ -144,7 +144,11 @@ export async function getAssetModels(params: {
   /**
    * A model that must be in the result even when it falls outside the page,
    * such as the one an asset being edited already has. A select shows its
-   * value only if the value is among its options. Put first when added.
+   * value only if the value is among its options.
+   *
+   * When it is not on the page it is added first, ahead of the `updatedAt`
+   * order, ignoring `search` and `page`, so the list can be `perPage + 1`
+   * long. Meant for an unfiltered first page, such as the edit form's.
    */
   includeId?: string | null;
 }) {
@@ -172,7 +176,7 @@ export async function getAssetModels(params: {
       },
     } as const;
 
-    const [pageModels, totalAssetModels] = await Promise.all([
+    const [pageModels, totalAssetModels, includedModel] = await Promise.all([
       db.assetModel.findMany({
         skip,
         take,
@@ -182,18 +186,19 @@ export async function getAssetModels(params: {
       }),
 
       db.assetModel.count({ where }),
-    ]);
 
-    const includedModel =
-      includeId && !pageModels.some((model) => model.id === includeId)
-        ? await db.assetModel.findFirst({
+      includeId
+        ? db.assetModel.findFirst({
             where: { id: includeId, organizationId },
             include,
           })
-        : null;
-    const assetModels = includedModel
-      ? [includedModel, ...pageModels]
-      : pageModels;
+        : null,
+    ]);
+
+    const assetModels =
+      includedModel && !pageModels.some((m) => m.id === includedModel.id)
+        ? [includedModel, ...pageModels]
+        : pageModels;
 
     const modelIds = assetModels.map((model) => model.id);
     const [archivedCounts, fieldDefaults] = await Promise.all([
