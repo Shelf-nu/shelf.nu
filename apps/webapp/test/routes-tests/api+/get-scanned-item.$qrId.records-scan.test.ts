@@ -65,6 +65,7 @@ const ORG_ID = "org-1";
 function assetRow(id: string) {
   return {
     id,
+    organizationId: ORG_ID,
     title: "An asset",
     mainImage: null,
     thumbnailImage: null,

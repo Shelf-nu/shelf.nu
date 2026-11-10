@@ -95,9 +95,9 @@ export async function generateQrObj({
 
     if (existingQr === undefined) {
       if (assetId) {
-        qr = await getQrByAssetId({ assetId });
+        qr = await getQrByAssetId({ assetId, organizationId });
       } else if (kitId) {
-        qr = await getQrByKitId({ kitId });
+        qr = await getQrByKitId({ kitId, organizationId });
       }
     }
 
@@ -117,14 +117,35 @@ export async function generateQrObj({
      */
     if (!qr) {
       qr = await db.$transaction(async (tx) => {
-        if (assetId) {
-          await tx.$queryRaw`SELECT id FROM "Asset" WHERE id = ${assetId} FOR UPDATE`;
-        } else {
-          await tx.$queryRaw`SELECT id FROM "Kit" WHERE id = ${kitId} FOR UPDATE`;
+        // The lock doubles as the workspace check: it only matches a row in
+        // the caller's workspace, so a code is never created for an asset or
+        // kit the caller cannot see.
+        const locked = assetId
+          ? await tx.$queryRaw<
+              { id: string }[]
+            >`SELECT id FROM "Asset" WHERE id = ${assetId} AND "organizationId" = ${organizationId} FOR UPDATE`
+          : await tx.$queryRaw<
+              { id: string }[]
+            >`SELECT id FROM "Kit" WHERE id = ${kitId} AND "organizationId" = ${organizationId} FOR UPDATE`;
+
+        if (!Array.isArray(locked) || locked.length === 0) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not found",
+            message: assetId
+              ? "The asset you are trying to access does not exist or you do not have permission to access it."
+              : "The kit you are trying to access does not exist or you do not have permission to access it.",
+            additionalData: { assetId, kitId, organizationId },
+            label: "QR",
+            status: 404,
+            shouldBeCaptured: false,
+          });
         }
 
         const existing = await tx.qr.findFirst({
-          where: assetId ? { assetId } : { kitId },
+          where: assetId
+            ? { assetId, asset: { organizationId } }
+            : { kitId, kit: { organizationId } },
         });
         if (existing) {
           return existing;

@@ -23,28 +23,29 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    const [qrObj, kit] = await Promise.all([
-      generateQrObj({
-        kitId,
-        userId,
-        organizationId,
-      }),
-      getKit({
-        id: kitId,
-        organizationId,
-        userOrganizations,
-        request,
-        extraInclude: {
-          barcodes: {
-            select: {
-              id: true,
-              type: true,
-              value: true,
-            },
+    // The kit is read first, scoped to the caller's workspace, so a kit from
+    // another workspace refuses before anything can create a code for it.
+    const kit = await getKit({
+      id: kitId,
+      organizationId,
+      userOrganizations,
+      request,
+      extraInclude: {
+        barcodes: {
+          select: {
+            id: true,
+            type: true,
+            value: true,
           },
         },
-      }),
-    ]);
+      },
+    });
+
+    const qrObj = await generateQrObj({
+      kitId: kit.id,
+      userId,
+      organizationId,
+    });
 
     return data(
       payload({

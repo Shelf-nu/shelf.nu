@@ -524,6 +524,7 @@ describe("createScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     // Access is revoked, but the mapping must still be persisted so SCIM now
     // manages this user (and can later reactivate them).
@@ -625,6 +626,7 @@ describe("replaceScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     expect(result.active).toBe(false);
   });
@@ -799,6 +801,7 @@ describe("patchScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     expect(result.active).toBe(false);
   });
@@ -1315,6 +1318,7 @@ describe("deactivateScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     expect(mockDb.db.userScimExternalId.deleteMany).toHaveBeenCalledWith({
       where: { organizationId: ORG_ID, scimExternalId: SCIM_ID },

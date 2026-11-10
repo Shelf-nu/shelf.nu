@@ -24,33 +24,55 @@ import { generateRandomCode } from "../invite/helpers";
 
 const label: ErrorLabel = "QR";
 
-export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
+/**
+ * Finds the QR code linked to an asset in the given workspace.
+ *
+ * @param args.assetId - The asset the code is linked to
+ * @param args.organizationId - The caller's workspace; an asset in any other
+ *   workspace resolves to no code
+ * @returns The code, or null when the asset has none in this workspace
+ */
+export async function getQrByAssetId({
+  assetId,
+  organizationId,
+}: Pick<Qr, "assetId"> & { organizationId: Organization["id"] }) {
   try {
     return await db.qr.findFirst({
-      where: { assetId },
+      where: { assetId, asset: { organizationId } },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while fetching the QR. Please try again or contact support.",
-      additionalData: { assetId },
+      additionalData: { assetId, organizationId },
       label,
     });
   }
 }
 
-export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
+/**
+ * Finds the QR code linked to a kit in the given workspace.
+ *
+ * @param args.kitId - The kit the code is linked to
+ * @param args.organizationId - The caller's workspace; a kit in any other
+ *   workspace resolves to no code
+ * @returns The code, or null when the kit has none in this workspace
+ */
+export async function getQrByKitId({
+  kitId,
+  organizationId,
+}: Pick<Qr, "kitId"> & { organizationId: Organization["id"] }) {
   try {
     return await db.qr.findFirst({
-      where: { kitId },
+      where: { kitId, kit: { organizationId } },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while fetching the QR. Please try again or contact support.",
-      additionalData: { kitId },
+      additionalData: { kitId, organizationId },
       label,
     });
   }

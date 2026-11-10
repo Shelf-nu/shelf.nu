@@ -94,6 +94,7 @@ const SAM_NOT_FOUND_STATUS = 500;
 function assetRow(id: string) {
   return {
     id,
+    organizationId: ORG_ID,
     title: "An asset",
     mainImage: null,
     thumbnailImage: null,
@@ -241,5 +242,55 @@ describe("GET /api/get-scanned-item/:qrId — SAM-shaped barcode fallback", () =
     expect(body.qr?.type).toBe("asset");
     expect(body.qr?.asset?.id).toBe("asset-2");
     expect(mockGetBarcodeByValue).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/get-scanned-item/:qrId: workspace of the linked item", () => {
+  it("refuses a code whose linked asset is in another workspace", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: "asset-3",
+      kitId: null,
+      asset: { ...assetRow("asset-3"), organizationId: "org-2" },
+      kit: null,
+    });
+
+    const { status, body } = await scan("abcdefghij");
+
+    expect(status).not.toBe(200);
+    expect(body.qr).toBeUndefined();
+  });
+
+  it("refuses a code whose linked kit is in another workspace", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: null,
+      kitId: "kit-3",
+      asset: null,
+      kit: { id: "kit-3", name: "A kit", organizationId: "org-2" },
+    });
+
+    const { status, body } = await scan("abcdefghij");
+
+    expect(status).not.toBe(200);
+    expect(body.qr).toBeUndefined();
+  });
+
+  it("resolves a code whose linked kit is in the caller's workspace", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: null,
+      kitId: "kit-4",
+      asset: null,
+      kit: { id: "kit-4", name: "A kit", organizationId: ORG_ID },
+    });
+
+    const { status, body } = await scan("abcdefghij");
+
+    expect(status).toBe(200);
+    expect(body.qr?.type).toBe("kit");
   });
 });

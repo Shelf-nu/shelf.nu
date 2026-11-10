@@ -390,7 +390,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       include,
     });
 
-    if (qr.organizationId !== organizationId) {
+    // The code and the item it is linked to must both be in the caller's
+    // workspace: a code row carries its own organizationId, independent of
+    // the asset's or kit's.
+    if (
+      qr.organizationId !== organizationId ||
+      (qr.asset && qr.asset.organizationId !== organizationId) ||
+      (qr.kit && qr.kit.organizationId !== organizationId)
+    ) {
       throw new ShelfError({
         cause: null,
         message:

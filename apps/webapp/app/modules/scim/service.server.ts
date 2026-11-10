@@ -281,7 +281,13 @@ async function revokeScimMembership(
   userId: string,
   organizationId: string
 ): Promise<void> {
-  await revokeAccessToOrganization({ userId, organizationId });
+  // Deprovisioning converges on "no access": a membership removed since the
+  // caller read it is already in that state, not an error.
+  await revokeAccessToOrganization({
+    userId,
+    organizationId,
+    allowMissingMembership: true,
+  });
 }
 
 /**

@@ -21,6 +21,9 @@ vi.mock("~/database/db.server", () => ({
       findMany: vi.fn(),
       update: vi.fn(),
     },
+    category: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -343,6 +346,64 @@ describe("createCustomField", () => {
       }),
     });
   });
+
+  it("refuses with 400 and creates nothing when a category is not in the organization", async () => {
+    // Only one of the two requested categories is in org-1.
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-own" },
+    ] as never);
+
+    await expect(
+      createCustomField({
+        name: "Manual",
+        helpText: null,
+        type: "TEXT",
+        required: false,
+        active: false,
+        organizationId: "org-1",
+        userId: "user-1",
+        categories: ["cat-own", "cat-other-org"],
+      })
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+    expect(db.category.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["cat-own", "cat-other-org"] },
+        organizationId: "org-1",
+      },
+      select: { id: true },
+    });
+    expect(db.customField.create).not.toHaveBeenCalled();
+  });
+
+  it("connects categories that are all in the organization", async () => {
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-own" },
+    ] as never);
+    vi.mocked(db.customField.create).mockResolvedValue({
+      name: "Manual",
+      type: "TEXT",
+      active: false,
+    } as never);
+    vi.mocked(db.assetIndexSettings.findMany).mockResolvedValue([]);
+
+    await createCustomField({
+      name: "Manual",
+      helpText: null,
+      type: "TEXT",
+      required: false,
+      active: false,
+      organizationId: "org-1",
+      userId: "user-1",
+      categories: ["cat-own"],
+    });
+
+    expect(db.customField.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        categories: { connect: [{ id: "cat-own" }] },
+      }),
+    });
+  });
 });
 
 describe("upsertCustomField", () => {
@@ -463,8 +524,12 @@ describe("updateCustomField", () => {
   function mockTransaction({
     field = savedField as typeof savedField | null,
     rewritten = [] as Rewritten[],
+    categoriesInOrg = [] as { id: string }[],
   } = {}) {
     const tx = {
+      category: {
+        findMany: vi.fn().mockResolvedValue(categoriesInOrg),
+      },
       customField: {
         findFirst: vi.fn().mockResolvedValue(field),
         update: vi.fn().mockImplementation(({ data }) => ({
@@ -719,6 +784,48 @@ describe("updateCustomField", () => {
       })
     ).rejects.toMatchObject({ status: 404, shouldBeCaptured: false });
     expect(tx.customField.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 400 and writes nothing when a category is not in the organization", async () => {
+    const tx = mockTransaction({ categoriesInOrg: [{ id: "cat-own" }] });
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        userId: "user-1",
+        categories: ["cat-own", "cat-other-org"],
+      })
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+    // The check reads through the transaction client.
+    expect(tx.category.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["cat-own", "cat-other-org"] },
+        organizationId: "org-1",
+      },
+      select: { id: true },
+    });
+    expect(tx.customField.update).not.toHaveBeenCalled();
+  });
+
+  it("sets categories that are all in the organization", async () => {
+    const tx = mockTransaction({ categoriesInOrg: [{ id: "cat-own" }] });
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      categories: ["cat-own"],
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          categories: { set: [{ id: "cat-own" }] },
+        }),
+      })
+    );
   });
 
   it.each([

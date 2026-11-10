@@ -340,6 +340,34 @@ export async function createInvite(
         teamMemberId = member.id;
       }
     } else {
+      /**
+       * The invite is linked to the given team member, so it must be a live,
+       * unclaimed team member of this workspace: the same rule the CSV import
+       * applies to its team member ids.
+       */
+      const teamMember = await db.teamMember.findFirst({
+        where: {
+          id: teamMemberId,
+          organizationId,
+          deletedAt: null,
+          userId: null,
+        },
+        select: { id: true },
+      });
+
+      if (!teamMember) {
+        throw new ShelfError({
+          cause: null,
+          title: "Team member not found",
+          message:
+            "The selected team member could not be found in your workspace or is already linked to a user.",
+          additionalData: { organizationId, teamMemberId },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       const previousActiveInvite = await db.invite.findFirst({
         where: {
           organizationId,

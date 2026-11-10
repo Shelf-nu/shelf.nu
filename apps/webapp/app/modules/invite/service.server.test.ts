@@ -47,6 +47,7 @@ const dbMock = vi.hoisted(() => ({
   user: { findFirst: vi.fn(), findMany: vi.fn() },
   teamMember: {
     update: vi.fn(),
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     createMany: vi.fn(),
   },
@@ -317,6 +318,73 @@ describe("createInvite: earlier invites of the same person", () => {
         }),
       })
     );
+  });
+});
+
+describe("createInvite: linking an existing team member", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+    });
+    dbMock.user.findFirst.mockResolvedValue(null);
+    dbMock.invite.findFirst.mockResolvedValue(null);
+    dbMock.invite.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: "invite-new",
+        inviteeEmail: data.inviteeEmail,
+        organization: { name: "Workspace", customEmailFooter: null },
+        inviter: { firstName: "Owner", lastName: "Person", displayName: null },
+      })
+    );
+  });
+
+  /** A createInvite payload that links the given team member. */
+  const linkPayload = (teamMemberId: string) => ({
+    organizationId: "org-1",
+    inviteeEmail: "person@school.org",
+    inviterId: "user-1",
+    roles: [OrganizationRoles.BASE],
+    teamMemberName: "Person",
+    teamMemberId,
+    userId: "user-1",
+    actorOwnsWorkspace: true,
+  });
+
+  it("looks the team member up as a live, unclaimed member of the workspace", async () => {
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
+
+    await createInvite(linkPayload("tm-own"));
+
+    expect(dbMock.teamMember.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "tm-own",
+        organizationId: "org-1",
+        deletedAt: null,
+        userId: null,
+      },
+      select: { id: true },
+    });
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeTeamMember: { connect: { id: "tm-own" } },
+        }),
+      })
+    );
+  });
+
+  it("refuses with 400 and writes no invite when the team member is not a live, unclaimed member of the workspace", async () => {
+    // No row matches the workspace-scoped lookup: another workspace's member,
+    // a deleted one, or one already linked to a user.
+    dbMock.teamMember.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createInvite(linkPayload("tm-other-org"))
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+    expect(dbMock.invite.create).not.toHaveBeenCalled();
   });
 });
 
