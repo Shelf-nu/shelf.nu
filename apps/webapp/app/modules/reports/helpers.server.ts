@@ -132,6 +132,21 @@ const RETURNED_BOOKING_WHERE = {
 } satisfies Prisma.BookingWhereInput;
 
 /**
+ * Prisma predicate for "this booking really happened", shared by the usage
+ * reports (Top Booked Assets and Kits, Monthly Booking Trends, Asset
+ * Utilization).
+ *
+ * A DRAFT is a plan and a CANCELLED booking never happened. A booking archived
+ * before any check-out (`archivedWithoutCheckin`: a discarded draft, or a
+ * reservation whose end passed unused) never went out either, although its
+ * status reads ARCHIVED, so it is left out too.
+ */
+const REAL_BOOKING_WHERE = {
+  status: { notIn: ["DRAFT", "CANCELLED"] },
+  archivedWithoutCheckin: false,
+} satisfies Prisma.BookingWhereInput;
+
+/**
  * Row-level counterpart of {@link RETURNED_BOOKING_WHERE}: whether an
  * already-fetched booking row represents a completed, returned booking.
  */
@@ -2419,7 +2434,7 @@ async function fetchTopBookedAssetRows(
       organizationId,
       from: { lte: timeframe.to },
       to: { gte: timeframe.from },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
+      ...REAL_BOOKING_WHERE,
     },
     select: {
       from: true,
@@ -2602,7 +2617,7 @@ async function computeTopBookedKpis(
       organizationId,
       from: { lte: timeframe.to },
       to: { gte: timeframe.from },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
+      ...REAL_BOOKING_WHERE,
       // "Total Bookings" counts the same population the rows aggregate:
       // bookings holding at least one asset matching the report's asset
       // filters. Without this, assetless bookings — and, when
@@ -2873,7 +2888,7 @@ async function fetchTopBookedKitData(
       organizationId,
       from: { lte: timeframe.to },
       to: { gte: timeframe.from },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
+      ...REAL_BOOKING_WHERE,
     },
     select: {
       from: true,
@@ -3920,10 +3935,9 @@ export async function monthlyBookingTrendsReport(
         ? mergeAssetWhere({ organizationId }, assetFilter)
         : null;
 
-    // Fetch all bookings created in the timeframe. DRAFT and CANCELLED are
-    // excluded so "Total Bookings" means the same thing it means in the
-    // top-booked reports: real bookings, not plans or bookings that never
-    // happened.
+    // Fetch all bookings created in the timeframe, limited to real bookings
+    // (REAL_BOOKING_WHERE) so "Total Bookings" means the same thing it means
+    // in the top-booked reports.
     const bookings = await db.booking.findMany({
       where: {
         organizationId,
@@ -3931,7 +3945,7 @@ export async function monthlyBookingTrendsReport(
           gte: timeframe.from,
           lte: timeframe.to,
         },
-        status: { notIn: ["DRAFT", "CANCELLED"] },
+        ...REAL_BOOKING_WHERE,
         ...(narrowedAssetWhere && {
           bookingAssets: { some: { asset: narrowedAssetWhere } },
         }),
@@ -4288,7 +4302,7 @@ export async function assetUtilizationReport(
             booking: {
               from: { lte: timeframe.to },
               to: { gte: timeframe.from },
-              status: { notIn: ["DRAFT", "CANCELLED"] },
+              ...REAL_BOOKING_WHERE,
             },
           },
           select: {

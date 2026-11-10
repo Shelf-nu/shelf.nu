@@ -381,6 +381,8 @@ describe("topBookedKitsReport", () => {
     const where = vi.mocked(db.booking.findMany).mock.calls[0][0]?.where as any;
     expect(where.organizationId).toBe("org-1");
     expect(where.status).toEqual({ notIn: ["DRAFT", "CANCELLED"] });
+    // A booking archived before any check-out was never used.
+    expect(where.archivedWithoutCheckin).toBe(false);
   });
 
   it("uses an interval-overlap timeframe predicate (counts bookings spanning the window)", async () => {
