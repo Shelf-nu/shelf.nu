@@ -10,7 +10,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { endSessionOnDevice, type SessionEndingClient } from "./end-session";
+import {
+  endSessionOnDevice,
+  signOutMayClearState,
+  type SessionEndingClient,
+} from "./end-session";
 import { onAfterSessionEnd } from "./session-end";
 
 type Answer = "ok" | "error" | "throw";
@@ -245,5 +249,24 @@ describe("endSessionOnDevice", () => {
     unregisterFailing();
 
     assert.equal(runs, 3);
+  });
+});
+
+describe("signOutMayClearState", () => {
+  const start = { signIns: 2, serverVersion: 5 };
+
+  it("clears when nothing changed during the sign-out", () => {
+    assert.equal(signOutMayClearState(start, { ...start }), true);
+  });
+
+  it("keeps a session that signed in meanwhile", () => {
+    assert.equal(signOutMayClearState(start, { ...start, signIns: 3 }), false);
+  });
+
+  it("keeps the state after a server switch meanwhile", () => {
+    assert.equal(
+      signOutMayClearState(start, { ...start, serverVersion: 6 }),
+      false
+    );
   });
 });

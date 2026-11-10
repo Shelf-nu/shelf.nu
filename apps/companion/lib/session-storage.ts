@@ -52,12 +52,14 @@ export type SessionStorage = {
   removeSession: (storageKey: string) => Promise<void>;
   /**
    * Makes a blocked session key writable for a sign-in: removes the old
-   * session and lifts the block only when the removal is verified. A no-op
-   * for a key that is not blocked. Never rejects; on failure the block stays.
+   * session and lifts the block only when the removal is verified. Never
+   * rejects; on failure the block stays.
    *
    * @param storageKey - The session storage key the sign-in will write
+   * @returns True when the key is writable (it was not blocked, or the block
+   *   was lifted); false when it is still blocked
    */
-  prepareSignIn: (storageKey: string) => Promise<void>;
+  prepareSignIn: (storageKey: string) => Promise<boolean>;
 };
 
 /**
@@ -99,6 +101,11 @@ export function createSessionStorage({
   /** Deletes a value and all its chunks. Throws on a store error. */
   async function deleteStrict(key: string): Promise<void> {
     await store.deleteItemAsync(key);
+    await deleteChunks(key);
+  }
+
+  /** Deletes a value's chunk set only. Throws on a store error. */
+  async function deleteChunks(key: string): Promise<void> {
     const countStr = await store.getItemAsync(`${key}_chunks`);
     if (!countStr) return;
     const count = parseInt(countStr, 10);
@@ -108,12 +115,18 @@ export function createSessionStorage({
     await store.deleteItemAsync(`${key}_chunks`);
   }
 
-  /** Writes a value, chunking it when long. Throws on a store error. */
+  /**
+   * Writes a value, chunking it when long. Throws on a store error.
+   *
+   * The new value overwrites in place wherever it can, so a write that fails
+   * part-way leaves the previous session readable rather than nothing at all:
+   * a short value replaces the direct key (old chunks are dropped first,
+   * since a direct value wins on read anyway); a long value writes its chunks
+   * and count, and only then drops the direct key that would shadow them.
+   */
   async function writeStrict(key: string, value: string): Promise<void> {
-    // Clear any previous value first, so a stale direct value or stale tail
-    // chunks can never shadow or corrupt the new one.
-    await deleteStrict(key);
     if (value.length <= chunkSize) {
+      await deleteChunks(key);
       await store.setItemAsync(key, value);
       return;
     }
@@ -125,6 +138,7 @@ export function createSessionStorage({
       );
     }
     await store.setItemAsync(`${key}_chunks`, String(chunks));
+    await store.deleteItemAsync(key);
   }
 
   const adapter: SessionStorageAdapter = {
@@ -168,19 +182,28 @@ export function createSessionStorage({
     }
   }
 
-  async function prepareSignIn(storageKey: string): Promise<void> {
-    if (!(await block.isBlocked(storageKey))) return;
+  async function prepareSignIn(storageKey: string): Promise<boolean> {
+    if (!(await block.isBlocked(storageKey))) return true;
     try {
       await removeSession(storageKey);
     } catch (error) {
       onError("prepareSignIn", storageKey, error);
-      return; // the old session may still be stored: keep it refused
+      return false; // the old session may still be stored: keep it refused
     }
     await block.unblock(storageKey);
+    return true;
   }
 
   return { adapter, removeSession, prepareSignIn };
 }
+
+/**
+ * The message a sign-in returns when the session key is still blocked: the
+ * previous sign-in could not be removed from the phone, so a new session
+ * written now would be refused on every read.
+ */
+export const PREVIOUS_SIGN_IN_NOT_CLEARED =
+  "This phone could not clear the previous sign-in. Restart the app and try again.";
 
 /** The message a sign-in returns when the server changed while it ran. */
 export const SERVER_CHANGED_DURING_SIGN_IN =
@@ -189,13 +212,14 @@ export const SERVER_CHANGED_DURING_SIGN_IN =
 /**
  * Runs one sign-in the same way on every sign-in path (password and SSO):
  * prepares the stored session key first (`prepareSignIn`), then signs in only
- * if the server did not change meanwhile.
+ * if that worked and the server did not change meanwhile.
  *
- * @param options.prepare - Prepares the session key (`prepareSignIn`)
+ * @param options.prepare - Prepares the session key (`prepareSignIn`);
+ *   false means it is still blocked
  * @param options.serverUnchanged - True while the server is the one the
  *   sign-in started on
  * @param options.signIn - The sign-in itself
- * @returns The sign-in's result, or the server-changed error
+ * @returns The sign-in's result, or the not-cleared or server-changed error
  */
 export async function signInWithPreparedSession<
   T extends { error: string | null },
@@ -204,11 +228,11 @@ export async function signInWithPreparedSession<
   serverUnchanged,
   signIn,
 }: {
-  prepare: () => Promise<void>;
+  prepare: () => Promise<boolean>;
   serverUnchanged: () => boolean;
   signIn: () => Promise<T>;
 }): Promise<T | { error: string }> {
-  await prepare();
+  if (!(await prepare())) return { error: PREVIOUS_SIGN_IN_NOT_CLEARED };
   if (!serverUnchanged()) return { error: SERVER_CHANGED_DURING_SIGN_IN };
   return signIn();
 }

@@ -85,11 +85,6 @@ export function useScanQueue({
   if (!gateRef.current) gateRef.current = createQueueGate();
   const gate = gateRef.current;
 
-  // Record the owner as soon as an account is known, before the first scan.
-  useEffect(() => {
-    gate.observe(userId);
-  }, [gate, userId]);
-
   useEffect(() => {
     gate.start();
     return () => gate.stop();
@@ -168,9 +163,16 @@ export function useScanQueue({
     isProcessingQueueRef.current = false;
   }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, saveDraft, gate]);
 
+  // Record the owner as soon as an account is known, before the first scan.
+  // When the owner is signed in again after a pause (the drain stops while
+  // nobody or someone else is signed in), resume sending the queue.
+  useEffect(() => {
+    gate.observe(userId);
+    if (gate.mayUse() && scanQueueRef.current.length > 0) void processQueue();
+  }, [gate, userId, processQueue]);
+
   const enqueueScan = useCallback(
     (incoming: ScanQueueEntry) => {
-      // A different account never adds to another account's queue.
       // Only the owner, signed in, adds scans: never another account, and
       // never a signed-out scanner into the previous owner's draft.
       if (!gate.mayUse()) return;

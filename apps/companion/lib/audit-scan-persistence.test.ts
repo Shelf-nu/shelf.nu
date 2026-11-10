@@ -128,6 +128,29 @@ describe("audit scan drafts", () => {
     assert.equal(await persistence.loadAuditScanState("user_a", "au_1"), null);
   });
 
+  it("refuses a draft with a null or malformed entry", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
+    const [key] = [...store.keys()];
+    const good = JSON.parse(store.get(key)!);
+    for (const broken of [
+      { ...good, scannedItems: [null] },
+      { ...good, pendingQueue: [ENTRY, null] },
+      { ...good, failedQueue: [{ assetId: "as_1" }] },
+      { ...good, scannedItems: [{ ...ITEM, name: 5 }] },
+      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: { n: 3 } }] },
+      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: -1 }] },
+      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: null }] },
+      { ...good, pendingQueue: [{ ...ENTRY, recount: "false" }] },
+      { ...good, failedQueue: [{ ...ENTRY, queuedAt: "soon" }] },
+    ]) {
+      store.set(key, JSON.stringify(broken));
+      assert.equal(
+        await persistence.loadAuditScanState("user_a", "au_1"),
+        null
+      );
+    }
+  });
+
   it("ignores drafts saved without an owner", async () => {
     store.set(
       `${prefix}au_1`,
@@ -222,29 +245,6 @@ describe("pruneStaleAuditDrafts", () => {
     assert.equal(await persistence.loadAuditScanState("user_a", "au_1"), null);
   });
 
-  it("refuses a draft with a null or malformed entry", async () => {
-    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], [ENTRY]);
-    const [key] = [...store.keys()];
-    const good = JSON.parse(store.get(key)!);
-    for (const broken of [
-      { ...good, scannedItems: [null] },
-      { ...good, pendingQueue: [ENTRY, null] },
-      { ...good, failedQueue: [{ assetId: "as_1" }] },
-      { ...good, scannedItems: [{ ...ITEM, name: 5 }] },
-      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: { n: 3 } }] },
-      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: -1 }] },
-      { ...good, pendingQueue: [{ ...ENTRY, foundQuantity: null }] },
-      { ...good, pendingQueue: [{ ...ENTRY, recount: "false" }] },
-      { ...good, failedQueue: [{ ...ENTRY, queuedAt: "soon" }] },
-    ]) {
-      store.set(key, JSON.stringify(broken));
-      assert.equal(
-        await persistence.loadAuditScanState("user_a", "au_1"),
-        null
-      );
-    }
-  });
-
   it("drops a synced draft of any account older than the maximum age", async () => {
     await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
     await persistence.saveAuditScanState("user_b", "au_2", [ITEM], []);
@@ -284,6 +284,14 @@ describe("pruneStaleAuditDrafts", () => {
     );
 
     assert.equal(store.size, 0);
+  });
+
+  it("removes a draft that is not valid JSON", async () => {
+    store.set(`${prefix}user_a:au_1`, "{not json");
+
+    await persistence.pruneStaleAuditDrafts();
+
+    assert.equal(store.has(`${prefix}user_a:au_1`), false);
   });
 
   it("leaves keys outside the draft prefix alone", async () => {
@@ -327,7 +335,10 @@ describe("adoptUnownedDraft", () => {
       })
     );
 
-    assert.equal(await persistence.adoptUnownedDraft("user_a", "au_1"), true);
+    assert.equal(
+      await persistence.adoptUnownedDraft("user_a", "au_1", { mayScan: true }),
+      true
+    );
 
     const draft = await persistence.loadAuditScanState("user_a", "au_1");
     assert.deepEqual(draft?.pendingQueue, [ENTRY]);
@@ -340,13 +351,35 @@ describe("adoptUnownedDraft", () => {
       `${prefix}au_1`,
       JSON.stringify({ version: 1, auditId: "au_1", pendingQueue: [ENTRY] })
     );
-    assert.equal(await persistence.adoptUnownedDraft("user_a", "au_1"), false);
+    assert.equal(
+      await persistence.adoptUnownedDraft("user_a", "au_1", { mayScan: true }),
+      false
+    );
 
     store.set(
       `${prefix}au_2`,
       JSON.stringify({ version: 1, auditId: "au_2", pendingQueue: [] })
     );
-    assert.equal(await persistence.adoptUnownedDraft("user_a", "au_2"), false);
+    assert.equal(
+      await persistence.adoptUnownedDraft("user_a", "au_2", { mayScan: true }),
+      false
+    );
+  });
+});
+
+describe("adoptUnownedDraft permission", () => {
+  it("never adopts for an account that may not scan the audit", async () => {
+    store.set(
+      `${prefix}au_1`,
+      JSON.stringify({ version: 1, auditId: "au_1", pendingQueue: [ENTRY] })
+    );
+
+    assert.equal(
+      await persistence.adoptUnownedDraft("user_a", "au_1", { mayScan: false }),
+      false
+    );
+    assert.equal(store.has(`${prefix}au_1`), true);
+    assert.equal(await persistence.loadAuditScanState("user_a", "au_1"), null);
   });
 });
 

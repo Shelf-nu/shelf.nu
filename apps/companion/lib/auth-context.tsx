@@ -12,6 +12,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import {
   endSessionOnDevice,
   getServerVersion,
+  signOutMayClearState,
   runBeforeSessionEnd,
   subscribeToServerChange,
 } from "./server";
@@ -163,8 +164,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A forced sign-out emits no auth event, so the state is cleared here,
     // unless someone signed in or the server changed while it ran.
     if (
-      signInsRef.current === signInsAtStart &&
-      getServerVersion() === serverAtStart
+      signOutMayClearState(
+        { signIns: signInsAtStart, serverVersion: serverAtStart },
+        { signIns: signInsRef.current, serverVersion: getServerVersion() }
+      )
     ) {
       setSession(null);
     }

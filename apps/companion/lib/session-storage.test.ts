@@ -10,6 +10,7 @@ import { beforeEach, describe, it } from "node:test";
 import { createSessionBlock } from "./session-block";
 import {
   createSessionStorage,
+  PREVIOUS_SIGN_IN_NOT_CLEARED,
   SERVER_CHANGED_DURING_SIGN_IN,
   signInWithPreparedSession,
 } from "./session-storage";
@@ -129,7 +130,7 @@ describe("prepareSignIn", () => {
     await storage.adapter.setItem(KEY, "previous person");
     await block.block(KEY);
 
-    await storage.prepareSignIn(KEY);
+    assert.equal(await storage.prepareSignIn(KEY), true);
 
     assert.equal(await storage.adapter.getItem(KEY), null);
     await storage.adapter.setItem(KEY, "new person");
@@ -141,7 +142,7 @@ describe("prepareSignIn", () => {
     await block.block(KEY);
     store.fail.delete = true;
 
-    await storage.prepareSignIn(KEY);
+    assert.equal(await storage.prepareSignIn(KEY), false);
 
     assert.equal(await block.isBlocked(KEY), true);
     store.fail.delete = false;
@@ -165,6 +166,7 @@ describe("signInWithPreparedSession", () => {
     const result = await signInWithPreparedSession({
       prepare: async () => {
         calls.push("prepare");
+        return true;
       },
       serverUnchanged: () => true,
       signIn: async () => {
@@ -180,7 +182,7 @@ describe("signInWithPreparedSession", () => {
   it("stops before sending credentials when the server changed", async () => {
     let signedIn = false;
     const result = await signInWithPreparedSession({
-      prepare: async () => {},
+      prepare: async () => true,
       serverUnchanged: () => false,
       signIn: async () => {
         signedIn = true;
@@ -190,5 +192,43 @@ describe("signInWithPreparedSession", () => {
 
     assert.equal(signedIn, false);
     assert.deepEqual(result, { error: SERVER_CHANGED_DURING_SIGN_IN });
+  });
+
+  it("does not sign in while the previous sign-in is still blocked", async () => {
+    let signedIn = false;
+    const result = await signInWithPreparedSession({
+      prepare: async () => false,
+      serverUnchanged: () => true,
+      signIn: async () => {
+        signedIn = true;
+        return { error: null };
+      },
+    });
+
+    assert.equal(signedIn, false);
+    assert.deepEqual(result, { error: PREVIOUS_SIGN_IN_NOT_CLEARED });
+  });
+});
+
+describe("adapter writes", () => {
+  it("keeps the previous session when writing a new one fails", async () => {
+    await storage.adapter.setItem(KEY, "previous");
+    store.fail.set = true;
+
+    await storage.adapter.setItem(KEY, "new");
+    store.fail.set = false;
+
+    assert.equal(await storage.adapter.getItem(KEY), "previous");
+  });
+
+  it("replaces a chunked value with a short one and the reverse", async () => {
+    await storage.adapter.setItem(KEY, "a-long-session-value");
+    await storage.adapter.setItem(KEY, "short");
+    assert.equal(await storage.adapter.getItem(KEY), "short");
+    assert.equal(store.data.has(`${KEY}_chunks`), false);
+
+    await storage.adapter.setItem(KEY, "another-long-value");
+    assert.equal(await storage.adapter.getItem(KEY), "another-long-value");
+    assert.equal(store.data.has(KEY), false);
   });
 });

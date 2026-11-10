@@ -193,3 +193,21 @@ export async function endSessionOnDevice(
   if (stillCurrent()) runAfterSessionEnd();
   return outcome;
 }
+
+/**
+ * Whether a finished sign-out may clear the app's signed-in state. A forced
+ * sign-out emits no auth event, so the app clears the state itself, but never
+ * over a session that started while the teardown ran.
+ *
+ * @param start - Sign-in count and server version when the sign-out began
+ * @param now - The same values now
+ * @returns True when nobody signed in and the server did not change
+ */
+export function signOutMayClearState(
+  start: { signIns: number; serverVersion: number },
+  now: { signIns: number; serverVersion: number }
+): boolean {
+  return (
+    start.signIns === now.signIns && start.serverVersion === now.serverVersion
+  );
+}

@@ -232,3 +232,24 @@ test("a known resource with a bad id is refused, not unknown", () => {
     id: null,
   });
 });
+
+test("an unknown path with a bad record-id query value is refused too", () => {
+  assert.equal(
+    nativeRouteForLink(
+      "shelf://(tabs)/scanner?bookingId=bk_1%2Fx&bookingAction=checkout"
+    ),
+    "/"
+  );
+  assert.equal(
+    nativeRouteForLink("shelf://(tabs)/scanner?bookingId=bk_1"),
+    "shelf://(tabs)/scanner?bookingId=bk_1"
+  );
+});
+
+test("an empty record-id query value is ignored", () => {
+  assert.equal(queryIdsArePlain("orgId=&qrId="), true);
+  assert.equal(
+    nativeRouteForLink("https://app.shelf.nu/assets/as_1?orgId="),
+    "/assets/as_1?orgId="
+  );
+});

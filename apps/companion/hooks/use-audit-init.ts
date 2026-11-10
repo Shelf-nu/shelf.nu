@@ -232,16 +232,19 @@ export function useAuditInit({
           : 0;
       progressAnim.setValue(Math.min(progress, 1));
 
-      // Initialize debounced saver
-      debouncedSaverRef.current = createDebouncedSaver(userId, auditId);
-
       // ── Crash recovery ───────────────────────────────
       // A draft saved by an older build has no owner; one with unsent scans
       // for this audit is adopted when this account may scan it, and then
-      // offered like any other.
-      if (data.canScan) await adoptUnownedDraft(userId, auditId);
+      // offered with a prompt that says it may be someone else's.
+      const adopted = await adoptUnownedDraft(userId, auditId, {
+        mayScan: data.canScan,
+      });
       const persisted = await loadAuditScanState(userId, auditId);
       if (cancelled) return;
+
+      // Installed only once this load is known to be current, so a cancelled
+      // load never leaves a saver bound to the old account or audit.
+      debouncedSaverRef.current = createDebouncedSaver(userId, auditId);
       // Housekeeping runs after the load, so the resume prompt never waits.
       void pruneStaleAuditDrafts();
       // why: gate on whether there is ANYTHING to recover (the inner check
@@ -300,13 +303,12 @@ export function useAuditInit({
           const recovery = guardRecoveryActions(() => cancelled, {
             discard: () => void clearAuditScanState(userId, auditId),
             resume: () => {
-              // A queued scan may have no recovered display item — the
+              // A queued scan may have no recovered display item: the
               // eager persist can save a queue entry before the list state
               // commits. Rebuild display rows for those (name from the
               // expected-asset map, else a neutral label) so they show as
               // scanned, count correctly, and don't leave the Complete
-              // button hidden because scannedItems stayed empty. (Codex
-              // review, PR #2586.)
+              // button hidden because scannedItems stayed empty.
               const recoveredIds = new Set(
                 recoveredItems.map((i) => i.assetId)
               );
@@ -404,9 +406,13 @@ export function useAuditInit({
           });
           Alert.alert(
             "Resume Previous Session?",
-            `Found ${unsyncedCount} unsynced scan${
-              unsyncedCount !== 1 ? "s" : ""
-            } from a previous session.`,
+            adopted
+              ? `Found ${unsyncedCount} unsynced scan${
+                  unsyncedCount !== 1 ? "s" : ""
+                } saved on this phone by an earlier version of the app, possibly by someone else. Resume sends them as your scans.`
+              : `Found ${unsyncedCount} unsynced scan${
+                  unsyncedCount !== 1 ? "s" : ""
+                } from a previous session.`,
             [
               {
                 text: "Discard",

@@ -354,19 +354,23 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
  * audit id alone) into the signed-in account's draft for that audit, so its
  * unsent scans go through the normal recovery prompt.
  *
- * Call it only when the signed-in account may scan this audit: the scans can
- * only have come from someone working on it, and the server records them
- * against whoever replays them. A draft is adopted only when it still holds
- * unsent scans and the account has no draft of its own for this audit.
+ * Only an account that may scan this audit adopts: the scans can only have
+ * come from someone working on it, and the server records them against
+ * whoever replays them (the resume prompt says so). A draft is adopted only
+ * when it still holds unsent scans and the account has no draft of its own
+ * for this audit.
  *
- * @param userId - The signed-in account, allowed to scan the audit
+ * @param userId - The signed-in account
  * @param auditId - The audit being opened
+ * @param options.mayScan - Whether the account may scan this audit
  * @returns True when a draft was adopted
  */
 export async function adoptUnownedDraft(
   userId: string,
-  auditId: string
+  auditId: string,
+  { mayScan }: { mayScan: boolean }
 ): Promise<boolean> {
+  if (!mayScan) return false;
   try {
     const legacyKey = `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
     const raw = await AsyncStorage.getItem(legacyKey);

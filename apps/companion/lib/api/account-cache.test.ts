@@ -179,6 +179,39 @@ describe("createAccountCachedFetch", () => {
     assert.deepEqual((await next).data, ["user b's roster"]);
   });
 
+  it("a server switch empties the cache", async () => {
+    const app = harness();
+    app.emit("user_a");
+    const first = app.cached.cachedFetch(ROSTER_PATH, TTL);
+    app.answer(["old server roster"]);
+    await first;
+
+    app.switchServer();
+    const second = app.cached.cachedFetch(ROSTER_PATH, TTL);
+
+    assert.equal(app.fetches, 2);
+    app.answer(["new server roster"]);
+    assert.deepEqual((await second).data, ["new server roster"]);
+  });
+
+  it("a response still in flight across a server switch is dropped", async () => {
+    const app = harness();
+    app.emit("user_a");
+    const inFlight = app.cached.cachedFetch(ROSTER_PATH, TTL);
+
+    app.switchServer();
+    app.answer(["old server roster"]);
+
+    assert.deepEqual(await inFlight, {
+      data: null,
+      error: SESSION_CHANGED_ERROR,
+    });
+    const next = app.cached.cachedFetch(ROSTER_PATH, TTL);
+    assert.equal(app.fetches, 2);
+    app.answer(["new server roster"]);
+    await next;
+  });
+
   it("attaches the listener to the new client after a server switch", () => {
     const app = harness();
 

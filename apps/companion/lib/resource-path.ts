@@ -81,6 +81,8 @@ export const LINK_ID_PARAMS: readonly string[] = [
 export function queryIdsArePlain(query: string): boolean {
   if (!query) return true;
   for (const [key, value] of new URLSearchParams(query)) {
+    // An empty value names nothing, so it cannot reshape anything either.
+    if (value === "") continue;
     if (LINK_ID_PARAMS.includes(key) && !isPlainRecordId(value)) return false;
   }
   return true;
@@ -227,10 +229,10 @@ export function nativeRouteForLink(url: string): string {
   // A resource path whose id is refused goes to the start screen: handing the
   // raw URL on would let the router match it to a detail screen anyway.
   if (match === "refused") return "/";
-  if (!match) return url;
-  // Screens read ids from the query too (`?qrId=`, `?auditId=`), so those
-  // follow the same rule as path ids.
+  // Checked before an unknown path is handed on: the router can still match a
+  // screen from it, and that screen would read the query.
   if (!queryIdsArePlain(query)) return "/";
+  if (!match) return url;
   const { resource, id } = match;
   const withQuery = (route: string) => (query ? `${route}?${query}` : route);
 

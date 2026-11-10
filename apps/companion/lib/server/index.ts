@@ -28,7 +28,7 @@ export {
   onBeforeSessionEnd,
   runBeforeSessionEnd,
 } from "./session-end";
-export { endSessionOnDevice } from "./end-session";
+export { endSessionOnDevice, signOutMayClearState } from "./end-session";
 export {
   disconnectFromServer,
   fetchLatestCompanionVersion,

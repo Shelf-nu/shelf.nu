@@ -194,9 +194,12 @@ export async function blockStoredSession(storageKey: string): Promise<void> {
  * blocked that key, the old session is removed and the block is lifted only
  * once the removal is verified, so the previous person's session is never
  * readable while the sign-in runs. Never rejects; on failure the block stays.
+ *
+ * @returns False when the key is still blocked: the sign-in must not run
  */
-export async function prepareStoredSessionForSignIn(): Promise<void> {
-  if (clientStorageKey) await sessionStorage.prepareSignIn(clientStorageKey);
+export async function prepareStoredSessionForSignIn(): Promise<boolean> {
+  if (!clientStorageKey) return true;
+  return sessionStorage.prepareSignIn(clientStorageKey);
 }
 
 /**
