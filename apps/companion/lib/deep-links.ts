@@ -1,6 +1,8 @@
 import { useEffect } from "react";
+import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
+import { isOpenedByRouter } from "./link-routing";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
@@ -190,19 +192,18 @@ export function resolveTappedQr(
  */
 export function useDeepLinkHandler() {
   useEffect(() => {
-    /**
-     * True for URLs that expo-router already routes natively via the
-     * `app/+native-intent.ts` rewrite. Acting on those here too would
-     * double-navigate; the exception is `/qr/:id`, which needs an async API
-     * resolve that a path rewrite cannot express.
-     */
-    function isNativelyRouted(url: string, link: ParsedLink) {
-      return /^https?:/i.test(url) && link.type !== "qr";
-    }
-
     function handleUrl(event: { url: string }) {
       const link = parseDeepLink(event.url);
-      if (isNativelyRouted(event.url, link)) return;
+      if (
+        isOpenedByRouter({
+          url: event.url,
+          linkType: link.type,
+          initial: false,
+          platform: Platform.OS,
+        })
+      ) {
+        return;
+      }
       navigateToLink(link);
     }
 
@@ -233,16 +234,20 @@ export function useDeepLinkHandler() {
       }
     }
 
-    // Handle the URL that launched the app (cold start). Every recognised
-    // link is navigated here, HTTPS included: with the Expo SDK 58 scene life
-    // cycle on iOS, the +native-intent rewrite alone left a cold-start
-    // universal link on the start screen. `router.navigate` goes to a screen
-    // that is already showing instead of stacking a copy, so a link the
-    // router did route is not opened twice.
+    // Handle the URL that launched the app (cold start). Links the router
+    // opens itself are skipped (see `isOpenedByRouter`).
     Linking.getInitialURL().then((url) => {
       if (url) {
         const link = parseDeepLink(url);
-        if (link.type !== "unknown") {
+        if (
+          link.type !== "unknown" &&
+          !isOpenedByRouter({
+            url,
+            linkType: link.type,
+            initial: true,
+            platform: Platform.OS,
+          })
+        ) {
           // Small delay to let navigation mount
           setTimeout(() => navigateToLink(link), 500);
         }
