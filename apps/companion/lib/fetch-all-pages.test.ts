@@ -112,3 +112,22 @@ test("returns the error and the rows loaded so far when a page fails", async () 
   assert.equal(error, "Network error");
   assert.deepEqual(rows, [{ id: "a" }]);
 });
+
+test("stops after the page during which the walk became obsolete", async () => {
+  const { fetchPage, calls } = fakeEndpoint(1000);
+  let current = true;
+
+  await fetchAllPages(
+    async (page, perPage) => {
+      if (page === 2) current = false; // a newer search started meanwhile
+      return fetchPage(page, perPage);
+    },
+    (d) => d.locations,
+    () => current
+  );
+
+  assert.deepEqual(
+    calls.map((c) => c.page),
+    [1, 2]
+  );
+});

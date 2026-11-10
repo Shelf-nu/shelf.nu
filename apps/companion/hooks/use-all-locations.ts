@@ -61,7 +61,8 @@ export function useAllLocations<L>(
     setIsLocationsLoading(true);
     const { rows, error } = await fetchAllPages(
       (page, perPage) => fetchPageRef.current(orgId, page, perPage),
-      (data) => data.locations
+      (data) => data.locations,
+      () => requestId === latestRequestRef.current
     );
     if (requestId !== latestRequestRef.current) return;
 

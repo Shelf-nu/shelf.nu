@@ -25,13 +25,17 @@ export const ALL_PAGES_HARD_STOP = 50;
  *
  * @param fetchPage - Fetches one page, given its number and page size.
  * @param pickRows - Reads the rows out of a page's data.
+ * @param isCurrent - Checked after each page; returning `false` stops the walk
+ *   (a newer search or workspace made this one obsolete). The result is then
+ *   incomplete and the caller drops it.
  * @returns Every row in page order (the rows loaded so far on an error), the
  *   first error, and `truncated` when the hard stop ended the walk before the
  *   last page.
  */
 export async function fetchAllPages<T, Row>(
   fetchPage: (page: number, perPage: number) => Promise<PageResult<T>>,
-  pickRows: (data: T) => Row[]
+  pickRows: (data: T) => Row[],
+  isCurrent: () => boolean = () => true
 ): Promise<{ rows: Row[]; error: string | null; truncated: boolean }> {
   const rows: Row[] = [];
 
@@ -42,6 +46,9 @@ export async function fetchAllPages<T, Row>(
     }
 
     rows.push(...pickRows(data));
+    if (!isCurrent()) {
+      return { rows, error: null, truncated: true };
+    }
 
     const totalPages = data.totalPages ?? 1;
     if (page >= totalPages) {

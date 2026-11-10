@@ -288,7 +288,9 @@ export function LocationPicker({
     const { rows, error: fetchErr } = await fetchAllPages(
       (page, perPage) =>
         api.locations(orgId, debouncedSearch || undefined, { page, perPage }),
-      (data) => data.locations
+      (data) => data.locations,
+      // Stop walking pages as soon as a newer search or workspace takes over.
+      () => generation === requestGenerationRef.current
     );
 
     // Superseded by a newer fetch — drop this result entirely.
