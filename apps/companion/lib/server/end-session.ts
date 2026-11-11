@@ -83,17 +83,23 @@ async function sessionStillStored(
 
 /** How far the teardown had to go. */
 export type SessionEndOutcome =
-  /** The server revoked the session and supabase-js removed it. */
+  /** The server revoked the session and it is gone from the device. */
   | "revoked"
-  /** The revoke failed; supabase-js removed the session locally. */
+  /** The revoke failed; the session was signed out and is gone locally. */
   | "local"
   /** Both sign-outs failed; the stored session was deleted directly. */
   | "forced"
   /**
-   * Both sign-outs failed and the stored session was still there after every
-   * delete. The in-memory state is cleared regardless; the caller reports it.
+   * The stored session was still there after every delete (whatever the
+   * sign-outs answered), and it is now blocked. The in-memory state is
+   * cleared regardless; the caller reports it.
    */
-  | "incomplete";
+  | "incomplete"
+  /**
+   * As "incomplete", but the block could not be stored either: it holds only
+   * until the app restarts, when the stored session could be restored.
+   */
+  | "unprotected";
 
 /**
  * Calls one sign-out and reports whether it succeeded.
@@ -118,7 +124,9 @@ async function trySignOut(
  * Ends the current session on this device.
  *
  * Tries a server revoke first, then a local sign-out, then deletes the stored
- * session itself. The caller still owns UI state (setting the signed-in user
+ * session itself and checks it is gone. The check runs after a sign-out that
+ * reported success too: supabase-js answers success even when its storage
+ * delete failed. The caller still owns UI state (setting the signed-in user
  * to null), because a forced teardown emits no auth event.
  *
  * @param client - The live Supabase client
@@ -135,7 +143,7 @@ export async function endSessionOnDevice(
   {
     stillCurrent = () => true,
     checkTimeoutMs = SESSION_CHECK_TIMEOUT_MS,
-    blockStoredSession = async () => {},
+    blockStoredSession = async () => true,
   }: {
     /**
      * False when another session replaced this one while the teardown ran (a
@@ -145,11 +153,12 @@ export async function endSessionOnDevice(
     stillCurrent?: () => boolean;
     checkTimeoutMs?: number;
     /**
-     * Refuses the stored session from now on. Called on an "incomplete"
-     * outcome, before the after-session-end tasks, so nothing that runs
-     * between can read and cache the old session's token.
+     * Refuses the stored session from now on. Called when the session
+     * survived every delete, before the after-session-end tasks, so nothing
+     * that runs between can read and cache the old session's token. Resolves
+     * true when the block is stored (survives a restart).
      */
-    blockStoredSession?: () => Promise<void>;
+    blockStoredSession?: () => Promise<boolean>;
   } = {}
 ): Promise<SessionEndOutcome> {
   let outcome: SessionEndOutcome = "revoked";
@@ -164,36 +173,39 @@ export async function endSessionOnDevice(
       } catch {
         // Best-effort; the re-checks below still catch a write-back.
       }
-      // The deletion happens outside supabase-js's auth lock, so a token
-      // refresh that was already running can write the session back. Delete,
-      // then check under the lock, and delete again if it came back.
-      let stored = true;
-      for (let check = 0; check <= FORCED_TEARDOWN_CHECKS && stored; check++) {
-        let removed = true;
-        try {
-          await removePersistedSession();
-        } catch {
-          // An unverifiable delete proves nothing: the session counts as
-          // still stored whatever a session read says (the storage adapter
-          // reads a failing store as "nothing stored").
-          removed = false;
-        }
-        const found = await sessionStillStored(client, checkTimeoutMs);
-        stored = !removed || found !== "gone";
-        // A check that timed out will time out again (a refresh hanging
-        // offline): stop re-checking, so a sign-out waits one timeout, not
-        // three, and report it incomplete.
-        if (found === "timeout") break;
-      }
-      if (stored) {
-        outcome = "incomplete";
-        try {
-          await blockStoredSession();
-        } catch {
-          // Reported by the caller through the "incomplete" outcome.
-        }
-      }
     }
+  }
+  // Delete and verify on every outcome: a sign-out that reported success may
+  // still have left the session on disk. The deletion happens outside
+  // supabase-js's auth lock, so a token refresh that was already running can
+  // write the session back: delete, check under the lock, delete again if it
+  // came back.
+  let stored = true;
+  for (let check = 0; check <= FORCED_TEARDOWN_CHECKS && stored; check++) {
+    let removed = true;
+    try {
+      await removePersistedSession();
+    } catch {
+      // An unverifiable delete proves nothing: the session counts as still
+      // stored whatever a session read says (the storage adapter reads a
+      // failing store as "nothing stored").
+      removed = false;
+    }
+    const found = await sessionStillStored(client, checkTimeoutMs);
+    stored = !removed || found !== "gone";
+    // A check that timed out will time out again (a refresh hanging
+    // offline): stop re-checking, so a sign-out waits one timeout, not
+    // three, and report it incomplete.
+    if (found === "timeout") break;
+  }
+  if (stored) {
+    let blockStored = false;
+    try {
+      blockStored = await blockStoredSession();
+    } catch {
+      // Reported by the caller through the "unprotected" outcome.
+    }
+    outcome = blockStored ? "incomplete" : "unprotected";
   }
   if (stillCurrent()) runAfterSessionEnd();
   return outcome;

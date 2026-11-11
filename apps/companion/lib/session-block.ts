@@ -42,8 +42,11 @@ export type SessionBlock = {
    * (`sessionStorageKeys`).
    *
    * @param storageKey - The client's session storage key
+   * @returns True when the block is stored (in the main list or the parked
+   *   one), so it survives a restart; false when it holds only in memory for
+   *   this app run
    */
-  block: (storageKey: string) => Promise<void>;
+  block: (storageKey: string) => Promise<boolean>;
   /**
    * Lifts the block on a session storage key, before a sign-in.
    *
@@ -117,18 +120,23 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
   }
 
   /**
-   * Rewrites the parked list as what it holds now plus `add`, minus `remove`,
-   * so a write never drops keys parked by an earlier app run.
+   * Rewrites the parked list as what it holds now plus `add`, minus `remove`.
+   *
+   * When the parked list cannot be read, a removal fails without writing (the
+   * key may still be parked, so the block stays), while an addition is
+   * written on its own: storing the block being made now outranks keeping
+   * keys parked by an earlier run, which belong to other servers' sessions.
    */
   async function updateParked(change: {
     add?: string;
     remove?: string;
   }): Promise<boolean> {
     try {
-      let parked: string[] = [];
+      let parked: string[];
       try {
         parked = parseKeys(await store.getItem(BLOCKED_SESSION_KEYS_PENDING));
-      } catch {
+      } catch (error) {
+        if (!change.add) throw error;
         parked = [];
       }
       const next = new Set(parked);
@@ -167,8 +175,8 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
       // never overwrite the stored list with a partial one. When the read
       // still fails, the block is parked in a separate list that the next
       // good read merges in, so it survives a restart.
-      if (blocked && (await save(keys))) return;
-      await updateParked({ add: storageKey });
+      if (blocked && (await save(keys))) return true;
+      return updateParked({ add: storageKey });
     },
     async unblock(storageKey) {
       pending.delete(storageKey);

@@ -184,9 +184,10 @@ export function currentSessionStorageKey(): string | null {
  * and retries the delete.
  *
  * @param storageKey - The signed-out client's session storage key
+ * @returns True when the block is stored, so it survives a restart
  */
-export async function blockStoredSession(storageKey: string): Promise<void> {
-  await sessionBlock.block(storageKey);
+export async function blockStoredSession(storageKey: string): Promise<boolean> {
+  return sessionBlock.block(storageKey);
 }
 
 /**

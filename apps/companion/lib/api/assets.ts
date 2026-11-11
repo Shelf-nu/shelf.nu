@@ -74,8 +74,8 @@ export const assetsApi = {
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
    * Wire contract for coordinates (matches the route's Zod schema): optional
-   * `latitude`/`longitude` query params, decimal degrees, both or neither
-   * (lat −90..90, lng −180..180). They are best-effort provenance — the
+   * `X-Scan-Latitude` / `X-Scan-Longitude` headers, decimal degrees, both or
+   * neither (lat -90..90, lng -180..180). They are best-effort provenance: the
    * server silently ignores invalid values and a resolve NEVER fails because
    * of them, mirroring the web flow's non-fatal geolocation post.
    *

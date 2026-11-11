@@ -96,6 +96,46 @@ describe("createSessionBlock", () => {
     assert.equal(await block.isBlocked(key), true);
   });
 
+  it("refuses an unblock while the parked list cannot be read", async () => {
+    const key = "sb-abcd-auth-token";
+    const store = mapStore({ [BLOCKED_SESSION_KEYS]: JSON.stringify([key]) });
+    const read = store.getItem;
+    store.getItem = async (k: string) => {
+      if (k === BLOCKED_SESSION_KEYS_PENDING) throw new Error("read failed");
+      return read(k);
+    };
+    const block = createSessionBlock(store);
+
+    assert.equal(await block.unblock(key), false);
+    assert.equal(await block.isBlocked(key), true);
+  });
+
+  it("still parks a new block when only the parked list cannot be read", async () => {
+    const key = "sb-abcd-auth-token";
+    const store = mapStore();
+    const read = store.getItem;
+    store.getItem = async () => {
+      throw new Error("read failed");
+    };
+
+    assert.equal(await createSessionBlock(store).block(key), true);
+
+    store.getItem = read; // storage recovers after a restart
+    assert.equal(await createSessionBlock(store).isBlocked(key), true);
+  });
+
+  it("says when a block could not be stored anywhere", async () => {
+    const store = mapStore();
+    store.setItem = async () => {
+      throw new Error("storage full");
+    };
+
+    assert.equal(
+      await createSessionBlock(store).block("sb-abcd-auth-token"),
+      false
+    );
+  });
+
   it("unblock lifts it, for the next sign-in", async () => {
     const store = mapStore();
     const block = createSessionBlock(store);

@@ -193,19 +193,25 @@ export function reportAuditDurabilityEvent(
 }
 
 /**
- * Reports a sign-out that could not delete the stored session: both
- * supabase-js sign-outs failed and the session was still stored after every
- * delete. The app still shows the login screen; this makes the case visible.
+ * Reports a sign-out that could not delete the stored session: it was still
+ * stored after every delete. The app still shows the login screen; this makes
+ * the case visible. `blockStored: false` marks the worst case, where the
+ * block refusing that session could not be stored either, so a restart can
+ * restore it.
  *
  * @param server - The Supabase project URL of the client being signed out
+ * @param details - Whether the block on the surviving session was stored
  */
-export function reportSignOutIncomplete(server: string | null): void {
+export function reportSignOutIncomplete(
+  server: string | null,
+  { blockStored }: { blockStored: boolean }
+): void {
   if (__DEV__) console.warn("[Auth] stored session survived sign-out");
   if (!dsn || __DEV__) return;
   try {
     Sentry.captureMessage("sign-out: stored session not deleted", {
       level: "error",
-      tags: { feature: "auth" },
+      tags: { feature: "auth", block_stored: String(blockStored) },
       extra: { server },
     });
   } catch {

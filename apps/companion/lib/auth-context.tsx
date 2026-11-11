@@ -57,8 +57,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // client — a `[]` dep array would leave it bound to the discarded one.
   const [serverVersion, setServerVersion] = useState(() => getServerVersion());
 
+  // The client the session state below belongs to. A server switch that
+  // rebuilds it starts from a clean, loading state: a forced teardown emits no
+  // SIGNED_OUT, so the outgoing session would otherwise stay on screen against
+  // the new server until the new client answers. A notice that keeps the
+  // client (a rename, refreshed sign-in options) changes no session.
+  const sessionClientRef = useRef(getSupabase());
+
   useEffect(
-    () => subscribeToServerChange(() => setServerVersion(getServerVersion())),
+    () =>
+      subscribeToServerChange(() => {
+        const client = getSupabase();
+        if (client !== sessionClientRef.current) {
+          sessionClientRef.current = client;
+          setSession(null);
+          setIsLoading(true);
+        }
+        setServerVersion(getServerVersion());
+      }),
     []
   );
 
@@ -155,11 +171,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       stillCurrent: () => getServerVersion() === serverAtStart,
       // A stored session that survives every delete is refused from then on,
       // so a restart cannot restore the previous person.
-      blockStoredSession: async () => {
-        if (storageKeyAtStart) await blockStoredSession(storageKeyAtStart);
-      },
+      blockStoredSession: async () =>
+        storageKeyAtStart ? blockStoredSession(storageKeyAtStart) : false,
     });
-    if (outcome === "incomplete") reportSignOutIncomplete(serverUrlAtStart);
+    if (outcome === "incomplete" || outcome === "unprotected") {
+      reportSignOutIncomplete(serverUrlAtStart, {
+        blockStored: outcome === "incomplete",
+      });
+    }
 
     // A forced sign-out emits no auth event, so the state is cleared here,
     // unless someone signed in or the server changed while it ran.

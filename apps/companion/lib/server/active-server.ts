@@ -227,9 +227,8 @@ async function endSessionOnOutgoingClient(): Promise<void> {
   // A stored session that survives every delete is refused from then on, so
   // reconnecting to this server later cannot restore it.
   await endSessionOnDevice(getSupabase(), persistedSessionRemover(), {
-    blockStoredSession: async () => {
-      if (storageKey) await blockStoredSession(storageKey);
-    },
+    blockStoredSession: async () =>
+      storageKey ? blockStoredSession(storageKey) : false,
   });
 }
 

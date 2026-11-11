@@ -68,6 +68,47 @@ describe("endSessionOnDevice", () => {
     assert.equal(state.stored, false);
   });
 
+  it("verifies the stored session is gone even when a sign-out reported success", async () => {
+    // supabase-js answers { error: null } even when its storage delete failed.
+    for (const [global, local] of [
+      ["ok", "ok"],
+      ["error", "ok"],
+    ] as const) {
+      const { client } = stubClient(global, local);
+      let blocked = 0;
+
+      const outcome = await endSessionOnDevice(
+        client,
+        async () => {
+          throw new Error("keychain delete");
+        },
+        {
+          blockStoredSession: async () => {
+            blocked += 1;
+            return true;
+          },
+        }
+      );
+
+      assert.equal(outcome, "incomplete", `${global}/${local}`);
+      assert.equal(blocked, 1, `${global}/${local}`);
+    }
+  });
+
+  it("reports a surviving session whose block could not be stored", async () => {
+    const { client } = stubClient("error", "error");
+
+    const outcome = await endSessionOnDevice(
+      client,
+      async () => {
+        throw new Error("keychain delete");
+      },
+      { blockStoredSession: async () => false }
+    );
+
+    assert.equal(outcome, "unprotected");
+  });
+
   it("falls back to a local sign-out when the revoke fails", async () => {
     for (const failure of ["error", "throw"] as const) {
       const { client, state, removeStored } = stubClient(failure, "ok");
@@ -121,6 +162,7 @@ describe("endSessionOnDevice", () => {
       {
         blockStoredSession: async () => {
           order.push("block");
+          return true;
         },
       }
     );
@@ -136,6 +178,7 @@ describe("endSessionOnDevice", () => {
     const outcome = await endSessionOnDevice(client, removeStored, {
       blockStoredSession: async () => {
         blocked = true;
+        return true;
       },
     });
 
