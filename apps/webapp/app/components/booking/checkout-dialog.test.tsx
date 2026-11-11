@@ -5,7 +5,14 @@
  *
  * @see {@link file://./checkout-dialog.tsx}
  */
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { useState } from "react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { useNavigation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -324,6 +331,59 @@ describe("CheckoutDialog confirmation", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/every asset/)).not.toBeInTheDocument();
     expect(screen.queryByText(/starts the booking/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Opens a controlled dialog from a separate button, the way a menu row does,
+ * with a second button for focus to return to.
+ */
+function ControlledHarness({ returnFocus }: { returnFocus: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <form id="edit-booking-form">
+      <button type="button" onClick={() => setOpen(true)}>
+        Open from menu
+      </button>
+      <button type="button" id="menu-trigger">
+        Menu trigger
+      </button>
+      <CheckoutDialog
+        booking={booking}
+        formId="edit-booking-form"
+        open={open}
+        onOpenChange={setOpen}
+        returnFocusTo={
+          returnFocus
+            ? () => document.getElementById("menu-trigger")
+            : undefined
+        }
+      />
+    </form>
+  );
+}
+
+describe("CheckoutDialog opened from outside", () => {
+  it("renders no trigger of its own", () => {
+    render(<ControlledHarness returnFocus />);
+
+    expect(
+      screen.queryByRole("button", { name: "Check Out" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("returns focus to the given element when it closes", async () => {
+    render(<ControlledHarness returnFocus />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Radix restores focus on the task after the dialog unmounts.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Menu trigger" })
+      )
+    );
   });
 });
 

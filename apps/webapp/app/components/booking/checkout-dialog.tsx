@@ -188,6 +188,13 @@ type CheckoutDialogProps = {
   open?: boolean;
   /** Called when a controlled dialog asks to open or close. Pair with `open`. */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Where focus goes when a controlled dialog closes. A controlled dialog has
+   * no trigger of its own to hand focus back to, so without this it lands on
+   * the page body. Ignored when the dialog closes on a blocked submit: focus
+   * then goes to the field that blocked it.
+   */
+  returnFocusTo?: () => HTMLElement | null;
 };
 
 /**
@@ -263,6 +270,7 @@ export default function CheckoutDialog({
   confirm = true,
   open: controlledOpen,
   onOpenChange: onControlledOpenChange,
+  returnFocusTo,
 }: CheckoutDialogProps) {
   const isNavigating = useDisabled();
   const { prefs } = useDateFormatter();
@@ -418,7 +426,16 @@ export default function CheckoutDialog({
 
       <AlertDialogContent
         portalProps={{ container: portalContainer }}
-        onCloseAutoFocus={reportBlockedForm}
+        onCloseAutoFocus={(event) => {
+          if (blockedFormRef.current) {
+            reportBlockedForm(event);
+            return;
+          }
+          const target = isControlled ? returnFocusTo?.() : null;
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+        }}
       >
         <AlertDialogHeader>
           <AlertDialogTitle>

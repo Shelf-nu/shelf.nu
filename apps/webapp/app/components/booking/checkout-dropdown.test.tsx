@@ -262,6 +262,21 @@ describe("CheckoutDropdown", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
+  it("announces a disabled Check out row and its reason on the row itself", () => {
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      checkOutDisabled: { reason: "Some assets are in custody." },
+    });
+
+    // Arrow-key focus lands on the row, so the row has to say it is disabled.
+    const row = screen.getAllByRole("menuitem")[0];
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    expect(row).toHaveAccessibleDescription("Some assets are in custody.");
+  });
+
   it("lets the operator pick a From location with the mouse", () => {
     // A menu item takes focus on every mouse move it sees, and React bubbles
     // a portaled dialog's events to its component parents. Focus leaving the

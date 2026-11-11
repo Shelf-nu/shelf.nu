@@ -31,7 +31,7 @@
  * @see {@link file://./checkout-dialog.tsx} - the "Check Out" trigger/flow
  * @see {@link file://./forms/edit-booking-form.tsx} - the call site
  */
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ChevronRightIcon, ScanLine, Zap } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -125,6 +125,10 @@ export default function CheckoutDropdown({
   /** The menu row's check-out dialog, rendered outside the menu. */
   const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
   const isNavigating = useDisabled();
+  /** The desktop and mobile menu triggers: one of them is hidden by CSS. */
+  const desktopTriggerRef = useRef<HTMLElement>(null);
+  const mobileTriggerRef = useRef<HTMLElement>(null);
+  const quickCheckoutReasonId = useId();
 
   function closeMenu() {
     setOpen(false);
@@ -149,6 +153,23 @@ export default function CheckoutDropdown({
   // the generic `disabled` and must NOT inherit `hasCheckedOutAssets` (which is
   // expected: this booking's own scanned-out assets are CHECKED_OUT).
   const quickCheckoutDisabled = canFullCheckOut ? checkOutDisabled : disabled;
+  /** Whether the quick check-out row can act right now. */
+  const quickCheckoutBlocked = Boolean(quickCheckoutDisabled) || isNavigating;
+  /** Why it cannot, when the caller gave a reason. */
+  const quickCheckoutReason =
+    quickCheckoutDisabled && typeof quickCheckoutDisabled === "object"
+      ? quickCheckoutDisabled.reason
+      : undefined;
+
+  /**
+   * The visible menu trigger, for focus to return to when the dialog closes:
+   * the row that opened the dialog is gone with the menu.
+   */
+  function visibleMenuTrigger(): HTMLElement | null {
+    const desktop = desktopTriggerRef.current;
+    if (desktop && getComputedStyle(desktop).display !== "none") return desktop;
+    return mobileTriggerRef.current;
+  }
 
   // Check-out is the primary action while RESERVED, but a secondary one while
   // ONGOING/OVERDUE (where check-in is the primary action beside it).
@@ -246,6 +267,7 @@ export default function CheckoutDropdown({
         allowNewEndDate={allowNewEndDate && canFullCheckOut}
         open={checkoutDialogOpen}
         onOpenChange={setCheckoutDialogOpen}
+        returnFocusTo={visibleMenuTrigger}
       />
 
       <DropdownMenu
@@ -262,6 +284,7 @@ export default function CheckoutDropdown({
           asChild
         >
           <Button
+            ref={desktopTriggerRef}
             type="button"
             variant={triggerVariant}
             disabled={disabled}
@@ -276,6 +299,7 @@ export default function CheckoutDropdown({
 
         {/* Mobile button */}
         <Button
+          ref={mobileTriggerRef}
           type="button"
           variant={triggerVariant}
           className="flex-1 md:hidden"
@@ -303,12 +327,20 @@ export default function CheckoutDropdown({
                 focus lands on the item, and Enter or Space clicks the item
                 only. A mouse click on the button bubbles up to it. The guard
                 lives here because the shared item does not hand `disabled` to
-                Radix, and the button keeps its disabled-reason tooltip. */}
+                Radix, and the button keeps its disabled-reason tooltip. Focus
+                sits on the item, so the item also announces that it is
+                disabled, and why. */}
             <DropdownMenuItem
               className="py-1 lg:p-0"
+              aria-disabled={quickCheckoutBlocked || undefined}
+              aria-describedby={
+                quickCheckoutBlocked && quickCheckoutReason
+                  ? quickCheckoutReasonId
+                  : undefined
+              }
               onSelect={(event) => {
                 event.preventDefault();
-                if (quickCheckoutDisabled || isNavigating) return;
+                if (quickCheckoutBlocked) return;
                 setCheckoutDialogOpen(true);
                 closeMenu();
               }}
@@ -324,8 +356,16 @@ export default function CheckoutDropdown({
                   <Zap className="size-4" /> {quickCheckoutLabel}
                 </span>
               </Button>
+              {quickCheckoutBlocked && quickCheckoutReason ? (
+                <span id={quickCheckoutReasonId} className="sr-only">
+                  {quickCheckoutReason}
+                </span>
+              ) : null}
             </DropdownMenuItem>
-            <DropdownMenuItem className="py-1 lg:p-0">
+            <DropdownMenuItem
+              className="py-1 lg:p-0"
+              aria-disabled={Boolean(disabled) || undefined}
+            >
               {scanToCheckOutLink}
             </DropdownMenuItem>
           </div>
