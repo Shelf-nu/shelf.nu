@@ -4240,6 +4240,10 @@ function sumMergedIntervalsMs(
   return coveredMs;
 }
 
+/**
+ * Represents a booking slice associated with a quantity-tracked asset pool.
+ * `quantity` specifies how many units were booked in this slice (defaults to 1 if omitted/null).
+ */
 export interface QuantityBookingSlice {
   quantity?: number | null;
   booking: {
@@ -4249,16 +4253,33 @@ export interface QuantityBookingSlice {
   };
 }
 
+/**
+ * Minimal ledger event representing an in-period stock change for capacity reconstruction.
+ * Excludes non-stock categories (`MOVE`, `OPENING_BALANCE`) and zero-change records.
+ */
 export interface QuantityLedgerRow {
   createdAt: Date;
   stockChange: number;
 }
 
+/**
+ * Ledger snapshot inputs for historical capacity reconstruction.
+ * `inPeriodLogs` captures non-move stock changes strictly within `(windowStart, windowEnd)`.
+ * `postPeriodStockChange` is the net stock change occurring at or after `windowEnd`.
+ */
 export interface QuantityUtilizationLedger {
   inPeriodLogs?: QuantityLedgerRow[];
   postPeriodStockChange?: number;
 }
 
+/**
+ * Arguments for the pure quantity-tracked utilization calculation.
+ * @property windowStart - Millisecond epoch timestamp for the period start.
+ * @property windowEnd - Millisecond epoch timestamp for the period end.
+ * @property liveQuantity - Current live stock of the asset pool.
+ * @property slices - Booking slices clamped and swept over the timeline.
+ * @property ledger - In-period stock delta events and post-period aggregate change.
+ */
 export interface ComputeQuantityUtilizationArgs {
   windowStart: number;
   windowEnd: number;
@@ -4267,6 +4288,9 @@ export interface ComputeQuantityUtilizationArgs {
   ledger?: QuantityUtilizationLedger | QuantityLedgerRow[];
 }
 
+/**
+ * Output metrics computed for a quantity-tracked asset pool.
+ */
 export interface QuantityUtilizationResult {
   daysInUse: number;
   utilizationRate: number;
@@ -4543,11 +4567,16 @@ export async function assetUtilizationReport(
       ]);
 
       for (const log of inPeriodLogs) {
+        if (typeof log.stockChange !== "number") continue;
+        const row: QuantityLedgerRow = {
+          createdAt: log.createdAt,
+          stockChange: log.stockChange,
+        };
         const list = inPeriodLogsByAssetId.get(log.assetId);
         if (list) {
-          list.push(log);
+          list.push(row);
         } else {
-          inPeriodLogsByAssetId.set(log.assetId, [log]);
+          inPeriodLogsByAssetId.set(log.assetId, [row]);
         }
       }
 
