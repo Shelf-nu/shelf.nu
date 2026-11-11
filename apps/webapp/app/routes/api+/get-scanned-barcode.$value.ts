@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
@@ -27,19 +26,11 @@ import {
 } from "~/utils/permissions/permission.data";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
 import { requirePermission } from "~/utils/roles.server";
-import {
-  sanitizeAssetExtraInclude,
-  sanitizeKitExtraInclude,
-} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
 } from "~/utils/scanner-includes.server";
-import {
-  ASSET_INCLUDE,
-  BARCODE_INCLUDE,
-  KIT_INCLUDE,
-} from "~/utils/scanner-includes.server";
+import { BARCODE_INCLUDE } from "~/utils/scanner-includes.server";
 
 // Export types for barcode scanning
 export type AssetFromBarcode = AssetFromScanner;
@@ -100,36 +91,9 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     // a loader sees them; the URL still has the difference.
     const value = readRawLastPathSegment(request, encodedValue);
 
-    const {
-      assetExtraInclude,
-      kitExtraInclude,
-      auditSessionId,
-      pickerContext,
-    } = parseData(
+    const { auditSessionId, pickerContext } = parseData(
       searchParams,
       z.object({
-        assetExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for assetExtraInclude");
-            }
-          }),
-        kitExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for kitExtraInclude");
-            }
-          }),
         auditSessionId: z.string().optional(),
         /** Mirror of the get-scanned-item shape; see that endpoint. */
         pickerContext: z
@@ -151,35 +115,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           }),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
-    };
-
-    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
-    // user-controlled JSON. Allowlist them before merging into the Prisma
-    // include so relation traversal / deep nesting cannot be injected.
-    const safeAssetExtraInclude = sanitizeAssetExtraInclude(assetExtraInclude);
-    const safeKitExtraInclude = sanitizeKitExtraInclude(kitExtraInclude);
-
-    const include = {
-      ...BARCODE_INCLUDE,
-
-      // Include additional data based on search params. This will override the default includes
-      ...(safeAssetExtraInclude
-        ? { asset: { include: { ...ASSET_INCLUDE, ...safeAssetExtraInclude } } }
-        : undefined),
-
-      ...(safeKitExtraInclude
-        ? { kit: { include: { ...KIT_INCLUDE, ...safeKitExtraInclude } } }
-        : undefined),
     };
 
     const barcode = await getBarcodeByValue({
       value,
       organizationId,
-      include,
+      include: BARCODE_INCLUDE,
     });
 
     if (!barcode) {

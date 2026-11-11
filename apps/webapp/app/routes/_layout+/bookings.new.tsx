@@ -311,7 +311,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         from,
         to,
         custodianTeamMemberId: custodianFromDb.id,
-        custodianUserId: custodianFromDb.userId,
         name: name!,
         description: description ?? null,
         organizationId,

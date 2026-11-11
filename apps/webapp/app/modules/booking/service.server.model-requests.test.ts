@@ -188,7 +188,6 @@ const baseBooking = {
   name: "Autumn shoot",
   description: null,
   creatorId: "user-1",
-  custodianUserId: null,
   custodianTeamMemberId: "tm-1",
   organizationId: "org-1",
   from: new Date("2026-10-01T09:00:00.000Z"),

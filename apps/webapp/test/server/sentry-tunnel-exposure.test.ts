@@ -211,6 +211,20 @@ describe("the tunnel path is named once", () => {
     expect(src).toContain('server.use("*", sentryTunnelGuard())');
   });
 
+  it("mounts the mobile and calendar-feed guards on every path, before the session", () => {
+    const src = collapsed(SERVER_ENTRY);
+    const sessionAt = src.indexOf("session({");
+
+    for (const mount of [
+      'server.use("*", mobileApiGuard())',
+      'server.use("*", calendarFeedGuard())',
+      'server.use("*", sentryTunnelGuard())',
+    ]) {
+      expect(src).toContain(mount);
+      expect(src.indexOf(mount)).toBeLessThan(sessionAt);
+    }
+  });
+
   it("has the client post to the same constant", () => {
     const src = fs.readFileSync(CLIENT_ENTRY, "utf8");
     expect(src).toContain("tunnel: SENTRY_TUNNEL_PATH");

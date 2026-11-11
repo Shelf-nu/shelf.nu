@@ -25,6 +25,7 @@ import { InviteStatuses, OrganizationRoles } from "@prisma/client";
 import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Logger } from "~/utils/logger";
 import { caseInsensitiveEmailFilter, normalizeInviteEmail } from "./helpers";
 import { MAX_IMPORT_USERS_ROWS } from "./import-users-preflight.server";
 import {
@@ -91,6 +92,12 @@ const ssoMock = vi.hoisted(() => ({
 // Stubbing them lets each case state a domain-ownership situation directly,
 // which is the input the invite guard branches on.
 vi.mock("~/utils/sso.server", () => ssoMock);
+
+// why: a failed claim release is reported through Logger, which talks to
+// Sentry; the tests assert the report without sending it.
+vi.mock("~/utils/logger", () => ({
+  Logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
+}));
 
 /**
  * Builds a PENDING invite row as `db.invite.findFirst` would return it.
@@ -304,6 +311,50 @@ describe("updateInviteStatus: claiming the invite", () => {
       },
       data: { status: InviteStatuses.PENDING },
     });
+  });
+
+  it("logs a failed release instead of hiding it", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+    // The claim succeeds, then the release write fails.
+    dbMock.invite.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockRejectedValueOnce(new Error("pool timeout"));
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects and closes the other pending invites in one transaction", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+
+    await updateInviteStatus({
+      id: "invite-1",
+      status: InviteStatuses.REJECTED,
+      password: "",
+    });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.invite.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.PENDING,
+      },
+      data: { status: InviteStatuses.REJECTED },
+    });
+    expect(dbMock.invite.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: { status: InviteStatuses.INVALIDATED },
+      })
+    );
+    expect(createUserOrAttachOrg).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
-import type { Prisma } from "@prisma/client";
 import { m } from "framer-motion";
 import { useSetAtom } from "jotai";
 import type { ScanListItem } from "~/atoms/qr-scanner";
@@ -57,21 +56,6 @@ type GenericItemRowProps<T> = {
   renderItem: (item: T) => ReactNode;
   renderLoading: (qrId: string, error?: string) => ReactNode;
   /**
-   * Extra relations to add to the scanned asset, sent as JSON in the
-   * `assetExtraInclude` search param. The server keeps only allowlisted
-   * relations and their allowlisted scalar fields (see
-   * `scanner-extra-include.server.ts`) and silently drops the rest, so
-   * request only what that allowlist offers. Placement and kit membership
-   * are always included and need no extra include.
-   */
-  assetExtraInclude?: Prisma.AssetInclude;
-  /**
-   * Extra relations to add to the scanned kit, sent as JSON in the
-   * `kitExtraInclude` search param. Same server-side allowlist rules as
-   * `assetExtraInclude`.
-   */
-  kitExtraInclude?: Prisma.KitInclude;
-  /**
    * Optional additional search params to be sent to the get-scanned-item endpoint
    */
   searchParams?: Record<string, string>;
@@ -104,8 +88,6 @@ export function GenericItemRow<T>({
   onRemove,
   renderItem,
   renderLoading,
-  assetExtraInclude,
-  kitExtraInclude,
   searchParams: additionalSearchParams,
   className: rowClassName,
   rejectItemType,
@@ -120,14 +102,6 @@ export function GenericItemRow<T>({
   // Determine if we should fetch - only if we don't already have data or error
   const shouldFetch = !(item && (item.data || item.error));
   const searchParams = new URLSearchParams();
-  // Add asset extra include if provided
-  if (assetExtraInclude) {
-    searchParams.append("assetExtraInclude", JSON.stringify(assetExtraInclude));
-  }
-  // Add kit extra include if provided
-  if (kitExtraInclude) {
-    searchParams.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
-  }
   // Add any additional search params
   if (additionalSearchParams) {
     Object.entries(additionalSearchParams).forEach(([key, value]) => {

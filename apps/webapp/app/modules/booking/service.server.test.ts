@@ -731,7 +731,6 @@ const mockCreateBookingParams = {
   booking: {
     name: "Test Booking",
     description: "Test Description",
-    custodianUserId: "user-1",
     custodianTeamMemberId: "team-member-1",
     organizationId: "org-1",
     creatorId: "user-1",
@@ -1008,17 +1007,11 @@ describe("createBooking", () => {
     );
   });
 
-  it("links the custodian user from the team member row, not the passed custodianUserId", async () => {
+  it("links the custodian user from the team member row", async () => {
     //@ts-expect-error missing vitest type
     db.booking.create.mockResolvedValue(mockBookingData);
 
-    await createBooking({
-      ...mockCreateBookingParams,
-      booking: {
-        ...mockCreateBookingParams.booking,
-        custodianUserId: "user-other",
-      },
-    });
+    await createBooking(mockCreateBookingParams);
 
     expect(db.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1030,18 +1023,12 @@ describe("createBooking", () => {
     );
   });
 
-  it("links no custodian user for a team member without one, whatever custodianUserId is passed", async () => {
+  it("links no custodian user for a team member without one", async () => {
     stubCustodianTeamMembers({ "team-member-1": null });
     //@ts-expect-error missing vitest type
     db.booking.create.mockResolvedValue(mockBookingData);
 
-    await createBooking({
-      ...mockCreateBookingParams,
-      booking: {
-        ...mockCreateBookingParams.booking,
-        custodianUserId: "user-other",
-      },
-    });
+    await createBooking(mockCreateBookingParams);
 
     const [{ data }] = (db.booking.create as ReturnType<typeof vitest.fn>).mock
       .calls[0];
@@ -2404,7 +2391,6 @@ describe("updateBasicBooking", () => {
     description: "Updated Description",
     from: new Date("2024-02-01T09:00:00Z"),
     to: new Date("2024-02-01T17:00:00Z"),
-    custodianUserId: "user-2",
     custodianTeamMemberId: "team-member-2",
     tags: [{ id: "tag-1" }, { id: "tag-2" }],
   };
@@ -2544,7 +2530,7 @@ describe("updateBasicBooking", () => {
     expect(result).toEqual(updatedBooking);
   });
 
-  it("links the custodian user from the team member row, not the passed custodianUserId", async () => {
+  it("links the custodian user from the team member row", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       id: "booking-1",
@@ -2558,7 +2544,6 @@ describe("updateBasicBooking", () => {
     await updateBasicBooking({
       ...mockUpdateBookingParams,
       custodianTeamMemberId: "team-member-2",
-      custodianUserId: "user-other",
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -2571,7 +2556,7 @@ describe("updateBasicBooking", () => {
     );
   });
 
-  it("unlinks the custodian user when the new team member has no user, whatever custodianUserId is passed", async () => {
+  it("unlinks the custodian user when the new team member has no user", async () => {
     stubCustodianTeamMembers({ "team-member-2": null });
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
@@ -2586,7 +2571,6 @@ describe("updateBasicBooking", () => {
     await updateBasicBooking({
       ...mockUpdateBookingParams,
       custodianTeamMemberId: "team-member-2",
-      custodianUserId: "user-other",
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -2926,7 +2910,6 @@ describe("updateBasicBooking", () => {
       description: "Same Description",
       from: newFrom,
       to: newTo,
-      custodianUserId: "user-1",
       custodianTeamMemberId: "team-member-1",
       tags: [],
       userId: "editor-1",
@@ -4285,7 +4268,6 @@ describe("reserveBooking", () => {
     id: "booking-1",
     name: "Reserved Booking",
     organizationId: "org-1",
-    custodianUserId: "user-1",
     custodianTeamMemberId: "team-1",
     from: futureFromDate,
     to: futureToDate,
@@ -4494,7 +4476,7 @@ describe("reserveBooking", () => {
     expect(result).toEqual(reservedBooking);
   });
 
-  it("links the custodian user from the team member row, not the passed custodianUserId", async () => {
+  it("links the custodian user from the team member row", async () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.DRAFT,
@@ -4510,10 +4492,7 @@ describe("reserveBooking", () => {
       status: BookingStatus.RESERVED,
     });
 
-    await reserveBooking({
-      ...mockReserveParams,
-      custodianUserId: "user-other",
-    });
+    await reserveBooking(mockReserveParams);
 
     expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -24619,7 +24598,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: "user-2",
       custodianTeamMemberId: "team-2",
       from: futureFromDate,
       to: futureToDate,
@@ -24993,7 +24971,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: "user-2",
       custodianTeamMemberId: "team-2",
       from: futureFromDate,
       to: futureToDate,
@@ -25089,7 +25066,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: newCustodian.id,
       custodianTeamMemberId: "team-4",
       from: new Date("2027-03-05T09:00:00.000Z"),
       to: new Date("2027-03-06T15:00:00.000Z"),
@@ -25169,7 +25145,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: "user-2",
       custodianTeamMemberId: "team-2",
       from: futureFromDate,
       to: futureToDate,
@@ -25234,7 +25209,6 @@ describe("booking emails name who acted", () => {
         id: "booking-1",
         name: "Test Booking",
         organizationId: "org-1",
-        custodianUserId: "user-2",
         custodianTeamMemberId: "team-2",
         from: futureFromDate,
         to: futureToDate,

@@ -40,6 +40,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import type { ImportPreflightResult } from "~/utils/import-row-errors";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { validEmail } from "~/utils/misc";
 import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
 import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
@@ -524,15 +525,17 @@ function teamMemberAlreadyClaimedError(
  *
  * @param invite - The invite being answered
  * @param status - The answer, ACCEPTED or REJECTED
+ * @param client - The Prisma client or the active transaction
  * @throws {ShelfError} 400 when the invite is no longer pending: it was
  *   replaced by a newer invite, answered, or cancelled since it was read
  */
 async function claimPendingInvite(
   invite: Pick<Invite, "id" | "organizationId">,
-  status: Invite["status"]
+  status: Invite["status"],
+  client: Pick<typeof db, "invite"> = db
 ) {
   const { id, organizationId } = invite;
-  const claimed = await db.invite.updateMany({
+  const claimed = await client.invite.updateMany({
     where: { id, organizationId, status: InviteStatuses.PENDING },
     data: { status },
   });
@@ -749,12 +752,28 @@ export async function updateInviteStatus({
             where: { id, organizationId: invite.organizationId, status },
             data: { status: InviteStatuses.PENDING },
           })
-          .catch(() => undefined);
+          .catch((releaseCause) => {
+            // The original failure is what the invitee sees. A failed release
+            // leaves the invite ACCEPTED without access, so it must be logged.
+            Logger.error(
+              new ShelfError({
+                cause: releaseCause,
+                message:
+                  "Failed to release a claimed invite after its acceptance failed",
+                additionalData: { inviteId: id },
+                label,
+              })
+            );
+          });
         throw cause;
       }
     } else {
-      await claimPendingInvite(invite, status);
-      await invalidateOtherPendingInvites(db, invite);
+      // The answer and the closing of the person's other pending invites
+      // commit together.
+      await db.$transaction(async (tx) => {
+        await claimPendingInvite(invite, status, tx);
+        await invalidateOtherPendingInvites(tx, invite);
+      });
       updatedInvite = { ...invite, status };
     }
 

@@ -23,29 +23,30 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    // The kit is read first, scoped to the caller's workspace, so a kit from
-    // another workspace refuses before anything can create a code for it.
-    const kit = await getKit({
-      id: kitId,
-      organizationId,
-      userOrganizations,
-      request,
-      extraInclude: {
-        barcodes: {
-          select: {
-            id: true,
-            type: true,
-            value: true,
+    // Both lookups are scoped to the caller's workspace: getKit refuses a
+    // kit from another workspace, and so does generateQrObj's own lock.
+    const [kit, qrObj] = await Promise.all([
+      getKit({
+        id: kitId,
+        organizationId,
+        userOrganizations,
+        request,
+        extraInclude: {
+          barcodes: {
+            select: {
+              id: true,
+              type: true,
+              value: true,
+            },
           },
         },
-      },
-    });
-
-    const qrObj = await generateQrObj({
-      kitId: kit.id,
-      userId,
-      organizationId,
-    });
+      }),
+      generateQrObj({
+        kitId,
+        userId,
+        organizationId,
+      }),
+    ]);
 
     return data(
       payload({

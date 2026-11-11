@@ -16,7 +16,10 @@ import { USER_EMAIL, USER_ID, ORGANIZATION_ID } from "@mocks/user";
 
 import type { Config } from "~/config/types";
 
-import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import {
+  endSessionByRefreshToken,
+  verifyOtpAndSignin,
+} from "~/modules/auth/service.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -44,6 +47,7 @@ vi.mock("~/config/shelf.config", async (importOriginal) => {
 // why: code verification is a Supabase call.
 vi.mock("~/modules/auth/service.server", () => ({
   verifyOtpAndSignin: vi.fn(),
+  endSessionByRefreshToken: vi.fn(),
 }));
 // why: the new-user branch writes a database row; the tests assert whether it
 // is reached.
@@ -102,6 +106,7 @@ describe("otp action with signup disabled", () => {
     vi.mocked(verifyOtpAndSignin).mockResolvedValue({
       userId: USER_ID,
       email: USER_EMAIL,
+      refreshToken: "refresh-1",
     } as never);
     vi.mocked(generateUniqueUsername).mockResolvedValue("new-person");
     vi.mocked(createUser).mockResolvedValue({ id: USER_ID } as never);
@@ -122,6 +127,8 @@ describe("otp action with signup disabled", () => {
     expect(response.status).toBe(403);
     expect(createUser).not.toHaveBeenCalled();
     expect(setSession).not.toHaveBeenCalled();
+    // The session the verified code opened is ended, not left behind.
+    expect(endSessionByRefreshToken).toHaveBeenCalledWith("refresh-1");
   });
 
   it("still signs an existing account in", async () => {

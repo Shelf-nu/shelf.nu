@@ -401,7 +401,7 @@ describe("bookings/new - custodian assignment", () => {
   });
 });
 
-describe("bookings/new - custodian user comes from the team member row", () => {
+describe("bookings/new - custodian comes from the team member row", () => {
   /** Posts a booking naming `custodian` as the caller holding `role`. */
   async function postBooking(
     role: OrganizationRoles,
@@ -410,7 +410,7 @@ describe("bookings/new - custodian user comes from the team member row", () => {
     requirePermissionMock.mockResolvedValue({
       ...permissionContext({ roles: [role] }),
       organizationId: "org-1",
-    } as any);
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
 
     const formData = new FormData();
     formData.set("name", "Test Booking");
@@ -448,7 +448,7 @@ describe("bookings/new - custodian user comes from the team member row", () => {
   );
 
   it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
-    "writes the team member's user, not the posted user id, for %s booking for themself",
+    "books the resolved team member, never the posted user id, for %s booking for themself",
     async (role) => {
       mockGetTeamMember.mockResolvedValue({
         id: "team-member-123",
@@ -462,18 +462,14 @@ describe("bookings/new - custodian user comes from the team member row", () => {
       });
 
       expect(response.status).toBe(302);
-      expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
-        expect.objectContaining({
-          booking: expect.objectContaining({
-            custodianTeamMemberId: "team-member-123",
-            custodianUserId: "user-123",
-          }),
-        })
-      );
+      const [{ booking }] = vi.mocked(createBooking).mock.calls[0];
+      expect(booking.custodianTeamMemberId).toBe("team-member-123");
+      // The custodian user is read from the team member row by the service.
+      expect(booking).not.toHaveProperty("custodianUserId");
     }
   );
 
-  it("writes no custodian user for a member without one, whatever user id is posted", async () => {
+  it("books a member without a user, whatever user id is posted", async () => {
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-nrm",
       userId: null,
@@ -486,14 +482,9 @@ describe("bookings/new - custodian user comes from the team member row", () => {
     });
 
     expect(response.status).toBe(302);
-    expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        booking: expect.objectContaining({
-          custodianTeamMemberId: "team-member-nrm",
-          custodianUserId: null,
-        }),
-      })
-    );
+    const [{ booking }] = vi.mocked(createBooking).mock.calls[0];
+    expect(booking.custodianTeamMemberId).toBe("team-member-nrm");
+    expect(booking).not.toHaveProperty("custodianUserId");
   });
 });
 

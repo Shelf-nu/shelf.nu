@@ -612,8 +612,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return data({
       asset: {
         ...assetData,
-        // Empty for a caller without `note: read` (see `canReadNotes`).
-        notes: canReadNotes ? assetData.notes : [],
+        // Empty for a caller without `note: read`: the query takes none.
+        notes: assetData.notes,
         // why: `assetData` carries the RAW image columns. Take the resolved
         // ones from the helper so an asset with no image of its own renders
         // its model's cover image on the detail screen.

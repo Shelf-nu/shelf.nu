@@ -1115,9 +1115,17 @@ describe("buildCsvExportDataFromBookings", () => {
 });
 
 describe("buildCsvExportDataFromBookings custodian visibility", () => {
-  /** A booking held by `custodianUserId`, through both custody links. */
-  function bookingHeldBy(custodianUserId: string) {
-    return {
+  /** One booking as the exporter receives it. */
+  type ExportedBooking = Parameters<
+    typeof buildCsvExportDataFromBookings
+  >[0][number];
+
+  /**
+   * A booking held by `custodianUserId`, through both custody links. Carries
+   * only the fields the export reads, so it is cast to the full row type.
+   */
+  function bookingHeldBy(custodianUserId: string): ExportedBooking {
+    const booking = {
       id: "booking-3",
       name: "Loan",
       status: "ONGOING",
@@ -1135,6 +1143,7 @@ describe("buildCsvExportDataFromBookings custodian visibility", () => {
       tags: [],
       bookingAssets: [],
     };
+    return booking as unknown as ExportedBooking;
   }
 
   /** Index of the Custodian column in every row. */
@@ -1142,7 +1151,7 @@ describe("buildCsvExportDataFromBookings custodian visibility", () => {
 
   it("writes Private, with no name or email, for a custodian the user may not see", () => {
     const [, row] = buildCsvExportDataFromBookings(
-      [bookingHeldBy("someone-else") as any],
+      [bookingHeldBy("someone-else")],
       HARDCODED_DEFAULT_PREFS,
       { canSeeAllCustody: false, userId: "exporter" }
     );
@@ -1153,7 +1162,7 @@ describe("buildCsvExportDataFromBookings custodian visibility", () => {
 
   it("names the user's own custody even without custody visibility", () => {
     const [, row] = buildCsvExportDataFromBookings(
-      [bookingHeldBy("exporter") as any],
+      [bookingHeldBy("exporter")],
       HARDCODED_DEFAULT_PREFS,
       { canSeeAllCustody: false, userId: "exporter" }
     );
@@ -1163,7 +1172,7 @@ describe("buildCsvExportDataFromBookings custodian visibility", () => {
 
   it("names every custodian for a user who may see all custody", () => {
     const [, row] = buildCsvExportDataFromBookings(
-      [bookingHeldBy("someone-else") as any],
+      [bookingHeldBy("someone-else")],
       HARDCODED_DEFAULT_PREFS,
       SEES_ALL_CUSTODY
     );
@@ -1178,7 +1187,7 @@ describe("buildCsvExportDataFromBookings custodian visibility", () => {
           ...bookingHeldBy("someone-else"),
           custodianTeamMember: null,
           custodianUser: null,
-        } as any,
+        } as unknown as ExportedBooking,
       ],
       HARDCODED_DEFAULT_PREFS,
       { canSeeAllCustody: false, userId: "exporter" }

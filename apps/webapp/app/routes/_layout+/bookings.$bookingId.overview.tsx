@@ -1800,7 +1800,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: custodian.userId,
           custodianTeamMemberId: custodian.id,
           tags,
           userId,
@@ -1866,7 +1865,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: custodian.userId,
           custodianTeamMemberId: custodian.id,
           hints: getClientHint(request),
           alertsOrgOnReservation:

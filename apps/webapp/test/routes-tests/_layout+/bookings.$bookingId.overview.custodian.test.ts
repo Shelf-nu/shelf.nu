@@ -193,7 +193,7 @@ describe("booking page save and reserve custodian", () => {
     );
 
     it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
-      "writes the team member's user, not the posted user id, for %s",
+      "books the resolved team member, never the posted user id, for %s",
       async (role) => {
         const response = await post({
           intent,
@@ -202,16 +202,14 @@ describe("booking page save and reserve custodian", () => {
         });
 
         expect(response.status).toBe(200);
-        expect(sinkFor[intent]).toHaveBeenCalledWith(
-          expect.objectContaining({
-            custodianTeamMemberId: "tm-self",
-            custodianUserId: CALLER,
-          })
-        );
+        const [args] = sinkFor[intent].mock.calls[0];
+        expect(args.custodianTeamMemberId).toBe("tm-self");
+        // The service reads the custodian user from the team member row.
+        expect(args).not.toHaveProperty("custodianUserId");
       }
     );
 
-    it("lets an admin name another member and writes that member's user", async () => {
+    it("lets an admin name another member", async () => {
       const response = await post({
         intent,
         role: OrganizationRoles.ADMIN,
@@ -219,15 +217,12 @@ describe("booking page save and reserve custodian", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(sinkFor[intent]).toHaveBeenCalledWith(
-        expect.objectContaining({
-          custodianTeamMemberId: "tm-other",
-          custodianUserId: "user-other",
-        })
-      );
+      const [args] = sinkFor[intent].mock.calls[0];
+      expect(args.custodianTeamMemberId).toBe("tm-other");
+      expect(args).not.toHaveProperty("custodianUserId");
     });
 
-    it("writes no custodian user for a member without one", async () => {
+    it("books a member without a user", async () => {
       const response = await post({
         intent,
         role: OrganizationRoles.ADMIN,
@@ -235,12 +230,9 @@ describe("booking page save and reserve custodian", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(sinkFor[intent]).toHaveBeenCalledWith(
-        expect.objectContaining({
-          custodianTeamMemberId: "tm-nrm",
-          custodianUserId: null,
-        })
-      );
+      const [args] = sinkFor[intent].mock.calls[0];
+      expect(args.custodianTeamMemberId).toBe("tm-nrm");
+      expect(args).not.toHaveProperty("custodianUserId");
     });
 
     it("refuses a team member outside the workspace", async () => {

@@ -27,29 +27,30 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    // The asset is read first, scoped to the caller's workspace, so an asset
-    // from another workspace refuses before anything can create a code for it.
-    const asset = await getAsset({
-      id: assetId,
-      organizationId,
-      userOrganizations,
-      request,
-      include: {
-        barcodes: {
-          select: {
-            id: true,
-            type: true,
-            value: true,
+    // Both lookups are scoped to the caller's workspace: getAsset refuses a
+    // asset from another workspace, and so does generateQrObj's own lock.
+    const [asset, qrObj] = await Promise.all([
+      getAsset({
+        id: assetId,
+        organizationId,
+        userOrganizations,
+        request,
+        include: {
+          barcodes: {
+            select: {
+              id: true,
+              type: true,
+              value: true,
+            },
           },
         },
-      },
-    });
-
-    const qrObj = await generateQrObj({
-      assetId: asset.id,
-      userId,
-      organizationId,
-    });
+      }),
+      generateQrObj({
+        assetId,
+        userId,
+        organizationId,
+      }),
+    ]);
 
     return data(
       payload({

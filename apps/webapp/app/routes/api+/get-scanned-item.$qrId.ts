@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
@@ -29,10 +28,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import {
-  sanitizeAssetExtraInclude,
-  sanitizeKitExtraInclude,
-} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -176,37 +171,9 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
-    const {
-      assetExtraInclude,
-      kitExtraInclude,
-      auditSessionId,
-      pickerContext,
-      source,
-    } = parseData(
+    const { auditSessionId, pickerContext, source } = parseData(
       searchParams,
       z.object({
-        assetExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for assetExtraInclude");
-            }
-          }),
-        kitExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for kitExtraInclude");
-            }
-          }),
         auditSessionId: z.string().optional(),
         /** `scanner` from the web scanner's SAM "View asset"; see above. */
         source: z.string().optional(),
@@ -236,8 +203,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           }),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
       source?: string;
@@ -276,19 +241,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
     };
 
-    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
-    // user-controlled JSON. Allowlist them before merging into the Prisma
-    // include so relation traversal / deep nesting cannot be injected.
-    const assetInclude: Prisma.AssetInclude = {
-      ...ASSET_INCLUDE,
-      ...(sanitizeAssetExtraInclude(assetExtraInclude) ?? {}),
-    };
-
-    const kitInclude: Prisma.KitInclude = {
-      ...KIT_INCLUDE,
-      ...(sanitizeKitExtraInclude(kitExtraInclude) ?? {}),
-    };
-
     const sequentialId = parseSequentialId(qrId);
 
     if (sequentialId) {
@@ -298,7 +250,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           organizationId,
           sequentialId,
         },
-        include: assetInclude,
+        include: ASSET_INCLUDE,
       });
 
       if (asset) {
@@ -340,8 +292,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             value: qrId,
             organizationId,
             include: {
-              asset: { include: assetInclude },
-              kit: { include: kitInclude },
+              asset: { include: ASSET_INCLUDE },
+              kit: { include: KIT_INCLUDE },
             },
           })
         : null;
@@ -397,15 +349,9 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    const include = {
-      ...QR_INCLUDE,
-      asset: { include: assetInclude },
-      kit: { include: kitInclude },
-    };
-
     const qr = await getQr({
       id: qrId,
-      include,
+      include: QR_INCLUDE,
     });
 
     // The code and the item it is linked to must both be in the caller's

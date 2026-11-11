@@ -18,7 +18,10 @@ import { ShelfOTP } from "~/components/forms/otp-input";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
-import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import {
+  endSessionByRefreshToken,
+  verifyOtpAndSignin,
+} from "~/modules/auth/service.server";
 import { assertSignupEnabled } from "~/modules/auth/signup-gate.server";
 import { isSsoDomainEmail } from "~/modules/auth/sso-enforcement.server";
 import {
@@ -129,8 +132,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (!userExists) {
           // A verified code with no Shelf account behind it is a signup, so it
           // obeys the same switch as `/join`. Invited and SSO users get their
-          // account from their own flows, not from here.
-          assertSignupEnabled();
+          // account from their own flows, not from here. A refused signup
+          // ends the session the code just opened, so none is left behind.
+          try {
+            assertSignupEnabled();
+          } catch (refusal) {
+            await endSessionByRefreshToken(authSession.refreshToken);
+            throw refusal;
+          }
 
           try {
             const username = await generateUniqueUsername(authSession.email);

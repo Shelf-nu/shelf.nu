@@ -237,7 +237,6 @@ export async function action({ request }: ActionFunctionArgs) {
       from,
       to,
       custodianTeamMemberId: custodian.id,
-      custodianUserId: custodian.userId ?? null,
       tags: body.tags.map((id) => ({ id })),
       userId: user.id,
       hints,

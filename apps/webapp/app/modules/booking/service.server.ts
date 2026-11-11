@@ -1142,19 +1142,13 @@ export async function createBooking({
   /**
    * Booking object that contains all the required fields to create a booking.
    *
-   * `custodianUserId` is not written: the custodian user is always the user
+   * There is no custodian user field: the custodian user is always the user
    * linked to `custodianTeamMemberId` in the database, so a request cannot
    * pair one member with another member's user.
    */
   booking: Pick<
     Booking,
-    | "name"
-    | "description"
-    | "creatorId"
-    | "custodianUserId"
-    | "organizationId"
-    | "from"
-    | "to"
+    "name" | "description" | "creatorId" | "organizationId" | "from" | "to"
   > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
@@ -1652,9 +1646,8 @@ export async function createBooking({
  * It only updates dates & custodian if the booking is in DRAFT state
  * In other ongoing states, it just updates name and description
  *
- * The custodian user is read from the `custodianTeamMemberId` row; a
- * `custodianUserId` argument is accepted for caller compatibility and never
- * written.
+ * The custodian user is read from the `custodianTeamMemberId` row in this
+ * organization, never taken from the caller.
  */
 export async function updateBasicBooking({
   id,
@@ -1675,7 +1668,6 @@ export async function updateBasicBooking({
     | "from"
     | "to"
     | "custodianTeamMemberId"
-    | "custodianUserId"
     | "description"
     | "organizationId"
   >
@@ -2243,9 +2235,8 @@ async function assertKitsNotBookedElsewhere(
 /**
  * Changes the status of a booking to RESERVED
  *
- * The custodian user is read from the `custodianTeamMemberId` row; a
- * `custodianUserId` argument is accepted for caller compatibility and never
- * written.
+ * The custodian user is read from the `custodianTeamMemberId` row in this
+ * organization, never taken from the caller.
  */
 export async function reserveBooking({
   id,
@@ -2268,7 +2259,6 @@ export async function reserveBooking({
     | "from"
     | "to"
     | "custodianTeamMemberId"
-    | "custodianUserId"
     | "description"
     | "organizationId"
   >
