@@ -321,7 +321,12 @@ describe("pruneStaleAuditDrafts", () => {
     await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
     await persistence.saveAuditScanState("user_a", "au_2", [ITEM], []);
     const staleKey = `${prefix}user_a:au_1`;
-    const savedAt = Date.parse(JSON.parse(store.get(staleKey)!).savedAt);
+    // Both drafts must be past the cutoff, whichever millisecond each landed.
+    const savedAt = Math.max(
+      ...[staleKey, `${prefix}user_a:au_2`].map((key) =>
+        Date.parse(JSON.parse(store.get(key)!).savedAt)
+      )
+    );
     // A scan is saved into the first draft while prune reads the second.
     let written = false;
     beforeRead = (key) => {
@@ -343,6 +348,23 @@ describe("pruneStaleAuditDrafts", () => {
 
     assert.equal(store.has(staleKey), true);
     assert.equal(store.has(`${prefix}user_a:au_2`), false);
+  });
+
+  it("does not recreate an ownerless draft adopted while prune ran", async () => {
+    const legacyKey = `${prefix}au_1`;
+    store.set(
+      legacyKey,
+      JSON.stringify({ version: 1, auditId: "au_1", pendingQueue: [ENTRY] })
+    );
+    // Adoption moves the draft away after prune has read it.
+    let reads = 0;
+    beforeRead = (key) => {
+      if (key === legacyKey && ++reads === 2) store.delete(legacyKey);
+    };
+
+    await persistence.pruneStaleAuditDrafts();
+
+    assert.equal(store.has(legacyKey), false);
   });
 
   it("keeps an ownerless draft with unsent scans and reports it once", async () => {

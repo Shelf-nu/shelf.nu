@@ -368,10 +368,15 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
             { auditId: parsed.auditId ?? "unknown", unsynced },
             "warning"
           );
-          await AsyncStorage.setItem(
-            key,
-            JSON.stringify({ ...record, unownedReported: true })
-          );
+          // Only over the value read above: adoption may have moved the
+          // draft away since, and writing it back would offer it again.
+          await inDraftOrder(key, async () => {
+            if ((await AsyncStorage.getItem(key)) !== raw) return;
+            await AsyncStorage.setItem(
+              key,
+              JSON.stringify({ ...record, unownedReported: true })
+            );
+          });
         }
         continue;
       }
@@ -443,7 +448,7 @@ export async function adoptUnownedDraft(
       await clearAuditScanState(userId, auditId);
       return false;
     }
-    await AsyncStorage.removeItem(legacyKey);
+    await inDraftOrder(legacyKey, () => AsyncStorage.removeItem(legacyKey));
     return true;
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] adopt failed:", e);
