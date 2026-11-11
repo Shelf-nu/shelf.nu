@@ -231,6 +231,10 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
       // `unblock` again instead of writing a session the next launch refuses.
       if (!(await unpark(storageKey))) {
         keys.add(storageKey);
+        // The main list no longer holds the block: write it back, so the
+        // refused unblock leaves a stored block even when no parked copy
+        // existed.
+        if (listed) await save(keys);
         return false;
       }
       return true;

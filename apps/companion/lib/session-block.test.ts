@@ -194,6 +194,24 @@ describe("createSessionBlock", () => {
     assert.equal(await createSessionBlock(flaky).isBlocked(key), true);
   });
 
+  it("keeps a main-list block when removing the parked copy fails", async () => {
+    const key = "sb-abcd-auth-token";
+    const store = mapStore({ [BLOCKED_SESSION_KEYS]: JSON.stringify([key]) });
+    let failRemoves = true;
+    const flaky = {
+      ...store,
+      removeItem: async (k: string) => {
+        if (failRemoves) throw new Error("disk");
+        return store.removeItem(k);
+      },
+    };
+
+    assert.equal(await createSessionBlock(flaky).unblock(key), false);
+    failRemoves = false; // the app restarts and storage works again
+
+    assert.equal(await createSessionBlock(flaky).isBlocked(key), true);
+  });
+
   it("unblock lifts it, for the next sign-in", async () => {
     const store = mapStore();
     const block = createSessionBlock(store);
