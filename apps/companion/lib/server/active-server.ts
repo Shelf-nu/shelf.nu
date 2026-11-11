@@ -27,6 +27,7 @@ import {
 } from "../supabase";
 import { callEach } from "../call-each";
 import { endSessionOnDevice } from "./end-session";
+import { serverScope } from "./server-scope";
 import { runBeforeSessionEnd } from "./session-end";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
@@ -337,6 +338,11 @@ export async function setActiveServer(config: ServerConfig): Promise<void> {
     notifyServerChange();
     return;
   }
+
+  // First, before anything awaits: draft writes for the outgoing server that
+  // are still in flight see the switch and are dropped, so none recreates a
+  // draft after `clearServerScopedState` sweeps them.
+  serverScope.bump();
 
   await endSessionOnOutgoingClient();
 

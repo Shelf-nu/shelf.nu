@@ -15,6 +15,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { reportAuditDurabilityEvent } from "./sentry";
 import { AUDIT_SCAN_KEY_PREFIX } from "./server/contract";
+import { serverScope } from "./server/server-scope";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -102,14 +103,18 @@ function inDraftOrder<T>(key: string, write: () => Promise<T>): Promise<T> {
 /**
  * Persist the current scan session so it survives app kills.
  * Fire-and-forget: errors are logged and reported, never thrown. Writes to
- * one draft land in call order; the snapshot is taken at call time.
+ * one draft land in call order; the snapshot is taken at call time. A save
+ * still waiting its turn when a full server switch starts is dropped: the
+ * switch sweeps the drafts, and the outgoing server's draft must not come
+ * back after it.
  *
  * @param userId - The signed-in account that made the scans
  * @param auditId - The audit session the scans belong to
  * @param scannedItems - The scanned rows on screen
  * @param pendingQueue - Scans still waiting to sync
  * @param failedQueue - Scans that exhausted their retries
- * @returns True when the draft was written
+ * @returns True when the draft was written; false when the write failed or
+ *   a server switch dropped it
  */
 export async function saveAuditScanState(
   userId: string,
@@ -130,8 +135,12 @@ export async function saveAuditScanState(
     };
     const key = storageKey(userId, auditId);
     const json = JSON.stringify(state);
-    await inDraftOrder(key, () => AsyncStorage.setItem(key, json));
-    return true;
+    const scope = serverScope.current();
+    return await inDraftOrder(key, async () => {
+      if (serverScope.current() !== scope) return false;
+      await AsyncStorage.setItem(key, json);
+      return true;
+    });
   } catch (e) {
     // why: log ALWAYS, not just in __DEV__. A swallowed setItem rejection
     // (e.g. device storage full during a long offline audit) is exactly how a
@@ -316,6 +325,8 @@ export const AUDIT_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
  * @param now - The current time in milliseconds
  */
 export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
+  // A full server switch sweeps every draft; prune writes nothing back after.
+  const scope = serverScope.current();
   try {
     const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
       key.startsWith(AUDIT_SCAN_KEY_PREFIX)
@@ -351,7 +362,7 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
         // are, so they are never offered, but they are not deleted either.
         // Reported once, so the case is visible.
         const record = parsed as typeof parsed & { unownedReported?: boolean };
-        if (!record.unownedReported) {
+        if (!record.unownedReported && serverScope.current() === scope) {
           reportAuditDurabilityEvent(
             "unowned_draft_kept",
             { auditId: parsed.auditId ?? "unknown", unsynced },

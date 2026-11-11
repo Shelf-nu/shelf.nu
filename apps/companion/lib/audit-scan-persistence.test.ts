@@ -284,6 +284,38 @@ describe("draft writes", () => {
   });
 });
 
+describe("draft writes across a server switch", () => {
+  it("drop a save still waiting its turn when the server switches", async () => {
+    const { serverScope } = await import("./server/server-scope");
+    let release: () => void = () => {};
+    let held = false;
+    beforeWrite = () => {
+      if (held) return Promise.resolve();
+      held = true;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    };
+    const key = `${prefix}user_a:au_1`;
+
+    const first = persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    const queued = persistence.saveAuditScanState(
+      "user_a",
+      "au_1",
+      [ITEM],
+      [ENTRY]
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    serverScope.bump(); // the switch starts
+    release(); // the first write lands; the sweep removes it
+    await first;
+    store.delete(key);
+    await queued;
+
+    assert.equal(store.has(key), false);
+  });
+});
+
 describe("pruneStaleAuditDrafts", () => {
   it("keeps a stale draft that gained an unsent scan while prune ran", async () => {
     await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);

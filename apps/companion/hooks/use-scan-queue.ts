@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from "react";
 import { accountGeneration, api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
+import { serverScope } from "@/lib/server/server-scope";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import {
   carryFirstScan,
@@ -113,6 +114,12 @@ export function useScanQueue({
   const gateRef = useRef<QueueGate | null>(null);
   if (!gateRef.current) gateRef.current = createQueueGate();
   const gate = gateRef.current;
+  /**
+   * The server-switch count when this screen opened. Once a full switch has
+   * swept the drafts, this queue's scans belong to a server the app left, so
+   * it writes no draft back.
+   */
+  const serverScopeRef = useRef(serverScope.current());
   /** False once the screen is gone: no new retry timer starts after that. */
   const mountedRef = useRef(true);
   /** This screen's mount number, compared with {@link newestScreenFor}. */
@@ -138,6 +145,7 @@ export function useScanQueue({
     (auditSessionId: string) => {
       const owner = gate.owner();
       if (!gate.maySave() || !owner) return;
+      if (serverScope.current() !== serverScopeRef.current) return;
       const newest = newestScreenFor.get(auditSessionId) ?? screenRef.current;
       if (!mountedRef.current && newest !== screenRef.current) return;
       void saveAuditScanState(
