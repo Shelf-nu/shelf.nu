@@ -79,7 +79,11 @@ type OrgState = {
   formatPrefs: ResolvedFormatPrefs;
   isLoading: boolean;
   error: string | null;
-  refresh: (options?: { silent?: boolean }) => Promise<void>;
+  /**
+   * Re-reads `/me`. Resolves `false` when the read failed, `true` otherwise.
+   * `silent` leaves the loading and error state alone.
+   */
+  refresh: (options?: { silent?: boolean }) => Promise<boolean>;
 };
 
 const OrgContext = createContext<OrgState | undefined>(undefined);
@@ -115,13 +119,25 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * Numbers each `/me` read. Only the latest read applies its answer, so a
+   * slow older read (a background re-check, say) cannot put back a workspace
+   * state that a newer one (a tap on "Check again") already replaced.
+   */
+  const latestReadRef = useRef(0);
+
+  /**
    * Reads `/me` and applies it. A `silent` read (the re-check after a refused
    * request) leaves the loading and error state alone, so no screen flashes a
    * spinner or an error for a check the person did not ask for.
+   *
+   * @returns `false` when the read failed, so a caller that asked for it can
+   *   say so; `true` when it applied, or a newer read took over.
    */
   const fetchOrgs = useCallback(
-    async (options?: { silent?: boolean }) => {
+    async (options?: { silent?: boolean }): Promise<boolean> => {
       const silent = options?.silent === true;
+      const readId = ++latestReadRef.current;
+      const superseded = () => readId !== latestReadRef.current;
       if (!user) {
         setOrganizations([]);
         currentOrgRef.current = null;
@@ -129,7 +145,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         setUserProfile(null);
         setIsLoading(false);
         setError(null);
-        return;
+        return true;
       }
 
       if (!silent) {
@@ -139,12 +155,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
       const { data, error: fetchError } = await api.me();
 
+      if (superseded()) {
+        if (!silent) setIsLoading(false);
+        return true;
+      }
+
       if (fetchError || !data) {
         if (!silent) {
           setError(fetchError || "Failed to load workspace data");
           setIsLoading(false);
         }
-        return;
+        return false;
       }
 
       // A good answer clears an error left by an earlier failed read, a quiet
@@ -165,6 +186,10 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       try {
         savedOrgId = await AsyncStorage.getItem(SELECTED_ORG_KEY);
       } catch {}
+      if (superseded()) {
+        if (!silent) setIsLoading(false);
+        return true;
+      }
 
       const landOnPreferredOrg = () => {
         const landing = pickLandingOrg(orgs, [
@@ -188,6 +213,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       }
 
       if (!silent) setIsLoading(false);
+      return true;
     },
     [user]
   );

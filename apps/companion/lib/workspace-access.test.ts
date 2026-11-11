@@ -98,6 +98,22 @@ describe("refreshOpenOrg", () => {
     assert.equal(refreshOpenOrg(org("a", true), [fresh]), fresh);
   });
 
+  test("takes the fresh object when roles or add-ons changed", () => {
+    const live = org("a", false);
+    const promoted = { ...org("a", false), roles: ["OWNER"] };
+    assert.equal(refreshOpenOrg(live, [promoted]), promoted);
+    const withBarcodes = { ...org("a", false), barcodesEnabled: true };
+    assert.equal(refreshOpenOrg(live, [withBarcodes]), withBarcodes);
+  });
+
+  test("keeps the same object for an equal copy with its own roles array", () => {
+    const live = org("a", false);
+    assert.equal(
+      refreshOpenOrg(live, [{ ...live, roles: [...live.roles] }]),
+      live
+    );
+  });
+
   test("answers null when the workspace is gone", () => {
     assert.equal(refreshOpenOrg(org("a", false), [org("b", false)]), null);
   });
@@ -185,7 +201,7 @@ describe("workspaceInactiveScanResult", () => {
     assert.deepEqual(workspaceInactiveScanResult("Disabled."), {
       title: "Workspace Inactive",
       message: "Disabled.",
-      announcement: "Workspace inactive",
+      announcement: "Workspace inactive. Disabled.",
     });
     assert.equal(
       workspaceInactiveScanResult(null).message,

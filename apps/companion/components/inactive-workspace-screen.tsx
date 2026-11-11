@@ -26,7 +26,7 @@ import {
   inactiveWorkspaceMessage,
   isWorkspaceInactive,
 } from "@/lib/workspace-access";
-import { openWorkspaceSwitcher } from "@/lib/workspace-switcher";
+import WorkspacePickerSheet from "@/components/workspace-picker-sheet";
 
 /**
  * @param props.org - The open workspace, which is inactive.
@@ -43,18 +43,23 @@ export default function InactiveWorkspaceScreen({
   const insets = useSafeAreaInsets();
   const { organizations, currentOrg, setCurrentOrg, refresh } = useOrg();
   const [isChecking, setIsChecking] = useState(false);
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   const canSwitch = organizations.some(
     (other) => other.id !== org.id && !isWorkspaceInactive(other)
   );
 
   /**
    * Re-reads `/me`. Once the workspace is active again, the tab layout stops
-   * rendering this screen, so there is no success state to show here.
+   * rendering this screen, so there is no success state to show here; a read
+   * that fails says so, so it is not mistaken for "still inactive".
    */
   const handleCheckAgain = async () => {
     setIsChecking(true);
+    setCheckFailed(false);
     try {
-      await refresh({ silent: true });
+      const ok = await refresh({ silent: true });
+      setCheckFailed(!ok);
     } finally {
       setIsChecking(false);
     }
@@ -73,13 +78,7 @@ export default function InactiveWorkspaceScreen({
         <NoticeButton
           label="Switch workspace"
           accessibilityLabel="Switch to another workspace"
-          onPress={() =>
-            openWorkspaceSwitcher({
-              organizations,
-              currentOrg,
-              onSelect: setCurrentOrg,
-            })
-          }
+          onPress={() => setShowPicker(true)}
         />
       )}
 
@@ -89,6 +88,23 @@ export default function InactiveWorkspaceScreen({
         onPress={handleCheckAgain}
         variant={canSwitch ? "secondary" : "primary"}
         busy={isChecking}
+      />
+
+      {checkFailed && (
+        <NoticeText variant="hint" accessibilityLiveRegion="polite">
+          Couldn&apos;t check right now. Check your connection and try again.
+        </NoticeText>
+      )}
+
+      <WorkspacePickerSheet
+        visible={showPicker}
+        organizations={organizations}
+        currentOrgId={currentOrg?.id}
+        onSelect={(picked) => {
+          setShowPicker(false);
+          setCurrentOrg(picked);
+        }}
+        onClose={() => setShowPicker(false)}
       />
     </FullScreenNotice>
   );

@@ -82,12 +82,33 @@ export function pickLandingOrg(
 }
 
 /**
+ * Whether two copies of a workspace from `/api/mobile/me` hold the same
+ * values. Fields are flat values or arrays of them (`roles`).
+ */
+function sameWorkspace(a: Organization, b: Organization): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    const x = (a as Record<string, unknown>)[key];
+    const y = (b as Record<string, unknown>)[key];
+    if (Array.isArray(x) && Array.isArray(y)) {
+      if (x.length !== y.length || x.some((item, i) => item !== y[i])) {
+        return false;
+      }
+    } else if (x !== y) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * The workspace to keep open after `/me` is read again.
  *
  * The open workspace stays open, so a workspace that becomes inactive shows
- * why rather than switching under the person. Its object is swapped for the
- * fresh one only when its active state changed, so screens keyed on the
- * object do not reload for nothing.
+ * why rather than switching under the person. It takes the fresh copy
+ * whenever anything about it changed (active state, roles, add-ons,
+ * switches), and keeps the same object when nothing did, so screens keyed on
+ * the object do not reload for nothing.
  *
  * @param live - The workspace open now.
  * @param orgs - The workspaces just read.
@@ -99,10 +120,7 @@ export function refreshOpenOrg(
 ): Organization | null {
   const fresh = orgs.find((org) => org.id === live.id);
   if (!fresh) return null;
-  const changed =
-    isWorkspaceInactive(fresh) !== isWorkspaceInactive(live) ||
-    fresh.inactiveMessage !== live.inactiveMessage;
-  return changed ? fresh : live;
+  return sameWorkspace(fresh, live) ? live : fresh;
 }
 
 /**
@@ -173,7 +191,8 @@ export function activeTeamWorkspaces(
  * What the scanner shows for a code whose workspace is inactive.
  *
  * @param message - The server's refusal text, when it sent one.
- * @returns The result card's title and message, and the screen-reader line.
+ * @returns The result card's title and message, and the screen-reader line
+ *   (title and reason together).
  */
 export function workspaceInactiveScanResult(
   message: string | null | undefined
@@ -182,9 +201,12 @@ export function workspaceInactiveScanResult(
   message: string;
   announcement: string;
 } {
+  const text = message || "The workspace this code belongs to is inactive.";
   return {
     title: "Workspace Inactive",
-    message: message || "The workspace this code belongs to is inactive.",
-    announcement: "Workspace inactive",
+    message: text,
+    // The reason is read out too: in batch scanning the next scan can replace
+    // the card before a screen reader reaches it.
+    announcement: `Workspace inactive. ${text}`,
   };
 }

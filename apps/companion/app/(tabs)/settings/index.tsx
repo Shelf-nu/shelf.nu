@@ -45,9 +45,9 @@ import {
   subscribeToServerChange,
 } from "@/lib/server";
 import ConnectServerSheet from "@/components/connect-server-sheet";
+import WorkspacePickerSheet from "@/components/workspace-picker-sheet";
 import { getApiBaseUrl } from "@/lib/api";
 import { openShelfWebUrl } from "@/lib/navigation";
-import { openWorkspaceSwitcher } from "@/lib/workspace-switcher";
 import {
   inactiveWorkspaceMessage,
   isWorkspaceInactive,
@@ -79,6 +79,7 @@ export default function SettingsScreen() {
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
   const [isConnectVisible, setIsConnectVisible] = useState(false);
+  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [isSwitchingServer, setIsSwitchingServer] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const notificationsValue = notificationsRowValue(usePushSettings().state);
@@ -192,12 +193,7 @@ export default function SettingsScreen() {
 
   const handleSwitchOrg = () => {
     if (organizations.length <= 1) return;
-
-    openWorkspaceSwitcher({
-      organizations,
-      currentOrg,
-      onSelect: setCurrentOrg,
-    });
+    setShowWorkspacePicker(true);
   };
 
   return (
@@ -592,6 +588,17 @@ export default function SettingsScreen() {
           {isSigningOut ? "Signing out..." : "Sign Out"}
         </Text>
       </TouchableOpacity>
+
+      <WorkspacePickerSheet
+        visible={showWorkspacePicker}
+        organizations={organizations}
+        currentOrgId={currentOrg?.id}
+        onSelect={(org) => {
+          setShowWorkspacePicker(false);
+          setCurrentOrg(org);
+        }}
+        onClose={() => setShowWorkspacePicker(false)}
+      />
 
       <ConnectServerSheet
         visible={isConnectVisible}

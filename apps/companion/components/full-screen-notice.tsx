@@ -10,6 +10,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import {
   ActivityIndicator,
+  ScrollView,
   Text,
   TouchableOpacity,
   View,
@@ -42,7 +43,13 @@ export function FullScreenNotice({
   const { colors } = useTheme();
   const styles = useStyles();
   return (
-    <View style={[styles.container, style]}>
+    <ScrollView
+      style={[styles.container, style]}
+      // why: large text or a long workspace name can make the notice taller
+      // than the screen; the column stays centred while it fits and scrolls
+      // to its actions when it does not.
+      contentContainerStyle={styles.scrollContent}
+    >
       <View style={styles.content}>
         <Ionicons
           name={icon}
@@ -55,7 +62,7 @@ export function FullScreenNotice({
         </Text>
         {children}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -66,12 +73,22 @@ export function FullScreenNotice({
 export function NoticeText({
   children,
   variant = "body",
+  accessibilityLiveRegion,
 }: {
   children: ReactNode;
   variant?: "body" | "hint" | "emphasis";
+  /** Android: read the text out when it appears (a result, an error). */
+  accessibilityLiveRegion?: "polite" | "assertive";
 }) {
   const styles = useStyles();
-  return <Text style={styles[variant]}>{children}</Text>;
+  return (
+    <Text
+      style={styles[variant]}
+      accessibilityLiveRegion={accessibilityLiveRegion}
+    >
+      {children}
+    </Text>
+  );
 }
 
 /**
@@ -130,9 +147,13 @@ const useStyles = createStyles((colors, shadows) => ({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   content: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
+    paddingVertical: spacing.xl,
     alignItems: "center",
     paddingHorizontal: spacing.xl,
     gap: spacing.md,
