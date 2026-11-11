@@ -12,9 +12,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { config as shelfConfig } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import {
+  MOBILE_CODE_WORKSPACE_INACTIVE_MESSAGE,
   MOBILE_WORKSPACE_INACTIVE_MESSAGE,
+  getMobileWorkspaceAccess,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 
@@ -42,6 +45,8 @@ vi.mock("stripe", () => ({
 vi.mock("~/integrations/supabase/client", () => ({
   getSupabaseAdmin: vi.fn(),
 }));
+
+type ShelfConfig = typeof shelfConfig;
 
 const membershipFindUnique = vi.mocked(db.userOrganization.findUnique);
 const ownerFindUniqueOrThrow = vi.mocked(db.user.findUniqueOrThrow);
@@ -192,5 +197,76 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
       status: 403,
       message: "You don't have access to this organization",
     });
+  });
+});
+
+describe("getMobileWorkspaceAccess", () => {
+  it("answers active, not-member, and inactive with the 403 for a scanned code's workspace", async () => {
+    givenMembership(membershipRow());
+    ownerTier("tier_2");
+    await expect(
+      getMobileWorkspaceAccess({
+        userId: CALLER_ID,
+        organizationId: ORG_ID,
+        reason: "code",
+      })
+    ).resolves.toEqual({ access: "active" });
+
+    givenMembership(null);
+    await expect(
+      getMobileWorkspaceAccess({
+        userId: CALLER_ID,
+        organizationId: ORG_ID,
+        reason: "code",
+      })
+    ).resolves.toEqual({ access: "not-member" });
+
+    givenMembership(membershipRow());
+    ownerTier("free");
+    const answer = await getMobileWorkspaceAccess({
+      userId: CALLER_ID,
+      organizationId: ORG_ID,
+      reason: "code",
+    });
+    expect(answer.access).toBe("inactive");
+    // A scanned code may belong to a workspace other than the app's own, so
+    // the message names the code's workspace.
+    expect(answer).toMatchObject({
+      error: {
+        status: 403,
+        message: `${MOBILE_CODE_WORKSPACE_INACTIVE_MESSAGE} Contact the workspace owner for more information.`,
+      },
+    });
+  });
+});
+
+describe("requireOrganizationAccess with premium features off (self-hosted)", () => {
+  it("lets a TEAM workspace through whatever the owner's tier, without reading it", async () => {
+    // why: `premiumIsEnabled` is read from the config when `stripe.server`
+    // loads, so the module graph is reloaded with premium switched off.
+    vi.resetModules();
+    vi.doMock("~/config/shelf.config", async (importOriginal) => {
+      const actual = await importOriginal<{ config: ShelfConfig }>();
+      return {
+        ...actual,
+        config: { ...actual.config, enablePremiumFeatures: false },
+      };
+    });
+    const { db: freshDb } = await import("~/database/db.server");
+    const { requireOrganizationAccess: gate } = await import(
+      "~/modules/api/mobile-auth.server"
+    );
+    vi.mocked(freshDb.userOrganization.findUnique).mockResolvedValue(
+      membershipRow() as never
+    );
+    vi.mocked(freshDb.user.findUniqueOrThrow).mockResolvedValue({
+      tier: { id: "free", tierLimit: { id: "free" } },
+    } as never);
+
+    await expect(gate(mobileRequest(), CALLER_ID)).resolves.toBe(ORG_ID);
+    expect(freshDb.user.findUniqueOrThrow).not.toHaveBeenCalled();
+
+    vi.doUnmock("~/config/shelf.config");
+    vi.resetModules();
   });
 });

@@ -68,7 +68,7 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     // why: the workspace lapse gate has its own tests
     // (mobile-auth.server.workspace-lapse.test.ts); here it answers membership
     // from the mocked membership row, as the gate does for an active workspace.
-    requireActiveMobileMembership: vitest.fn(
+    getMobileWorkspaceAccess: vitest.fn(
       async ({
         userId,
         organizationId,
@@ -80,7 +80,7 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
         const row = await mockedDb.userOrganization.findUnique({
           where: { userId_organizationId: { userId, organizationId } },
         });
-        return Boolean(row);
+        return { access: row ? "active" : "not-member" };
       }
     ),
   };
@@ -140,7 +140,7 @@ vitest.mock("~/utils/error", () => ({
 
 import {
   getMobileUserContext,
-  requireActiveMobileMembership,
+  getMobileWorkspaceAccess,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -482,9 +482,12 @@ describe("GET /api/mobile/qr/:qrId", () => {
 
   it("refuses a code whose workspace is inactive with a 403 and its message, recording nothing", async () => {
     const message =
-      "This workspace is inactive because its subscription has expired.";
+      "The workspace this code belongs to is inactive because its subscription has expired.";
     const inactiveError = Object.assign(new Error(message), { status: 403 });
-    (requireActiveMobileMembership as any).mockRejectedValueOnce(inactiveError);
+    (getMobileWorkspaceAccess as any).mockResolvedValueOnce({
+      access: "inactive",
+      error: inactiveError,
+    });
     (makeShelfError as any).mockReturnValue({ message, status: 403 });
 
     const result = await run(createQrRequest());

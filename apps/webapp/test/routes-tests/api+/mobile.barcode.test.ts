@@ -44,7 +44,7 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     // why: the workspace lapse gate has its own tests
     // (mobile-auth.server.workspace-lapse.test.ts); sibling workspaces here
     // are active.
-    requireActiveMobileMembership: vitest.fn(async () => true),
+    getMobileWorkspaceAccess: vitest.fn(async () => ({ access: "active" })),
   };
 });
 

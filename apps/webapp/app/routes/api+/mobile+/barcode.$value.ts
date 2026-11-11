@@ -19,7 +19,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
-  requireActiveMobileMembership,
+  getMobileWorkspaceAccess,
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
@@ -148,10 +148,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           distinct: ["organizationId"],
         });
 
+        // The code opens in the workspace that owns it, so each owner must
+        // still have the caller as a member and be active. Inactive and
+        // no-longer-member workspaces drop out before the ambiguity check:
+        // they can never open the code, so they must not block one that can.
+        const owners = await Promise.all(
+          owningOrgIds.map(async ({ organizationId: ownerId }) => ({
+            organizationId: ownerId,
+            workspace: await getMobileWorkspaceAccess({
+              userId: user.id,
+              organizationId: ownerId,
+              reason: "code",
+            }),
+          }))
+        );
+        const activeOwnerIds = owners
+          .filter((owner) => owner.workspace.access === "active")
+          .map((owner) => owner.organizationId);
+
         // Barcode uniqueness is per-workspace, so the same value can exist in
-        // several sibling workspaces. Only a UNIQUE match may drive the jump —
+        // several sibling workspaces. Only a UNIQUE match may drive the jump:
         // picking one arbitrarily would open the wrong asset.
-        if (owningOrgIds.length > 1) {
+        if (activeOwnerIds.length > 1) {
           return data(
             {
               error: {
@@ -159,39 +177,38 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                   "This barcode exists in more than one of your workspaces. Switch to the right workspace to scan it there.",
               },
             },
-            // 409, not 404: the code exists and the caller may see it — what
+            // 409, not 404: the code exists and the caller may see it; what
             // fails is choosing between workspaces.
             { status: 409 }
           );
         }
 
-        if (owningOrgIds.length === 1) {
-          // The code opens in the sibling workspace, so the caller must still
-          // be a member and that workspace must be active: an inactive one
-          // refuses with a 403, a membership gone since the list above falls
-          // through to the 404 below.
-          const isSiblingMember = await requireActiveMobileMembership({
-            userId: user.id,
-            organizationId: owningOrgIds[0].organizationId,
-          });
-
+        if (activeOwnerIds.length === 1) {
           // Phase 2: the full payload, once, for the winner. Routed back
           // through `getBarcodeByValue` so the original-case-then-uppercase
           // preference stays identical to the current-workspace path.
-          const candidate = isSiblingMember
-            ? await getBarcodeByValue({
-                value,
-                organizationId: owningOrgIds[0].organizationId,
-                include: {
-                  asset: { select: MOBILE_ASSET_SELECT },
-                  kit: { select: MOBILE_KIT_SELECT },
-                },
-              })
-            : null;
+          const candidate = await getBarcodeByValue({
+            value,
+            organizationId: activeOwnerIds[0],
+            include: {
+              asset: { select: MOBILE_ASSET_SELECT },
+              kit: { select: MOBILE_KIT_SELECT },
+            },
+          });
 
           if (candidate) {
-            foundOrganizationId = owningOrgIds[0].organizationId;
+            foundOrganizationId = activeOwnerIds[0];
             foundBarcode = candidate;
+          }
+        } else {
+          // No active owner. A code held only by inactive workspaces says so,
+          // like a QR scan of one; a membership gone since the list above
+          // falls through to the 404 below.
+          const inactiveOwner = owners.find(
+            (owner) => owner.workspace.access === "inactive"
+          );
+          if (inactiveOwner?.workspace.access === "inactive") {
+            throw inactiveOwner.workspace.error;
           }
         }
       }

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
-  requireActiveMobileMembership,
+  getMobileWorkspaceAccess,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
 } from "~/modules/api/mobile-auth.server";
@@ -51,10 +51,11 @@ vi.mock("~/utils/subscription.server", () => ({
 // heavy imports.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
-  // why: the lapse gate has its own tests in mobile-auth.server.test.ts. Here
-  // it answers membership from the mocked membership row, so the QR path's
-  // wrong-workspace branches stay driven by `userOrganization.findUnique`.
-  requireActiveMobileMembership: vi.fn(
+  // why: the lapse gate has its own tests in
+  // mobile-auth.server.workspace-lapse.test.ts. Here it answers membership
+  // from the mocked membership row, so the QR path's wrong-workspace branches
+  // stay driven by `userOrganization.findUnique`.
+  getMobileWorkspaceAccess: vi.fn(
     async ({
       userId,
       organizationId,
@@ -66,7 +67,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
       const row = await mockedDb.userOrganization.findUnique({
         where: { userId_organizationId: { userId, organizationId } },
       });
-      return Boolean(row);
+      return { access: row ? "active" : "not-member" };
     }
   ),
   // why: custody visibility is read per owning workspace; the route tests pin
@@ -509,23 +510,25 @@ describe("resolveMobileScannedCode inactive owning workspace", () => {
       kitId: null,
       organizationId: "org-lapsed",
     });
-    vi.mocked(requireActiveMobileMembership).mockRejectedValueOnce(
-      new ShelfError({
+    vi.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
+      access: "inactive",
+      error: new ShelfError({
         cause: null,
         message:
-          "This workspace is inactive because its subscription has expired.",
+          "The workspace this code belongs to is inactive because its subscription has expired.",
         label: "Auth",
         status: 403,
-      })
-    );
+      }),
+    });
 
     await expect(
       resolveMobileScannedCode(resolveArgs("qr-lapsed"))
     ).rejects.toMatchObject({ status: 403 });
-    expect(requireActiveMobileMembership).toHaveBeenCalledWith(
+    expect(getMobileWorkspaceAccess).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         organizationId: "org-lapsed",
+        reason: "code",
       })
     );
     expect(assetFindFirst).not.toHaveBeenCalled();

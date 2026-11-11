@@ -31,7 +31,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
-  requireActiveMobileMembership,
+  getMobileWorkspaceAccess,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
   MOBILE_ASSET_SELECT,
@@ -258,7 +258,7 @@ async function resolveSamShapedBarcode({
  * @returns A {@link ResolveMobileCodeResult}. Never throws for the expected
  *   not-found / wrong-org cases; those come back as `{ ok: false }`.
  * @throws {ShelfError} 403 when the code's workspace is inactive (see
- *   `requireActiveMobileMembership`).
+ *   `getMobileWorkspaceAccess`).
  */
 export async function resolveMobileScannedCode({
   request,
@@ -368,12 +368,15 @@ export async function resolveMobileScannedCode({
   // Membership of the code's workspace, which must also be active: a scan
   // opens the item in the workspace that owns the code, whatever workspace
   // the app is in.
-  const isMember = await requireActiveMobileMembership({
+  const workspace = await getMobileWorkspaceAccess({
     userId: user.id,
     organizationId: qr.organizationId,
+    reason: "code",
   });
 
-  if (!isMember) {
+  if (workspace.access === "inactive") throw workspace.error;
+
+  if (workspace.access === "not-member") {
     return {
       ok: false,
       status: 403,
