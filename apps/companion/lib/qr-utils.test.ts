@@ -566,10 +566,13 @@ test("scanMissFeedback covers every outcome that has no answer to render", () =>
       "Ask your admin to enable barcodes.",
       "Not a Shelf asset code.",
       "Sign in to that server to use it.",
-      "Not in your workspaces.",
+      "Other Shelf server? Sign in there.",
       "Not a code from this Shelf server.",
     ]
   );
+  // The screen reader hears the same action the toast shows.
+  assert.match(cases[0].announcement, /ask your admin/i);
+  assert.match(cases[3].announcement, /another Shelf server/);
   // A search is claimed only when the barcode lookup was asked.
   assert.match(cases[3].message, /not found in your workspaces/);
   assert.match(cases[4].message, /not a code from this Shelf server/);

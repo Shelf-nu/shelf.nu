@@ -337,7 +337,8 @@ export function scanMissFeedback(
           message:
             "Barcode scanning is not enabled for your workspace. Contact your admin to enable it.",
           shortMessage: "Ask your admin to enable barcodes.",
-          announcement: "Barcode scanning not available",
+          announcement:
+            "Barcode scanning not available. Ask your admin to enable barcodes.",
         }
       : {
           tone: "not_found",
@@ -368,7 +369,7 @@ export function scanMissFeedback(
       ? "This code was not found in your workspaces. A label from another Shelf server works only on that server."
       : "This link is not a code from this Shelf server. A label from another Shelf server works only on that server.",
     shortMessage: outcome.lookedUp
-      ? "Not in your workspaces."
+      ? "Other Shelf server? Sign in there."
       : "Not a code from this Shelf server.",
     announcement:
       "Code not found. A label from another Shelf server works only on that server.",
