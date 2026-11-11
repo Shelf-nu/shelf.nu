@@ -56,7 +56,13 @@ mock.module(pathToFileURL(join(__dirname, "navigation.ts")).href, {
     openShelfWebUrl: async (url: string) => {
       calls.web.push(url);
     },
+    openLinkedRoute: () => {},
   },
+});
+
+// why: react-native cannot load under Node; the hook only reads Platform.OS.
+mock.module("react-native", {
+  namedExports: { Platform: { OS: "ios" } },
 });
 
 // why: expo-location is native; counting reads proves no position is taken.

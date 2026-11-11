@@ -32,7 +32,8 @@ export type TabRoot =
  * same-stack list→detail navigation.
  *
  * Every cross-surface navigation into a tab's nested route MUST go through
- * this helper. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
+ * this helper, or through `openLinkedRoute` for a route a claimed web link
+ * maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
  * from outside that tab's own stack.
  *
  * @param tabRoot - the target tab's index route
@@ -41,14 +42,36 @@ export type TabRoot =
  * @throws Propagates any navigation error thrown by expo-router's `router`
  */
 export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
+  navigateAnchored(nestedHref ?? tabRoot);
+}
+
+/**
+ * Open the in-app route a claimed web link maps to (`nativeRouteForLink`),
+ * anchored the same way as `pushIntoTab` so "back" returns to that tab's list.
+ *
+ * @param route - an in-app path such as `/assets/as_1` or `/assets/new?qrId=q`
+ */
+export function openLinkedRoute(route: string) {
+  // why: routes from nativeRouteForLink are runtime strings that the
+  // typed-routes `Href` union cannot describe statically.
+  navigateAnchored(route as Href);
+}
+
+/**
+ * The one anchored navigation call behind `pushIntoTab` and
+ * `openLinkedRoute`, so a change to how tabs are anchored reaches both.
+ *
+ * @param href - the route to open
+ */
+function navigateAnchored(href: Href) {
   // `withAnchor` tells expo-router to include the target stack's anchor
   // screen (its `unstable_settings.initialRouteName`, set to "index" in
   // each tab's _layout) beneath the navigated route, so the list sits
-  // under the detail and "back" works — even when the tab was never
+  // under the detail and "back" works, even when the tab was never
   // mounted (e.g. the app launched straight onto the Scanner tab). This
   // is the documented in-app mechanism; a bare push or a push("/tab")
   // then push(detail) does NOT anchor the list and strands the user.
-  router.navigate(nestedHref ?? tabRoot, { withAnchor: true });
+  router.navigate(href, { withAnchor: true });
 }
 
 /**

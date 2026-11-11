@@ -1,7 +1,9 @@
 import { useEffect } from "react";
+import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import { accountGeneration, api, getApiBaseUrl } from "./api";
-import { openShelfWebUrl, pushIntoTab } from "./navigation";
+import { isOpenedByRouter, launchAction } from "./link-routing";
+import { openLinkedRoute, openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
   type QrLookups,
@@ -42,13 +44,19 @@ import { getScanCoordinates } from "./scan-location";
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
  * are never delivered to the app and keep opening the web.
  *
- * Division of labour with `app/+native-intent.ts`: HTTPS universal links are
- * rewritten there to native routes and handled by expo-router itself (a
- * claimed path that nests deeper than the app renders, e.g.
- * `/assets/:id/overview`, maps to the resource detail). This hook only
- * handles (a) custom-scheme links, which have no native path mapping
- * guarantees, and (b) `/qr/:id` links, which need an async API resolve.
- * Acting on other HTTPS links here would double-navigate.
+ * Division of labour with `app/+native-intent.ts`, decided per link by
+ * `isOpenedByRouter` (`lib/link-routing.ts`). HTTPS universal links are
+ * rewritten there to native routes (a claimed path that nests deeper than the
+ * app renders, e.g. `/assets/:id/overview`, maps to the resource detail).
+ *
+ * - While the app runs, expo-router opens every HTTPS link except `/qr/:id`.
+ *   This hook opens custom-scheme links and resolves `/qr/:id` through the API.
+ * - At launch, the same split applies on Android. On iOS the router does not
+ *   open the launch URL, so this hook opens HTTPS launch links too, through
+ *   the router's own mapping (`webLaunchRoute`), which keeps nested kit ids
+ *   and the query.
+ *
+ * Opening a link the router already opens would navigate twice.
  */
 
 /** A link the OS delivered, read into the screen it names. */
@@ -214,22 +222,50 @@ export function resolveTappedQr(
  */
 export function useDeepLinkHandler() {
   useEffect(() => {
-    /**
-     * True for URLs that expo-router already routes natively via the
-     * `app/+native-intent.ts` rewrite. Acting on those here too would
-     * double-navigate; the exception is `/qr/:id`, which needs an async API
-     * resolve that a path rewrite cannot express.
-     */
-    function isNativelyRouted(url: string, link: ParsedLink) {
-      return /^https?:/i.test(url) && link.type !== "qr";
+    // The launch link opens after a short delay. A different link arriving
+    // first, or the hook unmounting, cancels it so it cannot cover the newer
+    // screen. The same URL arriving again as a `url` event does not cancel
+    // it: that is the launch link delivered twice, not a newer one.
+    let disposed = false;
+    let launchUrl: string | undefined;
+    let launchTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastEventUrl: string | undefined;
+
+    /** Stops a scheduled launch-link navigation, if one is pending. */
+    function cancelLaunchLink() {
+      if (launchTimer) clearTimeout(launchTimer);
+      launchTimer = undefined;
     }
 
+    /**
+     * Opens a link that arrives while the app is running, unless the router
+     * opens it itself.
+     *
+     * @param event - the `url` event from expo-linking
+     */
     function handleUrl(event: { url: string }) {
+      lastEventUrl = event.url;
+      if (event.url !== launchUrl) cancelLaunchLink();
       const link = parseDeepLink(event.url);
-      if (isNativelyRouted(event.url, link)) return;
+      if (
+        isOpenedByRouter({
+          url: event.url,
+          linkType: link.type,
+          initial: false,
+          platform: Platform.OS,
+        })
+      ) {
+        return;
+      }
       navigateToLink(link);
     }
 
+    /**
+     * Opens the screen a parsed link names, anchored in its tab so "back"
+     * returns to the list. QR links resolve through the API first.
+     *
+     * @param link - the link parsed by `parseDeepLink`
+     */
     function navigateToLink(link: ParsedLink) {
       switch (link.type) {
         case "asset":
@@ -257,23 +293,36 @@ export function useDeepLinkHandler() {
       }
     }
 
-    // Handle the URL that launched the app (cold start). HTTPS links are
-    // already routed by expo-router via the +native-intent rewrite — only
-    // custom-scheme links and /qr resolution need JS navigation here.
+    // Handle the URL that launched the app (cold start). `launchAction`
+    // decides what to open; links the router opens itself come back `none`.
     Linking.getInitialURL().then((url) => {
-      if (url) {
-        const link = parseDeepLink(url);
-        // Skip natively-routed and unrecognized links.
-        if (link.type !== "unknown" && !isNativelyRouted(url, link)) {
-          // Small delay to let navigation mount
-          setTimeout(() => navigateToLink(link), 500);
-        }
+      if (!url || disposed) return;
+      // A different link already arrived: it is newer than the launch link.
+      if (lastEventUrl && lastEventUrl !== url) return;
+      const link = parseDeepLink(url);
+      const action = launchAction({
+        url,
+        linkType: link.type,
+        platform: Platform.OS,
+      });
+      // The delay lets navigation mount.
+      if (action.kind === "route") {
+        const { route } = action;
+        launchUrl = url;
+        launchTimer = setTimeout(() => openLinkedRoute(route), 500);
+      } else if (action.kind === "link") {
+        launchUrl = url;
+        launchTimer = setTimeout(() => navigateToLink(link), 500);
       }
     });
 
     // Handle URLs received while the app is already open (warm start)
     const subscription = Linking.addEventListener("url", handleUrl);
 
-    return () => subscription.remove();
+    return () => {
+      disposed = true;
+      cancelLaunchLink();
+      subscription.remove();
+    };
   }, []);
 }
