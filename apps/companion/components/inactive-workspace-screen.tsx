@@ -14,6 +14,7 @@
  * @see lib/workspace-access.ts
  */
 import { useState } from "react";
+import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   FullScreenNotice,
@@ -21,12 +22,17 @@ import {
   NoticeText,
 } from "@/components/full-screen-notice";
 import type { Organization } from "@/lib/api";
+import { announce } from "@/lib/a11y";
 import { useOrg } from "@/lib/org-context";
 import {
   inactiveWorkspaceMessage,
   isWorkspaceInactive,
 } from "@/lib/workspace-access";
 import WorkspacePickerSheet from "@/components/workspace-picker-sheet";
+
+/** Shown (and read out) when "Check again" could not reach the server. */
+const CHECK_FAILED_MESSAGE =
+  "Couldn't check right now. Check your connection and try again.";
 
 /**
  * @param props.org - The open workspace, which is inactive.
@@ -60,6 +66,9 @@ export default function InactiveWorkspaceScreen({
     try {
       const ok = await refresh({ silent: true });
       setCheckFailed(!ok);
+      // Android reads the hint out through its live region; iOS has none, so
+      // VoiceOver hears it here while focus stays on the button.
+      if (!ok && Platform.OS === "ios") announce(CHECK_FAILED_MESSAGE);
     } finally {
       setIsChecking(false);
     }
@@ -92,7 +101,7 @@ export default function InactiveWorkspaceScreen({
 
       {checkFailed && (
         <NoticeText variant="hint" accessibilityLiveRegion="polite">
-          Couldn&apos;t check right now. Check your connection and try again.
+          {CHECK_FAILED_MESSAGE}
         </NoticeText>
       )}
 

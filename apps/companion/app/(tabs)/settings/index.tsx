@@ -238,6 +238,10 @@ export default function SettingsScreen() {
           activeOpacity={0.7}
           accessibilityLabel={`Current workspace: ${
             currentOrg?.name ?? "None"
+          }${
+            currentOrg && isWorkspaceInactive(currentOrg)
+              ? `. ${inactiveWorkspaceMessage(currentOrg)}`
+              : ""
           }${organizations.length > 1 ? ". Tap to switch" : ""}`}
           accessibilityRole="button"
         >
