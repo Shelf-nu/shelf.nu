@@ -226,16 +226,19 @@ function buildSubscription({
   productIds = [TEAM_PRODUCT],
   status = "active",
   metadata = { organizationId: "org-1" },
+  collectionMethod = "send_invoice",
 }: {
   productIds?: string[];
   status?: Stripe.Subscription.Status;
   metadata?: Record<string, string>;
+  collectionMethod?: Stripe.Subscription.CollectionMethod;
 } = {}): Stripe.Subscription {
   return {
     id: "sub_1",
     customer: "cus_1",
     status,
     metadata,
+    collection_method: collectionMethod,
     trial_end: null,
     items: {
       data: productIds.map((product, index) => ({
@@ -335,6 +338,9 @@ describe("handleSubscriptionCreated", () => {
       emailsToNotify: new Set(["owner@example.com"]),
       customerName: "Alice",
     });
+    // Stripe still holds the event's subscription, live and unlinked,
+    // unless a test says otherwise.
+    stripeHolds(storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT]));
   });
 
   it("switches on the add-ons bundled on a subscription created with a workspace", async () => {
@@ -544,7 +550,9 @@ describe("handleSubscriptionCreated", () => {
       expect(adminEmailSubjects()).toEqual([
         expect.stringContaining("Needs you"),
       ]);
-      expect(adminEmailSubjects()[0]).not.toContain("1 Team workspaces");
+      expect(adminEmailSubjects()).toEqual([
+        "Needs you: more than one plan subscription has no workspace, pick in Stripe metadata",
+      ]);
       expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
         expect.objectContaining({ needsTeamWorkspace: false })
       );
@@ -584,6 +592,107 @@ describe("handleSubscriptionCreated", () => {
 
       expect(adminEmailSubjects()).toEqual([]);
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    });
+
+    it("leaves a subscription alone that was cancelled since the event", async () => {
+      stripeHolds();
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+    });
+
+    it("leaves a Checkout subscription to the workspace creation link", async () => {
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent(
+          "customer.subscription.created",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            metadata: {},
+            collectionMethod: "charge_automatically",
+          })
+        ),
+        user
+      );
+
+      expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+      expect(adminEmailSubjects()).toEqual([]);
+    });
+
+    it("does not email the admin when marking the subscription fails, so a retry asks once", async () => {
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-8", name: "ZZ Test Team A" },
+        { id: "org-9", name: "ZZ Test Team B" },
+      ]);
+      mockSubscriptionsUpdate.mockRejectedValueOnce(new Error("Stripe down"));
+
+      await expect(
+        handleSubscriptionCreated(
+          buildEvent("customer.subscription.created", unlinked()),
+          user
+        )
+      ).rejects.toThrow("Stripe down");
+
+      expect(adminEmailSubjects()).toEqual([]);
+    });
+
+    it("lists the other unlinked plan in the email so the admin can see both", async () => {
+      stripeHolds(
+        storedSubscription([TEAM_PRODUCT], { id: "sub_checkout" }),
+        storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT])
+      );
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      const adminEmail = mockSendEmail.mock.calls.find(
+        ([email]) => email.to === "admin@example.com"
+      )?.[0];
+      expect(adminEmail.text).toContain("sub_1");
+      expect(adminEmail.text).toContain("sub_checkout");
+      // Only the event's subscription is marked as asked.
+      expect(mockSubscriptionsUpdate).toHaveBeenCalledTimes(1);
+      expect(mockSubscriptionsUpdate).toHaveBeenCalledWith(
+        "sub_1",
+        expect.anything()
+      );
+    });
+
+    it("clears the asked mark when the subscription is linked later", async () => {
+      stripeHolds(
+        storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT], {
+          metadata: { workspacePickRequestedAt: "2026-11-10T00:00:00.000Z" },
+        })
+      );
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+        metadata: { workspacePickRequestedAt: "", organizationId: "org-9" },
+      });
     });
 
     it("leaves the subscription unlinked when the add-on sync fails, so Stripe's retry links it", async () => {
@@ -754,6 +863,22 @@ describe("handleSubscriptionPaused", () => {
     expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
   });
 
+  it("lowers the user to the plan their remaining subscription grants", async () => {
+    stripeHolds(storedSubscription([PLUS_PRODUCT], { id: "sub_2" }));
+
+    await handleSubscriptionPaused(
+      buildEvent(
+        "customer.subscription.paused",
+        buildSubscription({ status: "paused" })
+      ),
+      user
+    );
+
+    expect(mockUserUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { tierId: "tier_1" } })
+    );
+  });
+
   it("keeps Team while another live Team subscription still pays for it", async () => {
     stripeHolds(
       storedSubscription([TEAM_PRODUCT], {
@@ -849,6 +974,9 @@ describe("handleSubscriptionDeleted", () => {
       user
     );
 
+    expect(mockSubscriptionsList).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_1" })
+    );
     expect(mockUserUpdate).not.toHaveBeenCalled();
   });
 
@@ -926,6 +1054,7 @@ describe("handleSubscriptionDeleted", () => {
 describe("handleSubscriptionUpdated", () => {
   it("links a Team subscription without a workspace when it goes live", async () => {
     mockOrgFindMany.mockResolvedValue([{ id: "org-9", name: "ZZ Test Team" }]);
+    stripeHolds(storedSubscription([TEAM_PRODUCT, BARCODES_PRODUCT]));
     const subscription = buildSubscription({
       productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
       metadata: {},
@@ -951,6 +1080,7 @@ describe("handleSubscriptionUpdated", () => {
 
   it("links a Team subscription without a workspace when it is resumed", async () => {
     mockOrgFindMany.mockResolvedValue([{ id: "org-9", name: "ZZ Test Team" }]);
+    stripeHolds(storedSubscription([TEAM_PRODUCT]));
 
     await handleSubscriptionUpdated(
       buildEvent(

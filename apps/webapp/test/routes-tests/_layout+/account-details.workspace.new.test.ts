@@ -129,6 +129,24 @@ describe("new workspace action", () => {
     expect(linkAuditAddonToOrganization).not.toHaveBeenCalled();
   });
 
+  it("keeps linking what the creation link asks for when the lookup fails", async () => {
+    vi.mocked(linkWaitingSubscriptionsToWorkspace).mockRejectedValue(
+      new Error("Stripe unavailable")
+    );
+
+    await action(
+      createActionArgs({
+        request: createWorkspaceRequest("?includesAudits=true"),
+        context,
+      })
+    );
+
+    expect(linkAuditAddonToOrganization).toHaveBeenCalledWith({
+      customerId: "cus_1",
+      organizationId: "org-new",
+    });
+  });
+
   it("still creates the workspace when the lookup fails, links nothing unasked and tells the admin", async () => {
     vi.mocked(linkWaitingSubscriptionsToWorkspace).mockRejectedValue(
       new Error("Stripe unavailable")

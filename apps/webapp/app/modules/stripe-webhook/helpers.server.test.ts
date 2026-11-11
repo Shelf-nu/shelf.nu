@@ -493,12 +493,19 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       id = "sub_1",
       status = "active",
       metadata = {},
-    }: { id?: string; status?: string; metadata?: Record<string, string> } = {}
+      collection_method = "send_invoice",
+    }: {
+      id?: string;
+      status?: string;
+      metadata?: Record<string, string>;
+      collection_method?: string;
+    } = {}
   ) {
     return {
       id,
       status,
       metadata,
+      collection_method,
       items: { data: products.map((product) => ({ price: { product } })) },
     };
   }
@@ -518,6 +525,13 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       userId: "user-1",
       organizationId: "org-new",
     });
+  }
+
+  /** The workspace ids written to subscription metadata, in call order. */
+  function organizationIdsWritten() {
+    return mockSubscriptionsUpdate.mock.calls
+      .map(([, params]) => params.metadata?.organizationId)
+      .filter(Boolean);
   }
 
   /** The subjects of the emails sent to the admin. */
@@ -598,7 +612,7 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       audits: false,
       barcodes: false,
     });
-    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(organizationIdsWritten()).toEqual([]);
     expect(adminEmailSubjects()).toEqual([
       expect.stringContaining("Needs you"),
     ]);
@@ -614,7 +628,7 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       audits: false,
       barcodes: false,
     });
-    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(organizationIdsWritten()).toEqual([]);
     const [email] = mockSendEmail.mock.calls[0];
     expect(email.subject).toContain("Needs you");
     expect(email.text).toContain("sub_checkout");
@@ -649,6 +663,84 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     });
     expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
     expect(mockOrgFindMany).not.toHaveBeenCalled();
+  });
+
+  it("reads every page when Stripe's plain list has more than one page", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      data: [
+        subscription([TEAM], {
+          id: "sub_0",
+          metadata: { organizationId: "org-old" },
+        }),
+      ],
+      has_more: true,
+    });
+    mockGetCustomerSubscriptions.mockResolvedValue([
+      subscription([TEAM], {
+        id: "sub_0",
+        metadata: { organizationId: "org-old" },
+      }),
+      subscription([TEAM, AUDITS], { id: "sub_page_2" }),
+    ]);
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await expect(linkToNewWorkspace()).resolves.toEqual({
+      audits: true,
+      barcodes: false,
+    });
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_page_2", {
+      metadata: { organizationId: "org-new" },
+    });
+  });
+
+  it("leaves Checkout subscriptions to the creation link and makes one Stripe call", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        collection_method: "charge_automatically",
+      })
+    );
+
+    await expect(linkToNewWorkspace()).resolves.toEqual({
+      audits: false,
+      barcodes: false,
+    });
+    expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(adminEmailSubjects()).toEqual([]);
+  });
+
+  it("does not ask the admin again about subscriptions already asked about", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        metadata: { workspacePickRequestedAt: "2026-11-10T00:00:00.000Z" },
+      })
+    );
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(adminEmailSubjects()).toEqual([]);
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("clears the asked mark when it links", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        metadata: { workspacePickRequestedAt: "2026-11-10T00:00:00.000Z" },
+      })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      metadata: { workspacePickRequestedAt: "", organizationId: "org-new" },
+    });
   });
 
   it("reads nothing from Stripe for a user without a customer", async () => {

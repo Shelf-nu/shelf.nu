@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { unpaidInvoiceAdminText } from "~/emails/stripe/unpaid-invoice";
+import type { AddonType } from "~/modules/billing/price-validation.server";
 import {
   ADMIN_EMAIL,
   CUSTOM_INSTALL_CUSTOMERS,
@@ -270,12 +271,9 @@ export function resolveTeamWorkspaceForPlan({
   };
 }
 
-/** The add-ons a subscription can carry as line items. */
-type BundledAddonType = "audits" | "barcodes";
-
 /** The add-on types among a subscription's line items. */
-function addonTypesOf(subscription: Stripe.Subscription): BundledAddonType[] {
-  const types: BundledAddonType[] = [];
+function addonTypesOf(subscription: Stripe.Subscription): AddonType[] {
+  const types: AddonType[] = [];
   for (const item of subscription.items.data) {
     const product = item.price?.product;
     if (!product || typeof product === "string" || product.deleted) continue;
@@ -289,36 +287,99 @@ function addonTypesOf(subscription: Stripe.Subscription): BundledAddonType[] {
 }
 
 /**
- * The active or trialing subscriptions that carry an add-on without naming a
- * workspace, so no workspace has those add-ons switched on yet.
- *
- * @param subscriptions - The customer's subscriptions, products expanded
- * @returns Those subscriptions
+ * Whether a subscription is billed by invoice (`collection_method:
+ * "send_invoice"`), which is how subscriptions created by hand in the Stripe
+ * dashboard for invoice-billed customers are set up. Checkout subscriptions
+ * charge a card and reach their workspace through the creation link instead.
  */
-function subscriptionsWithWaitingAddons(
-  subscriptions: Stripe.Subscription[]
-): Stripe.Subscription[] {
-  return subscriptions.filter(
-    (sub) =>
-      (sub.status === "active" || sub.status === "trialing") &&
-      !sub.metadata?.organizationId &&
-      addonTypesOf(sub).length > 0
-  );
+export function isInvoiceBilled(subscription: Stripe.Subscription): boolean {
+  return subscription.collection_method === "send_invoice";
 }
 
 /**
- * Gives a newly created Team workspace what the user's subscriptions hold
- * without a workspace, when the creation link did not ask for it.
+ * The metadata that links a subscription to a workspace: its current
+ * metadata plus `organizationId`, with the "admin was asked" mark removed
+ * (an empty value removes a key in Stripe).
  *
- * When `resolveTeamWorkspaceForPlan` answers with the new workspace, the
- * live plan subscription that names no workspace (if any) gets
- * `metadata.organizationId`, and the waiting add-ons are returned for the
- * caller to link. When add-ons are waiting but the answer is not this
- * workspace, the admin is asked to pick: nothing else would ever place them.
+ * @param metadata - The subscription's metadata as Stripe holds it now
+ * @param organizationId - The workspace it belongs to
+ */
+export function linkedMetadata(
+  metadata: Stripe.Metadata | undefined,
+  organizationId: string
+): Stripe.MetadataParam {
+  return {
+    ...metadata,
+    organizationId,
+    ...(metadata?.[WORKSPACE_PICK_REQUESTED_KEY] && {
+      [WORKSPACE_PICK_REQUESTED_KEY]: "",
+    }),
+  };
+}
+
+/**
+ * Asks the admin to pick a workspace for these subscriptions, once: the
+ * subscriptions already asked about (`WORKSPACE_PICK_REQUESTED_KEY`) are
+ * left out, and the rest are marked before the email goes out, so a retried
+ * event that fails after the email does not send it again.
+ *
+ * @param args.user - The user the customer belongs to
+ * @param args.subscriptions - The subscriptions waiting for a workspace
+ * @param args.related - Other subscriptions the admin needs to see to
+ *   decide (another unlinked plan), listed but not marked
+ * @param args.ownedCount - How many Team workspaces the customer owns
+ * @param args.candidates - The workspaces no live plan is linked to
+ */
+export async function askAdminToPickWorkspaceOnce({
+  user,
+  subscriptions,
+  related = [],
+  ownedCount,
+  candidates,
+}: {
+  user: { email: string };
+  subscriptions: Stripe.Subscription[];
+  related?: Stripe.Subscription[];
+  ownedCount: number;
+  candidates: LinkableWorkspace[];
+}) {
+  const unasked = subscriptions.filter(
+    (sub) => !sub.metadata?.[WORKSPACE_PICK_REQUESTED_KEY]
+  );
+  if (unasked.length === 0) return;
+
+  const askedAt = new Date().toISOString();
+  for (const sub of unasked) {
+    await stripe.subscriptions.update(sub.id, {
+      metadata: { ...sub.metadata, [WORKSPACE_PICK_REQUESTED_KEY]: askedAt },
+    });
+  }
+
+  const ids = new Set([...subscriptions, ...related].map((sub) => sub.id));
+  sendAdminPickWorkspaceEmail({
+    user,
+    subscriptionIds: [...ids],
+    ownedCount,
+    candidates,
+  });
+}
+
+/**
+ * Gives a newly created Team workspace the invoice-billed subscriptions the
+ * user holds without a workspace, when the creation link did not ask for
+ * them.
+ *
+ * The waiting subscriptions are the live, invoice-billed ones
+ * (`isInvoiceBilled`) that name no workspace and carry a plan or an add-on.
+ * When `resolveTeamWorkspaceForPlan` answers with the new workspace, each of
+ * them gets `metadata.organizationId` (`linkedMetadata`), and their add-ons
+ * are returned for the caller to switch on. When add-ons are waiting but the
+ * answer is not this workspace, the admin is asked to pick, once per
+ * subscription: nothing else would ever place them.
  *
  * Stripe's plain subscription list is read first, and the products are only
- * looked up when a live subscription names no workspace, so a workspace
- * created by a customer with nothing waiting costs one Stripe call.
+ * looked up when a live invoice-billed subscription names no workspace, so a
+ * workspace created by any other customer costs one Stripe call.
  *
  * @param args.userId - The user who created the workspace
  * @param args.organizationId - The workspace just created
@@ -339,36 +400,42 @@ export async function linkWaitingSubscriptionsToWorkspace({
   });
   if (!user?.customerId || !stripe) return none;
 
+  const isWaiting = (sub: Stripe.Subscription) =>
+    subscriptionStatusGrantsPlan(sub.status) &&
+    !sub.metadata?.organizationId &&
+    isInvoiceBilled(sub);
+
   const listed = await stripe.subscriptions.list({
     customer: user.customerId,
     limit: 100,
   });
-  const anyUnlinked =
-    listed.has_more ||
-    listed.data.some(
-      (sub) =>
-        subscriptionStatusGrantsPlan(sub.status) &&
-        !sub.metadata?.organizationId
-    );
-  if (!anyUnlinked) return none;
+  if (!listed.has_more && !listed.data.some(isWaiting)) return none;
 
   const subscriptions = await getCustomerSubscriptionsWithProducts(
     user.customerId
   );
-  const waitingAddonSubscriptions =
-    subscriptionsWithWaitingAddons(subscriptions);
+  const waiting = subscriptions.filter(
+    (sub) => isWaiting(sub) && (carriesPlan(sub) || addonTypesOf(sub).length)
+  );
+  if (waiting.length === 0) return none;
+
   const owned = await findOwnedTeamWorkspaces(userId);
   const { candidates, unlinkedPlans, workspace } = resolveTeamWorkspaceForPlan({
     owned,
     subscriptions,
   });
+  const withAddons = waiting.filter(
+    (sub) =>
+      (sub.status === "active" || sub.status === "trialing") &&
+      addonTypesOf(sub).length > 0
+  );
 
   if (workspace?.id !== organizationId) {
-    if (waitingAddonSubscriptions.length > 0) {
-      const waiting = new Set([...unlinkedPlans, ...waitingAddonSubscriptions]);
-      sendAdminPickWorkspaceEmail({
+    if (withAddons.length > 0) {
+      await askAdminToPickWorkspaceOnce({
         user,
-        subscriptionIds: [...waiting].map((sub) => sub.id),
+        subscriptions: withAddons,
+        related: unlinkedPlans,
         ownedCount: owned.length,
         candidates,
       });
@@ -376,13 +443,13 @@ export async function linkWaitingSubscriptionsToWorkspace({
     return none;
   }
 
-  for (const plan of unlinkedPlans) {
-    await stripe.subscriptions.update(plan.id, {
-      metadata: { ...plan.metadata, organizationId },
+  for (const sub of waiting) {
+    await stripe.subscriptions.update(sub.id, {
+      metadata: linkedMetadata(sub.metadata, organizationId),
     });
   }
 
-  const waitingTypes = new Set(waitingAddonSubscriptions.flatMap(addonTypesOf));
+  const waitingTypes = new Set(withAddons.flatMap(addonTypesOf));
   return {
     audits: waitingTypes.has("audits"),
     barcodes: waitingTypes.has("barcodes"),

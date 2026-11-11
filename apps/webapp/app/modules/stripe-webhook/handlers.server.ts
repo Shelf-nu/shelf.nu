@@ -34,18 +34,19 @@ import {
 
 import { resolveUserGreetingName } from "~/utils/user";
 import {
+  askAdminToPickWorkspaceOnce,
   findOwnedTeamWorkspaces,
   highestPlanTier,
   isAddonSubscription,
   isHigherOrEqualTier,
   isHigherTier,
+  isInvoiceBilled,
   isTierId,
+  linkedMetadata,
   liveTierOf,
   resolveTeamWorkspaceForPlan,
   sendAdminInvoiceEmail,
-  sendAdminPickWorkspaceEmail,
   sendAdminWorkspaceLinkedEmail,
-  WORKSPACE_PICK_REQUESTED_KEY,
   type WebhookUser,
 } from "./helpers.server";
 
@@ -490,25 +491,30 @@ function buildUpgradeCompletedProps(
 }
 
 /**
- * Links a Team subscription that names no workspace to the Team workspace its
- * customer means, then switches its bundled add-ons on there.
+ * Links an invoice-billed Team subscription that names no workspace to the
+ * Team workspace its customer means, then switches its bundled add-ons on
+ * there.
  *
- * Invoice-billed subscriptions are created in the Stripe dashboard, so they
- * carry no `metadata.organizationId`. When the user owns no Team workspace
- * the answer is `"unplaced"` straight from the database, whatever the
- * subscription's status, and the next Team workspace they create picks the
- * subscription up (`linkWaitingSubscriptionsToWorkspace`). Otherwise, for an
- * active or trialing subscription, `resolveTeamWorkspaceForPlan` decides:
+ * Invoice-billed subscriptions (`isInvoiceBilled`) are created in the Stripe
+ * dashboard, so they carry no `metadata.organizationId`. Checkout
+ * subscriptions are left to the workspace creation link.
+ *
+ * When the user owns no Team workspace the answer is `"unplaced"` straight
+ * from the database, for any Team subscription and whatever its status, and
+ * the next Team workspace they create picks an invoice-billed one up
+ * (`linkWaitingSubscriptionsToWorkspace`). Otherwise, for an invoice-billed
+ * subscription that Stripe still holds as active or trialing,
+ * `resolveTeamWorkspaceForPlan` decides:
  * - no candidate workspace: `"unplaced"`, as above;
  * - one certain workspace: the add-ons switch on there, the subscription's
- *   metadata names it, and the admin is told;
+ *   metadata names it (`linkedMetadata`), and the admin is told;
  * - anything else: nothing is guessed and the admin is asked to pick, once
- *   per subscription (`WORKSPACE_PICK_REQUESTED_KEY` marks it in Stripe).
+ *   per subscription (`askAdminToPickWorkspaceOnce`).
  *
  * The subscription is read again from Stripe first, so a retried or late
- * event for a subscription linked since is left alone. The add-ons are
- * switched on before the metadata is written: if the sync fails, the
- * subscription is still unlinked when Stripe retries the event, and the
+ * event for a subscription linked or cancelled since is left alone. The
+ * add-ons are switched on before the metadata is written: if the sync fails,
+ * the subscription is still unlinked when Stripe retries the event, and the
  * retry does it all again. Writing the metadata first would make the retry
  * skip a subscription whose add-ons never switched on.
  *
@@ -548,49 +554,41 @@ async function linkSubscriptionToTeamWorkspace({
 
   const owned = await findOwnedTeamWorkspaces(user.id);
   if (owned.length === 0) return "unplaced";
+  if (!isInvoiceBilled(subscription)) return "skipped";
   if (subscription.status !== "active" && subscription.status !== "trialing") {
     return "skipped";
   }
 
   const subscriptions = await loadSubscriptions();
   const current = subscriptions.find((sub) => sub.id === subscription.id);
-  if (current?.metadata?.organizationId) return "skipped";
-  const currentMetadata = current?.metadata ?? subscription.metadata;
+  if (!current || current.metadata?.organizationId) return "skipped";
+  if (current.status !== "active" && current.status !== "trialing") {
+    return "skipped";
+  }
 
-  const { candidates, workspace } = resolveTeamWorkspaceForPlan({
+  const { candidates, unlinkedPlans, workspace } = resolveTeamWorkspaceForPlan({
     owned,
     subscriptions,
   });
   if (candidates.length === 0) return "unplaced";
   if (!workspace) {
-    if (!currentMetadata?.[WORKSPACE_PICK_REQUESTED_KEY]) {
-      sendAdminPickWorkspaceEmail({
-        user,
-        subscriptionIds: [subscription.id],
-        ownedCount: owned.length,
-        candidates,
-      });
-      await stripe.subscriptions.update(subscription.id, {
-        metadata: {
-          ...currentMetadata,
-          [WORKSPACE_PICK_REQUESTED_KEY]: new Date().toISOString(),
-        },
-      });
-    }
+    await askAdminToPickWorkspaceOnce({
+      user,
+      subscriptions: [current],
+      related: unlinkedPlans,
+      ownedCount: owned.length,
+      candidates,
+    });
     return "ask";
   }
 
-  const metadata = {
-    ...currentMetadata,
-    organizationId: workspace.id,
-    // An empty value removes the key in Stripe.
-    ...(currentMetadata?.[WORKSPACE_PICK_REQUESTED_KEY] && {
-      [WORKSPACE_PICK_REQUESTED_KEY]: "",
-    }),
-  };
+  const metadata = linkedMetadata(current.metadata, workspace.id);
   await syncBundledAddons({
     eventType,
-    subscription: { ...subscription, metadata },
+    subscription: {
+      ...subscription,
+      metadata: { ...current.metadata, organizationId: workspace.id },
+    },
     hasAuditAddon,
     hasBarcodeAddon,
   });
