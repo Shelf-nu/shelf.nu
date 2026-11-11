@@ -101,6 +101,27 @@ export function sitsOnItsBooking(
   return params?.id === bookingId;
 }
 
+/**
+ * What leaving the booking scanner does (back arrow, back swipe, Android
+ * back), as `useDiscardGuard` decides it.
+ *
+ * - A booking request still waiting for its answer holds the scanner in
+ *   place: its success alert goes back to the booking, which is only right
+ *   while the scanner is still on top of it.
+ * - Scans not sent yet ask "Discard?" first.
+ * - Otherwise the scanner leaves.
+ *
+ * @param state - whether a request is pending and how many rows are listed
+ * @returns `hold`, `prompt` or `leave`
+ */
+export function bookingScanLeaveDecision(state: {
+  submitting: boolean;
+  itemCount: number;
+}): "hold" | "prompt" | "leave" {
+  if (state.submitting) return "hold";
+  return state.itemCount > 0 ? "prompt" : "leave";
+}
+
 /** A route param as expo-router hands it over: absent, one value or repeated. */
 type RouteParam = string | string[] | undefined;
 

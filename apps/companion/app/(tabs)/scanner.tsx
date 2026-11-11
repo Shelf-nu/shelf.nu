@@ -18,7 +18,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useDiscardGuard } from "@/hooks/use-discard-guard";
-import type { BookingScanContext } from "@/lib/booking-scan-route";
+import {
+  bookingScanLeaveDecision,
+  type BookingScanContext,
+} from "@/lib/booking-scan-route";
 import { useOrg } from "@/lib/org-context";
 import {
   CAMERA_SETTINGS_FALLBACK,
@@ -399,18 +402,23 @@ function ScannerContent({ booking }: ScannerScreenProps) {
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
   // The booking scanner is a stack screen: back, the back swipe and Android
-  // back remove it, and its scan list with it. Ask first while the list holds
-  // anything not yet sent. Every flow clears the list before it returns to the
-  // booking, so a finished flow leaves without asking.
-  const bookingItemsRef = useRef(bookingCheckinItems);
+  // back remove it, and its scan list with it. It stays put while a request
+  // is pending and asks first while the list holds anything not yet sent
+  // (see bookingScanLeaveDecision). Every flow clears the list before it
+  // returns to the booking, so a finished flow leaves without asking.
+  const bookingLeaveRef = useRef({ submitting: false, itemCount: 0 });
   useEffect(() => {
-    bookingItemsRef.current = bookingCheckinItems;
-  }, [bookingCheckinItems]);
+    bookingLeaveRef.current = {
+      submitting: isBookingSubmitting,
+      itemCount: bookingCheckinItems.length,
+    };
+  }, [isBookingSubmitting, bookingCheckinItems]);
   useDiscardGuard({
-    active: isBookingMode && bookingCheckinItems.length > 0,
+    active:
+      isBookingMode && (isBookingSubmitting || bookingCheckinItems.length > 0),
     // Read at the moment of leaving: a finished flow empties the list just
     // before it goes back, possibly before the guard's own update lands.
-    decide: () => (bookingItemsRef.current.length > 0 ? "prompt" : "leave"),
+    decide: () => bookingScanLeaveDecision(bookingLeaveRef.current),
     title: "Discard scanned items?",
     message:
       "Nothing you scanned has been sent to the booking yet. Leaving the scanner discards the list.",

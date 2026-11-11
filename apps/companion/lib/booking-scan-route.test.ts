@@ -17,6 +17,7 @@ import {
   BOOKING_DETAIL_ROUTE_NAME,
   BOOKING_SCAN_PATHNAME,
   bookingScanHref,
+  bookingScanLeaveDecision,
   parseBookingScanParams,
   sitsOnItsBooking,
   type BookingScanAction,
@@ -164,5 +165,24 @@ test("the booking scanner does not run over another booking, a list or nothing",
 test("the booking detail route name matches the Bookings stack's route file", () => {
   assert.ok(
     existsSync(routeFile(`/(tabs)/bookings/${BOOKING_DETAIL_ROUTE_NAME}`))
+  );
+});
+
+test("leaving the booking scanner waits for a pending request, then asks before discarding", () => {
+  assert.equal(
+    bookingScanLeaveDecision({ submitting: true, itemCount: 3 }),
+    "hold"
+  );
+  assert.equal(
+    bookingScanLeaveDecision({ submitting: true, itemCount: 0 }),
+    "hold"
+  );
+  assert.equal(
+    bookingScanLeaveDecision({ submitting: false, itemCount: 3 }),
+    "prompt"
+  );
+  assert.equal(
+    bookingScanLeaveDecision({ submitting: false, itemCount: 0 }),
+    "leave"
   );
 });
