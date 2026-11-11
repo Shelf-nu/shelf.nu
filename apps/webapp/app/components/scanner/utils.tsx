@@ -6,7 +6,7 @@ import {
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
 import { isQrId } from "~/utils/id";
-import { isShelfQrCode } from "~/utils/qr-code";
+import { getShelfQrId } from "~/utils/qr-code";
 import type { OnCodeDetectionSuccess } from "./code-scanner";
 
 // Supported barcode formats that match our BarcodeType enum
@@ -29,8 +29,6 @@ const ZXING_FORMAT_TO_BARCODE_TYPE: Record<string, BarcodeType> = {
 function normalizeZxingFormat(format: string): string {
   return ZXING_FORMAT_TO_BARCODE_TYPE[format] ?? format;
 }
-
-// isShelfQrCode function moved to ~/utils/qr-code.ts for shared usage
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -374,7 +372,7 @@ export const handleDetection = async ({
 
   /**
    * The one place a scanned code is classified, for the camera and a handheld
-   * scanner alike. A QR arrives without a `barcodeType`; `isShelfQrCode` (our
+   * scanner alike. A QR arrives without a `barcodeType`; `getShelfQrId` (our
    * own host, the shortener or a raw id) decides whether it is ours, and a url
    * on any other host falls through to the barcode lookup as `ExternalQR`.
    *
@@ -383,25 +381,13 @@ export const handleDetection = async ({
    * read like a cuid must not be claimed as a QR id.
    */
   if (!barcodeType) {
-    const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-    const qrMatch = isShelfQrCode(result) ? result.match(qrRegex) : null;
+    const qrId = getShelfQrId(result);
 
-    if (qrMatch) {
-      // It's a QR code URL
-      const qrId = qrMatch[2];
+    if (qrId) {
       await onCodeDetectionSuccess?.({
         value: qrId,
         type: "qr",
         error: !isQrId(qrId) ? "Invalid QR code format" : undefined,
-      });
-      return;
-    }
-
-    // Check if it's a raw QR ID (before checking barcodes)
-    if (isQrId(result)) {
-      await onCodeDetectionSuccess?.({
-        value: result,
-        type: "qr",
       });
       return;
     }
