@@ -54,6 +54,8 @@ async function scanQr(text: string) {
     { format: "QRCode", text, position: undefined },
   ]);
 
+  // why: the test env has no 2D canvas or playing video. The decoder is
+  // mocked, so the frame only has to be readable, not real.
   const ctx = { drawImage: vi.fn(), getImageData: vi.fn(() => ({})) };
   const canvas = { getContext: () => ctx } as unknown as HTMLCanvasElement;
   const video = {
@@ -68,6 +70,8 @@ async function scanQr(text: string) {
     canvas,
     animationFrame: { current: 0 },
     paused: false,
+    // why: setPaused and setError are React state setters; these cases
+    // assert only on what onCodeDetectionSuccess receives.
     setPaused: vi.fn(),
     onCodeDetectionSuccess,
     allowNonShelfCodes: false,
