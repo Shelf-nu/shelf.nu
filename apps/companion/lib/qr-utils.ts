@@ -302,7 +302,13 @@ export type ScanMissFeedback = {
   /** `error` for a code that belongs elsewhere, `not_found` otherwise. */
   tone: "error" | "not_found";
   title: string;
+  /** The full guidance, for a card with room for it. */
   message: string;
+  /**
+   * The action in a few words, for a one-line toast subtitle (the audit
+   * scanner). Short enough to fit a phone-width line.
+   */
+  shortMessage: string;
   /** Spoken by the screen reader. */
   announcement: string;
 };
@@ -330,12 +336,14 @@ export function scanMissFeedback(
           title: "Barcode Not Supported",
           message:
             "Barcode scanning is not enabled for your workspace. Contact your admin to enable it.",
+          shortMessage: "Ask your admin to enable barcodes.",
           announcement: "Barcode scanning not available",
         }
       : {
           tone: "not_found",
           title: "Code Not Recognized",
           message: "This code is not recognized as a Shelf asset code.",
+          shortMessage: "Not a Shelf asset code.",
           announcement: "Code not recognized",
         };
   }
@@ -347,6 +355,7 @@ export function scanMissFeedback(
       title: "Different Shelf Server",
       message:
         "This code belongs to a different Shelf server. Sign in to that server to use it.",
+      shortMessage: "Sign in to that server to use it.",
       announcement: "Different Shelf Server. Sign in to that server to use it.",
     };
   }
@@ -358,6 +367,9 @@ export function scanMissFeedback(
     message: outcome.lookedUp
       ? "This code was not found in your workspaces. A label from another Shelf server works only on that server."
       : "This link is not a code from this Shelf server. A label from another Shelf server works only on that server.",
+    shortMessage: outcome.lookedUp
+      ? "Not in your workspaces."
+      : "Not a code from this Shelf server.",
     announcement:
       "Code not found. A label from another Shelf server works only on that server.",
   };

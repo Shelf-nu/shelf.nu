@@ -552,6 +552,24 @@ test("scanMissFeedback covers every outcome that has no answer to render", () =>
       ["not_found", "Code Not Found"],
     ]
   );
+  // The audit toast shows its subtitle on one line, so its short text must
+  // fit a phone-width line and still carry the action.
+  for (const feedback of cases) {
+    assert.ok(
+      feedback.shortMessage.length <= 36,
+      `${feedback.title}: "${feedback.shortMessage}" is too long for a toast`
+    );
+  }
+  assert.deepEqual(
+    cases.map((feedback) => feedback.shortMessage),
+    [
+      "Ask your admin to enable barcodes.",
+      "Not a Shelf asset code.",
+      "Sign in to that server to use it.",
+      "Not in your workspaces.",
+      "Not a code from this Shelf server.",
+    ]
+  );
   // A search is claimed only when the barcode lookup was asked.
   assert.match(cases[3].message, /not found in your workspaces/);
   assert.match(cases[4].message, /not a code from this Shelf server/);

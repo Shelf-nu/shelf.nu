@@ -957,7 +957,9 @@ function AuditScannerContent() {
           const feedback = scanMissFeedback(outcome, { hasWorkspace: true });
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast("error", feedback.title, feedback.message);
+          // The toast subtitle is one line: the short text keeps the action
+          // visible, and the announcement carries the full guidance.
+          showToast("error", feedback.title, feedback.shortMessage);
           announce(feedback.announcement);
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
           // a bare return would leave isProcessingRef.current true forever:
