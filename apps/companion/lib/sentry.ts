@@ -195,6 +195,9 @@ export function reportAuditDurabilityEvent(
   if (!dsn || __DEV__) return;
   Sentry.captureMessage(`audit-durability: ${event}`, {
     level,
+    // One issue per event: the stack this is captured from varies, and
+    // grouping by it splits one report across several issues.
+    fingerprint: ["audit-durability", event],
     tags: { feature: "audit-scan-durability", durability_event: event },
     extra: context,
   });
@@ -250,6 +253,8 @@ export function reportPushRegistrationFailure(
   try {
     Sentry.captureMessage(`push-registration: ${stage}`, {
       level: "warning",
+      // One issue per stage, whatever stack it is captured from.
+      fingerprint: ["push-registration", stage],
       tags: { feature: "push", push_stage: stage },
       extra: { message },
     });
