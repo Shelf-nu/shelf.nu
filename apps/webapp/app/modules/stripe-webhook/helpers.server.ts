@@ -449,10 +449,11 @@ export async function linkWaitingSubscriptionsToWorkspace({
     return;
   }
 
+  // Add-ons first, then the metadata, as in `linkSubscriptionToTeamWorkspace`:
+  // if switching an add-on on fails, the subscription is still unlinked, so
+  // the admin's "set metadata.organizationId" fix (or the next workspace
+  // creation) still applies.
   for (const sub of waiting) {
-    const metadata = linkedMetadata(sub.metadata, organizationId);
-    await stripe.subscriptions.update(sub.id, { metadata });
-
     // The handlers' creation branch switches the add-on on for the workspace
     // (and records a used trial), whatever the subscription's live status.
     const linked = {
@@ -474,6 +475,10 @@ export async function linkWaitingSubscriptionsToWorkspace({
         organizationId,
       });
     }
+
+    await stripe.subscriptions.update(sub.id, {
+      metadata: linkedMetadata(sub.metadata, organizationId),
+    });
   }
 }
 

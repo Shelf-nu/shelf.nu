@@ -605,6 +605,15 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     );
   });
 
+  it("leaves the subscription unlinked when switching an add-on on fails", async () => {
+    stripeHolds(subscription([TEAM, AUDITS]));
+    mockAuditAddonWebhook.mockRejectedValueOnce(new Error("database down"));
+
+    await expect(linkToNewWorkspace()).rejects.toThrow("database down");
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
   it("switches on the add-ons of a past-due subscription too", async () => {
     stripeHolds(subscription([TEAM, AUDITS], { status: "past_due" }));
 
