@@ -266,3 +266,99 @@ export async function runScanPlan<
     ? { kind: "qr", lookupId: plan.lookupId, answer }
     : { kind: "barcode", answer: fallback };
 }
+
+/**
+ * Whether a scan can be rejected as "Already Scanned" before any lookup runs:
+ * the plan asks the QR route for an id that is already in the batch list.
+ * A value bound for the barcode lookup is deduped after it resolves instead.
+ *
+ * @param plan - From {@link planScan}.
+ * @param scannedQrIds - The `qrId` of every item already in the batch list.
+ */
+export function isAlreadyScannedQr(
+  plan: ScanPlan,
+  scannedQrIds: readonly (string | null | undefined)[]
+): boolean {
+  return plan.first === "qr" && scannedQrIds.includes(plan.lookupId);
+}
+
+/**
+ * The QR id the claim and link flows may use for this scan. Set only when
+ * the QR route's answer is the one rendered: a code that resolved through the
+ * barcode fallback is not a Shelf QR, so it must not be offered a claim.
+ *
+ * @param plan - From {@link planScan}.
+ * @param outcome - From {@link runScanPlan} for that plan.
+ */
+export function claimableQrId(
+  plan: ScanPlan,
+  outcome: ScanOutcome<unknown, unknown>
+): string | null {
+  return outcome.kind === "qr" ? plan.qrId : null;
+}
+
+/** What a scanner shows for a scan that ended with no lookup answer to render. */
+export type ScanMissFeedback = {
+  /** `error` for a code that belongs elsewhere, `not_found` otherwise. */
+  tone: "error" | "not_found";
+  title: string;
+  message: string;
+  /** Spoken by the screen reader. */
+  announcement: string;
+};
+
+/**
+ * The text for a scan that ended as `barcodes-unavailable` or
+ * `outside-link-miss`. Both scanner screens render it, so the two always
+ * say the same thing.
+ *
+ * @param outcome - The outcome from {@link runScanPlan}.
+ * @param context - `hasWorkspace`: whether a workspace is selected. Without
+ *   one, a barcode cannot be resolved at all, so the code reads as unknown
+ *   rather than as a missing add-on.
+ */
+export function scanMissFeedback(
+  outcome:
+    | { kind: "barcodes-unavailable" }
+    | { kind: "outside-link-miss"; lookedUp: boolean; shelfServer: boolean },
+  context: { hasWorkspace: boolean }
+): ScanMissFeedback {
+  if (outcome.kind === "barcodes-unavailable") {
+    return context.hasWorkspace
+      ? {
+          tone: "not_found",
+          title: "Barcode Not Supported",
+          message:
+            "Barcode scanning is not enabled for your workspace. Contact your admin to enable it.",
+          announcement: "Barcode scanning not available",
+        }
+      : {
+          tone: "not_found",
+          title: "Code Not Recognized",
+          message: "This code is not recognized as a Shelf asset code.",
+          announcement: "Code not recognized",
+        };
+  }
+
+  // The label's host is a Shelf server the app can name.
+  if (outcome.shelfServer) {
+    return {
+      tone: "error",
+      title: "Different Shelf Server",
+      message:
+        "This code belongs to a different Shelf server. Sign in to that server to use it.",
+      announcement: "Different Shelf Server. Sign in to that server to use it.",
+    };
+  }
+
+  return {
+    tone: "not_found",
+    title: "Code Not Found",
+    // Only claim a search when the barcode lookup was asked.
+    message: outcome.lookedUp
+      ? "This code was not found in your workspaces. A label from another Shelf server works only on that server."
+      : "This link is not a code from this Shelf server. A label from another Shelf server works only on that server.",
+    announcement:
+      "Code not found. A label from another Shelf server works only on that server.",
+  };
+}

@@ -11,9 +11,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  claimableQrId,
   extractQrId,
+  isAlreadyScannedQr,
   planScan,
   runScanPlan,
+  scanMissFeedback,
   type ScanLookupAnswer,
 } from "./qr-utils";
 
@@ -80,6 +83,10 @@ type Answer = ScanLookupAnswer & { data: string | null; error?: string };
 /**
  * Lookups that answer the way the mobile routes do, and record what was asked
  * so a row can pin the order of the calls.
+ *
+ * why: stands in for the network. A plain not-found here is a 404 with the
+ * API's error envelope and no `reason`; `mobile.barcode.test.ts` pins that
+ * the barcode route answers in exactly that shape.
  */
 function fakeLookups(options: { offline?: boolean } = {}) {
   const calls: string[] = [];
@@ -458,4 +465,114 @@ test("runScanPlan shows the server's answer for an outside link when offline", a
   const outcome = await runScanPlan(plan, OUTSIDE_QR, lookups);
 
   assert.equal(outcome.kind, "barcode");
+});
+
+// ── What the screens build on an outcome ─────────────────
+
+/** Plans and runs a value the way both scanner screens do. */
+async function scan(input: string, barcodes = true) {
+  const plan = planScan(input, SERVERS, { barcodes, sequentialIds: true });
+  const outcome = await runScanPlan(plan, input, fakeLookups());
+  return { plan, outcome };
+}
+
+test("claimableQrId offers the claim flow only when the QR route's answer is rendered", async () => {
+  // A Shelf QR, found or unclaimed: the QR route answered.
+  const shelf = await scan(`${ACTIVE}/qr/${ID}`);
+  assert.equal(claimableQrId(shelf.plan, shelf.outcome), ID);
+  const unclaimed = await scan("unclaimed0");
+  assert.equal(claimableQrId(unclaimed.plan, unclaimed.outcome), "unclaimed0");
+
+  // A Shelf-shaped value that resolved through the barcode fallback is a
+  // barcode, not a QR: no claim.
+  const fallback = await scan(OUTSIDE_BARE);
+  assert.equal(fallback.plan.qrId, OUTSIDE_BARE);
+  assert.equal(fallback.outcome.kind, "barcode");
+  assert.equal(claimableQrId(fallback.plan, fallback.outcome), null);
+
+  // A SAM id goes to the QR route but is not a QR.
+  const sam = await scan("SAM-0001");
+  assert.equal(claimableQrId(sam.plan, sam.outcome), null);
+});
+
+test("isAlreadyScannedQr rejects a QR-route value that is already in the batch list", () => {
+  const options = { barcodes: true, sequentialIds: true };
+  const listed = [ID, "SAM-0001", null, undefined];
+
+  assert.equal(
+    isAlreadyScannedQr(
+      planScan(`${ACTIVE}/qr/${ID}`, SERVERS, options),
+      listed
+    ),
+    true
+  );
+  assert.equal(
+    isAlreadyScannedQr(planScan("sam-0001", SERVERS, options), listed),
+    true
+  );
+  assert.equal(
+    isAlreadyScannedQr(planScan("othercode1", SERVERS, options), listed),
+    false
+  );
+  // A value bound for the barcode lookup has no QR id to match before it
+  // resolves, even when its text equals a listed one.
+  assert.equal(
+    isAlreadyScannedQr(planScan("4006381333931", SERVERS, options), [
+      "4006381333931",
+    ]),
+    false
+  );
+});
+
+test("scanMissFeedback covers every outcome that has no answer to render", () => {
+  const cases = [
+    scanMissFeedback({ kind: "barcodes-unavailable" }, { hasWorkspace: true }),
+    scanMissFeedback({ kind: "barcodes-unavailable" }, { hasWorkspace: false }),
+    scanMissFeedback(
+      { kind: "outside-link-miss", lookedUp: true, shelfServer: true },
+      { hasWorkspace: true }
+    ),
+    scanMissFeedback(
+      { kind: "outside-link-miss", lookedUp: true, shelfServer: false },
+      { hasWorkspace: true }
+    ),
+    scanMissFeedback(
+      { kind: "outside-link-miss", lookedUp: false, shelfServer: false },
+      { hasWorkspace: true }
+    ),
+  ];
+
+  assert.deepEqual(
+    cases.map((feedback) => [feedback.tone, feedback.title]),
+    [
+      ["not_found", "Barcode Not Supported"],
+      ["not_found", "Code Not Recognized"],
+      ["error", "Different Shelf Server"],
+      ["not_found", "Code Not Found"],
+      ["not_found", "Code Not Found"],
+    ]
+  );
+  // A search is claimed only when the barcode lookup was asked.
+  assert.match(cases[3].message, /not found in your workspaces/);
+  assert.match(cases[4].message, /not a code from this Shelf server/);
+});
+
+test("scanMissFeedback follows each outside-link miss from the stand-in server", async () => {
+  // Linked to nothing anywhere, barcodes on: the lookup was asked.
+  const unknown = await scan("https://other-vendor.example/qr/nolink1");
+  assert.equal(unknown.outcome.kind, "outside-link-miss");
+  if (unknown.outcome.kind !== "outside-link-miss") return;
+  assert.match(
+    scanMissFeedback(unknown.outcome, { hasWorkspace: true }).message,
+    /not found in your workspaces/
+  );
+
+  // Barcodes off: nothing could be looked up.
+  const off = await scan("https://other-vendor.example/qr/nolink1", false);
+  assert.equal(off.outcome.kind, "outside-link-miss");
+  if (off.outcome.kind !== "outside-link-miss") return;
+  assert.match(
+    scanMissFeedback(off.outcome, { hasWorkspace: true }).message,
+    /not a code from this Shelf server/
+  );
 });

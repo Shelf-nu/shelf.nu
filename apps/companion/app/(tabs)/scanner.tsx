@@ -48,7 +48,13 @@ import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { planScan, runScanPlan } from "@/lib/qr-utils";
+import {
+  claimableQrId,
+  isAlreadyScannedQr,
+  planScan,
+  runScanPlan,
+  scanMissFeedback,
+} from "@/lib/qr-utils";
 import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { announce } from "@/lib/a11y";
@@ -858,9 +864,11 @@ function ScannerContent() {
 
         // Early batch dedup by code id (saves a network call)
         if (
-          plan.first === "qr" &&
           isBatchAction(action) &&
-          scannedItems.some((item) => item.qrId === plan.lookupId)
+          isAlreadyScannedQr(
+            plan,
+            scannedItems.map((item) => item.qrId)
+          )
         ) {
           flashFrame("duplicate");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -886,8 +894,9 @@ function ScannerContent() {
             return api.qr(lookupId, currentOrg?.id, coordinates);
           },
           barcode: (value) =>
-            // planScan plans a barcode lookup only for a workspace that can
-            // resolve barcodes, so one is selected whenever this runs.
+            // why: planScan plans a barcode lookup only for a workspace that
+            // can resolve barcodes, so currentOrg is always set when this
+            // runs. The null branch exists for the type checker only.
             currentOrg
               ? api.barcode(value, currentOrg.id)
               : Promise.resolve({
@@ -903,62 +912,29 @@ function ScannerContent() {
           return;
         }
 
-        // A barcode, scanned where barcodes cannot be resolved.
-        if (outcome.kind === "barcodes-unavailable") {
+        // A barcode scanned where barcodes cannot be resolved, or an outside
+        // link that resolved to nothing: no lookup answer to render.
+        if (
+          outcome.kind === "barcodes-unavailable" ||
+          outcome.kind === "outside-link-miss"
+        ) {
+          const feedback = scanMissFeedback(outcome, {
+            hasWorkspace: Boolean(currentOrg),
+          });
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          if (!currentOrg) {
-            announce("Code not recognized");
-            setScanResult({
-              type: "not_found",
-              title: "Code Not Recognized",
-              message: "This code is not recognized as a Shelf asset code.",
-            });
-          } else {
-            announce("Barcode scanning not available");
-            setScanResult({
-              type: "not_found",
-              title: "Barcode Not Supported",
-              message:
-                "Your workspace does not support barcode scanning. Contact your admin to enable this feature.",
-            });
-          }
-          finalizeScan();
-          return;
-        }
-
-        if (outcome.kind === "outside-link-miss") {
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          if (outcome.shelfServer) {
-            // The label's host is a Shelf server the app can name.
-            announce("Different Shelf Server");
-            setScanResult({
-              type: "error",
-              title: "Different Shelf Server",
-              message:
-                "This code belongs to a different Shelf server. Sign in to that server to use it.",
-            });
-            finalizeScan();
-            return;
-          }
-          announce("Code not found");
+          announce(feedback.announcement);
           setScanResult({
-            type: "not_found",
-            title: "Code Not Found",
-            // Only claim a search when the barcode lookup was asked.
-            message: outcome.lookedUp
-              ? "This code was not found in your workspaces. If it is a label from another Shelf server, sign in to that server to use it."
-              : "This link is not a code from this Shelf server. If it is a label from another Shelf server, sign in to that server to use it.",
+            type: feedback.tone,
+            title: feedback.title,
+            message: feedback.message,
           });
           finalizeScan();
           return;
         }
 
-        // Set only when the QR route's answer is the one in use: the claim
-        // and link flows below key on it, and a code that resolved as a
-        // barcode must not be offered them.
-        const qrId = outcome.kind === "qr" ? plan.qrId : null;
+        // The claim and link flows below key on this: see claimableQrId.
+        const qrId = claimableQrId(plan, outcome);
 
         if (outcome.kind === "qr") {
           // ── Shelf QR / SAM path ──

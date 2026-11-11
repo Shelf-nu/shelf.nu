@@ -35,7 +35,7 @@ import {
   useTabScreenWidth,
 } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { planScan, runScanPlan } from "@/lib/qr-utils";
+import { planScan, runScanPlan, scanMissFeedback } from "@/lib/qr-utils";
 import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
@@ -945,48 +945,20 @@ function AuditScannerContent() {
             ),
         });
 
-        // A barcode, scanned in a workspace that cannot resolve barcodes.
-        if (outcome.kind === "barcodes-unavailable") {
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Barcode Not Supported",
-            "Barcode scanning is not enabled for your workspace."
-          );
-          finalizeScan();
-          return;
-        }
-
-        if (outcome.kind === "outside-link-miss") {
+        // A barcode scanned in a workspace that cannot resolve barcodes, or an
+        // outside link that resolved to nothing: no lookup answer to render.
+        if (
+          outcome.kind === "barcodes-unavailable" ||
+          outcome.kind === "outside-link-miss"
+        ) {
           // Same feedback shape as every other rejected scan in this handler:
           // a silent return would look like the camera simply ignored a code
           // the user can see is valid.
+          const feedback = scanMissFeedback(outcome, { hasWorkspace: true });
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          if (outcome.shelfServer) {
-            // The label's host is a Shelf server the app can name.
-            showToast(
-              "error",
-              "Different Shelf Server",
-              "Sign in to that server to use this code."
-            );
-            announce(
-              "Different Shelf Server. Sign in to that server to use it."
-            );
-          } else {
-            showToast(
-              "error",
-              "Code Not Found",
-              // Only claim a search when the barcode lookup was asked.
-              outcome.lookedUp
-                ? "Not found in your workspaces. A label from another Shelf server works only there."
-                : "Not a code from this Shelf server. A label from another Shelf server works only there."
-            );
-            announce(
-              "Code not found. A label from another Shelf server works only there."
-            );
-          }
+          showToast("error", feedback.title, feedback.message);
+          announce(feedback.announcement);
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
           // a bare return would leave isProcessingRef.current true forever:
           // the scan guard would then reject every later scan and the camera
