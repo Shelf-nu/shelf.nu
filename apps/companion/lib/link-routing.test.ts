@@ -9,11 +9,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isOpenedByRouter, webLaunchRoute } from "./link-routing";
+import {
+  isOpenedByRouter,
+  isWebUrl,
+  launchAction,
+  webLaunchRoute,
+  type AppPlatform,
+} from "./link-routing";
 
 const WEB_ASSET = "https://app.shelf.nu/assets/as_1/overview";
 const WEB_QR = "https://app.shelf.nu/qr/qr_1";
 const SCHEME_ASSET = "shelf://assets/as_1";
+const PLATFORMS: AppPlatform[] = ["ios", "android"];
 
 test("the hook opens a web link that launches the app on iOS", () => {
   assert.equal(
@@ -40,7 +47,7 @@ test("the router opens a web link that launches the app on Android", () => {
 });
 
 test("the router opens a web link that arrives while the app runs, on both platforms", () => {
-  for (const platform of ["ios", "android"]) {
+  for (const platform of PLATFORMS) {
     assert.equal(
       isOpenedByRouter({
         url: WEB_ASSET,
@@ -56,7 +63,7 @@ test("the router opens a web link that arrives while the app runs, on both platf
 
 test("the hook always opens a QR link, which needs an API resolve", () => {
   for (const initial of [true, false]) {
-    for (const platform of ["ios", "android"]) {
+    for (const platform of PLATFORMS) {
       assert.equal(
         isOpenedByRouter({ url: WEB_QR, linkType: "qr", initial, platform }),
         false,
@@ -68,7 +75,7 @@ test("the hook always opens a QR link, which needs an API resolve", () => {
 
 test("the hook always opens a custom-scheme link", () => {
   for (const initial of [true, false]) {
-    for (const platform of ["ios", "android"]) {
+    for (const platform of PLATFORMS) {
       assert.equal(
         isOpenedByRouter({
           url: SCHEME_ASSET,
@@ -106,4 +113,78 @@ test("no web launch route for QR, custom-scheme, start-screen or unclaimed links
   assert.equal(webLaunchRoute(SCHEME_ASSET, "asset"), null);
   assert.equal(webLaunchRoute("https://app.shelf.nu/", "unknown"), null);
   assert.equal(webLaunchRoute("https://app.shelf.nu/login", "unknown"), null);
+});
+
+test("launch: an iOS claimed web link opens its mapped route", () => {
+  assert.deepEqual(
+    launchAction({ url: WEB_ASSET, linkType: "asset", platform: "ios" }),
+    { kind: "route", route: "/assets/as_1" }
+  );
+});
+
+test("launch: a QR link opens through the hook on both platforms", () => {
+  for (const platform of PLATFORMS) {
+    assert.deepEqual(
+      launchAction({ url: WEB_QR, linkType: "qr", platform }),
+      { kind: "link" },
+      platform
+    );
+  }
+});
+
+test("launch: a custom-scheme link opens through the hook on both platforms", () => {
+  for (const platform of PLATFORMS) {
+    assert.deepEqual(
+      launchAction({ url: SCHEME_ASSET, linkType: "asset", platform }),
+      { kind: "link" },
+      platform
+    );
+  }
+});
+
+test("launch: a web link on Android is left to the router", () => {
+  assert.deepEqual(
+    launchAction({ url: WEB_ASSET, linkType: "asset", platform: "android" }),
+    { kind: "none" }
+  );
+});
+
+test("launch: an unknown or unclaimed web link opens nothing", () => {
+  for (const platform of PLATFORMS) {
+    assert.deepEqual(
+      launchAction({
+        url: "https://app.shelf.nu/login",
+        linkType: "unknown",
+        platform,
+      }),
+      { kind: "none" },
+      platform
+    );
+    assert.deepEqual(
+      launchAction({
+        url: "https://app.shelf.nu/",
+        linkType: "unknown",
+        platform,
+      }),
+      { kind: "none" },
+      platform
+    );
+  }
+});
+
+test("launch: an unknown custom-scheme link opens nothing", () => {
+  assert.deepEqual(
+    launchAction({
+      url: "shelf://nowhere",
+      linkType: "unknown",
+      platform: "ios",
+    }),
+    { kind: "none" }
+  );
+});
+
+test("a web URL is http or https, in any case", () => {
+  assert.equal(isWebUrl("https://app.shelf.nu/assets/as_1"), true);
+  assert.equal(isWebUrl("HTTP://app.shelf.nu"), true);
+  assert.equal(isWebUrl("shelf://assets/as_1"), false);
 });

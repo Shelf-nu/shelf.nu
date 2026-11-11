@@ -11,17 +11,44 @@
  */
 import { nativeRouteForLink } from "./resource-path";
 
+/** The link kinds `parseDeepLink` (`lib/deep-links.ts`) returns. */
+export type LinkKind =
+  | "asset"
+  | "kit"
+  | "booking"
+  | "audit"
+  | "qr"
+  | "scanner"
+  | "unknown";
+
+/**
+ * The values of React Native's `Platform.OS`, written out because this module
+ * must not import React Native.
+ */
+export type AppPlatform = "ios" | "android" | "web" | "windows" | "macos";
+
 /** What the hook needs to know about a link to decide who opens it. */
 export type LinkRoutingInput = {
   /** The raw URL the OS delivered. */
   url: string;
-  /** The link kind parsed from the URL (`"qr"`, `"asset"`, ...). */
-  linkType: string;
+  /** The link kind parsed from the URL. */
+  linkType: LinkKind;
   /** True for the URL that launched the app (cold start). */
   initial: boolean;
   /** `Platform.OS` of the running app. */
-  platform: string;
+  platform: AppPlatform;
 };
+
+/**
+ * Whether a URL is a web link (http or https) rather than a custom-scheme
+ * link such as `shelf://`.
+ *
+ * @param url - the raw URL the OS delivered
+ * @returns true for an http(s) URL
+ */
+export function isWebUrl(url: string): boolean {
+  return /^https?:/i.test(url);
+}
 
 /**
  * Whether expo-router opens this link on its own, so the JS deep-link hook
@@ -45,7 +72,7 @@ export function isOpenedByRouter({
   initial,
   platform,
 }: LinkRoutingInput): boolean {
-  if (!/^https?:/i.test(url)) return false;
+  if (!isWebUrl(url)) return false;
   if (linkType === "qr") return false;
   if (initial && platform === "ios") return false;
   return true;
@@ -63,9 +90,47 @@ export function isOpenedByRouter({
  *   this link: not HTTPS, a `/qr/:id` link (resolved through the API instead),
  *   the start screen, or a path outside the allowlist
  */
-export function webLaunchRoute(url: string, linkType: string): string | null {
-  if (!/^https?:/i.test(url) || linkType === "qr") return null;
+export function webLaunchRoute(url: string, linkType: LinkKind): string | null {
+  if (!isWebUrl(url) || linkType === "qr") return null;
   const route = nativeRouteForLink(url);
   if (route === "/" || route === url) return null;
   return route;
+}
+
+/**
+ * What the deep-link hook does with the URL that launched the app:
+ *
+ * - `route`: open `route`, the in-app path the router's own mapping names (an
+ *   HTTPS launch link on iOS).
+ * - `link`: open the parsed link with `navigateToLink` (a custom-scheme link,
+ *   or a `/qr/:id` link that needs an API resolve).
+ * - `none`: do nothing, because the router opens it (an HTTPS launch link on
+ *   Android) or it names nothing the app opens.
+ */
+export type LaunchAction =
+  | { kind: "route"; route: string }
+  | { kind: "link" }
+  | { kind: "none" };
+
+/**
+ * Decides what the deep-link hook does with the URL that launched the app.
+ * The hook only carries out the result, so every launch rule lives here,
+ * covered by `link-routing.test.ts`.
+ *
+ * @param input - the launch URL, its parsed kind and the platform
+ * @returns the action the hook takes
+ */
+export function launchAction({
+  url,
+  linkType,
+  platform,
+}: Omit<LinkRoutingInput, "initial">): LaunchAction {
+  if (isOpenedByRouter({ url, linkType, initial: true, platform })) {
+    return { kind: "none" };
+  }
+  const route = webLaunchRoute(url, linkType);
+  if (route) return { kind: "route", route };
+  if (linkType === "unknown") return { kind: "none" };
+  if (linkType === "qr" || !isWebUrl(url)) return { kind: "link" };
+  return { kind: "none" };
 }

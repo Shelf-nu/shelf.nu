@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
-import { isOpenedByRouter, webLaunchRoute } from "./link-routing";
+import { isOpenedByRouter, launchAction } from "./link-routing";
 import { openLinkedRoute, openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
@@ -260,31 +260,21 @@ export function useDeepLinkHandler() {
       }
     }
 
-    // Handle the URL that launched the app (cold start). Links the router
-    // opens itself are skipped (see `isOpenedByRouter`).
+    // Handle the URL that launched the app (cold start). `launchAction`
+    // decides what to open; links the router opens itself come back `none`.
     Linking.getInitialURL().then((url) => {
       if (!url) return;
       const link = parseDeepLink(url);
-      if (
-        isOpenedByRouter({
-          url,
-          linkType: link.type,
-          initial: true,
-          platform: Platform.OS,
-        })
-      ) {
-        return;
-      }
-      // HTTPS links open their mapped route; custom-scheme and `/qr/:id`
-      // links go through `navigateToLink`. The delay lets navigation mount.
-      const webRoute = webLaunchRoute(url, link.type);
-      const isWebLink = /^https?:/i.test(url);
-      if (webRoute) {
-        setTimeout(() => openLinkedRoute(webRoute), 500);
-      } else if (
-        link.type !== "unknown" &&
-        (link.type === "qr" || !isWebLink)
-      ) {
+      const action = launchAction({
+        url,
+        linkType: link.type,
+        platform: Platform.OS,
+      });
+      // The delay lets navigation mount.
+      if (action.kind === "route") {
+        const { route } = action;
+        setTimeout(() => openLinkedRoute(route), 500);
+      } else if (action.kind === "link") {
         setTimeout(() => navigateToLink(link), 500);
       }
     });
