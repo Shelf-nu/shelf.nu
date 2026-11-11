@@ -90,7 +90,6 @@ type Props = ModelFilterProps & {
    */
   resetSearchOnClose?: boolean;
   excludeItems?: string[];
-  /** Allow undefined for deselection cases */
   /**
    * Called with the picked id, and the picked item (from the loader's list or
    * search results), or `undefined` for both on deselection.

@@ -61,14 +61,16 @@ describe("AssetModelFormRow", () => {
       defaultValuation: 199,
     } as ModelFilterItem);
 
-    expect(onChange).toHaveBeenCalledWith(
-      "m-old",
-      expect.objectContaining({
-        id: "m-old",
-        defaultCategoryId: "cat-1",
-        defaultValuation: 199,
-      })
-    );
+    // The converted row, not the raw picker item.
+    expect(onChange).toHaveBeenCalledWith("m-old", {
+      id: "m-old",
+      name: "ZZ Test Model",
+      image: null,
+      thumbnailImage: null,
+      defaultCategoryId: "cat-1",
+      defaultValuation: 199,
+      customFieldDefaults: [],
+    });
   });
 
   it("passes no row when the pick is cleared", () => {

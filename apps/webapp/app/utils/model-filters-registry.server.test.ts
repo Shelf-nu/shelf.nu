@@ -46,9 +46,13 @@ describe("MODEL_FILTER_REGISTRY", () => {
     expect(select).not.toHaveProperty("customFieldDefaults");
   });
 
-  it("limits the asset form's defaults to active, undeleted custom fields", () => {
-    expect(ASSET_MODEL_FORM_DEFAULTS_SELECT.customFieldDefaults.where).toEqual({
-      customField: { active: true, deletedAt: null },
+  it("selects the asset form's defaults as plain columns", () => {
+    // A default holds a plain customFieldId (no relation), so the route
+    // filters inactive fields in a second query, not in this select.
+    expect(ASSET_MODEL_FORM_DEFAULTS_SELECT).toEqual({
+      defaultCategoryId: true,
+      defaultValuation: true,
+      customFieldDefaults: { select: { customFieldId: true, value: true } },
     });
   });
 

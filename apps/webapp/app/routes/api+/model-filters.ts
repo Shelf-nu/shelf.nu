@@ -177,10 +177,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      * request asks for them and the caller may create or edit assets. The
      * grant is resolved from the session's roles, never from a request param.
      */
-    const resolveSelect = async () => {
+    const resolveSelect = async (): Promise<{
+      select: Record<string, unknown>;
+      withModelDefaults: boolean;
+    }> => {
       const base = getModelFilterConfig(modelFilters.name).select;
       if (modelFilters.name !== "assetModel" || !modelFilters.withDefaults) {
-        return base;
+        return { select: base, withModelDefaults: false };
       }
       const roles = userOrganizations.find(
         (o) => o.organization.id === organizationId
@@ -199,8 +202,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         canEdit(PermissionAction.update),
       ]);
       return canCreate || canUpdate
-        ? { ...base, ...ASSET_MODEL_FORM_DEFAULTS_SELECT }
-        : base;
+        ? {
+            select: { ...base, ...ASSET_MODEL_FORM_DEFAULTS_SELECT },
+            withModelDefaults: true,
+          }
+        : { select: base, withModelDefaults: false };
     };
     const { name, queryKey, queryValue, selectedValues } = modelFilters;
 
@@ -409,7 +415,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // The registry — not this call site — decides what leaves the server.
     // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
     // spread below safe, instead of having to sanitise three separate paths.
-    const select = await resolveSelect();
+    const { select, withModelDefaults } = await resolveSelect();
 
     /**
      * Two queries rather than one capped `OR`.
@@ -440,6 +446,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy: { [queryKey]: "asc" },
       }),
     ])) as Array<Array<Record<string, string>>>;
+
+    if (withModelDefaults) {
+      await keepActiveFieldDefaults(
+        [...selectedRows, ...searchRows] as unknown as ModelRowWithDefaults[],
+        organizationId
+      );
+    }
 
     // Selected first, then search hits, de-duplicated: a selected row can also
     // match what the user typed.
@@ -482,5 +495,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
+  }
+}
+
+/** An asset model row carrying `ASSET_MODEL_FORM_DEFAULTS_SELECT`. */
+type ModelRowWithDefaults = {
+  customFieldDefaults: { customFieldId: string; value: unknown }[];
+};
+
+/**
+ * Drops, in place, the custom field defaults whose field is inactive, deleted
+ * or outside the workspace, the way the server fill reads them
+ * (`getModelDefaults`), so the form never pre-fills a field it does not show.
+ */
+async function keepActiveFieldDefaults(
+  rows: ModelRowWithDefaults[],
+  organizationId: string
+) {
+  const fieldIds = [
+    ...new Set(
+      rows.flatMap((row) => row.customFieldDefaults.map((d) => d.customFieldId))
+    ),
+  ];
+  if (fieldIds.length === 0) return;
+
+  const activeFields = await db.customField.findMany({
+    where: {
+      id: { in: fieldIds },
+      organizationId,
+      active: true,
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  const activeIds = new Set(activeFields.map((field) => field.id));
+  for (const row of rows) {
+    row.customFieldDefaults = row.customFieldDefaults.filter((d) =>
+      activeIds.has(d.customFieldId)
+    );
   }
 }

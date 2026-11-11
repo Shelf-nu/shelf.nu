@@ -38,6 +38,7 @@ vi.mock("react-router", async () => {
 
 const dbMocks = vi.hoisted(() => ({
   dynamicFindMany: vi.fn(),
+  customFieldFindMany: vi.fn(),
 }));
 
 // why: exercising the where-clause + response shaping without a real database
@@ -50,6 +51,7 @@ vi.mock("~/database/db.server", () => ({
     tag: { dynamicFindMany: dbMocks.dynamicFindMany },
     location: { dynamicFindMany: dbMocks.dynamicFindMany },
     assetModel: { dynamicFindMany: dbMocks.dynamicFindMany },
+    customField: { findMany: dbMocks.customFieldFindMany },
   },
 }));
 
@@ -181,13 +183,18 @@ const DRAFTS_ONLY = { status: { in: ["DRAFT"] } };
  * @param role - Caller's role in the workspace.
  * @param canSeeAllOverride - Workspace override settings, both off by default.
  */
-function setRole(role: OrganizationRoles, canSeeAllOverride = false) {
+function setRole(
+  role: OrganizationRoles,
+  canSeeAllOverride = false,
+  managersCanEditAssets = false
+) {
   orgMocks.getSelectedOrganization.mockResolvedValue({
     organizationId: ORG_ID,
     userOrganizations: [{ organization: { id: ORG_ID }, roles: [role] }],
     currentOrganization: {
       selfServiceCanSeeBookings: canSeeAllOverride,
       baseUserCanSeeBookings: canSeeAllOverride,
+      managersCanEditAssets,
     },
   });
 }
@@ -263,15 +270,18 @@ describe("GET /api/model-filters", () => {
 
   describe("asset model defaults for the asset form", () => {
     /** A model row as the database returns it for the asset form's select. */
-    const modelRow = {
+    const modelRow = () => ({
       id: "m-1",
       name: "ZZ Test Model",
       image: null,
       thumbnailImage: null,
       defaultCategoryId: "cat-1",
       defaultValuation: 199,
-      customFieldDefaults: [{ customFieldId: "cf-1", value: { raw: "Acme" } }],
-    };
+      customFieldDefaults: [
+        { customFieldId: "cf-active", value: { raw: "Acme" } },
+        { customFieldId: "cf-inactive", value: { raw: "Old" } },
+      ],
+    });
 
     /** The `select` of the most recent search query. */
     function lastSelect() {
@@ -281,23 +291,26 @@ describe("GET /api/model-filters", () => {
     const WITH_DEFAULTS =
       "name=assetModel&queryKey=name&queryValue=ZZ&withDefaults=true";
 
+    beforeEach(() => {
+      // Only cf-active is an active, undeleted field of this workspace.
+      dbMocks.customFieldFindMany.mockResolvedValue([{ id: "cf-active" }]);
+    });
+
     it("sends them to a member who can edit assets, at the top level the form reads", async () => {
       setRole(OrganizationRoles.ADMIN);
-      dbMocks.dynamicFindMany.mockResolvedValue([modelRow]);
+      dbMocks.dynamicFindMany.mockResolvedValue([modelRow()]);
 
-      const filters = await readFilters(await callLoader(WITH_DEFAULTS));
+      const response = await callLoader(WITH_DEFAULTS);
+      const filters = await readFilters(response);
 
+      expect(response.status).toBe(200);
       expect(lastSelect()).toMatchObject({
         defaultCategoryId: true,
         defaultValuation: true,
-        customFieldDefaults: {
-          // Only defaults of active, undeleted custom fields.
-          where: { customField: { active: true, deletedAt: null } },
-          select: { customFieldId: true, value: true },
-        },
+        customFieldDefaults: { select: { customFieldId: true, value: true } },
       });
       // Producer and consumer pinned together: the route's item is what the
-      // asset form reads.
+      // asset form reads. The inactive field's default is gone.
       expect(formModelFromPickerItem(filters[0])).toEqual({
         id: "m-1",
         name: "ZZ Test Model",
@@ -306,9 +319,47 @@ describe("GET /api/model-filters", () => {
         defaultCategoryId: "cat-1",
         defaultValuation: 199,
         customFieldDefaults: [
-          { customFieldId: "cf-1", value: { raw: "Acme" } },
+          { customFieldId: "cf-active", value: { raw: "Acme" } },
         ],
       });
+    });
+
+    it("reads which fields are active within the caller's workspace", async () => {
+      setRole(OrganizationRoles.ADMIN);
+      dbMocks.dynamicFindMany.mockResolvedValue([modelRow()]);
+
+      await callLoader(WITH_DEFAULTS);
+
+      expect(dbMocks.customFieldFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { in: ["cf-active", "cf-inactive"] },
+            organizationId: ORG_ID,
+            active: true,
+            deletedAt: null,
+          },
+        })
+      );
+    });
+
+    it("sends them to a Manager when Managers may edit assets", async () => {
+      setRole(OrganizationRoles.MANAGER, false, true);
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader(WITH_DEFAULTS);
+
+      expect(dbMocks.dynamicFindMany).toHaveBeenCalled();
+      expect(lastSelect()).toHaveProperty("defaultValuation", true);
+    });
+
+    it("sends none to a Manager when Managers may not edit assets", async () => {
+      setRole(OrganizationRoles.MANAGER, false, false);
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader(WITH_DEFAULTS);
+
+      expect(dbMocks.dynamicFindMany).toHaveBeenCalled();
+      expect(lastSelect()).not.toHaveProperty("defaultValuation");
     });
 
     it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
@@ -317,10 +368,13 @@ describe("GET /api/model-filters", () => {
         setRole(role);
         dbMocks.dynamicFindMany.mockResolvedValue([]);
 
-        await callLoader(WITH_DEFAULTS);
+        const response = await callLoader(WITH_DEFAULTS);
 
+        expect(response.status).toBe(200);
+        expect(dbMocks.dynamicFindMany).toHaveBeenCalled();
         expect(lastSelect()).not.toHaveProperty("defaultValuation");
         expect(lastSelect()).not.toHaveProperty("customFieldDefaults");
+        expect(dbMocks.customFieldFindMany).not.toHaveBeenCalled();
       }
     );
 
@@ -328,8 +382,12 @@ describe("GET /api/model-filters", () => {
       setRole(OrganizationRoles.ADMIN);
       dbMocks.dynamicFindMany.mockResolvedValue([]);
 
-      await callLoader("name=assetModel&queryKey=name&queryValue=ZZ");
+      const response = await callLoader(
+        "name=assetModel&queryKey=name&queryValue=ZZ"
+      );
 
+      expect(response.status).toBe(200);
+      expect(dbMocks.dynamicFindMany).toHaveBeenCalled();
       expect(lastSelect()).not.toHaveProperty("defaultValuation");
       expect(lastSelect()).not.toHaveProperty("customFieldDefaults");
     });
