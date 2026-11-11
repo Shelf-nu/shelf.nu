@@ -30,6 +30,7 @@ import { Platform, View, type StyleProp, type ViewStyle } from "react-native";
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
+import { clampToMinimum } from "@/lib/booking-dates";
 import { useTheme } from "@/lib/theme-context";
 
 type DateTimeFieldProps = {
@@ -131,10 +132,15 @@ export function DateTimeField({
     );
   }
 
+  // UIDatePicker throws when its minimum moves past the date it shows, which a
+  // form can do while the picker is open (re-seeding its default window, a new
+  // start date). Keying on the minimum gives each minimum a fresh picker
+  // instead of updating a live one, and the value it opens on is never below it.
   return (
     <View style={inlineStyle}>
       <DateTimePicker
-        value={value}
+        key={minimumDate?.getTime() ?? "no-minimum"}
+        value={clampToMinimum(value, minimumDate)}
         mode="datetime"
         display="inline"
         minimumDate={minimumDate}

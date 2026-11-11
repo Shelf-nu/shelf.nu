@@ -11353,11 +11353,25 @@ export async function partialCheckoutBooking({
           submission: sourceLocations,
         });
 
+        // Grouped by units for the same reason `checkoutBooking` groups its
+        // departures: `updateMany`'s `data` takes literals and cannot name a
+        // column, and a batch carries very few distinct counts (every
+        // INDIVIDUAL slice moves 1), so this is a handful of statements rather
+        // than one per scanned slice.
+        const sliceIdsByUnits = new Map<number, string[]>();
         for (const [sliceId, units] of unitsBySliceId) {
           if (units <= 0) continue;
+          const ids = sliceIdsByUnits.get(units);
+          if (ids) {
+            ids.push(sliceId);
+          } else {
+            sliceIdsByUnits.set(units, [sliceId]);
+          }
+        }
+        for (const [units, sliceIds] of sliceIdsByUnits) {
           await tx.bookingAsset.updateMany({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
-            where: { id: sliceId, bookingId: id },
+            where: { id: { in: sliceIds }, bookingId: id },
             data: { checkedOutQuantity: { increment: units } },
           });
         }

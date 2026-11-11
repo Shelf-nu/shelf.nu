@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
-  Linking,
   Platform,
   Alert,
   AppState,
@@ -26,6 +25,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, type AuditExpectedAsset } from "@/lib/api";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
+import {
+  CAMERA_SETTINGS_FALLBACK,
+  openAppSettings,
+} from "@/lib/open-app-settings";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
@@ -35,9 +38,8 @@ import {
   useTabScreenWidth,
 } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
-import { getActiveServer } from "@/lib/server";
-import { parseSequentialId } from "@/lib/sequential-id";
+import { planScan, runScanPlan, scanMissFeedback } from "@/lib/qr-utils";
+import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { playScanSound } from "@/lib/scan-sound";
@@ -915,53 +917,64 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
-        // A Shelf URL from ANOTHER server would otherwise be resolved against
-        // this one and reported as "not found" — a baffling error for a code
-        // that is perfectly valid on the instance that minted it.
+        // 1. Resolve code -> asset (QR, SAM id, or barcode). Which lookups the
+        // value goes to, and in what order, is decided in one place: see
+        // planScan. currentOrg is non-null here (guard above).
+        const servers = {
+          active: getActiveServer().baseUrl,
+          known: getKnownServerUrls(),
+        };
+        const plan = planScan(data, servers, {
+          barcodes: currentOrg.barcodesEnabled,
+          sequentialIds: true,
+        });
+        let codeId: string;
+        let codeOrgId: string | null;
+        let asset: { id: string; title: string } | null;
+
+        const outcome = await runScanPlan(plan, data, {
+          // Audit lookups only identify the code: the AuditScan is recorded
+          // separately, so use the non-recording resolve. Otherwise every
+          // audited item would also get an ad-hoc "last scanned" entry (web
+          // parity: audits resolve through the non-recording get-scanned-item).
+          qr: (lookupId) => api.getScannedItem(lookupId, currentOrg.id),
+          barcode: (value) =>
+            api.barcode(
+              value,
+              currentOrg.id,
+              // why: records an AUDIT scan with no Activity note; the audit
+              // keeps its own trail (the normal scanner omits this).
+              "audit"
+            ),
+        });
+
+        // A barcode scanned in a workspace that cannot resolve barcodes, or an
+        // outside link that resolved to nothing: no lookup answer to render.
         if (
-          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
-          "foreign"
+          outcome.kind === "barcodes-unavailable" ||
+          outcome.kind === "outside-link-miss"
         ) {
           // Same feedback shape as every other rejected scan in this handler:
           // a silent return would look like the camera simply ignored a code
           // the user can see is valid.
+          const feedback = scanMissFeedback(outcome, { hasWorkspace: true });
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Different Shelf Server",
-            "Sign in to that server to use this code."
-          );
-          announce("Different Shelf Server. Sign in to that server to use it.");
+          // The toast subtitle is one line: the short text keeps the action
+          // visible, and the announcement carries the full guidance.
+          showToast("error", feedback.title, feedback.shortMessage);
+          announce(feedback.announcement);
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
-          // a bare return would leave isProcessingRef.current true forever —
-          // the guard above would then reject every later scan and the camera
+          // a bare return would leave isProcessingRef.current true forever:
+          // the scan guard would then reject every later scan and the camera
           // would stop delivering codes entirely.
           finalizeScan();
           return;
         }
 
-        // 1. Resolve code -> asset (QR, SAM id, or barcode)
-        const qrId = extractQrId(data);
-        // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's
-        // sequentialId branch, scoped to the workspace (web parity, ungated
-        // by the Barcodes add-on). currentOrg is non-null here (guard above).
-        const samId = !qrId ? parseSequentialId(data) : null;
-        const qrLookupId = qrId ?? samId;
-        let codeId: string;
-        let codeOrgId: string | null;
-        let asset: { id: string; title: string } | null;
-
-        if (qrLookupId) {
+        if (outcome.kind === "qr") {
           // ── Shelf QR / SAM path ──
-          // Audit lookups only identify the code: the AuditScan is recorded
-          // separately, so use the non-recording resolve. Otherwise every
-          // audited item would also get an ad-hoc "last scanned" entry (web
-          // parity: audits resolve through the non-recording get-scanned-item).
-          const { data: qrData, error } = await api.getScannedItem(
-            qrLookupId,
-            currentOrg.id
-          );
+          const { data: qrData, error } = outcome.answer;
           if (error || !qrData?.qr?.asset) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -974,30 +987,12 @@ function AuditScannerContent() {
             return;
           }
 
-          codeId = qrLookupId;
+          codeId = outcome.lookupId;
           codeOrgId = qrData.qr.organizationId ?? null;
           asset = qrData.qr.asset;
         } else {
-          // ── Barcode fallback path ──
-          if (!currentOrg.barcodesEnabled) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            showToast(
-              "error",
-              "Barcode Not Supported",
-              "Barcode scanning is not enabled for your workspace."
-            );
-            finalizeScan();
-            return;
-          }
-
-          const { data: barcodeData, error: barcodeError } = await api.barcode(
-            data,
-            currentOrg.id,
-            // why: records an AUDIT scan with no Activity note; the audit
-            // keeps its own trail (the normal scanner omits this).
-            "audit"
-          );
+          // ── Barcode path ──
+          const { data: barcodeData, error: barcodeError } = outcome.answer;
 
           if (barcodeError || !barcodeData?.barcode?.asset) {
             flashFrame("error");
@@ -1428,13 +1423,7 @@ function AuditScannerContent() {
         ) : (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => {
-              if (Platform.OS === "ios") {
-                Linking.openURL("app-settings:");
-              } else {
-                Linking.openSettings();
-              }
-            }}
+            onPress={() => void openAppSettings(CAMERA_SETTINGS_FALLBACK)}
           >
             <Text style={styles.primaryButtonText}>Open Settings</Text>
           </TouchableOpacity>
