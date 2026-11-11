@@ -31,7 +31,7 @@
  * @see {@link file://./checkout-dialog.tsx} - the "Check Out" trigger/flow
  * @see {@link file://./forms/edit-booking-form.tsx} - the call site
  */
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronRightIcon, ScanLine, Zap } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -128,7 +128,6 @@ export default function CheckoutDropdown({
   /** The desktop and mobile menu triggers: one of them is hidden by CSS. */
   const desktopTriggerRef = useRef<HTMLElement>(null);
   const mobileTriggerRef = useRef<HTMLElement>(null);
-  const quickCheckoutReasonId = useId();
 
   function closeMenu() {
     setOpen(false);
@@ -155,11 +154,6 @@ export default function CheckoutDropdown({
   const quickCheckoutDisabled = canFullCheckOut ? checkOutDisabled : disabled;
   /** Whether the quick check-out row can act right now. */
   const quickCheckoutBlocked = Boolean(quickCheckoutDisabled) || isNavigating;
-  /** Why it cannot, when the caller gave a reason. */
-  const quickCheckoutReason =
-    quickCheckoutDisabled && typeof quickCheckoutDisabled === "object"
-      ? quickCheckoutDisabled.reason
-      : undefined;
 
   /**
    * The visible menu trigger, for focus to return to when the dialog closes:
@@ -328,16 +322,12 @@ export default function CheckoutDropdown({
                 only. A mouse click on the button bubbles up to it. The guard
                 lives here because the shared item does not hand `disabled` to
                 Radix, and the button keeps its disabled-reason tooltip. Focus
-                sits on the item, so the item also announces that it is
-                disabled, and why. */}
+                sits on the item, so the item carries `aria-disabled`; the
+                reason is read from the button's own hidden description,
+                which sits inside the item. */}
             <DropdownMenuItem
               className="py-1 lg:p-0"
               aria-disabled={quickCheckoutBlocked || undefined}
-              aria-describedby={
-                quickCheckoutBlocked && quickCheckoutReason
-                  ? quickCheckoutReasonId
-                  : undefined
-              }
               onSelect={(event) => {
                 event.preventDefault();
                 if (quickCheckoutBlocked) return;
@@ -356,11 +346,6 @@ export default function CheckoutDropdown({
                   <Zap className="size-4" /> {quickCheckoutLabel}
                 </span>
               </Button>
-              {quickCheckoutBlocked && quickCheckoutReason ? (
-                <span id={quickCheckoutReasonId} className="sr-only">
-                  {quickCheckoutReason}
-                </span>
-              ) : null}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="py-1 lg:p-0"

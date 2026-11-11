@@ -94,7 +94,8 @@ export function CheckoutSourceSelect({
         className
       )}
     >
-      {picked ? (
+      {/* A disabled select was left out of the submission; so is this. */}
+      {picked && !disabled ? (
         <input
           type="hidden"
           name={sourceLocationFieldName(fieldKey)}
@@ -127,6 +128,9 @@ export function CheckoutSourceSelect({
           options={options}
           value={value}
           onChange={(next) => {
+            // Re-choosing the pre-selected option is not an answer: posting it
+            // would turn the server's own default into a pick it can refuse.
+            if (next === value) return;
             setValue(next);
             setPicked(true);
           }}

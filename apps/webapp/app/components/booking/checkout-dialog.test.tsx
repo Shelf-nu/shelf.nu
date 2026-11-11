@@ -338,10 +338,21 @@ describe("CheckoutDialog confirmation", () => {
  * Opens a controlled dialog from a separate button, the way a menu row does,
  * with a second button for focus to return to.
  */
-function ControlledHarness({ returnFocus }: { returnFocus: boolean }) {
+function ControlledHarness({
+  returnFocus,
+  requiredField = false,
+  ...props
+}: {
+  returnFocus: boolean;
+  /** Adds an empty required field, so a submit is blocked by validation. */
+  requiredField?: boolean;
+} & Partial<Parameters<typeof CheckoutDialog>[0]>) {
   const [open, setOpen] = useState(false);
   return (
-    <form id="edit-booking-form">
+    <form id="edit-booking-form" onSubmit={(event) => event.preventDefault()}>
+      {requiredField ? (
+        <input aria-label="Booking name" name="name" required />
+      ) : null}
       <button type="button" onClick={() => setOpen(true)}>
         Open from menu
       </button>
@@ -358,12 +369,43 @@ function ControlledHarness({ returnFocus }: { returnFocus: boolean }) {
             ? () => document.getElementById("menu-trigger")
             : undefined
         }
+        {...props}
       />
     </form>
   );
 }
 
 describe("CheckoutDialog opened from outside", () => {
+  it("always asks, even when the confirmation is off", () => {
+    render(<ControlledHarness returnFocus confirm={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+
+    // The caller opened it, so it must show a dialog, not a bare submit.
+    expect(
+      screen.getByRole("alertdialog", { name: "Check out booking" })
+    ).toBeInTheDocument();
+  });
+
+  it("reports a blocked submit instead of returning focus", async () => {
+    render(<ControlledHarness returnFocus requiredField />);
+    const form = document.getElementById(
+      "edit-booking-form"
+    ) as HTMLFormElement;
+    const reportValidity = vi.spyOn(form, "reportValidity");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    );
+    await waitFor(() => expect(reportValidity).toHaveBeenCalled());
+    expect(document.activeElement).not.toBe(
+      screen.getByRole("button", { name: "Menu trigger" })
+    );
+  });
+
   it("renders no trigger of its own", () => {
     render(<ControlledHarness returnFocus />);
 
@@ -415,6 +457,19 @@ describe("CheckoutDialog From location question", () => {
     expect(
       container.ownerDocument.querySelector('[aria-haspopup="listbox"]')
     ).toBeNull();
+  });
+
+  it("posts nothing when the operator re-chooses the pre-selected location", () => {
+    renderInForm({ sourceQuestions: [QUESTION] });
+    fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /AA Batteries/ }));
+    fireEvent.click(
+      screen.getByRole("option", { name: "Store Room · 60 pcs" })
+    );
+
+    // Re-choosing the default is not an answer: the server keeps its own.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
   });
 
   it("asks where each pool's units leave from before checking out", () => {

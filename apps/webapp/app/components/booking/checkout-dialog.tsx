@@ -1,6 +1,5 @@
 import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { Booking, BookingStatus } from "@prisma/client";
-import { Zap } from "lucide-react";
 import { DateTime } from "luxon";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -99,8 +98,7 @@ type CheckoutDialogProps = {
   formId?: string;
   /**
    * Optional className override for the trigger button. Defaults to the
-   * variant-aware composition below (`"grow"` for the default variant,
-   * full-width link styling for `"dropdown"`). Embedded contexts (e.g. the
+   * default `"grow"`. Embedded contexts (e.g. the
    * fulfil-and-checkout drawer) can pass a narrower class so the button
    * doesn't stretch oddly when its sibling buttons aren't also `grow`.
    */
@@ -118,12 +116,10 @@ type CheckoutDialogProps = {
   /** Custom label for the trigger button */
   label?: string;
   /**
-   * Rendering context. `"dropdown"` styles the trigger as a left-aligned link
-   * row so it sits inside a `DropdownMenuItem` like the check-in flow.
-   * `"icon"` renders a compact secondary button showing only `icon`, with
+   * Rendering context. `"icon"` renders a compact secondary button showing only `icon`, with
    * `label` as its tooltip and accessible name, for a list row's actions.
    */
-  variant?: "default" | "dropdown" | "icon";
+  variant?: "default" | "icon";
   /** The trigger's icon when `variant` is `"icon"`. */
   icon?: ReactNode;
   /**
@@ -291,28 +287,12 @@ export default function CheckoutDialog({
     0
   );
 
-  /** Shared trigger styling so the dropdown row matches the check-in dropdown */
-  const isDropdown = variant === "dropdown";
   /**
-   * Default trigger styling computed from `variant`. Callers can override the
-   * entire class via the `triggerClassName` prop (e.g. the fulfil-and-checkout
-   * drawer narrows the button so it doesn't stretch oddly next to siblings).
+   * Default trigger styling. Callers can override the entire class via the
+   * `triggerClassName` prop (e.g. the fulfil-and-checkout drawer narrows the
+   * button so it doesn't stretch oddly next to siblings).
    */
-  const computedTriggerClassName = tw(
-    "whitespace-nowrap",
-    isDropdown
-      ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-      : "grow"
-  );
-  const resolvedTriggerClassName = triggerClassName ?? computedTriggerClassName;
-  /** Dropdown rows pair the label with an icon; the default trigger is text-only */
-  const triggerContent = isDropdown ? (
-    <span className="flex items-center gap-2">
-      <Zap className="size-4" /> {label}
-    </span>
-  ) : (
-    label
-  );
+  const resolvedTriggerClassName = triggerClassName ?? "whitespace-nowrap grow";
   /**
    * The trigger's look. An icon trigger is the list-row action button: small,
    * secondary, the label carried by its tooltip and accessible name.
@@ -329,10 +309,10 @@ export default function CheckoutDialog({
         } as const)
       : ({
           className: resolvedTriggerClassName,
-          size: isDropdown ? undefined : "sm",
-          variant: isDropdown ? "link" : "primary",
-          width: isDropdown || fullWidth ? "full" : undefined,
-          children: triggerContent,
+          size: "sm",
+          variant: "primary",
+          width: fullWidth ? "full" : undefined,
+          children: label,
         } as const);
 
   const asksSource = sourceQuestions.length > 0;

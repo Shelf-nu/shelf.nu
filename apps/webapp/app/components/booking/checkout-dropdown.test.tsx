@@ -9,7 +9,7 @@
  */
 import { useState, type ComponentProps } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useNavigation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 
@@ -271,10 +271,48 @@ describe("CheckoutDropdown", () => {
       checkOutDisabled: { reason: "Some assets are in custody." },
     });
 
-    // Arrow-key focus lands on the row, so the row has to say it is disabled.
+    // Arrow-key focus lands on the row, so the row has to say it is disabled,
+    // and read the reason once (from the button's hidden description).
     const row = screen.getAllByRole("menuitem")[0];
     expect(row).toHaveAttribute("aria-disabled", "true");
-    expect(row).toHaveAccessibleDescription("Some assets are in custody.");
+    expect(row.textContent?.split("Some assets are in custody.").length).toBe(
+      2
+    );
+  });
+
+  it("marks the Scan to check out row disabled with the control", () => {
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      disabled: true,
+    });
+
+    expect(screen.getAllByRole("menuitem")[1]).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
+  });
+
+  it("does not open the check-out dialog while a submission is in flight", () => {
+    vi.mocked(useNavigation).mockReturnValue({ state: "submitting" } as never);
+    try {
+      menuOpen = true;
+      renderDropdown({
+        canFullCheckOut: true,
+        canCheckOutRemaining: false,
+        canScanCheckOut: true,
+      });
+
+      const row = screen.getAllByRole("menuitem")[0];
+      row.focus();
+      fireEvent.keyDown(row, { key: "Enter" });
+
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    } finally {
+      vi.mocked(useNavigation).mockReturnValue({ state: "idle" } as never);
+    }
   });
 
   it("lets the operator pick a From location with the mouse", () => {
