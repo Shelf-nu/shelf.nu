@@ -1469,14 +1469,13 @@ describe("GET /api/mobile/assets/:assetId: activity notes", () => {
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     // The stub honours the notes `take`, as the database would.
-    assetFindUniqueMock.mockImplementation(
-      (args: { select?: { notes?: { take?: number } } }) => {
-        const asset = assetWithNote();
-        return Promise.resolve(
-          args.select?.notes?.take === 0 ? { ...asset, notes: [] } : asset
-        );
-      }
-    );
+    assetFindUniqueMock.mockImplementation((args: unknown) => {
+      const { select } = args as { select?: { notes?: { take?: number } } };
+      const asset = assetWithNote();
+      return Promise.resolve(
+        select?.notes?.take === 0 ? { ...asset, notes: [] } : asset
+      );
+    });
   });
 
   it("sends the notes to a member holding note: read", async () => {
