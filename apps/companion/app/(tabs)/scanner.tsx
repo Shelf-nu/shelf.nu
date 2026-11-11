@@ -17,6 +17,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import type { BookingScanContext } from "@/lib/booking-scan-route";
 import { useOrg } from "@/lib/org-context";
 import {
@@ -261,7 +262,6 @@ function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
 function ScannerContent({ booking }: ScannerScreenProps) {
   const router = useRouter();
   const bookingId = booking?.bookingId;
-  const bookingName = booking?.bookingName;
   const bookingAction = booking?.action;
   const isFocused = useIsFocused();
   const { currentOrg, organizations, setCurrentOrg } = useOrg();
@@ -398,6 +398,23 @@ function ScannerContent({ booking }: ScannerScreenProps) {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+  // The booking scanner is a stack screen: back, the back swipe and Android
+  // back remove it, and its scan list with it. Ask first while the list holds
+  // anything not yet sent. Every flow clears the list before it returns to the
+  // booking, so a finished flow leaves without asking.
+  const bookingItemsRef = useRef(bookingCheckinItems);
+  useEffect(() => {
+    bookingItemsRef.current = bookingCheckinItems;
+  }, [bookingCheckinItems]);
+  useDiscardGuard({
+    active: isBookingMode && bookingCheckinItems.length > 0,
+    // Read at the moment of leaving: a finished flow empties the list just
+    // before it goes back, possibly before the guard's own update lands.
+    decide: () => (bookingItemsRef.current.length > 0 ? "prompt" : "leave"),
+    title: "Discard scanned items?",
+    message:
+      "Nothing you scanned has been sent to the booking yet. Leaving the scanner discards the list.",
+  });
   /**
    * The quantity sheet for a scanned quantity-tracked asset. `editing` means
    * the row is already in the list and the amount is being changed (a
@@ -450,6 +467,9 @@ function ScannerContent({ booking }: ScannerScreenProps) {
   // full asset rows for membership gates and kit→member expansion, plus
   // checkedInAssetIds to reject already-returned assets at scan time.
   const [bookingCtx, setBookingCtx] = useState<{
+    // The booking's name as the server has it, for the header and the
+    // confirmations. Never taken from the route: a link could name anything.
+    name: string;
     bookedAssetIds: Set<string>;
     bookingStatus: string;
     bookedAssets: BookingAsset[];
@@ -466,6 +486,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
     // when nothing needs asking, or from a server that does not send it.
     checkoutSourceQuestions: CheckoutSourceQuestion[];
   } | null>(null);
+  const bookingName = bookingCtx?.name;
 
   // Also called from the scan paths when a code arrives before the first
   // fetch lands (or after it failed) — a scan-while-loading retries it. A
@@ -486,6 +507,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
     (data: BookingDetailResponse, originOrgId: string) => {
       if (activeOrgIdRef.current !== originOrgId) return;
       setBookingCtx({
+        name: data.booking.name,
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
         bookedAssets: data.booking.assets,
@@ -611,7 +633,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
   // the switch makes stale.
 
   /**
-   * A workspace switch invalidates any on-screen result card: the scanner tab
+   * A workspace switch invalidates any on-screen result card: the scanner
    * keeps its state while unfocused, and the card's action closures captured
    * the org active at SCAN time — most dangerously the Unclaimed Code card,
    * whose claim would land in the PREVIOUS workspace (permanently, there is
@@ -2343,7 +2365,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    returnToBooking(bookingId);
+                    returnToBooking();
                   },
                 },
               ]
@@ -2417,7 +2439,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         kitIds,
         timeZone,
         sourceLocations,
-        // Every unit here came through the Scan tab.
+        // Every unit here was scanned.
         BOOKING_METHOD.scanned
       )
       .finally(() => {
@@ -2460,7 +2482,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          returnToBooking(bookingId);
+          returnToBooking();
         },
       },
     ]);
@@ -2670,7 +2692,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
               assetIds,
               timeZone,
               undefined,
-              // Every row here came through the Scan tab.
+              // Every row here was scanned.
               BOOKING_METHOD.scanned
             );
             setIsBookingSubmitting(false);
@@ -2711,7 +2733,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                   // The check-in mutated the booking — flag the detail to
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
-                  if (result?.isComplete) returnToBooking(bookingId);
+                  if (result?.isComplete) returnToBooking();
                 },
               },
             ]);
@@ -2759,7 +2781,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         timeZone,
         undefined,
         sourceLocations,
-        // Every row here came through the Scan tab.
+        // Every row here was scanned.
         BOOKING_METHOD.scanned
       )
       .finally(() => {
@@ -2832,7 +2854,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
               // Nothing left to scan.
-              returnToBooking(bookingId);
+              returnToBooking();
             }
           },
         },
@@ -3208,9 +3230,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             {isBookingMode ? (
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
-                  onPress={() =>
-                    bookingId ? returnToBooking(bookingId) : router.back()
-                  }
+                  onPress={returnToBooking}
                   accessibilityLabel="Go back"
                   accessibilityRole="button"
                 >
@@ -3228,8 +3248,12 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                       : "Booking Check-In"}
                   </Text>
                   <Text style={styles.bookingModeName} numberOfLines={1}>
+                    {/* The name arrives with the booking; until then the
+                        line says what to scan. */}
                     {bookingName ||
-                      (isBookingCheckoutMode
+                      (isBookingAddMode
+                        ? "Scan assets or kits to add"
+                        : isBookingCheckoutMode
                         ? "Scan assets to check out"
                         : "Scan assets to check in")}
                   </Text>

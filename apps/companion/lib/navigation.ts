@@ -77,21 +77,19 @@ function navigateAnchored(href: Href) {
 /**
  * Leave the booking scanner for the booking it serves.
  *
- * The booking scanner (`app/(tabs)/bookings/scan.tsx`) is pushed on top of
- * the booking in the Bookings stack, so this pops back to that booking. When
- * the booking is not beneath it (the scanner was opened by a link), the
- * scanner is replaced by the booking instead.
+ * The booking scanner (`app/(tabs)/bookings/scan.tsx`) only runs directly on
+ * top of its own booking in the Bookings stack (`sitsOnItsBooking`), so going
+ * back lands on that booking. It is the same back as the back swipe and the
+ * Android back button, so the scanner's discard guard sees all of them.
  *
  * Navigating synchronously inside an `Alert` button's `onPress` wedges the
  * navigation transition into an endless render-commit loop (the JS thread
  * stays busy and network callbacks starve). The navigation therefore runs on
  * the next frame, outside the button handler, from alerts and buttons alike.
- *
- * @param bookingId - the booking the scanner serves
  */
-export function returnToBooking(bookingId: string): void {
+export function returnToBooking(): void {
   requestAnimationFrame(() => {
-    router.dismissTo(`/(tabs)/bookings/${bookingId}`);
+    router.back();
   });
 }
 

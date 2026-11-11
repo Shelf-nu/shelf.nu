@@ -1,6 +1,14 @@
-import { Redirect, useLocalSearchParams } from "expo-router";
+import {
+  Redirect,
+  useLocalSearchParams,
+  useNavigation,
+  useRoute,
+} from "expo-router";
 import { ScannerScreen } from "@/app/(tabs)/scanner";
-import { parseBookingScanParams } from "@/lib/booking-scan-route";
+import {
+  parseBookingScanParams,
+  sitsOnItsBooking,
+} from "@/lib/booking-scan-route";
 
 /**
  * The booking scanner: the camera scanner serving one booking and flow
@@ -13,8 +21,9 @@ import { parseBookingScanParams } from "@/lib/booking-scan-route";
  * was last opened with, so a booking passed to it would still be there the
  * next time someone taps Scan in the tab bar.
  *
- * Without a booking id there is nothing to scan for, so it opens the
- * bookings list instead.
+ * It only runs on top of its own booking (see `sitsOnItsBooking`). Opened any
+ * other way, such as from a link, it opens that booking instead; without a
+ * booking id, the bookings list.
  *
  * @see {@link file://../../../lib/booking-scan-route.ts} the route and params
  * @returns the scanner for the booking named in the route params
@@ -22,10 +31,20 @@ import { parseBookingScanParams } from "@/lib/booking-scan-route";
 export default function BookingScanScreen() {
   const params = useLocalSearchParams<{
     bookingId?: string;
-    bookingName?: string;
     bookingAction?: string;
   }>();
+  const navigation = useNavigation();
+  const route = useRoute();
   const booking = parseBookingScanParams(params);
-  if (!booking) return <Redirect href="/(tabs)/bookings" />;
+
+  if (!booking) return <Redirect href="/(tabs)/bookings" withAnchor />;
+  const routes = navigation.getState()?.routes ?? [];
+  if (!sitsOnItsBooking(routes, route.key, booking.bookingId)) {
+    // Anchored, so the bookings list sits under the booking and back works
+    // even when nothing was beneath the scanner.
+    return (
+      <Redirect href={`/(tabs)/bookings/${booking.bookingId}`} withAnchor />
+    );
+  }
   return <ScannerScreen booking={booking} />;
 }

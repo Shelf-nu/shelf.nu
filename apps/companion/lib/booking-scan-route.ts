@@ -30,8 +30,6 @@ export type BookingScanAction = "checkin" | "checkout" | "add" | "fulfil";
 /** The booking a scanner screen serves, or null for the plain Scan tab. */
 export type BookingScanContext = {
   bookingId: string;
-  /** Shown in the scanner header; empty when the link carried no name. */
-  bookingName: string;
   action: BookingScanAction;
 };
 
@@ -47,24 +45,60 @@ const ACTIONS: readonly BookingScanAction[] = [
 
 /**
  * The href that opens the booking scanner for a booking, for `router.push`
- * from the booking screen (same stack, so back returns to the booking).
+ * from the booking screen (same stack, so back returns to the booking). It
+ * carries no name: the scanner shows the name the server returns.
  *
- * @param booking - the booking's id and name
+ * @param booking - the booking to scan for
  * @param action - the flow to scan for
- * @returns an object href that expo-router encodes, name included
+ * @returns an object href that expo-router encodes
  */
 export function bookingScanHref(
-  booking: { id: string; name: string },
+  booking: { id: string },
   action: BookingScanAction
 ) {
   return {
     pathname: BOOKING_SCAN_PATHNAME,
-    params: {
-      bookingId: booking.id,
-      bookingName: booking.name,
-      bookingAction: action,
-    },
+    params: { bookingId: booking.id, bookingAction: action },
   } as const;
+}
+
+/** Route name of the booking detail screen in the Bookings stack. */
+export const BOOKING_DETAIL_ROUTE_NAME = "[id]";
+
+/** A route in a stack's navigation state: what this module reads of it. */
+export type StackRoute = {
+  key: string;
+  name: string;
+  params?: object;
+};
+
+/**
+ * Whether the booking scanner sits directly on the booking it scans for.
+ *
+ * The booking screen is the only way in: it pushes the scanner on top of
+ * itself. Back and every finished flow then go back one screen, so that
+ * screen must be this booking. A scanner reached any other
+ * way (a link, a stack restored without its booking) opens the booking
+ * instead, and never shows a booking name that came from the link.
+ *
+ * @param routes - the Bookings stack's routes, bottom first
+ * @param ownKey - the booking scanner's own route key, which `routes` may not
+ *   list yet
+ * @param bookingId - the booking the scanner was opened for
+ * @returns true when the route right below the scanner is that booking
+ */
+export function sitsOnItsBooking(
+  routes: readonly StackRoute[],
+  ownKey: string,
+  bookingId: string
+): boolean {
+  const index = routes.findIndex((route) => route.key === ownKey);
+  // The pushed screen renders once before the stack lists it, while the push
+  // is still in flight: then the route below it is the stack's current top.
+  const below = index === -1 ? routes[routes.length - 1] : routes[index - 1];
+  if (below?.name !== BOOKING_DETAIL_ROUTE_NAME) return false;
+  const params = below.params as { id?: unknown } | undefined;
+  return params?.id === bookingId;
 }
 
 /** A route param as expo-router hands it over: absent, one value or repeated. */
@@ -78,13 +112,12 @@ function firstValue(param: RouteParam): string | undefined {
 /**
  * Reads the booking scanner's route params.
  *
- * @param params - `bookingId`, `bookingName` and `bookingAction` from the route
+ * @param params - `bookingId` and `bookingAction` from the route
  * @returns the booking context, or null without a booking id (the screen then
  *   has no booking to scan for). A missing or unknown action is `checkin`.
  */
 export function parseBookingScanParams(params: {
   bookingId?: RouteParam;
-  bookingName?: RouteParam;
   bookingAction?: RouteParam;
 }): BookingScanContext | null {
   const bookingId = firstValue(params.bookingId)?.trim();
@@ -93,9 +126,5 @@ export function parseBookingScanParams(params: {
   const rawAction = firstValue(params.bookingAction);
   const action = ACTIONS.find((a) => a === rawAction) ?? "checkin";
 
-  return {
-    bookingId,
-    bookingName: firstValue(params.bookingName) ?? "",
-    action,
-  };
+  return { bookingId, action };
 }
