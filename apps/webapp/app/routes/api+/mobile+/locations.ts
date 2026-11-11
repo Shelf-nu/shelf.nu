@@ -4,6 +4,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobilePagination } from "~/modules/api/mobile-pagination";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -34,23 +35,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * - The asset create and edit forms send neither and search the response
      *   on the device, so a location missing from that one response cannot be
      *   picked there at all. Without paging params the whole list comes back,
-     *   bounded by `UNPAGED_LOCATIONS_CAP`; `totalPages` above 1 tells the
-     *   client the list was cut.
+     *   up to `UNPAGED_LOCATIONS_CAP`. Those forms read only `locations`, so
+     *   rows past the cap stay out of reach there.
      */
     const isPaged =
       url.searchParams.has("page") || url.searchParams.has("perPage");
-    const page = isPaged
-      ? Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1)
-      : 1;
-    const perPage = isPaged
-      ? Math.min(
-          100,
-          Math.max(
-            1,
-            parseInt(url.searchParams.get("perPage") || "50", 10) || 50
-          )
-        )
-      : UNPAGED_LOCATIONS_CAP;
+    const { page, perPage, skip } = isPaged
+      ? parseMobilePagination(url.searchParams, {
+          defaultPerPage: 50,
+          maxPerPage: 100,
+        })
+      : { page: 1, perPage: UNPAGED_LOCATIONS_CAP, skip: 0 };
 
     const where = {
       organizationId,
@@ -59,22 +54,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
     };
 
-    const [locations, totalCount] = await Promise.all([
+    const [rows, totalCount] = await Promise.all([
       db.location.findMany({
         where,
         select: {
           id: true,
           name: true,
           description: true,
-          image: true,
+          // Never the `image` relation: that row carries the stored file bytes.
+          thumbnailUrl: true,
           parentId: true,
         },
-        orderBy: { name: "asc" },
-        skip: (page - 1) * perPage,
+        // `id` breaks ties between same-named locations so a row never moves
+        // across a page boundary between requests.
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        skip,
         take: perPage,
       }),
       db.location.count({ where }),
     ]);
+
+    // The companion's `Location.image` is a URL string or null.
+    const locations = rows.map(({ thumbnailUrl, ...location }) => ({
+      ...location,
+      image: thumbnailUrl,
+    }));
 
     return data({
       locations,

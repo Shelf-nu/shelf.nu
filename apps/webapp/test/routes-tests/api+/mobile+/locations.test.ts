@@ -41,32 +41,57 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 type Body = {
-  locations: Array<{ id: string; name: string }>;
+  locations: Array<{ id: string; name: string; image: string | null }>;
   page: number;
   perPage: number;
   totalCount: number;
   totalPages: number;
 };
 
-/** A workspace with `n` locations, already in name order. */
-function seedLocations(n: number) {
-  const all = Array.from({ length: n }, (_, i) => ({
-    id: `loc-${i + 1}`,
-    name: `Room ${String(i + 1).padStart(4, "0")}`,
-    description: null,
-    image: null,
-    parentId: null,
-  }));
+type FindManyArgs = {
+  where?: { name?: { contains: string } };
+  skip?: number;
+  take?: number;
+};
 
-  vi.mocked(db.location.findMany).mockImplementation(((args?: {
-    skip?: number;
-    take?: number;
-  }) => {
+/**
+ * A workspace with `n` locations named "Room 0001" upwards, plus `others`
+ * named "Shelf 0001" upwards, already in name order. The mocks apply the
+ * name search, `skip` and `take` the way the database would.
+ */
+function seedLocations(n: number, others = 0) {
+  const row = (prefix: string, i: number) => ({
+    id: `${prefix.toLowerCase()}-${i + 1}`,
+    name: `${prefix} ${String(i + 1).padStart(4, "0")}`,
+    description: null,
+    thumbnailUrl: `https://img.example.com/${prefix}-${i + 1}.jpg`,
+    parentId: null,
+  });
+  const all = [
+    ...Array.from({ length: n }, (_, i) => row("Room", i)),
+    ...Array.from({ length: others }, (_, i) => row("Shelf", i)),
+  ];
+  const matching = (args?: FindManyArgs) => {
+    const needle = args?.where?.name?.contains?.toLowerCase();
+    return needle
+      ? all.filter((l) => l.name.toLowerCase().includes(needle))
+      : all;
+  };
+
+  vi.mocked(db.location.findMany).mockImplementation(((args?: FindManyArgs) => {
     const skip = args?.skip ?? 0;
     const end = args?.take === undefined ? undefined : skip + args.take;
-    return Promise.resolve(all.slice(skip, end));
+    return Promise.resolve(matching(args).slice(skip, end));
   }) as unknown as typeof db.location.findMany);
-  vi.mocked(db.location.count).mockResolvedValue(n);
+  vi.mocked(db.location.count).mockImplementation(((args?: FindManyArgs) =>
+    Promise.resolve(
+      matching(args).length
+    )) as unknown as typeof db.location.count);
+}
+
+/** The arguments of the last location query the loader ran. */
+function lastFindManyArgs() {
+  return vi.mocked(db.location.findMany).mock.calls.at(-1)?.[0];
 }
 
 async function get(query = "") {
@@ -95,17 +120,31 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
     const body = await get();
 
     expect(body.locations).toHaveLength(76);
-    expect(body.locations.at(-1)?.id).toBe("loc-76");
+    expect(body.locations.at(-1)?.id).toBe("room-76");
     expect(body).toMatchObject({ page: 1, totalCount: 76, totalPages: 1 });
+    expect(lastFindManyArgs()).toMatchObject({
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      skip: 0,
+    });
   });
 
-  it("returns every match for a search", async () => {
-    seedLocations(120);
+  it("returns every match for a search, and only matches", async () => {
+    seedLocations(120, 30);
 
     const body = await get("&search=room");
 
     expect(body.locations).toHaveLength(120);
-    expect(body.totalPages).toBe(1);
+    expect(body.locations.every((l) => l.name.startsWith("Room"))).toBe(true);
+    expect(body).toMatchObject({ totalCount: 120, totalPages: 1 });
+  });
+
+  it("sends the thumbnail URL as the image, never the stored image row", async () => {
+    seedLocations(1);
+
+    const body = await get();
+
+    expect(body.locations[0]?.image).toBe("https://img.example.com/Room-1.jpg");
+    expect(lastFindManyArgs()?.select).not.toHaveProperty("image");
   });
 
   it("stops at the hard cap and reports the remaining pages", async () => {
@@ -130,7 +169,7 @@ describe("GET /api/mobile/locations: paged requests", () => {
     const body = await get("&page=2&perPage=50");
 
     expect(body.locations).toHaveLength(26);
-    expect(body.locations[0]?.id).toBe("loc-51");
+    expect(body.locations[0]?.id).toBe("room-51");
     expect(body).toMatchObject({
       page: 2,
       perPage: 50,
@@ -164,5 +203,14 @@ describe("GET /api/mobile/locations: paged requests", () => {
 
     expect(body.locations).toHaveLength(100);
     expect(body).toMatchObject({ perPage: 100, totalPages: 2 });
+  });
+
+  it("falls back to the first page when the requested page cannot be reached", async () => {
+    seedLocations(76);
+
+    const body = await get("&page=99999999999999999999&perPage=50");
+
+    expect(body.locations[0]?.id).toBe("room-1");
+    expect(body).toMatchObject({ page: 1, perPage: 50 });
   });
 });
