@@ -385,19 +385,18 @@ export const handleDetection = async ({
   if (!result || paused) return;
 
   /**
-   * The QR heuristics below are host-agnostic, so they only get to speak when
-   * the caller has not already classified the code. A `barcodeType` means it
-   * has: the camera path decides against `isShelfQrCode`, which knows our own
-   * host and the shortener, and sends `ExternalQR` precisely for a QR that is
-   * NOT ours. Letting the pattern re-read that as a Shelf id claims somebody
-   * else's QR code, and a structured barcode whose value happens to read like a
-   * cuid would be claimed the same way.
+   * The QR checks below only speak when the caller has not already classified
+   * the code. A `barcodeType` means it has: the camera path decides against
+   * `isShelfQrCode` and sends `ExternalQR` precisely for a QR that is NOT ours,
+   * and a structured barcode whose value happens to read like a cuid must not
+   * be claimed as a QR id either.
+   *
+   * Without a type (a handheld scanner, or a Shelf QR from the camera), the
+   * same `isShelfQrCode` decides: a url on our own host or shortener is read as
+   * a Shelf QR, and a url on any other host falls through to the barcode
+   * lookup as `ExternalQR`.
    */
   if (!barcodeType) {
-    // Check if it's a QR code (URL pattern). Only a url on our own host or
-    // shortener is ours: a handheld scanner sends every QR here unclassified,
-    // and a url on another host is an outside QR that falls through to the
-    // barcode lookup as ExternalQR, as the camera path sends it.
     const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
     const qrMatch = isShelfQrCode(result) ? result.match(qrRegex) : null;
 
