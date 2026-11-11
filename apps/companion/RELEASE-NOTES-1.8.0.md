@@ -83,13 +83,13 @@ commit), and tick each one with the device and date:
 - [x] **Deep links:** `shelf://assets/<id>` with the app closed opens the
       asset. (iPhone Air, build 44, 2026-11-10: pass.) Not checked: kit and
       booking links, Android.
-- [ ] **Universal links / app links:** an `app.shelf.nu` asset link opens the
+- [x] **Universal links / app links:** an `app.shelf.nu` asset link opens the
       asset with the app open, and so does `app.shelf.nu/qr/<id>` (where
-      `eam.sh` labels redirect). **Failed with the app closed:** an
-      `app.shelf.nu` asset link tapped in Notes opens Home (iPhone Air,
-      build 44, 2026-11-10). Fix pending in #3385, to ship as an OTA on
-      runtime 1.8.0 and be retested here. Not checked: kit and booking
-      links, Android.
+      `eam.sh` labels redirect). With the app closed, build 44 opened Home;
+      fixed by #3385 and shipped as an OTA on runtime 1.8.0 (update group
+      `5bc3a497`). Retested on the iPhone after the OTA applied: the link
+      tapped in Notes with the app closed opens the asset. (iPhone Air,
+      2026-11-11: pass.) Not checked: kit and booking links, Android.
 - [x] **Android compile:** a clean Android build of the release commit
       succeeds. (EAS production build of `e49568afa`, 2026-11-10.)
 - [x] **iOS release archive:** build 44 installs from TestFlight, launches,
