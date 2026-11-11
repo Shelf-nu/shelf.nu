@@ -7,10 +7,16 @@ import {
 import { makeShelfError } from "~/utils/error";
 
 /**
- * GET /api/mobile/locations?orgId=xxx&search=yyy
+ * Most locations returned to a request that sends no paging params. Keeps one
+ * response bounded while covering every realistic workspace in full.
+ */
+const UNPAGED_LOCATIONS_CAP = 1000;
+
+/**
+ * GET /api/mobile/locations?orgId=xxx&search=yyy[&page=n][&perPage=n]
  *
- * Returns all locations for the organization.
- * Used by the mobile app's location picker.
+ * Returns the organization's locations, ordered by name, for the companion
+ * app's location picker and its asset create and edit forms.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -21,21 +27,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const search = url.searchParams.get("search") || "";
 
     /**
-     * Pagination. The picker must be able to reach EVERY location, not just
-     * the first page — a workspace with more rooms than one page could not
-     * place an asset in the ones past the cut, and search only helps someone
-     * who already knows the name they are looking for.
+     * Two kinds of caller share this endpoint:
      *
-     * Defaults keep older clients working unchanged: no params means page 1.
+     * - The full-screen location picker pages explicitly with `page` and/or
+     *   `perPage` (50 per page by default, at most 100).
+     * - The asset create and edit forms send neither and search the response
+     *   on the device, so a location missing from that one response cannot be
+     *   picked there at all. Without paging params the whole list comes back,
+     *   bounded by `UNPAGED_LOCATIONS_CAP`; `totalPages` above 1 tells the
+     *   client the list was cut.
      */
-    const page = Math.max(
-      1,
-      parseInt(url.searchParams.get("page") || "1", 10) || 1
-    );
-    const perPage = Math.min(
-      100,
-      Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
-    );
+    const isPaged =
+      url.searchParams.has("page") || url.searchParams.has("perPage");
+    const page = isPaged
+      ? Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1)
+      : 1;
+    const perPage = isPaged
+      ? Math.min(
+          100,
+          Math.max(
+            1,
+            parseInt(url.searchParams.get("perPage") || "50", 10) || 50
+          )
+        )
+      : UNPAGED_LOCATIONS_CAP;
 
     const where = {
       organizationId,
