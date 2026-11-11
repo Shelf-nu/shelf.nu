@@ -90,6 +90,9 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
     // origin-allowlist sanitization the action now depends on (safeRedirect's
     // own edge cases are unit-tested in http.server.test.ts).
     safeRedirect: actual.safeRedirect,
+    // why: real, so the loader reads the Models tab search and page off the
+    // request URL exactly as it does in production.
+    getCurrentSearchParams: actual.getCurrentSearchParams,
   };
 });
 
@@ -1229,7 +1232,8 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1264,7 +1268,8 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1277,25 +1282,26 @@ describe("manage-kits loader — Models tab payload", () => {
     expect(result).toMatchObject({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
     });
   });
 
-  it("wires the helper's Models tab payload through, shipping both crash-guard keys", async () => {
-    // Omitting either `initialAssetModels` or `totalAssetModels` crashes the
-    // Models tab the moment it mounts: `useModelFilters` maps over
-    // `initialData["initialAssetModels"]` / `["totalAssetModels"]`
-    // (`use-model-filters.ts:96-103`), so this test asserts BOTH keys are
-    // present, not just that the tab is shown.
+  it("wires the helper's Models tab payload through, including its paging", async () => {
+    // The Models tab renders its table and pagination straight from these
+    // keys, so every one must reach the component unchanged.
     const mockModelTabData = {
       showModelsTab: true,
       assetModels: [
         {
           id: "model1",
           name: "Dell XPS",
+          image: null,
+          thumbnailImage: null,
+          defaultCategory: null,
           total: 5,
           available: 3,
           reservedConcrete: 1,
@@ -1303,21 +1309,10 @@ describe("manage-kits loader — Models tab payload", () => {
           inCustody: 0,
         },
       ],
-      initialAssetModels: [
-        {
-          id: "model1",
-          name: "Dell XPS",
-          metadata: {
-            total: 5,
-            available: 3,
-            reservedConcrete: 1,
-            reservedViaRequest: 1,
-            inCustody: 0,
-          },
-        },
-      ],
       totalAssetModels: 1,
       matchedAssetModels: 1,
+      modelsPage: 1,
+      modelsPerPage: 50,
       modelRequests: [
         {
           assetModelId: "model1",
@@ -1336,13 +1331,14 @@ describe("manage-kits loader — Models tab payload", () => {
       createLoaderArgs({ context: mockContext, params: mockParams })
     );
 
-    expect(result).toHaveProperty("initialAssetModels");
+    expect(result).toHaveProperty("modelsPage");
     expect(result).toHaveProperty("totalAssetModels");
     expect((result as any).totalAssetModels).toBe(1);
     expect(result).toMatchObject({
       showModelsTab: true,
       assetModels: mockModelTabData.assetModels,
-      initialAssetModels: mockModelTabData.initialAssetModels,
+      modelsPage: mockModelTabData.modelsPage,
+      modelsPerPage: mockModelTabData.modelsPerPage,
       totalAssetModels: mockModelTabData.totalAssetModels,
       matchedAssetModels: mockModelTabData.totalAssetModels,
       modelRequests: mockModelTabData.modelRequests,
@@ -1358,7 +1354,8 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: true,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 1,
       matchedAssetModels: 1,
       modelRequests: [],
@@ -1371,6 +1368,35 @@ describe("manage-kits loader — Models tab payload", () => {
     expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
       organizationId: "org123",
       booking: mockLoaderBooking,
+    });
+  });
+
+  it("forwards the Models tab search and page from the URL", async () => {
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: true,
+      assetModels: [],
+      totalAssetModels: 1,
+      matchedAssetModels: 0,
+      modelsPage: 2,
+      modelsPerPage: 50,
+      modelRequests: [],
+    });
+
+    await loader(
+      createLoaderArgs({
+        context: mockContext,
+        params: mockParams,
+        request: new Request(
+          "http://localhost:3000/bookings/booking123/overview/manage-kits?s=kit&modelSearch=dell&modelPage=2"
+        ),
+      })
+    );
+
+    expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
+      organizationId: "org123",
+      booking: mockLoaderBooking,
+      search: "dell",
+      page: 2,
     });
   });
 
@@ -1418,7 +1444,8 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1496,7 +1523,8 @@ describe("manage-kits loader — Models tab payload", () => {
       vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
         showModelsTab: false,
         assetModels: [],
-        initialAssetModels: [],
+        modelsPage: 1,
+        modelsPerPage: 50,
         totalAssetModels: 0,
         matchedAssetModels: 0,
         modelRequests: [],
@@ -1603,7 +1631,8 @@ describe("manage-kits loader — Models tab payload", () => {
       vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
         showModelsTab: false,
         assetModels: [],
-        initialAssetModels: [],
+        modelsPage: 1,
+        modelsPerPage: 50,
         totalAssetModels: 0,
         matchedAssetModels: 0,
         modelRequests: [],
@@ -1715,7 +1744,8 @@ describe("manage-kits loader: ownership gate", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],

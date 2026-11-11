@@ -8,7 +8,10 @@ import {
   getModelPoolRemaining,
   getModelRequestQuantityIssue,
   getOutstandingModelRequests,
-  isModelPoolOverCommitted,
+  isReservationOverCommitted,
+  MODEL_TAB_PAGE_PARAM,
+  MODEL_TAB_SEARCH_PARAM,
+  readModelTabParams,
   summarizeUnassignedUnits,
 } from "./booking-model-requests";
 
@@ -272,7 +275,8 @@ describe("summarizeUnassignedUnits", () => {
   });
 });
 
-describe("isModelPoolOverCommitted", () => {
+describe("isReservationOverCommitted", () => {
+  /** Pool counts as the loader supplies them: this booking left out. */
   const counts = {
     total: 5,
     inCustody: 0,
@@ -280,35 +284,33 @@ describe("isModelPoolOverCommitted", () => {
     reservedViaRequest: 0,
   };
 
-  it("is false when the promises fit the stock", () => {
-    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 3 })).toBe(
-      false
-    );
-  });
-
-  it("is false when the stock is exactly spoken for", () => {
-    // The boundary matters: exactly-empty is not over-committed, and it is the
-    // case an off-by-one here would misreport as a shortfall on every full pool.
-    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 5 })).toBe(
-      false
-    );
-  });
-
-  it("is true when more units are promised than exist", () => {
-    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 6 })).toBe(
-      true
-    );
-  });
-
-  it("counts custody and both kinds of reservation against the pool", () => {
-    // 5 total − 2 in custody − 2 concrete − 2 via request = −1.
+  it("is false when the reservation fits what the pool leaves", () => {
     expect(
-      isModelPoolOverCommitted({
-        total: 5,
-        inCustody: 2,
-        reservedConcrete: 2,
-        reservedViaRequest: 2,
-      })
+      isReservationOverCommitted({ ...counts, reservedConcrete: 2 }, 3)
+    ).toBe(false);
+  });
+
+  it("is false when the reservation takes exactly what is left", () => {
+    // The boundary matters: a full pool is not over-committed, and it is the
+    // case an off-by-one here would misreport as a shortfall.
+    expect(
+      isReservationOverCommitted({ ...counts, reservedConcrete: 3 }, 2)
+    ).toBe(false);
+  });
+
+  it("is true when the reservation asks for more than is left", () => {
+    expect(
+      isReservationOverCommitted({ ...counts, reservedConcrete: 3 }, 3)
+    ).toBe(true);
+  });
+
+  it("counts custody and both kinds of other reservation against the pool", () => {
+    // 5 total - 1 in custody - 1 concrete - 1 via request = 2 left for 3.
+    expect(
+      isReservationOverCommitted(
+        { total: 5, inCustody: 1, reservedConcrete: 1, reservedViaRequest: 1 },
+        3
+      )
     ).toBe(true);
   });
 });
@@ -436,5 +438,33 @@ describe("getModelRequestQuantityIssue", () => {
     );
     // No capacity to judge against, so any quantity above the floor passes.
     expect(getModelRequestQuantityIssue(99, unknownPool)).toBeNull();
+  });
+});
+
+describe("readModelTabParams", () => {
+  /** Builds the URL params the Models tab writes. */
+  const params = (search?: string, page?: string) => {
+    const p = new URLSearchParams({ s: "asset search" });
+    if (search !== undefined) p.set(MODEL_TAB_SEARCH_PARAM, search);
+    if (page !== undefined) p.set(MODEL_TAB_PAGE_PARAM, page);
+    return p;
+  };
+
+  it("reads the trimmed model search and page", () => {
+    expect(readModelTabParams(params("  dell ", "3"))).toEqual({
+      search: "dell",
+      page: 3,
+    });
+  });
+
+  it("ignores the asset list's own search", () => {
+    expect(readModelTabParams(params())).toEqual({});
+  });
+
+  it("omits a blank search and any page that is not a whole number above 1", () => {
+    expect(readModelTabParams(params("   ", "1"))).toEqual({});
+    expect(readModelTabParams(params(undefined, "0"))).toEqual({});
+    expect(readModelTabParams(params(undefined, "2.5"))).toEqual({});
+    expect(readModelTabParams(params(undefined, "abc"))).toEqual({});
   });
 });

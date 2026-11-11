@@ -2204,6 +2204,12 @@ type BookingForModelTab = {
 type BookingModelTabAssetModel = {
   id: string;
   name: string;
+  /** Public URL of the model's cover image, or null when it has none. */
+  image: string | null;
+  /** Public URL of the list-size thumbnail generated alongside `image`. */
+  thumbnailImage: string | null;
+  /** Category new assets of this model start in, when the model sets one. */
+  defaultCategory: { id: string; name: string; color: string } | null;
   total: number;
   available: number;
   reservedConcrete: number;
@@ -2217,19 +2223,7 @@ export type BookingModelTabData = {
   showModelsTab: boolean;
   /** Per-model availability for the current booking's window. */
   assetModels: BookingModelTabAssetModel[];
-  /** `assetModels` reshaped for {@link DynamicSelect}'s seed list. */
-  initialAssetModels: Array<{
-    id: string;
-    name: string;
-    metadata: {
-      total: number;
-      available: number;
-      reservedConcrete: number;
-      reservedViaRequest: number;
-      inCustody: number;
-    };
-  }>;
-  /** Full-org model count (not the truncated `MODEL_PICKER_LIMIT` list). */
+  /** Full-org model count, regardless of search or page. */
   totalAssetModels: number;
   /**
    * How many models match the current `search` (equals `totalAssetModels`
@@ -2238,6 +2232,13 @@ export type BookingModelTabData = {
    * full-org count, to know when it has reached the end.
    */
   matchedAssetModels: number;
+  /**
+   * 1-based page `assetModels` was read from. Named apart from `page` because
+   * the loaders spread this payload beside their own asset/kit list paging.
+   */
+  modelsPage: number;
+  /** Page size `assetModels` was read with; pairs with `matchedAssetModels`. */
+  modelsPerPage: number;
   /** This booking's existing model-level requests, outstanding + fulfilled. */
   modelRequests: Array<{
     assetModelId: string;
@@ -2254,8 +2255,9 @@ export type BookingModelTabData = {
  *
  * Always counts the org's `AssetModel`s so the UI knows whether to render
  * the Models tab at all (hidden when the org has none). When there is at
- * least one model, also fetches the first `MODEL_PICKER_LIMIT` (sorted by
- * name) plus each one's availability in the booking's window, and projects
+ * least one model, also fetches one page of models (sorted by name, with
+ * image and default category) plus each one's availability in the booking's
+ * window, and projects
  * the booking's existing model-level requests for the tab's "active /
  * fulfilled" split.
  *
@@ -2267,11 +2269,8 @@ export type BookingModelTabData = {
  * scopes both the model count and list, preventing cross-org leakage.
  * @param booking - The booking these models are being reserved against.
  * Only `id`, `from`, `to`, and `modelRequests` are read.
- * @param search - Optional case-insensitive name filter. The seed list is
- * capped at `MODEL_PICKER_LIMIT`, so without this a model sorting after the
- * cap is unreachable. The web's DynamicSelect searches beyond the seed via
- * the `model-filters` endpoint; passing `search` here gives the same reach
- * to callers (e.g. the mobile picker) that render this list directly.
+ * @param search - Optional case-insensitive name filter. A page holds at most
+ * `perPage` models, so search and `page` are how a caller reaches the rest.
  * `totalAssetModels` stays the full-org count so "showing N of M" is honest.
  * @returns The Models tab payload; see {@link BookingModelTabData}.
  */
@@ -2285,16 +2284,9 @@ export async function getBookingModelTabData({
   organizationId: string;
   booking: BookingForModelTab;
   search?: string;
-  /**
-   * 1-based page for callers that paginate the model list (the mobile
-   * picker). Omitted by the web loaders, which render a seed list and reach
-   * the rest through search — they keep the historical single-page shape.
-   */
+  /** 1-based page of the model list. Defaults to the first page. */
   page?: number;
-  /**
-   * Page size for paginating callers. Defaults to `MODEL_PICKER_LIMIT` so
-   * omitting both params reproduces the pre-pagination behaviour exactly.
-   */
+  /** Page size, capped at 100. Defaults to `MODEL_PICKER_LIMIT`. */
   perPage?: number;
 }): Promise<BookingModelTabData> {
   try {
@@ -2338,7 +2330,13 @@ export async function getBookingModelTabData({
     if (showModelsTab) {
       const rawModels = await db.assetModel.findMany({
         where: { organizationId, ...searchWhere },
-        select: { id: true, name: true },
+        select: {
+          id: true,
+          name: true,
+          image: true,
+          thumbnailImage: true,
+          defaultCategory: { select: { id: true, name: true, color: true } },
+        },
         /**
          * `AssetModel.name` is NOT unique, so name alone is not a stable sort:
          * tied rows can repeat on one page and vanish from the next, leaving
@@ -2365,6 +2363,9 @@ export async function getBookingModelTabData({
       assetModels = rawModels.map((m, i) => ({
         id: m.id,
         name: m.name,
+        image: m.image,
+        thumbnailImage: m.thumbnailImage,
+        defaultCategory: m.defaultCategory,
         total: availabilities[i].total,
         available: availabilities[i].available,
         reservedConcrete: availabilities[i].reservedConcrete,
@@ -2388,28 +2389,13 @@ export async function getBookingModelTabData({
           : req.fulfilledAt,
     }));
 
-    // Shape for `DynamicSelect`. The picker reads `initialAssetModels` as
-    // its seed list and `totalAssetModels` to decide whether to offer the
-    // "show all / search" affordance. Availability goes on `metadata` so
-    // the renderItem can show e.g. "5 / 5 available" inline per option.
-    const initialAssetModels = assetModels.map((m) => ({
-      id: m.id,
-      name: m.name,
-      metadata: {
-        total: m.total,
-        available: m.available,
-        reservedConcrete: m.reservedConcrete,
-        reservedViaRequest: m.reservedViaRequest,
-        inCustody: m.inCustody,
-      },
-    }));
-
     return {
       showModelsTab,
       assetModels,
-      initialAssetModels,
       totalAssetModels: assetModelsCount,
       matchedAssetModels,
+      modelsPage: effectivePage,
+      modelsPerPage: effectivePerPage,
       modelRequests,
     };
   } catch (cause) {

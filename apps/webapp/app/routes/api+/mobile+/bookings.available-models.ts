@@ -140,9 +140,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       perPage,
     });
 
-    // Trim to a mobile-friendly payload. Drop the web-only `initialAssetModels`
-    // (shaped for the web DynamicSelect seed list) — the app renders its own
-    // list from `assetModels`.
+    // Trim to a mobile-friendly payload: the app renders its own list from
+    // `assetModels` and needs only the availability fields of each model.
     return data({
       // Whether the workspace has any AssetModel at all (hides the picker).
       showModelsTab: modelTabData.showModelsTab,

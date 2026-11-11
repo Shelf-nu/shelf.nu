@@ -102,9 +102,10 @@ beforeEach(() => {
   getTabDataMock.mockResolvedValue({
     showModelsTab: true,
     assetModels: [],
-    initialAssetModels: [],
     totalAssetModels: 0,
     matchedAssetModels: 0,
+    modelsPage: 1,
+    modelsPerPage: 50,
     modelRequests: [],
   });
 });
@@ -205,7 +206,7 @@ describe("GET /api/mobile/bookings/available-models", () => {
     expect(getTabDataMock).not.toHaveBeenCalled();
   });
 
-  it("trims the payload to the mobile shape (drops initialAssetModels)", async () => {
+  it("trims each model to the mobile shape (drops the web-only display fields)", async () => {
     withRole(OrganizationRoles.ADMIN);
     getTabDataMock.mockResolvedValue({
       showModelsTab: true,
@@ -213,6 +214,9 @@ describe("GET /api/mobile/bookings/available-models", () => {
         {
           id: "m-1",
           name: "Dell XPS",
+          image: "https://cdn.example/dell.jpg",
+          thumbnailImage: "https://cdn.example/dell-thumb.jpg",
+          defaultCategory: { id: "c-1", name: "Laptops", color: "#123456" },
           total: 10,
           available: 6,
           inCustody: 1,
@@ -220,11 +224,10 @@ describe("GET /api/mobile/bookings/available-models", () => {
           reservedViaRequest: 1,
         },
       ],
-      initialAssetModels: [
-        { id: "m-1", name: "Dell XPS", metadata: {} as never },
-      ],
       totalAssetModels: 1,
       matchedAssetModels: 1,
+      modelsPage: 1,
+      modelsPerPage: 50,
       modelRequests: [
         {
           assetModelId: "m-1",
@@ -240,17 +243,25 @@ describe("GET /api/mobile/bookings/available-models", () => {
     assertIsDataWithResponseInit(response);
     const body = response.data as {
       showModelsTab: boolean;
-      assetModels: Array<{ id: string; available: number }>;
+      assetModels: Array<Record<string, unknown>>;
       totalAssetModels: number;
       modelRequests: Array<{ assetModelId: string }>;
-      initialAssetModels?: unknown;
     };
 
     expect(body.showModelsTab).toBe(true);
     expect(body.assetModels[0]).toMatchObject({ id: "m-1", available: 6 });
     expect(body.totalAssetModels).toBe(1);
     expect(body.modelRequests[0]).toMatchObject({ assetModelId: "m-1" });
-    // Web-only seed list must NOT leak into the mobile payload.
-    expect(body.initialAssetModels).toBeUndefined();
+    // The app's contract is the availability fields only; the web table's
+    // image and category stay out of the mobile payload.
+    expect(Object.keys(body.assetModels[0]).sort()).toEqual([
+      "available",
+      "id",
+      "inCustody",
+      "name",
+      "reservedConcrete",
+      "reservedViaRequest",
+      "total",
+    ]);
   });
 });

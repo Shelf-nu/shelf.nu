@@ -236,18 +236,27 @@ export function getModelPoolRemaining(counts: ModelPoolCounts): number {
 }
 
 /**
- * Whether more units of a model are promised over this window than exist.
+ * Whether a booking reserves more units of a model than the pool can give it
+ * over the window.
+ *
+ * The pool counts leave the booking being edited out, so the remainder is
+ * everything this booking may hold, including the units it already reserves.
+ * The reservation is over-committed when it asks for more than that.
  *
  * Reservations are a read-then-decide, so two operators reserving at once can
  * both be told there is room and both commit; the pool then owes more than it
  * holds and somebody arrives to an empty shelf. This is the state the
  * "Over-reserved" badge exists to show.
  *
- * @param counts - The model's pool counts, as the loader supplies them.
- * @returns `true` when the promises exceed the stock.
+ * @param counts - The model's pool counts, excluding this booking.
+ * @param reservedHere - Units this booking reserves of the model.
+ * @returns `true` when the reservation exceeds what the pool can supply.
  */
-export function isModelPoolOverCommitted(counts: ModelPoolCounts): boolean {
-  return getModelPoolRemaining(counts) < 0;
+export function isReservationOverCommitted(
+  counts: ModelPoolCounts,
+  reservedHere: number
+): boolean {
+  return getModelPoolRemaining(counts) < reservedHere;
 }
 
 /** The bounds a model reservation's quantity is judged against. */
@@ -258,9 +267,9 @@ export type ModelRequestQuantityBounds = {
    */
   floor: number;
   /**
-   * Units this booking may climb to — `null` when the pool is unknown, as it is
-   * for a model fetched via typeahead beyond the seed list. May be zero or
-   * negative when other bookings owe more than the pool holds.
+   * Units this booking may climb to: the pool's signed remainder, which already
+   * counts this booking's own units as free. `null` when the pool is unknown.
+   * May be zero or negative when other bookings owe more than the pool holds.
    */
   capacity: number | null;
   /** The reservation's stored quantity, which a change is measured against. */
@@ -354,4 +363,34 @@ export function summarizeUnassignedUnits(
 
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * URL parameter holding the Models tab's search text on the booking
+ * manage-assets / manage-kits dialogs. Separate from the asset list's `s` so
+ * searching one tab never filters the other.
+ */
+export const MODEL_TAB_SEARCH_PARAM = "modelSearch";
+
+/** URL parameter holding the Models tab's 1-based page. See above. */
+export const MODEL_TAB_PAGE_PARAM = "modelPage";
+
+/**
+ * Reads the Models tab's search and page from the request URL, in the shape
+ * `getBookingModelTabData` takes.
+ *
+ * @param searchParams - The request's search params.
+ * @returns `search` (trimmed, omitted when blank) and `page` (omitted unless a
+ *   whole number above 1).
+ */
+export function readModelTabParams(searchParams: URLSearchParams): {
+  search?: string;
+  page?: number;
+} {
+  const search = searchParams.get(MODEL_TAB_SEARCH_PARAM)?.trim();
+  const page = Number(searchParams.get(MODEL_TAB_PAGE_PARAM));
+  return {
+    ...(search ? { search } : {}),
+    ...(Number.isInteger(page) && page > 1 ? { page } : {}),
+  };
 }
