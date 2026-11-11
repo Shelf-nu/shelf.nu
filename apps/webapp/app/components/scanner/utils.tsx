@@ -287,27 +287,15 @@ export const processFrame = async ({
 
       // Check if it's a QR code first
       if (detectedFormat === "QRCode") {
-        // Check if it's a Shelf QR code by checking against known Shelf QR patterns
-        const isShelfQr = isShelfQrCode(result.text);
-
-        if (isShelfQr) {
-          // Handle as Shelf QR code
-          await handleDetection({
-            result: result.text,
-            onCodeDetectionSuccess,
-            allowNonShelfCodes,
-            paused,
-          });
-        } else {
-          // Handle as external QR code (treat as ExternalQR barcode type)
-          await handleDetection({
-            result: result.text,
-            onCodeDetectionSuccess,
-            allowNonShelfCodes,
-            paused,
-            barcodeType: "ExternalQR",
-          });
-        }
+        // A QR carries no barcode type: handleDetection decides whether it is
+        // a Shelf QR or an outside one, the same way it does for a handheld
+        // scanner.
+        await handleDetection({
+          result: result.text,
+          onCodeDetectionSuccess,
+          allowNonShelfCodes,
+          paused,
+        });
       } else if (
         SUPPORTED_BARCODE_FORMATS.includes(normalizeZxingFormat(detectedFormat))
       ) {
@@ -385,16 +373,14 @@ export const handleDetection = async ({
   if (!result || paused) return;
 
   /**
-   * The QR checks below only speak when the caller has not already classified
-   * the code. A `barcodeType` means it has: the camera path decides against
-   * `isShelfQrCode` and sends `ExternalQR` precisely for a QR that is NOT ours,
-   * and a structured barcode whose value happens to read like a cuid must not
-   * be claimed as a QR id either.
+   * The one place a scanned code is classified, for the camera and a handheld
+   * scanner alike. A QR arrives without a `barcodeType`; `isShelfQrCode` (our
+   * own host, the shortener or a raw id) decides whether it is ours, and a url
+   * on any other host falls through to the barcode lookup as `ExternalQR`.
    *
-   * Without a type (a handheld scanner, or a Shelf QR from the camera), the
-   * same `isShelfQrCode` decides: a url on our own host or shortener is read as
-   * a Shelf QR, and a url on any other host falls through to the barcode
-   * lookup as `ExternalQR`.
+   * A `barcodeType` means the camera read a structured barcode and knows its
+   * format, so the QR checks do not speak: a Code128 whose value happens to
+   * read like a cuid must not be claimed as a QR id.
    */
   if (!barcodeType) {
     const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;

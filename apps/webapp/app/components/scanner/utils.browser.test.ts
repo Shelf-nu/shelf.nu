@@ -34,7 +34,12 @@ window.env = {
   SUPPORT_EMAIL: "support@shelf.nu",
 } as unknown as typeof window.env;
 
+// why: code-scanner renders a lottie animation on success, and lottie paints
+// on a canvas at import time, which the test DOM does not provide.
+vi.mock("./success-animation", () => ({ default: () => null }));
+
 const { processFrame } = await import("./utils");
+const { handleScannerInputValue } = await import("./code-scanner");
 
 /** A value `isQrId` accepts: 10 characters, lowercase, leading letter. */
 const QR_ID = "abc1234567";
@@ -95,9 +100,59 @@ describe("processFrame in the browser", () => {
     ).resolves.toEqual({ value: QR_ID, type: "qr", error: undefined });
   });
 
+  it("treats a /qr/ url on somebody else's host as external", async () => {
+    await expect(
+      scanQr("http://other-vendor.example/qr/01383d6c")
+    ).resolves.toEqual({
+      value: "http://other-vendor.example/qr/01383d6c",
+      type: "barcode",
+      barcodeType: "ExternalQR",
+    });
+  });
+
   it("still treats a QR on somebody else's host as external", async () => {
     await expect(scanQr(`https://example.com/${QR_ID}`)).resolves.toEqual({
       value: `https://example.com/${QR_ID}`,
+      type: "barcode",
+      barcodeType: "ExternalQR",
+    });
+  });
+});
+
+describe("a handheld scanner in the browser", () => {
+  // A keyboard-wedge scanner types the code into an input, so it reaches
+  // handleDetection without a format, and must get the camera's answer.
+  async function typeIn(rawValue: string) {
+    await handleScannerInputValue({
+      rawValue,
+      paused: false,
+      onCodeDetectionSuccess,
+      allowNonShelfCodes: false,
+    });
+
+    expect(onCodeDetectionSuccess).toHaveBeenCalledTimes(1);
+    return onCodeDetectionSuccess.mock.calls[0][0];
+  }
+
+  it("reads a shortener label as a Shelf QR", async () => {
+    await expect(typeIn(`https://eam.sh/${QR_ID}`)).resolves.toEqual({
+      value: QR_ID,
+      type: "qr",
+      error: undefined,
+    });
+  });
+
+  it("reads a label pointing at this app's own /qr route as a Shelf QR", async () => {
+    await expect(
+      typeIn(`${window.location.origin}/qr/${QR_ID}`)
+    ).resolves.toEqual({ value: QR_ID, type: "qr", error: undefined });
+  });
+
+  it("treats a /qr/ url on somebody else's host as external", async () => {
+    await expect(
+      typeIn("http://other-vendor.example/qr/01383d6c")
+    ).resolves.toEqual({
+      value: "http://other-vendor.example/qr/01383d6c",
       type: "barcode",
       barcodeType: "ExternalQR",
     });

@@ -1,12 +1,10 @@
 /**
  * Classifying a scanned code.
  *
- * `handleDetection` is reached from two places, and only one of them knows
- * anything about the code: the camera path recognises the format and, for a QR,
- * decides against `isShelfQrCode` whether the host is ours, then passes a
- * `barcodeType`. The manual-entry path passes none. So `barcodeType` is the
- * caller's answer to "what is this", and the QR heuristics here are for the case
- * where nobody has answered yet.
+ * `handleDetection` classifies every scan. The camera passes a `barcodeType`
+ * only for a structured barcode whose format it read; a QR from the camera and
+ * anything a handheld scanner types arrive without one, and `isShelfQrCode`
+ * decides whether a url is ours or an outside QR.
  *
  * @see {@link file://./utils.tsx}
  */
@@ -148,9 +146,8 @@ describe("a handheld scanner", () => {
 });
 
 describe("handleDetection with an external QR", () => {
-  // The camera path sends ExternalQR only after isShelfQrCode has said the host
-  // is not ours, so the url here is settled: it is somebody else's QR code and
-  // belongs to the caller's chosen type.
+  // A caller that already knows the code is an outside QR keeps its value as
+  // is, even when the tail reads like a QR id.
   it("keeps an external url whose tail looks like a QR id", async () => {
     expect(
       await detect(`https://example.com/${QR_ID}`, BarcodeType.ExternalQR)
