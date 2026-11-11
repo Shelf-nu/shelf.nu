@@ -16,10 +16,16 @@ import {
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
+  ASSET_MODEL_FORM_DEFAULTS_SELECT,
   getModelFilterConfig,
   isSearchableKey,
 } from "~/utils/model-filters-registry.server";
 import { resolveMembershipAccess } from "~/utils/permissions/membership-access";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { rolesWhere } from "~/utils/permissions/role-access";
 
 /**
@@ -120,6 +126,13 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
+    /**
+     * `"true"` asks for each model's defaults (category, value, custom field
+     * defaults) with the results, for the asset form's pre-fill. Granted only
+     * to callers who may create or edit assets; see
+     * `ASSET_MODEL_FORM_DEFAULTS_SELECT`.
+     */
+    withDefaults: z.literal("true").optional(),
   }),
   // No `asset` member: `Asset` has no `name` column (it has `title`), no call
   // site ever passed `name: "asset"`, and any such call would have thrown at
@@ -158,6 +171,37 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Validating parameters */
     const modelFilters = parseData(searchParams, ModelFiltersSchema);
+
+    /**
+     * The registry's select, plus the asset form's model defaults when the
+     * request asks for them and the caller may create or edit assets. The
+     * grant is resolved from the session's roles, never from a request param.
+     */
+    const resolveSelect = async () => {
+      const base = getModelFilterConfig(modelFilters.name).select;
+      if (modelFilters.name !== "assetModel" || !modelFilters.withDefaults) {
+        return base;
+      }
+      const roles = userOrganizations.find(
+        (o) => o.organization.id === organizationId
+      )?.roles;
+      const canEdit = (action: PermissionAction) =>
+        hasPermission({
+          organizationId,
+          userId,
+          roles,
+          workspace: currentOrganization,
+          entity: PermissionEntity.asset,
+          action,
+        });
+      const [canCreate, canUpdate] = await Promise.all([
+        canEdit(PermissionAction.create),
+        canEdit(PermissionAction.update),
+      ]);
+      return canCreate || canUpdate
+        ? { ...base, ...ASSET_MODEL_FORM_DEFAULTS_SELECT }
+        : base;
+    };
     const { name, queryKey, queryValue, selectedValues } = modelFilters;
 
     /**
@@ -365,7 +409,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // The registry — not this call site — decides what leaves the server.
     // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
     // spread below safe, instead of having to sanitise three separate paths.
-    const select = getModelFilterConfig(name).select;
+    const select = await resolveSelect();
 
     /**
      * Two queries rather than one capped `OR`.

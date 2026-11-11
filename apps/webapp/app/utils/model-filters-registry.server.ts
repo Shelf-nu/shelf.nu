@@ -73,17 +73,7 @@ export const MODEL_FILTER_REGISTRY: Record<
   },
   assetModel: {
     searchable: ["name"],
-    // The defaults let the asset form pre-fill from a model picked from search
-    // results, exactly as from one in the loader's page (`picked-asset-model.ts`).
-    select: {
-      id: true,
-      name: true,
-      image: true,
-      thumbnailImage: true,
-      defaultCategoryId: true,
-      defaultValuation: true,
-      customFieldDefaults: { select: { customFieldId: true, value: true } },
-    },
+    select: { id: true, name: true, image: true, thumbnailImage: true },
   },
   booking: {
     searchable: ["name"],
@@ -149,3 +139,21 @@ export function getModelFilterConfig(
 export function isSearchableKey(name: RegisteredModelName, key: string) {
   return MODEL_FILTER_REGISTRY[name].searchable.includes(key);
 }
+
+/**
+ * Extra `assetModel` fields for the asset create and edit form, which
+ * pre-fills from a model picked from search results exactly as from one in
+ * its loader's page (`components/assets/picked-asset-model.ts`).
+ *
+ * `/api/model-filters` adds these only when the request asks for them
+ * (`withDefaults`) and the caller may create or edit assets. Only defaults of
+ * active, undeleted custom fields are sent.
+ */
+export const ASSET_MODEL_FORM_DEFAULTS_SELECT = {
+  defaultCategoryId: true,
+  defaultValuation: true,
+  customFieldDefaults: {
+    where: { customField: { active: true, deletedAt: null } },
+    select: { customFieldId: true, value: true },
+  },
+} as const;

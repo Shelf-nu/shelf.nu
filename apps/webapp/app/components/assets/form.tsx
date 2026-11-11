@@ -72,7 +72,7 @@ import {
   prefillVersion,
 } from "./model-default-prefill";
 import type { FormAssetModel } from "./picked-asset-model";
-import { findFormModel } from "./picked-asset-model";
+import { findFormModel, resolveModelPick } from "./picked-asset-model";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
@@ -694,22 +694,22 @@ const AssetFormInner = ({
     setHasPickedAssetModel(Boolean(modelId));
     setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
-    const previousModel = findFormModel(
-      selectedAssetModelId,
-      assetModelsData,
-      pickedModels
-    );
+    const pick = resolveModelPick({
+      pickedId: modelId,
+      pickedRow: picked,
+      previousId: selectedAssetModelId,
+      loaded: assetModelsData,
+      pickedModels,
+    });
+    const { previousModel, model } = pick;
+    if (pick.pickedModels !== pickedModels) {
+      setPickedModels(pick.pickedModels);
+    }
     if (
       previousModel?.defaultCategoryId &&
       params.get("category") === previousModel.defaultCategoryId
     ) {
       params.delete("category");
-    }
-
-    const model =
-      findFormModel(modelId, assetModelsData, pickedModels) ?? picked;
-    if (picked && !pickedModels[picked.id]) {
-      setPickedModels((prev) => ({ ...prev, [picked.id]: picked }));
     }
 
     // Fill the empty valuation and custom field inputs with the model's

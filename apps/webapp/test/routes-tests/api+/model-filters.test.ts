@@ -15,6 +15,7 @@ import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { formModelFromPickerItem } from "~/components/assets/picked-asset-model";
 import { ADDABLE_BOOKING_STATUSES } from "~/modules/booking/constants";
 import { loader } from "~/routes/api+/model-filters";
 
@@ -257,6 +258,80 @@ describe("GET /api/model-filters", () => {
       );
 
       expect(filters[0].userId).toBe("user-9");
+    });
+  });
+
+  describe("asset model defaults for the asset form", () => {
+    /** A model row as the database returns it for the asset form's select. */
+    const modelRow = {
+      id: "m-1",
+      name: "ZZ Test Model",
+      image: null,
+      thumbnailImage: null,
+      defaultCategoryId: "cat-1",
+      defaultValuation: 199,
+      customFieldDefaults: [{ customFieldId: "cf-1", value: { raw: "Acme" } }],
+    };
+
+    /** The `select` of the most recent search query. */
+    function lastSelect() {
+      return dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.select;
+    }
+
+    const WITH_DEFAULTS =
+      "name=assetModel&queryKey=name&queryValue=ZZ&withDefaults=true";
+
+    it("sends them to a member who can edit assets, at the top level the form reads", async () => {
+      setRole(OrganizationRoles.ADMIN);
+      dbMocks.dynamicFindMany.mockResolvedValue([modelRow]);
+
+      const filters = await readFilters(await callLoader(WITH_DEFAULTS));
+
+      expect(lastSelect()).toMatchObject({
+        defaultCategoryId: true,
+        defaultValuation: true,
+        customFieldDefaults: {
+          // Only defaults of active, undeleted custom fields.
+          where: { customField: { active: true, deletedAt: null } },
+          select: { customFieldId: true, value: true },
+        },
+      });
+      // Producer and consumer pinned together: the route's item is what the
+      // asset form reads.
+      expect(formModelFromPickerItem(filters[0])).toEqual({
+        id: "m-1",
+        name: "ZZ Test Model",
+        image: null,
+        thumbnailImage: null,
+        defaultCategoryId: "cat-1",
+        defaultValuation: 199,
+        customFieldDefaults: [
+          { customFieldId: "cf-1", value: { raw: "Acme" } },
+        ],
+      });
+    });
+
+    it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+      "sends none to %s, who cannot create or edit assets",
+      async (role) => {
+        setRole(role);
+        dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+        await callLoader(WITH_DEFAULTS);
+
+        expect(lastSelect()).not.toHaveProperty("defaultValuation");
+        expect(lastSelect()).not.toHaveProperty("customFieldDefaults");
+      }
+    );
+
+    it("sends none when the request does not ask for them", async () => {
+      setRole(OrganizationRoles.ADMIN);
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader("name=assetModel&queryKey=name&queryValue=ZZ");
+
+      expect(lastSelect()).not.toHaveProperty("defaultValuation");
+      expect(lastSelect()).not.toHaveProperty("customFieldDefaults");
     });
   });
 

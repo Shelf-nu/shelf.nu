@@ -14,7 +14,11 @@ import {
   VALUATION_PREFILL_KEY,
 } from "./model-default-prefill";
 import type { FormAssetModel } from "./picked-asset-model";
-import { findFormModel, formModelFromPickerItem } from "./picked-asset-model";
+import {
+  findFormModel,
+  formModelFromPickerItem,
+  resolveModelPick,
+} from "./picked-asset-model";
 
 /** A search result as `/api/model-filters` returns it for an asset model. */
 const searchResult = {
@@ -63,7 +67,7 @@ describe("formModelFromPickerItem", () => {
     });
 
     expect(prefill.values[VALUATION_PREFILL_KEY]).toBe("199");
-    expect(prefill.values["cf-brand"]).toBeDefined();
+    expect(prefill.values["cf-brand"]).toBe("Acme");
   });
 });
 
@@ -79,7 +83,82 @@ describe("findFormModel", () => {
     expect(findFormModel("m-old", loaded, picked)).toBe(picked["m-old"]);
   });
 
+  it("prefers the loaded row when the same model was also picked", () => {
+    const both = { "m-1": { id: "m-1", defaultValuation: 999 } };
+
+    expect(findFormModel("m-1", loaded, both)).toBe(loaded[0]);
+  });
+
   it("finds nothing for no model", () => {
     expect(findFormModel(undefined, loaded, picked)).toBeUndefined();
+  });
+});
+
+describe("resolveModelPick", () => {
+  const loaded: FormAssetModel[] = [
+    { id: "m-1", defaultCategoryId: "cat-loaded", defaultValuation: 10 },
+  ];
+  const searched = formModelFromPickerItem(searchResult);
+
+  it("uses the picker's row for a model outside the loader's page", () => {
+    const pick = resolveModelPick({
+      pickedId: "m-old",
+      pickedRow: searched,
+      previousId: undefined,
+      loaded,
+      pickedModels: {},
+    });
+
+    expect(pick.model).toBe(searched);
+    expect(pick.pickedModels).toEqual({ "m-old": searched });
+  });
+
+  it("uses the loaded row, and keeps no copy, for a model in the page", () => {
+    const pick = resolveModelPick({
+      pickedId: "m-1",
+      pickedRow: { id: "m-1" },
+      previousId: undefined,
+      loaded,
+      pickedModels: {},
+    });
+
+    expect(pick.model).toBe(loaded[0]);
+    expect(pick.pickedModels).toEqual({});
+  });
+
+  it("takes back a searched model's untouched fill when another model is picked", () => {
+    const first = resolveModelPick({
+      pickedId: "m-old",
+      pickedRow: searched,
+      previousId: undefined,
+      loaded,
+      pickedModels: {},
+    });
+    const afterFirst = planModelPrefill({
+      previous: EMPTY_MODEL_PREFILL,
+      model: first.model,
+      readCurrent: () => "",
+      savedKeys: new Set(),
+    });
+
+    const second = resolveModelPick({
+      pickedId: "m-1",
+      pickedRow: loaded[0],
+      previousId: "m-old",
+      loaded,
+      pickedModels: first.pickedModels,
+    });
+    // The searched model is still known, so its fill can be taken back.
+    expect(second.previousModel).toBe(searched);
+
+    const afterSecond = planModelPrefill({
+      previous: afterFirst,
+      model: second.model,
+      // The inputs still hold what the first model put there.
+      readCurrent: (key) => afterFirst.values[key] ?? "",
+      savedKeys: new Set(),
+    });
+    expect(afterSecond.values[VALUATION_PREFILL_KEY]).toBe("10");
+    expect(afterSecond.values["cf-brand"]).toBeUndefined();
   });
 });

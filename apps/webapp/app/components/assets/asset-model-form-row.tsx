@@ -88,7 +88,9 @@ export function AssetModelFormRow({
           disabled={disabled}
           defaultValue={assetModelId ?? undefined}
           fieldName="assetModelId"
-          model={{ name: "assetModel", queryKey: "name" }}
+          // `withDefaults`: search results carry each model's defaults, so a
+          // model found by search pre-fills like one from the loader's page.
+          model={{ name: "assetModel", queryKey: "name", withDefaults: "true" }}
           triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
           placeholder="Select asset model"
           contentLabel="Asset Models"
