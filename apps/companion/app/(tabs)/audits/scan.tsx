@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
-  Linking,
   Platform,
   Alert,
   AppState,
@@ -26,6 +25,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, type AuditExpectedAsset } from "@/lib/api";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
+import {
+  CAMERA_SETTINGS_FALLBACK,
+  openAppSettings,
+} from "@/lib/open-app-settings";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
@@ -1428,13 +1431,7 @@ function AuditScannerContent() {
         ) : (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => {
-              if (Platform.OS === "ios") {
-                Linking.openURL("app-settings:");
-              } else {
-                Linking.openSettings();
-              }
-            }}
+            onPress={() => void openAppSettings(CAMERA_SETTINGS_FALLBACK)}
           >
             <Text style={styles.primaryButtonText}>Open Settings</Text>
           </TouchableOpacity>

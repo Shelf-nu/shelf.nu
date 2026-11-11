@@ -770,6 +770,11 @@ export type LocationsResponse = {
   perPage?: number;
   totalCount?: number;
   totalPages?: number;
+  /**
+   * Set only on requests sent without `page` and `perPage`: true when the
+   * server's 1000-row cap cut the list, so `locations` is not every location.
+   */
+  truncated?: boolean;
 };
 
 export type CustodyResponse = {
@@ -1242,6 +1247,12 @@ export type BookingDetailResponse = {
     canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
+    /**
+     * Whether the caller may discard this draft (archive a DRAFT): offered to
+     * members who may archive but not delete. Optional: servers that predate
+     * the flag omit it, and an absent flag hides the action.
+     */
+    canDiscardDraft?: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
     /**
