@@ -48,6 +48,15 @@ export function useAllLocations<L>(
     fetchPageRef.current = fetchPage;
   });
 
+  // Leaving the screen drops the load in flight, so its page walk stops after
+  // the page it is on instead of fetching the rest for nobody.
+  useEffect(
+    () => () => {
+      latestRequestRef.current += 1;
+    },
+    []
+  );
+
   const loadLocations = useCallback(async () => {
     if (!orgId) {
       latestRequestRef.current += 1;

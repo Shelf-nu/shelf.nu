@@ -69,6 +69,10 @@ function renderLoader(
       act(() => {
         renderer.update(createElement(Probe, { org }));
       }),
+    unmount: () =>
+      act(() => {
+        renderer.unmount();
+      }),
   };
 }
 
@@ -173,6 +177,21 @@ describe("useAllLocations", () => {
     pending.shift()!.resolve({ error: "Network error" });
     await flush();
     assert.deepEqual(loader.result().locations, []);
+  });
+
+  it("stops walking pages when the screen unmounts mid-load", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    const firstPage = pending.shift()!;
+    loader.unmount();
+
+    // Page 1 of 3 answers after the screen is gone: no page 2 is asked for.
+    firstPage.resolve(page("A", 0, 100, 3));
+    await flush();
+
+    assert.equal(pending.length, 0);
   });
 
   it("empties the list and drops a load in flight when signed out", async () => {
