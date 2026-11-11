@@ -4,6 +4,7 @@ paths:
   - "apps/webapp/app/routes/*well-known*"
   - "apps/companion/app.json"
   - "apps/companion/lib/deep-links.ts"
+  - "apps/companion/lib/link-routing.ts"
   - "apps/companion/app/**/*.tsx"
   - "apps/companion/app/+native-intent.ts"
   - "apps/companion/lib/resource-path.ts"
@@ -29,10 +30,15 @@ link on a claimed host to the app screen its path names (through
 `matchResourcePath`) or else the in-app browser, never `Linking.openURL`.
 Change it with `app.json`.
 
-**Division of labour:** HTTPS universal links are routed natively by
-expo-router via the `+native-intent.ts` rewrite (#3). The JS hook (#4) only
-navigates custom-scheme links and resolves `/qr/:id` (async API call). Acting
-on other HTTPS links in the JS hook double-navigates.
+**Division of labour:** `isOpenedByRouter` (`apps/companion/lib/link-routing.ts`)
+decides, per link, whether expo-router opens it through the `+native-intent.ts`
+rewrite (#3) or the JS hook (#4) does. The hook opens custom-scheme links,
+resolves `/qr/:id` (async API call), and opens the HTTPS link that launches the
+app on iOS, where the router does not open the launch URL under the scene life
+cycle. It opens that link through `webLaunchRoute`, the router's own mapping, so
+nested kit ids and the query survive. Every other HTTPS link is the router's:
+opening it in the hook as well navigates twice. Change the split only in
+`link-routing.ts`, with its tests.
 
 **Prerequisite:** the destination screen must already exist (e.g.
 `apps/companion/app/(tabs)/locations/[id].tsx`) and be reachable via
