@@ -136,6 +136,27 @@ describe("createSessionBlock", () => {
     );
   });
 
+  it("reads the parked list again after a failed read", async () => {
+    const key = "sb-abcd-auth-token";
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: "[]",
+      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify([key]),
+    });
+    const read = store.getItem;
+    let failParked = true;
+    store.getItem = async (k: string) => {
+      if (k === BLOCKED_SESSION_KEYS_PENDING && failParked) {
+        failParked = false;
+        throw new Error("read failed");
+      }
+      return read(k);
+    };
+    const block = createSessionBlock(store);
+
+    assert.equal(await block.isBlocked(key), false);
+    assert.equal(await block.isBlocked(key), true);
+  });
+
   it("unblock lifts it, for the next sign-in", async () => {
     const store = mapStore();
     const block = createSessionBlock(store);

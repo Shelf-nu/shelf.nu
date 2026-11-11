@@ -90,24 +90,25 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
     }
   }
 
-  async function load(): Promise<Set<string>> {
-    if (blocked) return blocked;
-    let raw: string | null;
-    try {
-      raw = await store.getItem(BLOCKED_SESSION_KEYS);
-    } catch {
-      // Not cached: the next call reads the store again. Keys blocked in this
-      // app session stay in `pending` meanwhile.
-      return new Set(pending);
-    }
-    let parked: string[] = [];
+  /** Whether the parked list has been read into `blocked` in this run. */
+  let parkedRead = false;
+
+  /**
+   * Folds the parked list into `blocked` (which must be loaded). A failed
+   * read leaves `parkedRead` false, so the next call reads it again instead
+   * of missing a parked block for the rest of the run.
+   */
+  async function readParked(keys: Set<string>): Promise<void> {
+    let parked: string[];
     try {
       parked = parseKeys(await store.getItem(BLOCKED_SESSION_KEYS_PENDING));
     } catch {
-      parked = [];
+      return;
     }
-    blocked = new Set([...parseKeys(raw), ...parked, ...pending]);
-    if (parked.length > 0 && (await save(blocked))) {
+    parkedRead = true;
+    if (parked.length === 0) return;
+    for (const key of parked) keys.add(key);
+    if (await save(keys)) {
       // The parked keys are in the main list now; clear the parked list only
       // once that write succeeded, so a block is never in neither list.
       try {
@@ -116,6 +117,23 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
         // Harmless: the next good read folds them in again.
       }
     }
+  }
+
+  async function load(): Promise<Set<string>> {
+    if (blocked) {
+      if (!parkedRead) await readParked(blocked);
+      return blocked;
+    }
+    let raw: string | null;
+    try {
+      raw = await store.getItem(BLOCKED_SESSION_KEYS);
+    } catch {
+      // Not cached: the next call reads the store again. Keys blocked in this
+      // app session stay in `pending` meanwhile.
+      return new Set(pending);
+    }
+    blocked = new Set([...parseKeys(raw), ...pending]);
+    await readParked(blocked);
     return blocked;
   }
 

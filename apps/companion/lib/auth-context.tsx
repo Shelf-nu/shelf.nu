@@ -150,11 +150,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // forget this device for push, so a shared phone stops receiving the
   // previous person's notifications.
   //
-  // Sign-out always ends the session on the phone, even when the server cannot
-  // be reached: `endSessionOnDevice` falls back to a local teardown and, if
-  // that fails too, deletes the stored session itself. That last step emits no
-  // auth event, so the signed-in state is cleared here as well, which sends the
-  // person to the login screen with nothing to explain.
+  // Sign-out always clears the signed-in state here, so the person reaches the
+  // login screen even when the server cannot be reached. `endSessionOnDevice`
+  // tries a server revoke, then a local sign-out, then deletes the stored
+  // session itself; a forced delete emits no auth event, which is why the state
+  // is cleared here. When the stored session cannot be confirmed gone, it is
+  // blocked from being restored ("incomplete"), or blocked only for this app
+  // run when the block cannot be stored ("unprotected"), and both are reported.
   const signOut = useCallback(async () => {
     // Bound to the session being signed out before anything awaits: a server
     // switch while the before-session-end tasks run must not make this

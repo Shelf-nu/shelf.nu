@@ -13,6 +13,8 @@ import { before, beforeEach, describe, it, mock } from "node:test";
 const store = new Map<string, string>();
 /** Runs before each read, so a test can write while another task reads. */
 let beforeRead: ((key: string) => void) | null = null;
+/** Runs before each write lands, so a test can hold one back. */
+let beforeWrite: ((key: string) => Promise<void>) | null = null;
 
 // why: AsyncStorage is a native module; a Map behaves like the device store.
 mock.module("@react-native-async-storage/async-storage", {
@@ -22,6 +24,7 @@ mock.module("@react-native-async-storage/async-storage", {
       return store.get(key) ?? null;
     },
     setItem: async (key: string, value: string) => {
+      await beforeWrite?.(key);
       store.set(key, value);
     },
     removeItem: async (key: string) => {
@@ -70,6 +73,7 @@ before(async () => {
 
 beforeEach(() => {
   beforeRead = null;
+  beforeWrite = null;
   store.clear();
   reported.length = 0;
 });
@@ -229,6 +233,54 @@ describe("audit scan drafts", () => {
       await persistence.loadAuditScanState("user_b", "au_1"),
       null
     );
+  });
+});
+
+describe("draft writes", () => {
+  it("land in call order for one draft, even when the store finishes them out of order", async () => {
+    // The first write is held until the second has been issued, as
+    // AsyncStorage on Android may finish them.
+    let release: () => void = () => {};
+    let held = false;
+    beforeWrite = () => {
+      if (held) return Promise.resolve();
+      held = true;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    };
+
+    const older = persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    const newer = persistence.saveAuditScanState(
+      "user_a",
+      "au_1",
+      [ITEM],
+      [ENTRY]
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release();
+    await Promise.all([older, newer]);
+
+    const draft = await persistence.loadAuditScanState("user_a", "au_1");
+    assert.equal(draft?.pendingQueue.length, 1);
+  });
+
+  it("do not wait on another draft's write", async () => {
+    let release: () => void = () => {};
+    beforeWrite = (key) =>
+      key.endsWith("user_a:au_1")
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve();
+
+    const held = persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    assert.equal(
+      await persistence.saveAuditScanState("user_a", "au_2", [ITEM], [ENTRY]),
+      true
+    );
+    release();
+    await held;
   });
 });
 

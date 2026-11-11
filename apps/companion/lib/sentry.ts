@@ -23,6 +23,7 @@ import * as Sentry from "@sentry/react-native";
 import type { PushFailureStage } from "./push/token-record";
 import {
   getActiveServer,
+  setIncompleteTeardownReporter,
   subscribeToServerChange,
 } from "./server/active-server";
 
@@ -124,7 +125,14 @@ export function trackServerTag(): () => void {
     }
   };
   apply();
-  return subscribeToServerChange(apply);
+  // A server switch tears the outgoing session down and reports an
+  // incomplete teardown the same way a sign-out does.
+  setIncompleteTeardownReporter(reportSignOutIncomplete);
+  const unsubscribe = subscribeToServerChange(apply);
+  return () => {
+    unsubscribe();
+    setIncompleteTeardownReporter(null);
+  };
 }
 
 /**
@@ -193,23 +201,25 @@ export function reportAuditDurabilityEvent(
 }
 
 /**
- * Reports a sign-out that could not delete the stored session: it was still
- * stored after every delete. The app still shows the login screen; this makes
- * the case visible. `blockStored: false` marks the worst case, where the
- * block refusing that session could not be stored either, so a restart can
- * restore it.
+ * Reports a sign-out that could not confirm the stored session is gone: a
+ * delete failed, the session was still found after every delete, or the check
+ * timed out. The app still shows the login screen; this makes the case
+ * visible. `blockStored: false` marks the worst case, where the block refusing
+ * that session could not be stored either, so a restart could restore it.
  *
  * @param server - The Supabase project URL of the client being signed out
- * @param details - Whether the block on the surviving session was stored
+ * @param details - Whether the block on the session was stored
  */
 export function reportSignOutIncomplete(
   server: string | null,
   { blockStored }: { blockStored: boolean }
 ): void {
-  if (__DEV__) console.warn("[Auth] stored session survived sign-out");
+  if (__DEV__) {
+    console.warn("[Auth] stored session not confirmed gone after sign-out");
+  }
   if (!dsn || __DEV__) return;
   try {
-    Sentry.captureMessage("sign-out: stored session not deleted", {
+    Sentry.captureMessage("sign-out: stored session not confirmed deleted", {
       level: "error",
       tags: { feature: "auth", block_stored: String(blockStored) },
       extra: { server },

@@ -74,9 +74,35 @@ const storageKey = (userId: string, auditId: string) =>
 
 // ── Public API ───────────────────────────────────────────
 
+/** The last write queued for each draft key; the next write waits for it. */
+const draftWriteTails = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs a write to one draft key after every write queued for that key
+ * before it. AsyncStorage on Android may finish two writes to one key in
+ * either order, and an older snapshot landing last would drop the scans
+ * saved since. Writes to other keys do not wait.
+ *
+ * @param key - The draft's storage key
+ * @param write - The write to run
+ * @returns What the write resolves to
+ */
+function inDraftOrder<T>(key: string, write: () => Promise<T>): Promise<T> {
+  const previous = draftWriteTails.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => {}).then(write);
+  draftWriteTails.set(key, run);
+  run
+    .catch(() => {})
+    .finally(() => {
+      if (draftWriteTails.get(key) === run) draftWriteTails.delete(key);
+    });
+  return run;
+}
+
 /**
  * Persist the current scan session so it survives app kills.
- * Fire-and-forget: errors are logged and reported, never thrown.
+ * Fire-and-forget: errors are logged and reported, never thrown. Writes to
+ * one draft land in call order; the snapshot is taken at call time.
  *
  * @param userId - The signed-in account that made the scans
  * @param auditId - The audit session the scans belong to
@@ -102,10 +128,9 @@ export async function saveAuditScanState(
       pendingQueue,
       failedQueue,
     };
-    await AsyncStorage.setItem(
-      storageKey(userId, auditId),
-      JSON.stringify(state)
-    );
+    const key = storageKey(userId, auditId);
+    const json = JSON.stringify(state);
+    await inDraftOrder(key, () => AsyncStorage.setItem(key, json));
     return true;
   } catch (e) {
     // why: log ALWAYS, not just in __DEV__. A swallowed setItem rejection
@@ -260,7 +285,8 @@ export async function clearAuditScanState(
   auditId: string
 ): Promise<void> {
   try {
-    await AsyncStorage.removeItem(storageKey(userId, auditId));
+    const key = storageKey(userId, auditId);
+    await inDraftOrder(key, () => AsyncStorage.removeItem(key));
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] clear failed:", e);
   }
@@ -348,9 +374,11 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
     // been saved again since (a new scan): only a value that is still the one
     // read above is removed.
     for (const { key, raw } of stale) {
-      if ((await AsyncStorage.getItem(key)) === raw) {
-        await AsyncStorage.removeItem(key);
-      }
+      await inDraftOrder(key, async () => {
+        if ((await AsyncStorage.getItem(key)) === raw) {
+          await AsyncStorage.removeItem(key);
+        }
+      });
     }
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] prune failed:", e);

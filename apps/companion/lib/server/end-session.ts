@@ -90,14 +90,16 @@ export type SessionEndOutcome =
   /** Both sign-outs failed; the stored session was deleted directly. */
   | "forced"
   /**
-   * The stored session was still there after every delete (whatever the
-   * sign-outs answered), and it is now blocked. The in-memory state is
-   * cleared regardless; the caller reports it.
+   * The stored session could not be shown to be gone (whatever the sign-outs
+   * answered): a delete failed, it was still found after every delete, or a
+   * check timed out before confirming the delete. It is now blocked. The
+   * in-memory state is cleared regardless; the caller reports it.
    */
   | "incomplete"
   /**
    * As "incomplete", but the block could not be stored either: it holds only
-   * until the app restarts, when the stored session could be restored.
+   * until the app restarts, when a session that is still stored could be
+   * restored.
    */
   | "unprotected";
 
@@ -143,7 +145,9 @@ export async function endSessionOnDevice(
   {
     stillCurrent = () => true,
     checkTimeoutMs = SESSION_CHECK_TIMEOUT_MS,
-    blockStoredSession = async () => true,
+    // No blocker means nothing was stored: a surviving session then reads as
+    // "unprotected", never as safely blocked.
+    blockStoredSession = async () => false,
   }: {
     /**
      * False when another session replaced this one while the teardown ran (a
@@ -195,7 +199,8 @@ export async function endSessionOnDevice(
     stored = !removed || found !== "gone";
     // A check that timed out will time out again (a refresh hanging
     // offline): stop re-checking, so a sign-out waits one timeout, not
-    // three, and report it incomplete.
+    // three. The delete is then unconfirmed, so the session is blocked as if
+    // it were still stored.
     if (found === "timeout") break;
   }
   if (stored) {

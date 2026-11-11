@@ -21,6 +21,7 @@ import {
   blockStoredSession,
   currentSessionStorageKey,
   getSupabase,
+  getSupabaseClientUrl,
   persistedSessionRemover,
   rebuildSupabase,
 } from "../supabase";
@@ -224,12 +225,51 @@ async function clearServerScopedState(): Promise<void> {
 async function endSessionOnOutgoingClient(): Promise<void> {
   await runBeforeSessionEnd();
   const storageKey = currentSessionStorageKey();
+  const serverUrl = getSupabaseClientUrl();
   // A stored session that survives every delete is refused from then on, so
   // reconnecting to this server later cannot restore it.
-  await endSessionOnDevice(getSupabase(), persistedSessionRemover(), {
-    blockStoredSession: async () =>
-      storageKey ? blockStoredSession(storageKey) : false,
-  });
+  const outcome = await endSessionOnDevice(
+    getSupabase(),
+    persistedSessionRemover(),
+    {
+      blockStoredSession: async () =>
+        storageKey ? blockStoredSession(storageKey) : false,
+    }
+  );
+  if (outcome === "incomplete" || outcome === "unprotected") {
+    try {
+      reportIncompleteTeardown?.(serverUrl, {
+        blockStored: outcome === "incomplete",
+      });
+    } catch {
+      // Telemetry must never stop a server switch.
+    }
+  }
+}
+
+/** Reports a teardown that could not confirm the stored session is gone. */
+export type IncompleteTeardownReporter = (
+  server: string | null,
+  details: { blockStored: boolean }
+) => void;
+
+/**
+ * Where a server switch reports an incomplete teardown. Injected (by
+ * `trackServerTag` in `../sentry.ts`) because the Sentry module imports this
+ * one, so this module must not import it back.
+ */
+let reportIncompleteTeardown: IncompleteTeardownReporter | null = null;
+
+/**
+ * Sets the reporter a server switch calls when it could not confirm the
+ * outgoing session is gone (the same report a sign-out sends).
+ *
+ * @param reporter - The reporter, or null to stop reporting
+ */
+export function setIncompleteTeardownReporter(
+  reporter: IncompleteTeardownReporter | null
+): void {
+  reportIncompleteTeardown = reporter;
 }
 
 /**

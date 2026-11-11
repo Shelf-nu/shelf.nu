@@ -59,6 +59,9 @@ function stubClient(global: Answer, local: Answer) {
   return { client, state, removeStored };
 }
 
+/** A blocker that stores its block: a surviving session ends "incomplete". */
+const BLOCKS = { blockStoredSession: async () => true };
+
 describe("endSessionOnDevice", () => {
   it("stops after a successful revoke", async () => {
     const { client, state, removeStored } = stubClient("ok", "ok");
@@ -140,9 +143,13 @@ describe("endSessionOnDevice", () => {
     // The read side reports nothing stored (a failing store reads as null).
     client.auth.getSession = async () => ({ data: { session: null } });
 
-    const outcome = await endSessionOnDevice(client, async () => {
-      throw new Error("keychain delete");
-    });
+    const outcome = await endSessionOnDevice(
+      client,
+      async () => {
+        throw new Error("keychain delete");
+      },
+      BLOCKS
+    );
 
     assert.equal(outcome, "incomplete");
   });
@@ -221,10 +228,14 @@ describe("endSessionOnDevice", () => {
       error: new Error("refresh failed"),
     });
 
-    const outcome = await endSessionOnDevice(client, async () => {
-      deletes += 1;
-      await removeStored();
-    });
+    const outcome = await endSessionOnDevice(
+      client,
+      async () => {
+        deletes += 1;
+        await removeStored();
+      },
+      BLOCKS
+    );
 
     assert.equal(outcome, "incomplete");
     assert.equal(deletes, 3);
@@ -237,6 +248,7 @@ describe("endSessionOnDevice", () => {
     const started = Date.now();
     const outcome = await endSessionOnDevice(client, removeStored, {
       checkTimeoutMs: 10,
+      ...BLOCKS,
     });
 
     assert.equal(outcome, "incomplete");
@@ -258,7 +270,7 @@ describe("endSessionOnDevice", () => {
         deletes += 1;
         await removeStored();
       },
-      { checkTimeoutMs: 10 }
+      { checkTimeoutMs: 10, ...BLOCKS }
     );
 
     assert.equal(outcome, "incomplete");
@@ -285,10 +297,14 @@ describe("endSessionOnDevice", () => {
     const { client } = stubClient("throw", "throw");
     let deletes = 0;
 
-    const outcome = await endSessionOnDevice(client, async () => {
-      deletes += 1;
-      throw new Error("keychain");
-    });
+    const outcome = await endSessionOnDevice(
+      client,
+      async () => {
+        deletes += 1;
+        throw new Error("keychain");
+      },
+      BLOCKS
+    );
 
     assert.equal(outcome, "incomplete");
     assert.equal(deletes, 3);
