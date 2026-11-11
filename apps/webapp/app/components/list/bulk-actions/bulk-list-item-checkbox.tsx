@@ -2,13 +2,14 @@ import type { MouseEvent } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkSelectionKey,
-  clearSelectedBulkItemsAtom,
   disabledBulkItemsAtom,
   removeSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
+  selectionIsFormStateAtom,
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import { showNotificationAtom } from "~/atoms/notifications";
 import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Td } from "~/components/table";
@@ -26,9 +27,9 @@ type BulkListItemCheckboxProps = {
    */
   bulkItems?: ListItemData[];
   /**
-   * Every row on the page this checkbox sits on. Unticking one row while
-   * "Select all" is on keeps the rest of these ticked. Without it, the
-   * selection falls back to the rows "Select all" listed.
+   * Every row on the page this checkbox sits on. Required for the row to
+   * follow "Select all": unticking one row then keeps the rest of these
+   * ticked. Lists that do not pass it tick only the rows they listed.
    */
   pageItems?: ListItemData[];
   className?: string;
@@ -45,7 +46,12 @@ export default function BulkListItemCheckbox({
   const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const removeSelectedBulkItems = useSetAtom(removeSelectedBulkItemsAtom);
-  const clearSelectedBulkItems = useSetAtom(clearSelectedBulkItemsAtom);
+  const replaceSelectedBulkItems = useSetAtom(selectedBulkItemsAtom);
+  const showNotification = useSetAtom(showNotificationAtom);
+  // On manage-* screens the selection is what gets saved: every attached item
+  // left out of it is detached. There a row ticks only when listed, so no
+  // click here can drop attached items that sit on other pages.
+  const selectionIsFormState = useAtomValue(selectionIsFormStateAtom);
 
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -60,7 +66,10 @@ export default function BulkListItemCheckbox({
   // "Select all" stores ALL_SELECTED_KEY, not the ids of rows on other pages,
   // and the server acts on every row matching the list's filters. So with the
   // key present every selectable row is ticked, listed or not.
-  const selectingAll = isSelectingAllItems(selectedBulkItems);
+  const selectingAll =
+    !!pageItems &&
+    !selectionIsFormState &&
+    isSelectingAllItems(selectedBulkItems);
   const listed = selectedBulkItems.some((i) => bulkSelectionKey(i) === itemKey);
   const checked = listed || (selectingAll && !disabled);
 
@@ -69,19 +78,26 @@ export default function BulkListItemCheckbox({
     e.stopPropagation();
     if (disabled) return;
 
-    if (selectingAll) {
+    if (selectingAll && pageItems) {
       // The selection cannot say "every match except this row", so unticking
       // a row leaves "Select all" and keeps what the reader sees ticked: this
-      // page, minus the row (and, for a kit row, its assets).
-      const untickedKeys = new Set(
-        [item, ...(bulkItems ?? [])].map(bulkSelectionKey)
-      );
-      const stillTicked = (pageItems ?? selectedBulkItems).filter(
+      // page, minus the row (and, for a kit row, its assets). The toast says
+      // so, because the next bulk action now reaches this page only.
+      const leftOutKeys = new Set([
+        ...[item, ...(bulkItems ?? [])].map(bulkSelectionKey),
+        ...disabledBulkItems.map(bulkSelectionKey),
+      ]);
+      const stillTicked = pageItems.filter(
         (i) =>
-          i.id !== ALL_SELECTED_KEY && !untickedKeys.has(bulkSelectionKey(i))
+          i.id !== ALL_SELECTED_KEY && !leftOutKeys.has(bulkSelectionKey(i))
       );
-      clearSelectedBulkItems();
-      setSelectedBulkItems(stillTicked);
+      replaceSelectedBulkItems(stillTicked);
+      showNotification({
+        title: "Select all is off",
+        message: `Only the ${stillTicked.length} ticked rows on this page are selected now.`,
+        icon: { name: "check", variant: "gray" },
+        senderId: null,
+      });
       return;
     }
 

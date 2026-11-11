@@ -14,7 +14,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { createStore, Provider, useAtomValue } from "jotai";
 import { describe, expect, it, vi } from "vitest";
-import { disabledBulkItemsAtom, selectedBulkItemsAtom } from "~/atoms/list";
+import {
+  disabledBulkItemsAtom,
+  selectedBulkItemsAtom,
+  selectionIsFormStateAtom,
+} from "~/atoms/list";
+import { notificationAtom } from "~/atoms/notifications";
 import type { ListItemData } from "~/components/list/list-item";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import BulkListItemCheckbox from "./bulk-list-item-checkbox";
@@ -57,9 +62,11 @@ function SelectionProbe() {
 function renderPageTwo({
   selected,
   disabled = [],
+  formState = false,
 }: {
   selected: ListItemData[];
   disabled?: ListItemData[];
+  formState?: boolean;
 }) {
   const store = createStore();
   render(
@@ -77,6 +84,7 @@ function renderPageTwo({
     </Provider>
   );
   act(() => {
+    store.set(selectionIsFormStateAtom, formState);
     store.set(disabledBulkItemsAtom, disabled);
     store.set(selectedBulkItemsAtom, selected);
   });
@@ -116,6 +124,36 @@ describe("BulkListItemCheckbox with every result selected", () => {
     expect(screen.getByTestId("selected")).toHaveTextContent(/^p2-a,p2-c$/);
     expect(isTicked("p2-a")).toBe(true);
     expect(isTicked("p2-b")).toBe(false);
+  });
+
+  it("says that the selection fell back to this page", () => {
+    const store = renderPageTwo({ selected: SELECTED_ALL_FROM_PAGE_ONE });
+
+    fireEvent.click(screen.getByTestId("row-p2-b").querySelector("td")!);
+
+    // why: the next bulk action now reaches this page only, not every match.
+    expect(store.get(notificationAtom)).toMatchObject({
+      open: true,
+      title: "Select all is off",
+    });
+  });
+
+  it("keeps listed-only ticks on a screen whose selection is saved", () => {
+    // why: a manage-* picker detaches every attached item left out of the
+    // selection, so a row click there must never narrow it to one page.
+    renderPageTwo({
+      selected: [...SELECTED_ALL_FROM_PAGE_ONE, { id: "p2-a" }],
+      formState: true,
+    });
+
+    expect(isTicked("p2-a")).toBe(true);
+    expect(isTicked("p2-b")).toBe(false);
+
+    fireEvent.click(screen.getByTestId("row-p2-c").querySelector("td")!);
+
+    expect(screen.getByTestId("selected")).toHaveTextContent(
+      /^p1-a,p1-b,all-selected,p2-a,p2-c$/
+    );
   });
 
   it("ticks only listed rows when not everything is selected", () => {
