@@ -64,7 +64,8 @@ function seedLocations(n: number, others = 0) {
     id: `${prefix.toLowerCase()}-${i + 1}`,
     name: `${prefix} ${String(i + 1).padStart(4, "0")}`,
     description: null,
-    thumbnailUrl: `https://img.example.com/${prefix}-${i + 1}.jpg`,
+    thumbnailUrl: `https://img.example.com/${prefix}-${i + 1}-thumb.jpg`,
+    imageUrl: `https://img.example.com/${prefix}-${i + 1}.jpg`,
     parentId: null,
   });
   const all = [
@@ -94,6 +95,7 @@ function lastFindManyArgs() {
   return vi.mocked(db.location.findMany).mock.calls.at(-1)?.[0];
 }
 
+/** Calls the loader as org-1 with the given extra query string. */
 async function get(query = "") {
   const response = await loader(
     createLoaderArgs({
@@ -143,8 +145,28 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
 
     const body = await get();
 
-    expect(body.locations[0]?.image).toBe("https://img.example.com/Room-1.jpg");
+    expect(body.locations[0]?.image).toBe(
+      "https://img.example.com/Room-1-thumb.jpg"
+    );
     expect(lastFindManyArgs()?.select).not.toHaveProperty("image");
+  });
+
+  it("falls back to the full image URL when there is no thumbnail", async () => {
+    vi.mocked(db.location.findMany).mockResolvedValue([
+      {
+        id: "room-1",
+        name: "Room 0001",
+        description: null,
+        thumbnailUrl: null,
+        imageUrl: "https://img.example.com/Room-1.jpg",
+        parentId: null,
+      },
+    ] as unknown as Awaited<ReturnType<typeof db.location.findMany>>);
+    vi.mocked(db.location.count).mockResolvedValue(1);
+
+    const body = await get();
+
+    expect(body.locations[0]?.image).toBe("https://img.example.com/Room-1.jpg");
   });
 
   it("stops at the hard cap and reports the remaining pages", async () => {
