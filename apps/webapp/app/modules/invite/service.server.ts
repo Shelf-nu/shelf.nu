@@ -551,6 +551,28 @@ async function claimPendingInvite(
   }
 }
 
+/**
+ * Invalidates every other pending invite to the same person in the invite's
+ * workspace. Once a person answers one invite, any other pending one (sent
+ * twice by mistake, or resent) is moot.
+ *
+ * @param client - The Prisma client or the active transaction
+ * @param invite - The invite that was just answered
+ */
+async function invalidateOtherPendingInvites(
+  client: Pick<typeof db, "invite">,
+  invite: Pick<Invite, "inviteeEmail" | "organizationId">
+) {
+  await client.invite.updateMany({
+    where: {
+      status: InviteStatuses.PENDING,
+      inviteeEmail: caseInsensitiveEmailFilter(invite.inviteeEmail),
+      organizationId: invite.organizationId,
+    },
+    data: { status: InviteStatuses.INVALIDATED },
+  });
+}
+
 //when user clicks on accept/reject route action will validate the jwt if its valid it will call this
 export async function updateInviteStatus({
   id,
@@ -606,7 +628,7 @@ export async function updateInviteStatus({
       });
     }
 
-    const data = { status };
+    let updatedInvite: Invite;
 
     if (status === "ACCEPTED") {
       /**
@@ -682,15 +704,7 @@ export async function updateInviteStatus({
           formatPrefs,
         });
 
-        Object.assign(data, {
-          inviteeUser: {
-            connect: {
-              id: user.id,
-            },
-          },
-        });
-
-        await db.$transaction(async (tx) => {
+        updatedInvite = await db.$transaction(async (tx) => {
           /**
            * Links the team member only while it is unclaimed or already this
            * user's, so an acceptance racing another one for the same team
@@ -721,6 +735,13 @@ export async function updateInviteStatus({
             },
             data: { custodianUserId: user.id },
           });
+
+          await invalidateOtherPendingInvites(tx, invite);
+
+          return tx.invite.update({
+            where: { id, organizationId: invite.organizationId },
+            data: { inviteeUser: { connect: { id: user.id } } },
+          });
         });
       } catch (cause) {
         await db.invite
@@ -733,21 +754,9 @@ export async function updateInviteStatus({
       }
     } else {
       await claimPendingInvite(invite, status);
+      await invalidateOtherPendingInvites(db, invite);
+      updatedInvite = { ...invite, status };
     }
-
-    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; same `id` already resolved and PENDING-validated via the findFirst above (line ~321), and there is no caller organizationId in this token-driven flow
-    const updatedInvite = await db.invite.update({ where: { id }, data });
-
-    //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1
-    //because user doesnt or want to join that org, so we should update all pending invite to show the same
-    await db.invite.updateMany({
-      where: {
-        status: InviteStatuses.PENDING,
-        inviteeEmail: caseInsensitiveEmailFilter(invite.inviteeEmail),
-        organizationId: invite.organizationId,
-      },
-      data: { status: InviteStatuses.INVALIDATED },
-    });
 
     return updatedInvite;
   } catch (cause) {

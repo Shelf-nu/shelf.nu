@@ -286,6 +286,25 @@ describe("updateInviteStatus: claiming the invite", () => {
     });
     expect(dbMock.invite.update).not.toHaveBeenCalled();
   });
+
+  it("releases the claim when recording the invitee fails", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+    // The last write of the acceptance transaction fails.
+    dbMock.invite.update.mockRejectedValueOnce(new Error("write failed"));
+
+    await expect(acceptInvite()).rejects.toBeDefined();
+
+    expect(dbMock.invite.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.ACCEPTED,
+      },
+      data: { status: InviteStatuses.PENDING },
+    });
+  });
 });
 
 describe("updateInviteStatus: linking the team member", () => {
