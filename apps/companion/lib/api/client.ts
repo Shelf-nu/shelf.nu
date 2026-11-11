@@ -9,6 +9,7 @@ import { reportServerMismatch } from "../sentry";
 import { CLIENT_USER_AGENT } from "./user-agent";
 import { chainAbort } from "../latest-request";
 import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
+import { notifyForbidden } from "./forbidden";
 
 export type { ApiErrorDetails };
 
@@ -42,21 +43,6 @@ export function onAuthError(listener: AuthErrorListener): () => void {
 }
 export function notifyAuthError() {
   authErrorListeners.forEach((fn) => fn());
-}
-
-/**
- * Global 403 listener. A refused request can mean the workspace became
- * inactive while the app was open, which only `/api/mobile/me` can confirm,
- * so the workspace context re-reads it when this fires.
- */
-type ForbiddenListener = () => void;
-const forbiddenListeners = new Set<ForbiddenListener>();
-export function onForbidden(listener: ForbiddenListener): () => void {
-  forbiddenListeners.add(listener);
-  return () => forbiddenListeners.delete(listener);
-}
-function notifyForbidden() {
-  forbiddenListeners.forEach((fn) => fn());
 }
 
 /** Default request timeout (20 seconds -- generous for first cold-start request) */

@@ -8,7 +8,10 @@ import { describe, test } from "node:test";
 
 import type { Organization } from "./api/types";
 import {
+  activeTeamWorkspaces,
   inactiveWorkspaceMessage,
+  tabShowsInactiveScreen,
+  workspaceInactiveScanResult,
   isWorkspaceInactive,
   isWorkspaceInactiveRefusal,
   pickLandingOrg,
@@ -137,5 +140,56 @@ describe("isWorkspaceInactiveRefusal", () => {
     assert.equal(isWorkspaceInactiveRefusal({ reason: "unclaimed" }), false);
     assert.equal(isWorkspaceInactiveRefusal({}), false);
     assert.equal(isWorkspaceInactiveRefusal(null), false);
+  });
+});
+
+describe("tabShowsInactiveScreen", () => {
+  test("gates every tab but Settings while the workspace is inactive", () => {
+    for (const tab of [
+      "home",
+      "assets",
+      "scanner",
+      "bookings",
+      "audits",
+      "custody",
+    ]) {
+      assert.equal(tabShowsInactiveScreen(tab, org("a", true)), true, tab);
+    }
+    assert.equal(tabShowsInactiveScreen("settings", org("a", true)), false);
+  });
+
+  test("gates nothing in an active workspace, or with none open", () => {
+    assert.equal(tabShowsInactiveScreen("home", org("a", false)), false);
+    assert.equal(tabShowsInactiveScreen("home", org("a")), false);
+    assert.equal(tabShowsInactiveScreen("home", null), false);
+  });
+});
+
+describe("activeTeamWorkspaces", () => {
+  test("offers only active team workspaces, in order", () => {
+    const personal = { ...org("personal", false), type: "PERSONAL" };
+    assert.deepEqual(
+      activeTeamWorkspaces([
+        personal,
+        org("lapsed", true),
+        org("team-b", false),
+        org("team-c"),
+      ]).map((o) => o.id),
+      ["team-b", "team-c"]
+    );
+  });
+});
+
+describe("workspaceInactiveScanResult", () => {
+  test("titles the card Workspace Inactive with the server's text", () => {
+    assert.deepEqual(workspaceInactiveScanResult("Disabled."), {
+      title: "Workspace Inactive",
+      message: "Disabled.",
+      announcement: "Workspace inactive",
+    });
+    assert.equal(
+      workspaceInactiveScanResult(null).message,
+      "The workspace this code belongs to is inactive."
+    );
   });
 });

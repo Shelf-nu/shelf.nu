@@ -57,7 +57,10 @@ import {
   runScanPlan,
   scanMissFeedback,
 } from "@/lib/qr-utils";
-import { isWorkspaceInactiveRefusal } from "@/lib/workspace-access";
+import {
+  isWorkspaceInactiveRefusal,
+  workspaceInactiveScanResult,
+} from "@/lib/workspace-access";
 import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { announce } from "@/lib/a11y";
@@ -1015,12 +1018,12 @@ function ScannerContent() {
                 },
               });
             } else if (isWorkspaceInactiveRefusal(errorDetails)) {
-              announce("Workspace inactive");
+              const inactive = workspaceInactiveScanResult(error);
+              announce(inactive.announcement);
               setScanResult({
                 type: "error",
-                title: "Workspace Inactive",
-                message:
-                  error || "The workspace this code belongs to is inactive.",
+                title: inactive.title,
+                message: inactive.message,
               });
             } else {
               setScanResult({
@@ -1052,13 +1055,12 @@ function ScannerContent() {
             // The code was found, in a workspace of the person's that is
             // inactive: say so, rather than that it is unknown.
             if (isWorkspaceInactiveRefusal(barcodeErrorDetails)) {
-              announce("Workspace inactive");
+              const inactive = workspaceInactiveScanResult(barcodeError);
+              announce(inactive.announcement);
               setScanResult({
                 type: "error",
-                title: "Workspace Inactive",
-                message:
-                  barcodeError ||
-                  "The workspace this code belongs to is inactive.",
+                title: inactive.title,
+                message: inactive.message,
               });
             } else {
               announce("Code not recognized");

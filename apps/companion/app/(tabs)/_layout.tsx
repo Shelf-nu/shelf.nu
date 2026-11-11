@@ -10,7 +10,7 @@ import { useTheme } from "@/lib/theme-context";
 import { useOrg } from "@/lib/org-context";
 import { fontSize } from "@/lib/constants";
 import { showsTabSidebar } from "@/lib/content-column";
-import { isWorkspaceInactive } from "@/lib/workspace-access";
+import { tabShowsInactiveScreen } from "@/lib/workspace-access";
 
 /**
  * Holds the tabs that are single screens in the content column on wide
@@ -24,12 +24,6 @@ const COLUMN_LAYOUT = contentColumnLayout({
 
 /** Tabs that draw a header of their own above the screen. */
 const TABS_WITH_HEADER: ReadonlySet<string> = new Set(["home", "custody"]);
-
-/**
- * Tabs that stay open in an inactive workspace. Settings holds the workspace
- * switcher, preferences and sign-out, none of which needs the workspace.
- */
-const TABS_OPEN_WHEN_INACTIVE: ReadonlySet<string> = new Set(["settings"]);
 
 /**
  * Shows the inactive-workspace screen in place of a tab while the open
@@ -46,11 +40,7 @@ function InactiveWorkspaceGate({
   children: ReactNode;
 }) {
   const { currentOrg } = useOrg();
-  if (
-    currentOrg &&
-    isWorkspaceInactive(currentOrg) &&
-    !TABS_OPEN_WHEN_INACTIVE.has(routeName)
-  ) {
+  if (currentOrg && tabShowsInactiveScreen(routeName, currentOrg)) {
     return (
       <InactiveWorkspaceScreen
         org={currentOrg}

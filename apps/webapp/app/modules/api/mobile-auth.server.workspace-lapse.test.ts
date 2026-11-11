@@ -22,6 +22,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 // why: importing the module loads `~/database/db.server`, which connects a
 // real Prisma client at module load. The gate reads the membership row and the
@@ -41,6 +42,10 @@ vi.mock("stripe", () => ({
     return {};
   }),
 }));
+
+// why: a failed state read is logged; the tests assert that it is without
+// writing to the test output.
+vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
 
 // why: `mobile-auth.server` loads the Supabase admin client, which needs env
 // and network wiring; the gate never calls it.
@@ -373,6 +378,56 @@ describe("getMobileWorkspaceStates", () => {
     });
 
     expect(states.get("team-lapsed")?.inactive).toBe(false);
+  });
+
+  it("reads each owner's tier once, however many of their workspaces the caller is in", async () => {
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      stateRow({ id: "team-a", ownerId: "owner-shared" }),
+      stateRow({ id: "team-b", ownerId: "owner-shared" }),
+      stateRow({ id: "team-c", ownerId: "owner-other" }),
+    ] as never);
+    ownerTiers({ "owner-shared": "free", "owner-other": "tier_2" });
+
+    const states = await getMobileWorkspaceStates({
+      userId: CALLER_ID,
+      organizationIds: ["team-a", "team-b", "team-c"],
+    });
+
+    expect(ownerFindUniqueOrThrow).toHaveBeenCalledTimes(2);
+    expect(
+      ["team-a", "team-b", "team-c"].map((id) => states.get(id)?.inactive)
+    ).toEqual([true, true, false]);
+  });
+
+  it("leaves out only the workspace whose owner's tier cannot be read", async () => {
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      stateRow({ id: "team-broken", ownerId: "owner-broken" }),
+      stateRow({
+        id: "team-disabled",
+        ownerId: "owner-broken",
+        workspaceDisabled: true,
+      }),
+      stateRow({ id: "team-paid", ownerId: "owner-paid" }),
+    ] as never);
+    ownerFindUniqueOrThrow.mockImplementation(((args: {
+      where: { id: string };
+    }) =>
+      args.where.id === "owner-broken"
+        ? Promise.reject(new Error("User tier not found"))
+        : Promise.resolve({
+            tier: { id: "tier_2", tierLimit: { id: "tier_2" } },
+          })) as never);
+
+    const states = await getMobileWorkspaceStates({
+      userId: CALLER_ID,
+      organizationIds: ["team-broken", "team-disabled", "team-paid"],
+    });
+
+    expect(states.has("team-broken")).toBe(false);
+    // A switched-off workspace needs no tier read, so it keeps its answer.
+    expect(states.get("team-disabled")?.inactiveReason).toBe("disabled");
+    expect(states.get("team-paid")?.inactive).toBe(false);
+    expect(Logger.error).toHaveBeenCalledTimes(1);
   });
 
   it("reads nothing for a caller with no workspace", async () => {

@@ -9,6 +9,12 @@
  * server without the fields reads every workspace as active, which is what
  * such a server does.
  *
+ * MIRROR of `MOBILE_WORKSPACE_INACTIVE_REASON` in
+ * apps/webapp/app/modules/api/mobile-auth.server.ts: the reason string and the
+ * fallback message (used only when the server sends none) are copies, for
+ * display only; the server refuses inactive workspaces on its own. Extraction
+ * target: a pure `packages/*` mobile-contract module (none yet).
+ *
  * @see apps/webapp/app/modules/api/mobile-auth.server.ts `getMobileWorkspaceStates`
  * @see components/inactive-workspace-screen.tsx
  */
@@ -128,4 +134,57 @@ export function isWorkspaceInactiveRefusal(
   details: Pick<ApiErrorDetails, "reason"> | null | undefined
 ): boolean {
   return details?.reason === WORKSPACE_INACTIVE_REASON;
+}
+
+/**
+ * Tabs that stay open in an inactive workspace. Settings holds the workspace
+ * switcher, preferences and sign-out, none of which needs the workspace.
+ */
+const TABS_OPEN_WHEN_INACTIVE: ReadonlySet<string> = new Set(["settings"]);
+
+/**
+ * Whether a tab shows the inactive-workspace screen in place of its own.
+ *
+ * @param routeName - The tab's route name.
+ * @param org - The workspace open now.
+ * @returns `true` for every tab but Settings while the workspace is inactive.
+ */
+export function tabShowsInactiveScreen(
+  routeName: string,
+  org: Pick<Organization, "inactive"> | null | undefined
+): boolean {
+  return isWorkspaceInactive(org) && !TABS_OPEN_WHEN_INACTIVE.has(routeName);
+}
+
+/**
+ * The team workspaces worth offering as a place to switch to: an inactive
+ * one refuses every request.
+ *
+ * @param orgs - The workspaces from `/api/mobile/me`.
+ * @returns The active team workspaces, in the same order.
+ */
+export function activeTeamWorkspaces(
+  orgs: readonly Organization[]
+): Organization[] {
+  return orgs.filter((org) => org.type === "TEAM" && !isWorkspaceInactive(org));
+}
+
+/**
+ * What the scanner shows for a code whose workspace is inactive.
+ *
+ * @param message - The server's refusal text, when it sent one.
+ * @returns The result card's title and message, and the screen-reader line.
+ */
+export function workspaceInactiveScanResult(
+  message: string | null | undefined
+): {
+  title: string;
+  message: string;
+  announcement: string;
+} {
+  return {
+    title: "Workspace Inactive",
+    message: message || "The workspace this code belongs to is inactive.",
+    announcement: "Workspace inactive",
+  };
 }

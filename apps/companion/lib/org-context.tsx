@@ -19,6 +19,7 @@ import {
 import { useAuth } from "./auth-context";
 import { api, onForbidden, type Organization } from "./api";
 import { setSentryUser } from "./sentry";
+import { createRecheckThrottle } from "./recheck-throttle";
 import { pickLandingOrg, refreshOpenOrg } from "./workspace-access";
 
 /**
@@ -35,7 +36,7 @@ const SELECTED_ORG_KEY = "shelf_selected_org_id_v2";
 /**
  * Shortest gap between two `/me` re-reads set off by refused requests. A
  * screen that loads several things at once can collect several 403s; one
- * re-read answers them all.
+ * re-read (plus at most one at the end of the gap) answers them all.
  */
 const FORBIDDEN_RECHECK_GAP_MS = 15_000;
 
@@ -146,6 +147,10 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // A good answer clears an error left by an earlier failed read, a quiet
+      // one included, so no screen keeps showing it over fresh data.
+      setError(null);
+
       // Store user profile
       setUserProfile(data.user);
 
@@ -192,21 +197,20 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [fetchOrgs]);
 
   // A refused request may mean the open workspace became inactive while the
-  // app was open: re-read `/me` quietly, at most once per gap, so the
-  // inactive screen replaces the screen's own error.
-  const lastForbiddenRecheckRef = useRef(0);
-  useEffect(
-    () =>
-      onForbidden(() => {
-        const now = Date.now();
-        if (now - lastForbiddenRecheckRef.current < FORBIDDEN_RECHECK_GAP_MS) {
-          return;
-        }
-        lastForbiddenRecheckRef.current = now;
-        void fetchOrgs({ silent: true });
-      }),
-    [fetchOrgs]
-  );
+  // app was open: re-read `/me` quietly, so the inactive screen replaces the
+  // screen's own error. The throttle runs at most once per gap and keeps one
+  // trailing re-read, so a refusal inside the gap is never lost.
+  useEffect(() => {
+    const recheck = createRecheckThrottle({
+      gapMs: FORBIDDEN_RECHECK_GAP_MS,
+      run: () => void fetchOrgs({ silent: true }),
+    });
+    const unsubscribe = onForbidden(recheck.request);
+    return () => {
+      unsubscribe();
+      recheck.cancel();
+    };
+  }, [fetchOrgs]);
 
   // Keep Sentry's user/org/role scope in sync so every event (crashes included)
   // is self-describing — which org, what role, which user — for triage without

@@ -22,6 +22,7 @@ import {
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   type PermissionAction,
   type PermissionEntity,
@@ -493,7 +494,7 @@ export type MobileWorkspaceState = {
  * @param args.userId - The signed-in caller.
  * @param args.organizationIds - The caller's workspaces, as `/me` lists them.
  * @returns The state of each workspace, keyed by its id. An id the caller is
- *   not a member of is left out.
+ *   not a member of, or whose state could not be read (logged), is left out.
  */
 export async function getMobileWorkspaceStates({
   userId,
@@ -513,13 +514,50 @@ export async function getMobileWorkspaceStates({
     },
   });
 
+  // A TEAM workspace that is not switched off lapses with its owner's tier, so
+  // workspaces sharing an owner share one tier read.
+  const reasonByKey = new Map<
+    string,
+    Promise<MobileWorkspaceInactiveReason | null>
+  >();
+
   await Promise.all(
     memberships.map(async ({ organization, user }) => {
-      const inactiveReason = await getMobileWorkspaceInactiveReason({
-        // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
-        isShelfAdmin: user.roles.some((role) => role.name === Roles.ADMIN),
-        organization,
-      });
+      // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
+      const isShelfAdmin = user.roles.some((role) => role.name === Roles.ADMIN);
+      const key =
+        !isShelfAdmin &&
+        organization.type === "TEAM" &&
+        !organization.workspaceDisabled
+          ? `owner:${organization.userId}`
+          : `workspace:${organization.id}`;
+      let reason = reasonByKey.get(key);
+      if (!reason) {
+        reason = getMobileWorkspaceInactiveReason({
+          isShelfAdmin,
+          organization,
+        });
+        reasonByKey.set(key, reason);
+      }
+
+      // Each workspace is decided on its own: one failed read leaves that
+      // workspace out (the caller reports it active; every other route still
+      // refuses it), and the others keep their answer.
+      let inactiveReason: MobileWorkspaceInactiveReason | null;
+      try {
+        inactiveReason = await reason;
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to read whether a workspace is active",
+            additionalData: { userId, organizationId: organization.id },
+            label: "Auth",
+          })
+        );
+        return;
+      }
+
       states.set(organization.id, {
         inactive: inactiveReason !== null,
         inactiveReason,
