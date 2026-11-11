@@ -12,20 +12,21 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
+import { useRouter, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
+import type { BookingScanContext } from "@/lib/booking-scan-route";
 import { useOrg } from "@/lib/org-context";
 import {
   CAMERA_SETTINGS_FALLBACK,
   openAppSettings,
 } from "@/lib/open-app-settings";
 import {
-  openBookingAfterAlert,
   openShelfWebUrl,
   pushIntoTab,
+  returnToBooking,
 } from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
@@ -257,17 +258,11 @@ function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
 
 // ── Scanner Content ─────────────────────────────────────
 
-function ScannerContent() {
+function ScannerContent({ booking }: ScannerScreenProps) {
   const router = useRouter();
-  const { bookingId, bookingName, bookingAction } = useLocalSearchParams<{
-    bookingId?: string;
-    bookingName?: string;
-    /**
-     * Which booking flow the scanner serves: "checkin" (default), "add",
-     * "fulfil" or "checkout".
-     */
-    bookingAction?: string;
-  }>();
+  const bookingId = booking?.bookingId;
+  const bookingName = booking?.bookingName;
+  const bookingAction = booking?.action;
   const isFocused = useIsFocused();
   const { currentOrg, organizations, setCurrentOrg } = useOrg();
   const { colors } = useTheme();
@@ -606,8 +601,8 @@ function ScannerContent() {
   }, [dismissResultBase, lastScanRef]);
 
   // The scan list and booking context are reset by remounting the whole
-  // ScannerContent on any SCAN-CONTEXT change — the default export keys the
-  // error boundary on `bookingId` + `bookingAction`. No reset-in-effect is
+  // ScannerContent on any SCAN-CONTEXT change: `ScannerScreen` keys the
+  // error boundary on the booking id and flow. No reset-in-effect is
   // needed for that axis (and react-doctor forbids that pattern anyway).
   //
   // A workspace switch is a separate axis: the org is deliberately NOT part of
@@ -2344,14 +2339,11 @@ function ScannerContent() {
                   onPress: () => {
                     setBookingCheckinItems([]);
                     lastScanRef.current = "";
-                    // Navigate explicitly (anchored) — router.back() from a
-                    // tab screen falls through history and can land on Home.
                     // The dirty flag forces the detail to refetch past its
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    // Opens the booking once the alert has dismissed
-                    openBookingAfterAlert(bookingId);
+                    returnToBooking(bookingId);
                   },
                 },
               ]
@@ -2468,7 +2460,7 @@ function ScannerContent() {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          openBookingAfterAlert(bookingId);
+          returnToBooking(bookingId);
         },
       },
     ]);
@@ -2719,11 +2711,7 @@ function ScannerContent() {
                   // The check-in mutated the booking — flag the detail to
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
-                  if (result?.isComplete) {
-                    // Anchored navigation: router.back() from a tab screen
-                    // falls through history and can land on Home.
-                    openBookingAfterAlert(bookingId);
-                  }
+                  if (result?.isComplete) returnToBooking(bookingId);
                 },
               },
             ]);
@@ -2843,9 +2831,8 @@ function ScannerContent() {
             // freshness gate has to be bypassed too.
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
-              // Nothing left to scan. Anchored navigation: router.back() from
-              // a tab screen falls through history and can land on Home.
-              openBookingAfterAlert(bookingId);
+              // Nothing left to scan.
+              returnToBooking(bookingId);
             }
           },
         },
@@ -3221,17 +3208,8 @@ function ScannerContent() {
             {isBookingMode ? (
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
-                  // Anchored navigation, like the submit handlers: the scanner
-                  // is a tab screen, so router.back() unwinds the tab's own
-                  // history and lands on the start page rather than on the
-                  // booking the operator came from.
                   onPress={() =>
-                    bookingId
-                      ? pushIntoTab(
-                          "/(tabs)/bookings",
-                          `/(tabs)/bookings/${bookingId}`
-                        )
-                      : router.back()
+                    bookingId ? returnToBooking(bookingId) : router.back()
                   }
                   accessibilityLabel="Go back"
                   accessibilityRole="button"
@@ -3635,34 +3613,50 @@ function ScannerContent() {
   );
 }
 
-// ── Default export wraps with error boundary ─────────────
+// ── Screens ──────────────────────────────────────────────
 
-export default function ScannerScreen() {
-  // The scanner is one reused tab screen: navigating from a different booking,
-  // or the same booking in a different mode, only updates the route params —
-  // expo-router keeps the component mounted, so its scanned-items list and
-  // cached booking context would survive across contexts they don't belong to.
-  // Keying on the scan context remounts on any such change, so React resets ALL
-  // of that state cleanly (no reset-in-effect, and no window where a scan
-  // matches the previous booking's reservations).
-  //
-  // The key sits on the error boundary, not on ScannerContent: the boundary
-  // holds its own `hasError` state, so keying only the child would leave a
-  // caught error's fallback up when the operator navigates to a new booking.
-  // Remounting the boundary clears `hasError` and remounts ScannerContent with
-  // it.
-  const { bookingId, bookingAction } = useLocalSearchParams<{
-    bookingId?: string;
-    bookingAction?: string;
-  }>();
+/** Props of {@link ScannerScreen}. */
+type ScannerScreenProps = {
+  /**
+   * The booking this scanner serves, or null for the plain scanner. Only the
+   * booking scanner route (`app/(tabs)/bookings/scan.tsx`) passes one.
+   */
+  booking: BookingScanContext | null;
+};
+
+/**
+ * The camera scanner, wrapped in its error boundary. The Scan tab renders it
+ * plain; the Bookings stack renders it for one booking and flow.
+ *
+ * Keying the boundary on the booking and flow remounts the scanner when they
+ * change, so React resets the scanned-items list and cached booking context
+ * with them (no reset-in-effect, and no window where a scan matches another
+ * booking's reservations). The key sits on the boundary, not on
+ * ScannerContent, so a caught error's fallback clears with it too.
+ *
+ * @param props - {@link ScannerScreenProps}
+ * @returns the scanner screen
+ */
+export function ScannerScreen({ booking }: ScannerScreenProps) {
   return (
     <ScannerErrorBoundary
-      key={`${bookingId ?? ""}:${bookingAction ?? ""}`}
+      key={`${booking?.bookingId ?? ""}:${booking?.action ?? ""}`}
       label="Scanner"
     >
-      <ScannerContent />
+      <ScannerContent booking={booking} />
     </ScannerErrorBoundary>
   );
+}
+
+/**
+ * The Scan tab: always the plain scanner. It reads no route params, because a
+ * tab screen keeps the params it was last opened with; booking scanning is its
+ * own screen in the Bookings stack (see `lib/booking-scan-route.ts`).
+ *
+ * @returns the plain scanner
+ */
+export default function ScanTabScreen() {
+  return <ScannerScreen booking={null} />;
 }
 
 // ── Styles ────────────────────────────────────────────────

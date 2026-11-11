@@ -75,19 +75,23 @@ function navigateAnchored(href: Href) {
 }
 
 /**
- * Open a booking's detail screen from an alert button.
+ * Leave the booking scanner for the booking it serves.
+ *
+ * The booking scanner (`app/(tabs)/bookings/scan.tsx`) is pushed on top of
+ * the booking in the Bookings stack, so this pops back to that booking. When
+ * the booking is not beneath it (the scanner was opened by a link), the
+ * scanner is replaced by the booking instead.
  *
  * Navigating synchronously inside an `Alert` button's `onPress` wedges the
  * navigation transition into an endless render-commit loop (the JS thread
- * stays busy and network callbacks starve). The push therefore runs on the
- * next frame, outside the button handler. It goes through `pushIntoTab`, so
- * "back" returns to the bookings list.
+ * stays busy and network callbacks starve). The navigation therefore runs on
+ * the next frame, outside the button handler, from alerts and buttons alike.
  *
- * @param bookingId - the booking to open
+ * @param bookingId - the booking the scanner serves
  */
-export function openBookingAfterAlert(bookingId: string): void {
+export function returnToBooking(bookingId: string): void {
   requestAnimationFrame(() => {
-    pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
+    router.dismissTo(`/(tabs)/bookings/${bookingId}`);
   });
 }
 

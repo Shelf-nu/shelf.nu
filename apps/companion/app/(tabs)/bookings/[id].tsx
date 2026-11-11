@@ -79,6 +79,7 @@ import {
 } from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
+import { bookingScanHref } from "@/lib/booking-scan-route";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
@@ -2172,15 +2173,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             {canAddItems && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
-                onPress={() =>
-                  router.push(
-                    `/(tabs)/scanner?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&bookingAction=add`
-                  )
-                }
+                onPress={() => router.push(bookingScanHref(booking, "add"))}
                 accessibilityLabel="Scan assets or kits to add to this booking"
                 accessibilityRole="button"
               >
@@ -2304,13 +2297,7 @@ function BookingDetailScreen({ id }: { id: string }) {
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={() =>
-                  router.push(
-                    `/(tabs)/scanner?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&bookingAction=checkout`
-                  )
+                  router.push(bookingScanHref(booking, "checkout"))
                 }
                 accessibilityLabel="Scan assets to check out"
                 accessibilityRole="button"
@@ -2386,13 +2373,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&bookingAction=fulfil`
-                    )
+                    router.push(bookingScanHref(booking, "fulfil"))
                   }
                   accessibilityLabel={`Scan to assign ${
                     booking.outstandingModelUnitCount
@@ -2450,11 +2431,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                     <TouchableOpacity
                       style={styles.actionButtonOutline}
                       onPress={() =>
-                        router.push(
-                          `/(tabs)/scanner?bookingId=${
-                            booking.id
-                          }&bookingName=${encodeURIComponent(booking.name)}`
-                        )
+                        router.push(bookingScanHref(booking, "checkin"))
                       }
                       accessibilityLabel="Scan assets to check in"
                       accessibilityRole="button"
