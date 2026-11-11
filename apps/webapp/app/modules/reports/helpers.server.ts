@@ -4240,6 +4240,183 @@ function sumMergedIntervalsMs(
   return coveredMs;
 }
 
+export interface QuantityBookingSlice {
+  quantity?: number | null;
+  booking: {
+    id: string;
+    from: Date | null;
+    to: Date | null;
+  };
+}
+
+export interface QuantityLedgerRow {
+  createdAt: Date;
+  stockChange: number;
+}
+
+export interface QuantityUtilizationLedger {
+  inPeriodLogs?: QuantityLedgerRow[];
+  postPeriodStockChange?: number;
+}
+
+export interface ComputeQuantityUtilizationArgs {
+  windowStart: number;
+  windowEnd: number;
+  liveQuantity: number | null | undefined;
+  slices: QuantityBookingSlice[];
+  ledger?: QuantityUtilizationLedger | QuantityLedgerRow[];
+}
+
+export interface QuantityUtilizationResult {
+  daysInUse: number;
+  utilizationRate: number;
+  bookingCount: number;
+}
+
+/**
+ * Pure helper to compute daysInUse and utilizationRate for quantity-tracked assets.
+ * Reconstructs historical capacity from the stock ledger and sweeps timeline
+ * alongside clamped bookings, capping instantaneous usage at capacity.
+ */
+export function computeQuantityUtilization({
+  windowStart,
+  windowEnd,
+  liveQuantity,
+  slices,
+  ledger,
+}: ComputeQuantityUtilizationArgs): QuantityUtilizationResult {
+  const dayMs = 1000 * 60 * 60 * 24;
+  const liveQty =
+    typeof liveQuantity === "number" ? Math.max(0, liveQuantity) : 0;
+
+  const bookingQuantities = new Map<
+    string,
+    { start: number; end: number; quantity: number }
+  >();
+  const bookingIds = new Set<string>();
+
+  for (const ba of slices) {
+    const booking = ba.booking;
+    if (!booking.from || !booking.to) continue;
+    bookingIds.add(booking.id);
+
+    const start = Math.max(booking.from.getTime(), windowStart);
+    const end = Math.min(booking.to.getTime(), windowEnd);
+    if (end <= start) continue;
+
+    const sliceQty = ba.quantity ?? 1;
+    const existing = bookingQuantities.get(booking.id);
+    if (existing) {
+      existing.quantity += sliceQty;
+    } else {
+      bookingQuantities.set(booking.id, {
+        start,
+        end,
+        quantity: sliceQty,
+      });
+    }
+  }
+
+  const inPeriodLogs: QuantityLedgerRow[] = [];
+  let postPeriodStockChange = 0;
+
+  if (Array.isArray(ledger)) {
+    for (const log of ledger) {
+      const logTime = log.createdAt.getTime();
+      if (logTime <= windowStart) {
+        continue;
+      }
+      if (logTime >= windowEnd) {
+        postPeriodStockChange += log.stockChange;
+      } else {
+        inPeriodLogs.push(log);
+      }
+    }
+  } else if (ledger) {
+    if (ledger.inPeriodLogs) inPeriodLogs.push(...ledger.inPeriodLogs);
+    postPeriodStockChange = ledger.postPeriodStockChange ?? 0;
+  }
+
+  let totalUnitMsAvailable = 0;
+  let totalUnitMsInUse = 0;
+
+  if (windowEnd > windowStart) {
+    let capacityAtStart = liveQty - postPeriodStockChange;
+    const events: Array<{
+      time: number;
+      bookingDelta: number;
+      capacityDelta: number;
+    }> = [
+      { time: windowStart, bookingDelta: 0, capacityDelta: 0 },
+      { time: windowEnd, bookingDelta: 0, capacityDelta: 0 },
+    ];
+
+    for (const log of inPeriodLogs) {
+      const delta = log.stockChange;
+      const logTime = log.createdAt.getTime();
+      capacityAtStart -= delta;
+      events.push({
+        time: logTime,
+        bookingDelta: 0,
+        capacityDelta: delta,
+      });
+    }
+
+    for (const { start, end, quantity } of bookingQuantities.values()) {
+      if (quantity <= 0) continue;
+      events.push({
+        time: start,
+        bookingDelta: quantity,
+        capacityDelta: 0,
+      });
+      events.push({
+        time: end,
+        bookingDelta: -quantity,
+        capacityDelta: 0,
+      });
+    }
+
+    events.sort((a, b) => a.time - b.time);
+
+    let currentCapacity = capacityAtStart;
+    let activeUnits = 0;
+    let prevTime = windowStart;
+    for (const ev of events) {
+      if (ev.time > prevTime) {
+        const dt = ev.time - prevTime;
+        const effectiveCapacity = Math.max(0, currentCapacity);
+        totalUnitMsAvailable += dt * effectiveCapacity;
+        if (activeUnits > 0 && effectiveCapacity > 0) {
+          totalUnitMsInUse += dt * Math.min(activeUnits, effectiveCapacity);
+        }
+        prevTime = ev.time;
+      }
+      activeUnits += ev.bookingDelta;
+      currentCapacity += ev.capacityDelta;
+    }
+  }
+
+  const daysInUse = Math.ceil(
+    sumMergedIntervalsMs([...bookingQuantities.values()]) / dayMs
+  );
+
+  const unitDaysAvailable = Math.ceil(totalUnitMsAvailable / dayMs);
+  const unitDaysInUse = Math.min(
+    unitDaysAvailable,
+    Math.ceil(totalUnitMsInUse / dayMs)
+  );
+  const utilizationRate =
+    unitDaysAvailable > 0
+      ? Math.round((unitDaysInUse / unitDaysAvailable) * 100)
+      : 0;
+
+  return {
+    daysInUse,
+    utilizationRate,
+    bookingCount: bookingIds.size,
+  };
+}
+
 /**
  * Generate the Asset Utilization report (R8).
  *
@@ -4323,213 +4500,114 @@ export async function assetUtilizationReport(
             },
           },
         },
-        consumptionLogs: {
+      },
+    });
+
+    const quantityAssets = assets.filter((a) => a.type === "QUANTITY_TRACKED");
+    const quantityAssetIds = quantityAssets.map((a) => a.id);
+
+    const inPeriodLogsByAssetId = new Map<string, QuantityLedgerRow[]>();
+    const postPeriodStockChangeByAssetId = new Map<string, number>();
+
+    if (quantityAssetIds.length > 0) {
+      const [inPeriodLogs, postPeriodSums] = await Promise.all([
+        db.consumptionLog.findMany({
           where: {
-            OR: [{ stockChange: { gt: 0 } }, { stockChange: { lt: 0 } }],
+            assetId: { in: quantityAssetIds },
+            createdAt: {
+              gt: timeframe.from,
+              lt: timeframe.to,
+            },
+            stockChange: { not: 0 },
             category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
-            createdAt: { gt: timeframe.from },
           },
           select: {
+            assetId: true,
             createdAt: true,
             stockChange: true,
           },
           orderBy: { createdAt: "asc" },
-        },
-      },
-    });
+        }),
+        db.consumptionLog.groupBy({
+          by: ["assetId"],
+          where: {
+            assetId: { in: quantityAssetIds },
+            createdAt: { gte: timeframe.to },
+            stockChange: { not: 0 },
+            category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
+          },
+          _sum: {
+            stockChange: true,
+          },
+        }),
+      ]);
+
+      for (const log of inPeriodLogs) {
+        const list = inPeriodLogsByAssetId.get(log.assetId);
+        if (list) {
+          list.push(log);
+        } else {
+          inPeriodLogsByAssetId.set(log.assetId, [log]);
+        }
+      }
+
+      for (const group of postPeriodSums) {
+        postPeriodStockChangeByAssetId.set(
+          group.assetId,
+          group._sum.stockChange ?? 0
+        );
+      }
+    }
 
     // Index raw assets by id so we can refresh only the paginated subset
-    // below — saves work for large workspaces with many idle assets.
+    // below; saves work for large workspaces with many idle assets.
     const rawAssetsById = new Map(assets.map((a) => [a.id, a]));
 
     // Calculate utilization for each asset
     const rows: AssetUtilizationRow[] = assets.map((asset) => {
-      if (asset.type === "QUANTITY_TRACKED") {
-        const liveQuantity =
-          typeof asset.quantity === "number" ? Math.max(0, asset.quantity) : 0;
-        const dayMs = 1000 * 60 * 60 * 24;
-        const windowStart = timeframe.from.getTime();
-        const windowEnd = timeframe.to.getTime();
+      let daysInUse: number;
+      let utilizationRate: number;
+      let bookingCount: number;
 
-        // Aggregate booked units per booking (standalone + kit-driven slices on
-        // the same booking share its clamped window and sum their quantities).
-        const bookingQuantities = new Map<
-          string,
-          { start: number; end: number; quantity: number }
-        >();
+      if (asset.type === "QUANTITY_TRACKED") {
+        const res = computeQuantityUtilization({
+          windowStart: timeframe.from.getTime(),
+          windowEnd: timeframe.to.getTime(),
+          liveQuantity: asset.quantity,
+          slices: asset.bookingAssets,
+          ledger: {
+            inPeriodLogs: inPeriodLogsByAssetId.get(asset.id) ?? [],
+            postPeriodStockChange:
+              postPeriodStockChangeByAssetId.get(asset.id) ?? 0,
+          },
+        });
+        daysInUse = res.daysInUse;
+        utilizationRate = res.utilizationRate;
+        bookingCount = res.bookingCount;
+      } else {
         const bookingIds = new Set<string>();
+        const inUseIntervals: Array<{ start: number; end: number }> = [];
 
         for (const ba of asset.bookingAssets) {
           const booking = ba.booking;
           if (!booking.from || !booking.to) continue;
+          if (bookingIds.has(booking.id)) continue;
           bookingIds.add(booking.id);
 
-          const start = Math.max(booking.from.getTime(), windowStart);
-          const end = Math.min(booking.to.getTime(), windowEnd);
-          if (end <= start) continue;
-
-          const sliceQty = ba.quantity ?? 1;
-          const existing = bookingQuantities.get(booking.id);
-          if (existing) {
-            existing.quantity += sliceQty;
-          } else {
-            bookingQuantities.set(booking.id, {
-              start,
-              end,
-              quantity: sliceQty,
-            });
-          }
+          inUseIntervals.push({
+            start: Math.max(booking.from.getTime(), timeframe.from.getTime()),
+            end: Math.min(booking.to.getTime(), timeframe.to.getTime()),
+          });
         }
 
-        // Reconstruct historical pool capacity from the stock ledger
-        // (`ConsumptionLog.stockChange` rows after `timeframe.from`, excluding
-        // zero-net `MOVE` rows and baseline `OPENING_BALANCE` restatements) and
-        // sweep across `[windowStart, windowEnd]` alongside clamped bookings.
-        let totalUnitMsAvailable = 0;
-        let totalUnitMsInUse = 0;
-
-        if (windowEnd > windowStart) {
-          let capacityAtStart = liveQuantity;
-          const events: Array<{
-            time: number;
-            bookingDelta: number;
-            capacityDelta: number;
-          }> = [
-            { time: windowStart, bookingDelta: 0, capacityDelta: 0 },
-            { time: windowEnd, bookingDelta: 0, capacityDelta: 0 },
-          ];
-
-          for (const log of asset.consumptionLogs ?? []) {
-            const delta = log.stockChange ?? 0;
-            const logTime = log.createdAt.getTime();
-            if (delta === 0 || logTime <= windowStart) continue;
-            capacityAtStart -= delta;
-            if (logTime < windowEnd) {
-              events.push({
-                time: logTime,
-                bookingDelta: 0,
-                capacityDelta: delta,
-              });
-            }
-          }
-
-          for (const { start, end, quantity } of bookingQuantities.values()) {
-            if (quantity <= 0) continue;
-            events.push({
-              time: start,
-              bookingDelta: quantity,
-              capacityDelta: 0,
-            });
-            events.push({
-              time: end,
-              bookingDelta: -quantity,
-              capacityDelta: 0,
-            });
-          }
-
-          events.sort((a, b) => a.time - b.time);
-
-          let currentCapacity = capacityAtStart;
-          let activeUnits = 0;
-          let prevTime = windowStart;
-          for (const ev of events) {
-            if (ev.time > prevTime) {
-              const dt = ev.time - prevTime;
-              const effectiveCapacity = Math.max(0, currentCapacity);
-              totalUnitMsAvailable += dt * effectiveCapacity;
-              if (activeUnits > 0 && effectiveCapacity > 0) {
-                totalUnitMsInUse +=
-                  dt * Math.min(activeUnits, effectiveCapacity);
-              }
-              prevTime = ev.time;
-            }
-            activeUnits += ev.bookingDelta;
-            currentCapacity += ev.capacityDelta;
-          }
-        }
-
-        // Calendar days on at least one booking, matching INDIVIDUAL rows and
-        // the "Days Booked" / "Total Booking Days" / "Days in Use" labels.
-        const daysInUse =
-          totalUnitMsAvailable > 0
-            ? Math.min(
-                totalDays,
-                Math.ceil(
-                  sumMergedIntervalsMs([...bookingQuantities.values()]) / dayMs
-                )
-              )
-            : 0;
-
-        // Convert both numerator and denominator to whole unit-days so a 1-unit
-        // pool uses the exact same day-rounding basis as an INDIVIDUAL asset.
-        const unitDaysAvailable = Math.ceil(totalUnitMsAvailable / dayMs);
-        const unitDaysInUse = Math.min(
-          unitDaysAvailable,
-          Math.ceil(totalUnitMsInUse / dayMs)
+        daysInUse = Math.ceil(
+          sumMergedIntervalsMs(inUseIntervals) / (1000 * 60 * 60 * 24)
         );
-        const utilizationRate =
-          unitDaysAvailable > 0
-            ? Math.min(
-                100,
-                Math.round((unitDaysInUse / unitDaysAvailable) * 100)
-              )
-            : 0;
 
-        return {
-          id: asset.id,
-          assetId: asset.id,
-          assetName: asset.title,
-          thumbnailImage: asset.thumbnailImage,
-          mainImage: asset.mainImage,
-          assetModel: asset.assetModel ?? null,
-          category: asset.category?.name || null,
-          location: getPrimaryLocation(asset)?.name || null,
-          totalDays,
-          daysInUse,
-          utilizationRate,
-          bookingCount: bookingIds.size,
-          valuation: asset.valuation,
-          type: asset.type,
-          quantity: asset.quantity,
-          unitOfMeasure: asset.unitOfMeasure,
-        };
+        utilizationRate =
+          totalDays > 0 ? Math.round((daysInUse / totalDays) * 100) : 0;
+        bookingCount = bookingIds.size;
       }
-
-      // One booking can hold several pivot rows for the same asset
-      // (standalone + kit-driven slices — the pivot's partial unique indexes
-      // allow it), so both aggregates key on the BOOKING: `bookingIds`
-      // dedupes the count, and each booking contributes its in-window
-      // interval once.
-      const bookingIds = new Set<string>();
-      const inUseIntervals: Array<{ start: number; end: number }> = [];
-
-      for (const ba of asset.bookingAssets) {
-        const booking = ba.booking;
-        if (!booking.from || !booking.to) continue;
-        if (bookingIds.has(booking.id)) continue;
-        bookingIds.add(booking.id);
-
-        // Clamp to the report window.
-        inUseIntervals.push({
-          start: Math.max(booking.from.getTime(), timeframe.from.getTime()),
-          end: Math.min(booking.to.getTime(), timeframe.to.getTime()),
-        });
-      }
-
-      // In-use time is the UNION of the clamped intervals, not their sum:
-      // concurrent bookings of the same asset cover the same calendar time,
-      // so coverage can never exceed the window and utilization stays ≤100%.
-      // Exact milliseconds are summed and converted to days once, so
-      // per-booking rounding cannot compound.
-      const daysInUse = Math.min(
-        totalDays,
-        Math.ceil(sumMergedIntervalsMs(inUseIntervals) / (1000 * 60 * 60 * 24))
-      );
-
-      const utilizationRate =
-        totalDays > 0
-          ? Math.min(100, Math.round((daysInUse / totalDays) * 100))
-          : 0;
 
       return {
         id: asset.id,
@@ -4543,7 +4621,7 @@ export async function assetUtilizationReport(
         totalDays,
         daysInUse,
         utilizationRate,
-        bookingCount: bookingIds.size,
+        bookingCount,
         valuation: asset.valuation,
         type: asset.type,
         quantity: asset.quantity,
