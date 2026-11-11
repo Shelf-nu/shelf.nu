@@ -20,6 +20,8 @@ const OPTIONS = Array.from({ length: 12 }, (_, index) => ({
 }));
 
 /** What a modal dialog's scroll lock sees: events that reach `document`. */
+// why: a recording listener on `document` stands in for react-remove-scroll,
+// which only mounts inside a modal dialog this unit test does not render.
 const reachedDocument = vi.fn();
 
 afterEach(() => {

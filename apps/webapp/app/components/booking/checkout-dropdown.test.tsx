@@ -296,6 +296,8 @@ describe("CheckoutDropdown", () => {
   });
 
   it("does not open the check-out dialog while a submission is in flight", () => {
+    // why: an in-flight submission is the navigation state under test, and
+    // the file already mocks `useNavigation` for the data-router dependency.
     vi.mocked(useNavigation).mockReturnValue({ state: "submitting" } as never);
     try {
       menuOpen = true;
