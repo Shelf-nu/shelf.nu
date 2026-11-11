@@ -518,6 +518,39 @@ function teamMemberAlreadyClaimedError(
   });
 }
 
+/**
+ * Moves an invite from PENDING to its answer in one conditional write, so of an
+ * acceptance and a replacing invite, only the first one to write wins.
+ *
+ * @param invite - The invite being answered
+ * @param status - The answer, ACCEPTED or REJECTED
+ * @throws {ShelfError} 400 when the invite is no longer pending: it was
+ *   replaced by a newer invite, answered, or cancelled since it was read
+ */
+async function claimPendingInvite(
+  invite: Pick<Invite, "id" | "organizationId">,
+  status: Invite["status"]
+) {
+  const { id, organizationId } = invite;
+  const claimed = await db.invite.updateMany({
+    where: { id, organizationId, status: InviteStatuses.PENDING },
+    data: { status },
+  });
+
+  if (claimed.count === 0) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invite is no longer valid",
+      message:
+        "This invitation was replaced by a newer one or has already been answered. Please use the most recent invite you received.",
+      additionalData: { inviteId: id, status },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
 //when user clicks on accept/reject route action will validate the jwt if its valid it will call this
 export async function updateInviteStatus({
   id,
@@ -627,61 +660,79 @@ export async function updateInviteStatus({
         }
       }
 
-      const { firstName, lastName } = splitName(inviteeTeamMember.name);
+      await claimPendingInvite(invite, status);
 
-      const user = await createUserOrAttachOrg({
-        // A stored invite can hold capitals; the account is keyed on the
-        // normalised address.
-        email: normalizeInviteEmail(invite.inviteeEmail),
-        organizationId: invite.organizationId,
-        roles: invite.roles,
-        password,
-        firstName,
-        lastName,
-        createdWithInvite: true,
-        formatPrefs,
-      });
+      /**
+       * The invite is claimed from here on. If granting access fails, the claim
+       * is released so the invite stays answerable.
+       */
+      try {
+        const { firstName, lastName } = splitName(inviteeTeamMember.name);
 
-      Object.assign(data, {
-        inviteeUser: {
-          connect: {
-            id: user.id,
-          },
-        },
-      });
-
-      await db.$transaction(async (tx) => {
-        /**
-         * Links the team member only while it is unclaimed or already this
-         * user's, so an acceptance racing another one for the same team
-         * member cannot take it over. A deleted team member is restored.
-         */
-        const linked = await tx.teamMember.updateMany({
-          where: {
-            id: invite.teamMemberId,
-            organizationId: invite.organizationId,
-            OR: [{ userId: null }, { userId: user.id }],
-          },
-          data: { deletedAt: null, userId: user.id },
+        const user = await createUserOrAttachOrg({
+          // A stored invite can hold capitals; the account is keyed on the
+          // normalised address.
+          email: normalizeInviteEmail(invite.inviteeEmail),
+          organizationId: invite.organizationId,
+          roles: invite.roles,
+          password,
+          firstName,
+          lastName,
+          createdWithInvite: true,
+          formatPrefs,
         });
 
-        if (linked.count === 0) {
-          throw teamMemberAlreadyClaimedError(invite);
-        }
-
-        /**
-         * Bookings can be assigned to a team member while its invite is still
-         * pending. Linking them to the user lets the user see them on their
-         * bookings index.
-         */
-        await tx.booking.updateMany({
-          where: {
-            custodianTeamMemberId: invite.teamMemberId,
-            organizationId: invite.organizationId,
+        Object.assign(data, {
+          inviteeUser: {
+            connect: {
+              id: user.id,
+            },
           },
-          data: { custodianUserId: user.id },
         });
-      });
+
+        await db.$transaction(async (tx) => {
+          /**
+           * Links the team member only while it is unclaimed or already this
+           * user's, so an acceptance racing another one for the same team
+           * member cannot take it over. A deleted team member is restored.
+           */
+          const linked = await tx.teamMember.updateMany({
+            where: {
+              id: invite.teamMemberId,
+              organizationId: invite.organizationId,
+              OR: [{ userId: null }, { userId: user.id }],
+            },
+            data: { deletedAt: null, userId: user.id },
+          });
+
+          if (linked.count === 0) {
+            throw teamMemberAlreadyClaimedError(invite);
+          }
+
+          /**
+           * Bookings can be assigned to a team member while its invite is still
+           * pending. Linking them to the user lets the user see them on their
+           * bookings index.
+           */
+          await tx.booking.updateMany({
+            where: {
+              custodianTeamMemberId: invite.teamMemberId,
+              organizationId: invite.organizationId,
+            },
+            data: { custodianUserId: user.id },
+          });
+        });
+      } catch (cause) {
+        await db.invite
+          .updateMany({
+            where: { id, organizationId: invite.organizationId, status },
+            data: { status: InviteStatuses.PENDING },
+          })
+          .catch(() => undefined);
+        throw cause;
+      }
+    } else {
+      await claimPendingInvite(invite, status);
     }
 
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; same `id` already resolved and PENDING-validated via the findFirst above (line ~321), and there is no caller organizationId in this token-driven flow

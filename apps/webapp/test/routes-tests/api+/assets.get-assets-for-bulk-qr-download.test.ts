@@ -143,6 +143,12 @@ describe("bulk QR download", () => {
     // that threw after the reads.
     expect(response.data.error).toBeFalsy();
     expect(db.qr.findMany).toHaveBeenCalledTimes(1);
+    // Codes claimed by another workspace are left out of the prefetch.
+    expect(db.qr.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [{ organizationId: null }, { organizationId: expect.any(String) }],
+      }),
+    });
     // The per-asset lookup inside `generateQrObj` must not be reached, and no
     // asset here is missing a code, so nothing should be created either.
     expect(qrMocks.getQrByAssetId).not.toHaveBeenCalled();

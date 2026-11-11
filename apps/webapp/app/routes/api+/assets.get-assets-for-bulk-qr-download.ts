@@ -179,10 +179,14 @@ export async function loader({ context, request }: ActionFunctionArgs) {
      * Every code in one read rather than one read per asset. Assets that
      * already have a code — which is all of them, in the normal case — then
      * need no database work at all, and only the rare asset without one pays
-     * for the locked create inside `generateQrObj`.
+     * for the locked create inside `generateQrObj`. The same scope as
+     * `getQrByAssetId`: a code claimed by another workspace reads as a miss.
      */
     const existingQrs = await db.qr.findMany({
-      where: { assetId: { in: assets.map((asset) => asset.id) } },
+      where: {
+        assetId: { in: assets.map((asset) => asset.id) },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
     });
     const qrByAssetId = new Map(
       existingQrs.map((qr) => [qr.assetId, qr] as const)

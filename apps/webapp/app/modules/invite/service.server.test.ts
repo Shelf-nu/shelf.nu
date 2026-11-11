@@ -133,7 +133,9 @@ const acceptInvite = () =>
 /** Default mocks for an acceptance that links an unclaimed team member. */
 function mockAcceptanceWrites() {
   dbMock.invite.update.mockResolvedValue({ id: "invite-1" });
-  dbMock.invite.updateMany.mockResolvedValue({ count: 0 });
+  // The PENDING claim matches the one invite; the trailing invalidation of
+  // other pending invites reports the same count, which nothing reads.
+  dbMock.invite.updateMany.mockResolvedValue({ count: 1 });
   dbMock.teamMember.updateMany.mockResolvedValue({ count: 1 });
   dbMock.booking.updateMany.mockResolvedValue({ count: 0 });
   dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
@@ -220,6 +222,69 @@ describe("updateInviteStatus — stored role validation", () => {
         }),
       })
     );
+  });
+});
+
+describe("updateInviteStatus: claiming the invite", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAcceptanceWrites();
+  });
+
+  it("claims the invite with a conditional PENDING write before granting access", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+
+    await acceptInvite();
+
+    expect(dbMock.invite.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.PENDING,
+      },
+      data: { status: InviteStatuses.ACCEPTED },
+    });
+    expect(dbMock.invite.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(createUserOrAttachOrg).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("refuses with 400 and grants nothing when a newer invite replaced it first", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.ADMIN])
+    );
+    // The invite was invalidated between the read and the claim.
+    dbMock.invite.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({
+      status: 400,
+      title: "Invite is no longer valid",
+    });
+
+    expect(createUserOrAttachOrg).not.toHaveBeenCalled();
+    expect(dbMock.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim when granting access fails", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    expect(dbMock.invite.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.ACCEPTED,
+      },
+      data: { status: InviteStatuses.PENDING },
+    });
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
   });
 });
 
