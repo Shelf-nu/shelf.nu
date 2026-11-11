@@ -1417,6 +1417,7 @@ describe("manage-assets loader — Models tab payload", () => {
       booking: mockLoaderBooking,
       // Models without assets are hidden unless the URL turns them on.
       showModelsWithoutAssets: false,
+      clampPageToResults: true,
     });
 
     // Parity check: same keys, same values, nothing
@@ -1459,6 +1460,7 @@ describe("manage-assets loader — Models tab payload", () => {
       search: "dell",
       page: 2,
       showModelsWithoutAssets: true,
+      clampPageToResults: true,
     });
   });
 

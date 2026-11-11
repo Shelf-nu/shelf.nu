@@ -242,6 +242,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       booking,
       ...readModelTabParams(getCurrentSearchParams(request)),
+      // A stale page in the URL lands on the last page, not an empty one.
+      clampPageToResults: true,
     });
 
     const { page, perPage, kits, search, totalKits, totalPages } =
@@ -793,8 +795,10 @@ export default function AddKitsToBooking() {
    * so a reload stays on the tab the operator was using. "kits" otherwise.
    */
   const [searchParams] = useSearchParams();
+  // Only when the tab exists: a workspace without models never renders it, so
+  // a stale `?tab=models` would otherwise open the dialog with no tab shown.
   const [activeTab, setActiveTab] = useState<"kits" | "models">(() =>
-    searchParams.get("tab") === "models" ? "models" : "kits"
+    searchParams.get("tab") === "models" && showModelsTab ? "models" : "kits"
   );
 
   const navigate = useNavigate();

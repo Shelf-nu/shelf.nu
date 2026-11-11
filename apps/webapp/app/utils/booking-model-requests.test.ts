@@ -5,7 +5,7 @@ import {
   canEditModelReservations,
   countReservedModelUnits,
   countUnassignedModelUnits,
-  getModelPoolRemaining,
+  getReservationCeiling,
   getModelRequestQuantityIssue,
   getOutstandingModelRequests,
   isReservationOverCommitted,
@@ -276,69 +276,65 @@ describe("summarizeUnassignedUnits", () => {
   });
 });
 
-describe("isReservationOverCommitted", () => {
-  /** Pool counts as the loader supplies them: this booking left out. */
-  const counts = {
-    total: 5,
-    inCustody: 0,
-    reservedConcrete: 0,
-    reservedViaRequest: 0,
-  };
-
-  it("is false when the reservation fits what the pool leaves", () => {
+describe("getReservationCeiling", () => {
+  it("is the free units when the booking holds nothing by name", () => {
     expect(
-      isReservationOverCommitted({ ...counts, reservedConcrete: 2 }, 3)
+      getReservationCeiling({ available: 4, namedNotInCustody: 0 }, 0)
+    ).toBe(4);
+  });
+
+  it("takes off units the booking already holds by name", () => {
+    // Two named units of four free leave room for a reservation of two.
+    expect(
+      getReservationCeiling({ available: 4, namedNotInCustody: 2 }, 0)
+    ).toBe(2);
+  });
+
+  it("adds back units the reservation has already been fulfilled with", () => {
+    // Those two named units ARE the reservation's assigned units, so the
+    // reservation may still total four.
+    expect(
+      getReservationCeiling({ available: 4, namedNotInCustody: 2 }, 2)
+    ).toBe(4);
+  });
+
+  it("does not take off a fulfilled unit a custodian holds", () => {
+    // The pool already deducted the custody unit, so it is not named here.
+    expect(
+      getReservationCeiling({ available: 3, namedNotInCustody: 0 }, 1)
+    ).toBe(4);
+  });
+});
+
+describe("isReservationOverCommitted", () => {
+  const pool = { available: 3, namedNotInCustody: 0 };
+
+  it("is false when the reservation fits", () => {
+    expect(
+      isReservationOverCommitted(pool, { quantity: 2, fulfilled: 0 })
     ).toBe(false);
   });
 
   it("is false when the reservation takes exactly what is left", () => {
-    // The boundary matters: a full pool is not over-committed, and it is the
-    // case an off-by-one here would misreport as a shortfall.
+    // The boundary matters: a full pool is not over-committed.
     expect(
-      isReservationOverCommitted({ ...counts, reservedConcrete: 3 }, 2)
+      isReservationOverCommitted(pool, { quantity: 3, fulfilled: 0 })
     ).toBe(false);
   });
 
   it("is true when the reservation asks for more than is left", () => {
     expect(
-      isReservationOverCommitted({ ...counts, reservedConcrete: 3 }, 3)
+      isReservationOverCommitted(pool, { quantity: 4, fulfilled: 0 })
     ).toBe(true);
   });
 
-  it("counts custody and both kinds of other reservation against the pool", () => {
-    // 5 total - 1 in custody - 1 concrete - 1 via request = 2 left for 3.
+  it("counts units held by name against the same pool", () => {
     expect(
       isReservationOverCommitted(
-        { total: 5, inCustody: 1, reservedConcrete: 1, reservedViaRequest: 1 },
-        3
+        { available: 3, namedNotInCustody: 2 },
+        { quantity: 2, fulfilled: 0 }
       )
     ).toBe(true);
-  });
-});
-
-describe("getModelPoolRemaining", () => {
-  it("returns how many units are free", () => {
-    expect(
-      getModelPoolRemaining({
-        total: 5,
-        inCustody: 1,
-        reservedConcrete: 2,
-        reservedViaRequest: 0,
-      })
-    ).toBe(2);
-  });
-
-  it("goes negative when the pool owes more than it holds", () => {
-    // The signed result is the reason this exists: `available` is clamped at
-    // zero, so it reports this case and an exactly-empty pool identically.
-    expect(
-      getModelPoolRemaining({
-        total: 5,
-        inCustody: 0,
-        reservedConcrete: 4,
-        reservedViaRequest: 3,
-      })
-    ).toBe(-2);
   });
 });
 

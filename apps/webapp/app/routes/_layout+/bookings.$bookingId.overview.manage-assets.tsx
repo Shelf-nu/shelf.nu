@@ -605,6 +605,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       booking,
       ...readModelTabParams(getCurrentSearchParams(request)),
+      // A stale page in the URL lands on the last page, not an empty one.
+      clampPageToResults: true,
     });
 
     return payload({
@@ -1356,7 +1358,10 @@ export default function AddAssetsToNewBooking() {
    * into the Models tab rather than forcing a manual click.
    */
   const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") === "models" ? "models" : "assets";
+  // Only when the tab exists: a workspace without models never renders it, so
+  // a stale `?tab=models` would otherwise open the dialog with no tab shown.
+  const initialTab =
+    searchParams.get("tab") === "models" && showModelsTab ? "models" : "assets";
   const [activeTab, setActiveTab] = useState<"assets" | "models">(initialTab);
 
   /**

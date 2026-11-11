@@ -1370,6 +1370,7 @@ describe("manage-kits loader — Models tab payload", () => {
       booking: mockLoaderBooking,
       // Models without assets are hidden unless the URL turns them on.
       showModelsWithoutAssets: false,
+      clampPageToResults: true,
     });
   });
 
@@ -1400,6 +1401,7 @@ describe("manage-kits loader — Models tab payload", () => {
       search: "dell",
       page: 2,
       showModelsWithoutAssets: true,
+      clampPageToResults: true,
     });
   });
 

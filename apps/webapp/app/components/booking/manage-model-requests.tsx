@@ -15,12 +15,12 @@
  *     while nothing has been assigned to it;
  *   - fully fulfilled: read-only, kept as the record of what was reserved.
  *
- * Search, page and the "Show models without assets" toggle live in the URL
+ * Search, page and the "Models with assets / All models" choice live in the URL
  * under their own keys ({@link MODEL_TAB_SEARCH_PARAM},
  * {@link MODEL_TAB_PAGE_PARAM}, {@link MODEL_TAB_SHOW_EMPTY_PARAM}) so they
  * never filter the Assets or Kits list, and the loader reads them through
- * `readModelTabParams`. Models with no assets are hidden unless the toggle is
- * on.
+ * `readModelTabParams`. Models with no assets are hidden unless "All models"
+ * is chosen, and this booking's reserved models lead the list.
  *
  * Every control submits to
  * {@link file://../../routes/api+/bookings.$bookingId.model-requests.ts}.
@@ -31,10 +31,17 @@
 
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFetcher, useLocation, useNavigation } from "react-router";
+import { useFetcher, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import Input from "~/components/forms/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/forms/select";
 import { ChevronRight } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Badge } from "~/components/shared/badge";
@@ -46,8 +53,8 @@ import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.mode
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   canCancelModelReservation,
-  getModelPoolRemaining,
   getModelRequestQuantityIssue,
+  getReservationCeiling,
   isReservationOverCommitted,
   MODEL_TAB_PAGE_PARAM,
   MODEL_TAB_SEARCH_PARAM,
@@ -71,11 +78,17 @@ export type ManageModelRequestsModel = {
   thumbnailImage: string | null;
   /** Category new assets of this model start in, when the model sets one. */
   defaultCategory: { id: string; name: string; color: string } | null;
+  /**
+   * Units of this model the booking holds by name that no custodian holds.
+   * They count against the same pool as the reservation.
+   */
+  namedNotInCustody: number;
   /** Total INDIVIDUAL assets of this model in the org */
   total: number;
   /**
-   * Units this booking can still add from the pool, clamped at zero. Excludes
-   * what this booking already reserves.
+   * Units free over the window with this booking left out of the pool,
+   * clamped at zero. See `getReservationCeiling` for what this booking may
+   * reserve from it.
    */
   available: number;
   /** Units already reserved on other bookings as concrete `BookingAsset`s */
@@ -163,7 +176,7 @@ export function ManageModelRequests({
                 : "There are no models on this page."}
               {showingEmpty
                 ? null
-                : ' Models without assets are hidden; tick "Show models without assets" to list them.'}
+                : ' Models without assets are hidden; choose "All models" to list them.'}
             </p>
           </div>
         ) : (
@@ -211,6 +224,15 @@ function ModelSearchBar() {
   /** Pending debounce timer, or `null` when nothing is scheduled. */
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isDebouncePending, setIsDebouncePending] = useState(false);
+
+  // The field is uncontrolled, so a URL change it did not make (Back/Forward)
+  // would leave it showing an older term. Sync it while nobody is typing, and
+  // compare trimmed values because the URL holds the trimmed term.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || debounceRef.current) return;
+    if (el.value.trim() !== current) el.value = current;
+  }, [current]);
 
   // The dialog can close while a debounce is still scheduled.
   useEffect(
@@ -291,33 +313,25 @@ function ModelSearchBar() {
           />
         ) : null}
       </div>
-      <ShowEmptyModelsCheckbox />
+      <ModelsWithAssetsSelect />
     </div>
   );
 }
 
 /**
- * Toggles {@link MODEL_TAB_SHOW_EMPTY_PARAM}: models with no bookable asset
- * are hidden unless it is ticked. Mirrors the "Include assets from child
- * locations" checkbox on the Assets tab, including reading the pending URL so
- * the box flips the moment it is clicked rather than after the loader runs.
+ * Chooses whether the Models tab lists models with no bookable asset, through
+ * {@link MODEL_TAB_SHOW_EMPTY_PARAM}. Styled like the Assets tab's
+ * availability select: two options, models with assets by default.
  */
-function ShowEmptyModelsCheckbox() {
+function ModelsWithAssetsSelect() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { pathname } = useLocation();
-  const navigation = useNavigation();
-  const pendingSearchParams =
-    navigation.location?.pathname === pathname
-      ? new URLSearchParams(navigation.location.search)
-      : null;
-  const checked =
-    (pendingSearchParams ?? searchParams).get(MODEL_TAB_SHOW_EMPTY_PARAM) ===
-    "true";
+  const value =
+    searchParams.get(MODEL_TAB_SHOW_EMPTY_PARAM) === "true" ? "all" : "with";
 
-  const handleChange = (nextChecked: boolean) => {
+  const handleChange = (next: string) => {
     setSearchParams(
       (prev) => {
-        if (nextChecked) prev.set(MODEL_TAB_SHOW_EMPTY_PARAM, "true");
+        if (next === "all") prev.set(MODEL_TAB_SHOW_EMPTY_PARAM, "true");
         else prev.delete(MODEL_TAB_SHOW_EMPTY_PARAM);
         prev.delete(MODEL_TAB_PAGE_PARAM);
         prev.set("tab", "models");
@@ -328,19 +342,39 @@ function ShowEmptyModelsCheckbox() {
   };
 
   return (
-    <label
-      htmlFor="show-empty-models"
-      className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-sm"
+    <Select
+      name={MODEL_TAB_SHOW_EMPTY_PARAM}
+      value={value}
+      onValueChange={handleChange}
     >
-      <input
-        id="show-empty-models"
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => handleChange(event.target.checked)}
-        className="rounded-sm checked:bg-primary focus-within:ring-primary checked:hover:bg-primary checked:focus:bg-primary"
-      />
-      <span>Show models without assets</span>
-    </label>
+      <SelectTrigger
+        className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit"
+        aria-label="Which models to show"
+      >
+        <SelectValue placeholder="Which models to show" />
+      </SelectTrigger>
+      <SelectContent
+        className="w-full min-w-[250px] p-0"
+        position="popper"
+        align="end"
+        sideOffset={4}
+      >
+        <div className="max-h-[320px] overflow-auto">
+          <SelectItem
+            value="with"
+            className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+          >
+            <span className="mr-4 block text-gray-700">Models with assets</span>
+          </SelectItem>
+          <SelectItem
+            value="all"
+            className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+          >
+            <span className="mr-4 block text-gray-700">All models</span>
+          </SelectItem>
+        </div>
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -456,10 +490,7 @@ function ModelRow({
                   Fulfilled
                 </Badge>
               ) : (
-                <ModelAvailabilityBadge
-                  model={model}
-                  reservedHere={request?.quantity ?? 0}
-                />
+                <ModelAvailabilityBadge model={model} request={request} />
               )}
               {request && !isFulfilled ? (
                 <Badge
@@ -475,8 +506,11 @@ function ModelRow({
               ) : null}
               {request &&
               !isFulfilled &&
-              isReservationOverCommitted(model, request.quantity) ? (
-                <OverReservedBadge model={model} />
+              isReservationOverCommitted(model, {
+                quantity: request.quantity,
+                fulfilled: request.fulfilledQuantity,
+              }) ? (
+                <OverReservedBadge model={model} request={request} />
               ) : null}
             </div>
           </div>
@@ -509,19 +543,18 @@ function ModelRow({
 /**
  * How many more units of a model this booking can take, amber when none.
  *
- * `available` leaves this booking's own reservation out of the pool, so it is
- * the ceiling for this booking's whole reservation. Before a reservation that
- * reads "3 of 5 available"; once the booking holds some, the units it holds
- * come off it and the row reads "1 more available". A model with no assets at
- * all says so rather than reporting "0 of 0".
+ * Measured against {@link getReservationCeiling}, the same bound the server
+ * enforces. Before a reservation that reads "3 of 5 available"; once the
+ * booking reserves some, they come off the ceiling and the row reads "1 more
+ * available". A model with no assets at all says so rather than "0 of 0".
  */
 function ModelAvailabilityBadge({
   model,
-  reservedHere,
+  request,
 }: {
   model: ManageModelRequestsModel;
-  /** Units this booking already reserves of the model, 0 when none. */
-  reservedHere: number;
+  /** This booking's reservation of the model, when it has one. */
+  request?: ManageModelRequestsRequest;
 }) {
   if (model.total === 0) {
     return (
@@ -534,11 +567,12 @@ function ModelAvailabilityBadge({
       </Badge>
     );
   }
-  const more = Math.max(0, model.available - reservedHere);
+  const ceiling = getReservationCeiling(model, request?.fulfilledQuantity ?? 0);
+  const more = Math.max(0, ceiling - (request?.quantity ?? 0));
   const tone = more > 0 ? BADGE_COLORS.green : BADGE_COLORS.amber;
   return (
     <Badge color={tone.bg} textColor={tone.text} withDot={false}>
-      {reservedHere > 0
+      {request
         ? `${more} more available`
         : `${more} of ${model.total} available`}
     </Badge>
@@ -549,10 +583,19 @@ function ModelAvailabilityBadge({
  * Warns that this booking reserves more units than the pool can give it over
  * the window, so the operator reduces or removes the reservation.
  */
-function OverReservedBadge({ model }: { model: ManageModelRequestsModel }) {
-  // What this booking can hold. Clamped for display, since a negative unit
-  // count is not a sentence.
-  const unitsLeft = Math.max(0, getModelPoolRemaining(model));
+function OverReservedBadge({
+  model,
+  request,
+}: {
+  model: ManageModelRequestsModel;
+  request: ManageModelRequestsRequest;
+}) {
+  // What this booking's reservation can be. Clamped for display, since a
+  // negative unit count is not a sentence.
+  const unitsLeft = Math.max(
+    0,
+    getReservationCeiling(model, request.fulfilledQuantity)
+  );
   return (
     <AvailabilityBadge
       badgeText="Over-reserved"
@@ -614,11 +657,13 @@ function AddControls({
   });
   const disabled = useDisabled(fetcher);
   const [quantityInput, setQuantityInput] = useState("1");
-  const { available, total } = model;
+  const { total } = model;
+  // Nothing is assigned to a reservation that does not exist yet.
+  const available = Math.max(0, getReservationCeiling(model, 0));
 
   /**
-   * The server schema plus the model's availability, so the operator sees the
-   * limit before a round trip.
+   * The server schema plus the model's ceiling for this booking, so the
+   * operator sees the limit before a round trip.
    */
   const clientSchema = useMemo(
     () =>
@@ -729,12 +774,13 @@ function ReservationControls({
   const isRemoving = useDisabled(removeFetcher);
   const disabled = isUpdating || isRemoving;
 
-  // What this booking's reservation may climb to. The pool counts leave this
-  // booking out, so the remainder already includes the units it holds; adding
-  // `request.quantity` on top would count them twice. Read from the SIGNED
-  // remainder, never `model.available`, which is clamped at zero and so
-  // cannot tell an over-committed pool from an exactly-empty one.
-  const capacityForThisBooking = getModelPoolRemaining(model);
+  // What this booking's reservation may climb to, the same bound the server
+  // enforces. Left signed: a negative ceiling is a real state of the pool and
+  // `getModelRequestQuantityIssue` clamps it for the message.
+  const capacityForThisBooking = getReservationCeiling(
+    model,
+    request.fulfilledQuantity
+  );
 
   // Inline-edit state, re-synced whenever the loader refreshes the
   // server-authoritative quantity (our own update or a concurrent change).

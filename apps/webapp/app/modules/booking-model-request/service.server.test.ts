@@ -3632,6 +3632,7 @@ describe("getBookingModelTabData", () => {
         image: "https://cdn.example/dell.jpg",
         thumbnailImage: "https://cdn.example/dell-thumb.jpg",
         defaultCategory: category,
+        namedNotInCustody: 0,
         total: 10,
         available: 4,
         reservedConcrete: 2,
@@ -3644,6 +3645,7 @@ describe("getBookingModelTabData", () => {
         image: null,
         thumbnailImage: null,
         defaultCategory: null,
+        namedNotInCustody: 0,
         total: 10,
         available: 4,
         reservedConcrete: 2,
@@ -3732,15 +3734,137 @@ describe("getBookingModelTabData", () => {
         { id: { in: ["model-reserved"] } },
       ],
     };
-    const findManyCall = (
+    // Reserved models are read first, then the rest; both under the filter.
+    const findManyCalls = (
       db.assetModel.findMany as ReturnType<typeof vitest.fn>
-    ).mock.calls[0]?.[0];
-    expect(findManyCall?.where).toEqual(expectedWhere);
+    ).mock.calls.map((call) => call[0]?.where);
+    expect(findManyCalls).toEqual([
+      { AND: [expectedWhere, { id: { in: ["model-reserved"] } }] },
+      { AND: [expectedWhere, { id: { notIn: ["model-reserved"] } }] },
+    ]);
     // The page count follows the filtered list, not the full-org count.
     expect(db.assetModel.count).toHaveBeenLastCalledWith({
       where: expectedWhere,
     });
     expect(result.matchedAssetModels).toBe(4);
+  });
+
+  /** One `AssetModel` row in the shape the tab selects. */
+  const modelRow = (id: string) => ({
+    id,
+    name: id,
+    image: null,
+    thumbnailImage: null,
+    defaultCategory: null,
+  });
+
+  /** A booking reserving the given models, one unit each. */
+  const bookingReserving = (...assetModelIds: string[]) => ({
+    ...emptyBooking,
+    modelRequests: assetModelIds.map((assetModelId) => ({
+      assetModelId,
+      quantity: 1,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: assetModelId },
+    })),
+  });
+
+  it("leads with the models this booking reserves", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(5);
+    // @ts-expect-error mocked
+    db.assetModel.findMany
+      .mockResolvedValueOnce([modelRow("zebra-camera")])
+      .mockResolvedValueOnce([modelRow("alpha"), modelRow("beta")]);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+    });
+
+    expect(result.assetModels.map((m) => m.id)).toEqual([
+      "zebra-camera",
+      "alpha",
+      "beta",
+    ]);
+    // The rest fill what the reserved model leaves of the first page.
+    const restCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[1]?.[0];
+    expect(restCall?.skip).toBe(0);
+    expect(restCall?.take).toBe(49);
+  });
+
+  it("offsets later pages by the reserved models already shown", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(120);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValueOnce([modelRow("zebra-camera")]);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+      page: 2,
+    });
+
+    // Page 1 showed the reserved model and 49 others, so page 2 starts at the
+    // 50th of the others.
+    const restCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[1]?.[0];
+    expect(restCall?.skip).toBe(49);
+    expect(restCall?.take).toBe(50);
+  });
+
+  it("clamps a page past the end only when asked to", async () => {
+    expect.assertions(4);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(3);
+
+    const clamped = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+      page: 5,
+      clampPageToResults: true,
+    });
+    const clampedCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[0]?.[0];
+    expect(clamped.modelsPage).toBe(1);
+    expect(clampedCall?.skip).toBe(0);
+
+    // A client that stops on an empty page keeps the page it asked for.
+    const unclamped = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+      page: 5,
+    });
+    const unclampedCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[1]?.[0];
+    expect(unclamped.modelsPage).toBe(5);
+    expect(unclampedCall?.skip).toBe(200);
+  });
+
+  it("reports the units the booking holds by name outside custody", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(1);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValue([modelRow("model-1")]);
+    // why: `readOwnNamedUnits` reads this booking's units of the page's models;
+    // one is free, one is with a custodian and already off the pool.
+    (db.asset.findMany as unknown as Mock).mockResolvedValueOnce([
+      { id: "unit-1", assetModelId: "model-1", custody: [] },
+      { id: "unit-2", assetModelId: "model-1", custody: [{ id: "c-1" }] },
+    ]);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    expect(result.assetModels[0]?.namedNotInCustody).toBe(1);
   });
 
   it("projects modelRequests: assetModelName, ISO date, and null pass-through", async () => {
