@@ -15,8 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { config as shelfConfig } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import {
-  MOBILE_CODE_WORKSPACE_INACTIVE_MESSAGE,
-  MOBILE_WORKSPACE_INACTIVE_MESSAGE,
+  MOBILE_INACTIVE_MESSAGES,
   getMobileWorkspaceAccess,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -127,7 +126,7 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
         requireOrganizationAccess(mobileRequest(), CALLER_ID)
       ).rejects.toMatchObject({
         status: 403,
-        message: `${MOBILE_WORKSPACE_INACTIVE_MESSAGE} Contact the workspace owner for more information.`,
+        message: `${MOBILE_INACTIVE_MESSAGES.lapsed.workspace} Contact the workspace owner for more information.`,
       });
     }
   );
@@ -155,17 +154,20 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
     ).rejects.toMatchObject({
       status: 403,
-      message: MOBILE_WORKSPACE_INACTIVE_MESSAGE,
+      message: MOBILE_INACTIVE_MESSAGES.lapsed.workspace,
     });
   });
 
-  it("refuses a workspace a Shelf admin disabled, whatever the owner's tier", async () => {
+  it("refuses a workspace a Shelf admin disabled, whatever the owner's tier, without blaming the subscription", async () => {
     givenMembership(membershipRow({ workspaceDisabled: true }));
     ownerTier("tier_2");
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({
+      status: 403,
+      message: `${MOBILE_INACTIVE_MESSAGES.disabled.workspace} Contact the workspace owner for more information.`,
+    });
   });
 
   it("never refuses a personal workspace for its owner's free tier", async () => {
@@ -234,7 +236,7 @@ describe("getMobileWorkspaceAccess", () => {
     expect(answer).toMatchObject({
       error: {
         status: 403,
-        message: `${MOBILE_CODE_WORKSPACE_INACTIVE_MESSAGE} Contact the workspace owner for more information.`,
+        message: `${MOBILE_INACTIVE_MESSAGES.lapsed.code} Contact the workspace owner for more information.`,
       },
     });
   });

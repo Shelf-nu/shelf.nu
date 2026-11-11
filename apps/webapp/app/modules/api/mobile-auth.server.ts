@@ -286,18 +286,23 @@ const MOBILE_WORKSPACE_GATE_SELECT = {
 } as const;
 
 /**
- * Message the companion shows when the workspace it acts in is inactive. It
- * states the fact only: the phone app never points the user at a purchase.
+ * Messages the companion shows when a workspace is inactive, by why it is
+ * inactive and whether the request acts in that workspace (`workspace`) or
+ * opens a scanned code it owns (`code`; that workspace may not be the one the
+ * app is in). They state the fact only: the phone app never points the user
+ * at a purchase.
  */
-export const MOBILE_WORKSPACE_INACTIVE_MESSAGE =
-  "This workspace is inactive because its subscription has expired.";
-
-/**
- * Message for a scanned code whose workspace is inactive. That workspace may
- * not be the one the app is in, so the message names the code's workspace.
- */
-export const MOBILE_CODE_WORKSPACE_INACTIVE_MESSAGE =
-  "The workspace this code belongs to is inactive because its subscription has expired.";
+export const MOBILE_INACTIVE_MESSAGES = {
+  lapsed: {
+    workspace:
+      "This workspace is inactive because its subscription has expired.",
+    code: "The workspace this code belongs to is inactive because its subscription has expired.",
+  },
+  disabled: {
+    workspace: "This workspace has been disabled.",
+    code: "The workspace this code belongs to has been disabled.",
+  },
+} as const;
 
 /** Added for anyone but the owner, who is the one who can act on it. */
 const CONTACT_OWNER_SUFFIX =
@@ -318,9 +323,10 @@ const CONTACT_OWNER_SUFFIX =
  *
  * @param args.isShelfAdmin - Whether the caller holds the Shelf `ADMIN` role.
  * @param args.organization - The workspace to check.
- * @returns `true` when the workspace is inactive for this caller.
+ * @returns Why the workspace is inactive for this caller (`disabled` by a
+ *   Shelf admin, or `lapsed` Team plan), or `null` when it is active.
  */
-async function isMobileWorkspaceInactive({
+async function getMobileWorkspaceInactiveReason({
   isShelfAdmin,
   organization,
 }: {
@@ -329,14 +335,14 @@ async function isMobileWorkspaceInactive({
     Organization,
     "id" | "type" | "name" | "imageId" | "userId" | "workspaceDisabled"
   >;
-}): Promise<boolean> {
-  if (isShelfAdmin) return false;
-  if (organization.workspaceDisabled) return true;
+}): Promise<"disabled" | "lapsed" | null> {
+  if (isShelfAdmin) return null;
+  if (organization.workspaceDisabled) return "disabled";
   // Only a TEAM workspace depends on the owner's paid tier, so the tier lookup
   // inside `disabledTeamOrg` runs for those alone.
-  if (organization.type !== "TEAM") return false;
+  if (organization.type !== "TEAM") return null;
 
-  return disabledTeamOrg({
+  const lapsed = await disabledTeamOrg({
     currentOrganization: organization,
     organizations: [organization],
     // why: `disabledTeamOrg` exempts any URL containing "account-details", a
@@ -345,6 +351,7 @@ async function isMobileWorkspaceInactive({
     // hands one over.
     url: "",
   });
+  return lapsed ? "lapsed" : null;
 }
 
 /** What the caller may do in a workspace, from {@link getMobileWorkspaceAccess}. */
@@ -387,7 +394,7 @@ export async function getMobileWorkspaceAccess({
   if (!membership) return { access: "not-member" };
 
   const { organization } = membership;
-  const inactive = await isMobileWorkspaceInactive({
+  const inactiveReason = await getMobileWorkspaceInactiveReason({
     // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
     isShelfAdmin: membership.user.roles.some(
       (role) => role.name === Roles.ADMIN
@@ -395,12 +402,9 @@ export async function getMobileWorkspaceAccess({
     organization,
   });
 
-  if (!inactive) return { access: "active" };
+  if (!inactiveReason) return { access: "active" };
 
-  const base =
-    reason === "code"
-      ? MOBILE_CODE_WORKSPACE_INACTIVE_MESSAGE
-      : MOBILE_WORKSPACE_INACTIVE_MESSAGE;
+  const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][reason];
   // `organization.userId` is the workspace owner.
   const isOwner = organization.userId === userId;
 
