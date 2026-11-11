@@ -8,8 +8,6 @@ import {
   ActivityIndicator,
   Animated,
   ScrollView,
-  Linking,
-  Platform,
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +18,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useOrg } from "@/lib/org-context";
+import {
+  CAMERA_SETTINGS_FALLBACK,
+  openAppSettings,
+} from "@/lib/open-app-settings";
 import {
   openBookingAfterAlert,
   openShelfWebUrl,
@@ -2960,13 +2962,7 @@ function ScannerContent() {
         ) : (
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => {
-              if (Platform.OS === "ios") {
-                Linking.openURL("app-settings:");
-              } else {
-                Linking.openSettings();
-              }
-            }}
+            onPress={() => void openAppSettings(CAMERA_SETTINGS_FALLBACK)}
           >
             <Text style={styles.actionButtonText}>Open Settings</Text>
           </TouchableOpacity>
