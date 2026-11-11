@@ -51,6 +51,20 @@ describe("subscriptionGrantedText", () => {
   });
 });
 
+describe("subscriptionGrantedText, Checkout add-ons", () => {
+  it("carries Checkout add-ons on the workspace creation link", () => {
+    const text = subscriptionGrantedText({
+      subscriptionName: "Team",
+      needsTeamWorkspace: true,
+      newWorkspaceAddons: { audits: true, barcodes: true },
+    });
+
+    expect(text).toContain(
+      `${NEW_WORKSPACE_URL}?includesAudits=true&includesBarcodes=true`
+    );
+  });
+});
+
 describe("subscriptionGrantedHtml", () => {
   it("points the button at workspace creation for a customer without a Team workspace", async () => {
     const html = await subscriptionGrantedHtml({

@@ -1,8 +1,10 @@
-import type { TierId } from "@prisma/client";
+import { TierId } from "@prisma/client";
 import Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { unpaidInvoiceAdminText } from "~/emails/stripe/unpaid-invoice";
+import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
+import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
 import type { AddonType } from "~/modules/billing/price-validation.server";
 import {
   ADMIN_EMAIL,
@@ -205,11 +207,15 @@ export function findOwnedTeamWorkspaces(
   });
 }
 
-/** Whether a subscription carries a plan item (not only add-ons). */
-function carriesPlan(subscription: Stripe.Subscription): boolean {
-  return !!highestPlanTier(
+/**
+ * Whether a subscription carries a Team (or higher) plan item. Plus plans
+ * have no Team workspace, so they never take or wait for one.
+ */
+function carriesTeamPlan(subscription: Stripe.Subscription): boolean {
+  const tier = highestPlanTier(
     subscription.items.data.map((item) => item.price?.product)
   );
+  return !!tier && isHigherOrEqualTier(tier, TierId.tier_2);
 }
 
 /**
@@ -217,8 +223,9 @@ function carriesPlan(subscription: Stripe.Subscription): boolean {
  * `metadata.organizationId` belongs to, from the customer's subscriptions
  * and the Team workspaces the user owns.
  *
- * A workspace is taken while a live plan subscription (status grants a plan,
- * per `subscriptionStatusGrantsPlan`, and it carries a plan item) names it in
+ * A workspace is taken while a live Team plan subscription (status grants a
+ * plan, per `subscriptionStatusGrantsPlan`, and it carries a Team or higher
+ * plan item, `carriesTeamPlan`) names it in
  * `metadata.organizationId`. A standalone add-on subscription never takes a
  * workspace, and a paused or cancelled plan subscription releases it. The
  * rest are the candidates.
@@ -249,7 +256,7 @@ export function resolveTeamWorkspaceForPlan({
   workspace: LinkableWorkspace | null;
 } {
   const livePlans = subscriptions.filter(
-    (sub) => subscriptionStatusGrantsPlan(sub.status) && carriesPlan(sub)
+    (sub) => subscriptionStatusGrantsPlan(sub.status) && carriesTeamPlan(sub)
   );
   const taken = new Set(
     livePlans
@@ -271,8 +278,8 @@ export function resolveTeamWorkspaceForPlan({
   };
 }
 
-/** The add-on types among a subscription's line items. */
-function addonTypesOf(subscription: Stripe.Subscription): AddonType[] {
+/** The add-on types among a subscription's line items, products expanded. */
+export function addonTypesOf(subscription: Stripe.Subscription): AddonType[] {
   const types: AddonType[] = [];
   for (const item of subscription.items.data) {
     const product = item.price?.product;
@@ -366,16 +373,20 @@ export async function askAdminToPickWorkspaceOnce({
 
 /**
  * Gives a newly created Team workspace the invoice-billed subscriptions the
- * user holds without a workspace, when the creation link did not ask for
- * them.
+ * user holds without a workspace, and switches their add-ons on there.
  *
  * The waiting subscriptions are the live, invoice-billed ones
- * (`isInvoiceBilled`) that name no workspace and carry a plan or an add-on.
- * When `resolveTeamWorkspaceForPlan` answers with the new workspace, each of
- * them gets `metadata.organizationId` (`linkedMetadata`), and their add-ons
- * are returned for the caller to switch on. When add-ons are waiting but the
- * answer is not this workspace, the admin is asked to pick, once per
- * subscription: nothing else would ever place them.
+ * (`isInvoiceBilled`) that name no workspace and carry a Team plan or an
+ * add-on. When `resolveTeamWorkspaceForPlan` answers with the new workspace
+ * and at most one waiting subscription carries add-ons, each waiting
+ * subscription gets `metadata.organizationId` (`linkedMetadata`) and its
+ * add-ons are switched on through the add-on handlers, for that exact
+ * subscription. A `past_due` one keeps its add-ons, as its plan does. In
+ * every other case where add-ons are waiting, the admin is asked to pick,
+ * once per subscription: nothing else would ever place them.
+ *
+ * Checkout subscriptions are left to the creation link's `includesAudits` /
+ * `includesBarcodes` params.
  *
  * Stripe's plain subscription list is read first, and the products are only
  * looked up when a live invoice-billed subscription names no workspace, so a
@@ -383,7 +394,6 @@ export async function askAdminToPickWorkspaceOnce({
  *
  * @param args.userId - The user who created the workspace
  * @param args.organizationId - The workspace just created
- * @returns Whether to link the Audits and the Barcodes add-on
  */
 export async function linkWaitingSubscriptionsToWorkspace({
   userId,
@@ -391,14 +401,12 @@ export async function linkWaitingSubscriptionsToWorkspace({
 }: {
   userId: string;
   organizationId: string;
-}): Promise<{ audits: boolean; barcodes: boolean }> {
-  const none = { audits: false, barcodes: false };
-
+}): Promise<void> {
   const user = await db.user.findUnique({
     where: { id: userId },
     select: { customerId: true, email: true },
   });
-  if (!user?.customerId || !stripe) return none;
+  if (!user?.customerId || !stripe) return;
 
   const isWaiting = (sub: Stripe.Subscription) =>
     subscriptionStatusGrantsPlan(sub.status) &&
@@ -409,28 +417,26 @@ export async function linkWaitingSubscriptionsToWorkspace({
     customer: user.customerId,
     limit: 100,
   });
-  if (!listed.has_more && !listed.data.some(isWaiting)) return none;
+  if (!listed.has_more && !listed.data.some(isWaiting)) return;
 
   const subscriptions = await getCustomerSubscriptionsWithProducts(
     user.customerId
   );
   const waiting = subscriptions.filter(
-    (sub) => isWaiting(sub) && (carriesPlan(sub) || addonTypesOf(sub).length)
+    (sub) =>
+      isWaiting(sub) && (carriesTeamPlan(sub) || addonTypesOf(sub).length)
   );
-  if (waiting.length === 0) return none;
+  if (waiting.length === 0) return;
 
   const owned = await findOwnedTeamWorkspaces(userId);
   const { candidates, unlinkedPlans, workspace } = resolveTeamWorkspaceForPlan({
     owned,
     subscriptions,
   });
-  const withAddons = waiting.filter(
-    (sub) =>
-      (sub.status === "active" || sub.status === "trialing") &&
-      addonTypesOf(sub).length > 0
-  );
+  const withAddons = waiting.filter((sub) => addonTypesOf(sub).length > 0);
 
-  if (workspace?.id !== organizationId) {
+  // Two subscriptions carrying add-ons may be meant for two workspaces.
+  if (workspace?.id !== organizationId || withAddons.length > 1) {
     if (withAddons.length > 0) {
       await askAdminToPickWorkspaceOnce({
         user,
@@ -440,20 +446,35 @@ export async function linkWaitingSubscriptionsToWorkspace({
         candidates,
       });
     }
-    return none;
+    return;
   }
 
   for (const sub of waiting) {
-    await stripe.subscriptions.update(sub.id, {
-      metadata: linkedMetadata(sub.metadata, organizationId),
-    });
-  }
+    const metadata = linkedMetadata(sub.metadata, organizationId);
+    await stripe.subscriptions.update(sub.id, { metadata });
 
-  const waitingTypes = new Set(withAddons.flatMap(addonTypesOf));
-  return {
-    audits: waitingTypes.has("audits"),
-    barcodes: waitingTypes.has("barcodes"),
-  };
+    // The handlers' creation branch switches the add-on on for the workspace
+    // (and records a used trial), whatever the subscription's live status.
+    const linked = {
+      ...sub,
+      metadata: { ...sub.metadata, organizationId },
+    } as Stripe.Subscription;
+    const addonTypes = addonTypesOf(sub);
+    if (addonTypes.includes("audits")) {
+      await handleAuditAddonWebhook({
+        eventType: "customer.subscription.created",
+        subscription: linked,
+        organizationId,
+      });
+    }
+    if (addonTypes.includes("barcodes")) {
+      await handleBarcodeAddonWebhook({
+        eventType: "customer.subscription.created",
+        subscription: linked,
+        organizationId,
+      });
+    }
+  }
 }
 
 /**

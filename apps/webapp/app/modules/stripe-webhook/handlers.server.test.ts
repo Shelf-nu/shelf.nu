@@ -609,6 +609,74 @@ describe("handleSubscriptionCreated", () => {
       expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
     });
 
+    it("switches on only the add-ons the subscription still carries (a late event)", async () => {
+      // The event still lists Audits; Stripe no longer does.
+      stripeHolds(storedSubscription([TEAM_PRODUCT]));
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(organizationIdsWritten()).toEqual(["org-9"]);
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+    });
+
+    it("does not let an unlinked Plus plan make the Team workspace uncertain", async () => {
+      stripeHolds(
+        storedSubscription([PLUS_PRODUCT], { id: "sub_plus" }),
+        storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT])
+      );
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(organizationIdsWritten()).toEqual(["org-9"]);
+    });
+
+    it("sends a Checkout customer with no workspace to create one with their add-ons", async () => {
+      await handleSubscriptionCreated(
+        buildEvent(
+          "customer.subscription.created",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            metadata: {},
+            collectionMethod: "charge_automatically",
+          })
+        ),
+        user
+      );
+
+      expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          needsTeamWorkspace: true,
+          newWorkspaceAddons: { audits: true, barcodes: false },
+        })
+      );
+    });
+
+    it("leaves the add-on params out for an invoice-billed customer, whose workspace finds the subscription", async () => {
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", unlinked()),
+        user
+      );
+
+      expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          needsTeamWorkspace: true,
+          newWorkspaceAddons: undefined,
+        })
+      );
+    });
+
     it("leaves a Checkout subscription to the workspace creation link", async () => {
       mockOrgFindMany.mockResolvedValue([
         { id: "org-9", name: "ZZ Test Team" },
@@ -1010,6 +1078,21 @@ describe("handleSubscriptionDeleted", () => {
     );
 
     expect(mockUserUpdate).not.toHaveBeenCalled();
+  });
+
+  it("counts the cancellation as churn when an overdue invoice already moved the user to Free", async () => {
+    await handleSubscriptionDeleted(
+      buildEvent(
+        "customer.subscription.deleted",
+        buildSubscription({ status: "canceled" })
+      ),
+      { ...user, tierId: TierId.free }
+    );
+
+    expect(mockUserUpdate).not.toHaveBeenCalled();
+    expect(mockCaptureServerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "subscription_cancelled" })
+    );
   });
 
   it("lowers the user to Free when no other subscription grants a plan", async () => {

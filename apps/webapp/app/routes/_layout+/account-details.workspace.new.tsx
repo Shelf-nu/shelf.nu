@@ -146,12 +146,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currency,
     });
 
-    // A subscription the user holds without a workspace goes to this one
-    // when it is the only Team workspace it could belong to (an
-    // invoice-billed subscription created in Stripe, for instance). A failed
-    // lookup adds nothing to the creation-link params below and never blocks
-    // workspace creation; the admin is told so they can link it by hand.
-    const awaitingAddons = await linkWaitingSubscriptionsToWorkspace({
+    // An invoice-billed subscription the user holds without a workspace goes
+    // to this one, with its add-ons, when it is the only Team workspace it
+    // could belong to. A failed lookup never blocks workspace creation; the
+    // admin is told so they can link it by hand.
+    await linkWaitingSubscriptionsToWorkspace({
       userId,
       organizationId: newOrg.id,
     }).catch((cause) => {
@@ -179,17 +178,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           "metadata.organizationId where one belongs to this workspace.",
         ].join("\n"),
       });
-
-      return { audits: false, barcodes: false };
     });
 
     // Link audit addon to new org if checkout included audits.
     // This must not block workspace creation: if it fails, we log,
     // notify the admin, and let the user continue.
     const url = new URL(request.url);
-    const includesAudits =
-      url.searchParams.get("includesAudits") === "true" ||
-      awaitingAddons.audits;
+    const includesAudits = url.searchParams.get("includesAudits") === "true";
     let auditLinkFailed = false;
 
     if (includesAudits) {
@@ -242,8 +237,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // Link barcode addon to new org if checkout included barcodes.
     // Same graceful failure pattern as audits above.
     const includesBarcodes =
-      url.searchParams.get("includesBarcodes") === "true" ||
-      awaitingAddons.barcodes;
+      url.searchParams.get("includesBarcodes") === "true";
     let barcodeLinkFailed = false;
 
     if (includesBarcodes) {

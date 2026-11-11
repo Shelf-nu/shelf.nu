@@ -34,6 +34,7 @@ import {
 
 import { resolveUserGreetingName } from "~/utils/user";
 import {
+  addonTypesOf,
   askAdminToPickWorkspaceOnce,
   findOwnedTeamWorkspaces,
   highestPlanTier,
@@ -522,8 +523,6 @@ function buildUpgradeCompletedProps(
  * @param args.subscription - The subscription from the event
  * @param args.tierId - The tier the subscription carries
  * @param args.user - The user the customer belongs to
- * @param args.hasAuditAddon - Whether the subscription carries an Audits item
- * @param args.hasBarcodeAddon - Whether the subscription carries a Barcodes item
  * @param args.loadSubscriptions - The event's shared read of the customer's
  *   subscriptions (`createCustomerSubscriptionsLoader`)
  * @returns `"unplaced"` when the user owns no Team workspace the subscription
@@ -535,16 +534,12 @@ async function linkSubscriptionToTeamWorkspace({
   subscription,
   tierId,
   user,
-  hasAuditAddon,
-  hasBarcodeAddon,
   loadSubscriptions,
 }: {
   eventType: string;
   subscription: Stripe.Subscription;
   tierId: string | undefined;
   user: WebhookUser;
-  hasAuditAddon: boolean;
-  hasBarcodeAddon: boolean;
   loadSubscriptions: () => Promise<Stripe.Subscription[]>;
 }): Promise<"skipped" | "unplaced" | "linked" | "ask"> {
   if (subscription.metadata?.organizationId) return "skipped";
@@ -582,11 +577,16 @@ async function linkSubscriptionToTeamWorkspace({
     return "ask";
   }
 
+  // The add-ons come from the subscription as Stripe holds it now: a late
+  // event may still list an add-on that has since been removed.
+  const addonTypes = addonTypesOf(current);
+  const hasAuditAddon = addonTypes.includes("audits");
+  const hasBarcodeAddon = addonTypes.includes("barcodes");
   const metadata = linkedMetadata(current.metadata, workspace.id);
   await syncBundledAddons({
     eventType,
     subscription: {
-      ...subscription,
+      ...current,
       metadata: { ...current.metadata, organizationId: workspace.id },
     },
     hasAuditAddon,
@@ -815,8 +815,6 @@ export async function handleSubscriptionCreated(
     subscription,
     tierId,
     user,
-    hasAuditAddon,
-    hasBarcodeAddon,
     loadSubscriptions: createCustomerSubscriptionsLoader(customerId),
   });
 
@@ -835,8 +833,14 @@ export async function handleSubscriptionCreated(
     });
     const subscriptionName = product?.name || "Shelf Subscription";
     // A Team plan is used in a Team workspace, so a customer with no
-    // workspace the subscription could belong to is sent to create one.
+    // workspace the subscription could belong to is sent to create one. A
+    // Checkout subscription's add-ons reach that workspace through the
+    // creation link's params; an invoice-billed one is found by
+    // `linkWaitingSubscriptionsToWorkspace`.
     const needsTeamWorkspace = workspaceLink === "unplaced";
+    const newWorkspaceAddons = isInvoiceBilled(subscription)
+      ? undefined
+      : { audits: hasAuditAddon, barcodes: hasBarcodeAddon };
 
     for (const email of emailsToNotify) {
       sendEmail({
@@ -846,6 +850,7 @@ export async function handleSubscriptionCreated(
           customerName,
           subscriptionName,
           needsTeamWorkspace,
+          newWorkspaceAddons,
         }),
       });
     }
@@ -1005,8 +1010,6 @@ export async function handleSubscriptionUpdated(
       subscription,
       tierId,
       user,
-      hasAuditAddon,
-      hasBarcodeAddon,
       loadSubscriptions,
     });
   }
@@ -1152,26 +1155,27 @@ export async function handleSubscriptionDeleted(
         });
       });
 
-    // Count churn only for users who actually paid and have no plan left.
-    // Trial users are placed on the paid tier at trial start, so the tier
-    // guard above also passes for a mid-trial cancellation: exclude those
-    // (still inside the trial window) so trial abandonment doesn't inflate
-    // churn. Best-effort; never blocks.
-    const stillWithinTrial = subscription.trial_end
-      ? subscription.trial_end * 1000 > Date.now()
-      : false;
-    if (remainingTierId === TierId.free && !stillWithinTrial) {
-      captureServerEvent({
-        distinctId: user.id,
-        event: "subscription_cancelled",
-        properties: { tierId: tierId ?? "unknown" },
-      });
-    }
-
     // Only reset branding when downgrading from Plus (tier_1) to Free
     if (user.tierId === TierId.tier_1) {
       await resetPersonalWorkspaceBranding(user.id);
     }
+  }
+
+  // Count churn only for users who actually paid and have no plan left,
+  // including a user an overdue invoice already moved to Free. Trial users
+  // are placed on the paid tier at trial start, so the tier guard above also
+  // passes for a mid-trial cancellation: exclude those (still inside the
+  // trial window) so trial abandonment doesn't inflate churn. Best-effort;
+  // never blocks.
+  const stillWithinTrial = subscription.trial_end
+    ? subscription.trial_end * 1000 > Date.now()
+    : false;
+  if (remainingTierId === TierId.free && !stillWithinTrial) {
+    captureServerEvent({
+      distinctId: user.id,
+      event: "subscription_cancelled",
+      properties: { tierId: tierId ?? "unknown" },
+    });
   }
 
   return OK();

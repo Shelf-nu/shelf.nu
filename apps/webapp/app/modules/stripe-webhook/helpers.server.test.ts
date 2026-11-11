@@ -89,6 +89,19 @@ vi.mock("~/emails/mail.server", () => ({
   sendEmail: mockSendEmail,
 }));
 
+// why: the add-on handlers write the workspace's add-on flags; what matters
+// here is which subscription and workspace reach them
+const { mockAuditAddonWebhook, mockBarcodeAddonWebhook } = vi.hoisted(() => ({
+  mockAuditAddonWebhook: vi.fn(),
+  mockBarcodeAddonWebhook: vi.fn(),
+}));
+vi.mock("~/modules/audit/addon.server", () => ({
+  handleAuditAddonWebhook: mockAuditAddonWebhook,
+}));
+vi.mock("~/modules/barcode/addon.server", () => ({
+  handleBarcodeAddonWebhook: mockBarcodeAddonWebhook,
+}));
+
 // why: We need the StripeSignatureVerificationError class for instanceof
 // checks in the catch block; must be hoisted so the vi.mock factory can use it
 const { FakeStripeSignatureVerificationError } = vi.hoisted(() => {
@@ -477,6 +490,7 @@ describe("parseCustomInstallCustomers", () => {
 
 describe("linkWaitingSubscriptionsToWorkspace", () => {
   const TEAM = { id: "prod_team", metadata: { shelf_tier: "tier_2" } };
+  const PLUS = { id: "prod_plus", metadata: { shelf_tier: "tier_1" } };
   const AUDITS = {
     id: "prod_audits",
     metadata: { product_type: "addon", addon_type: "audits" },
@@ -542,6 +556,18 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       .map((email) => email.subject as string);
   }
 
+  /** The add-ons switched on, as `<type>:<subscription>:<workspace>`. */
+  function addonsSwitchedOn() {
+    return [
+      ...mockAuditAddonWebhook.mock.calls.map(
+        ([args]) => `audits:${args.subscription.id}:${args.organizationId}`
+      ),
+      ...mockBarcodeAddonWebhook.mock.calls.map(
+        ([args]) => `barcodes:${args.subscription.id}:${args.organizationId}`
+      ),
+    ];
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAdminEmail.value = "admin@test.com";
@@ -554,31 +580,48 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     mockOrgFindMany.mockResolvedValue([{ id: "org-new", name: "ZZ New" }]);
   });
 
-  it("links the waiting plan and its add-ons to the user's first Team workspace", async () => {
+  it("links the waiting plan to the user's first Team workspace and switches its add-ons on there", async () => {
     stripeHolds(subscription([TEAM, AUDITS, BARCODES]));
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: true,
-      barcodes: true,
-    });
+    await linkToNewWorkspace();
+
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
       metadata: { organizationId: "org-new" },
     });
+    expect(addonsSwitchedOn()).toEqual([
+      "audits:sub_1:org-new",
+      "barcodes:sub_1:org-new",
+    ]);
+    expect(mockAuditAddonWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "customer.subscription.created",
+        subscription: expect.objectContaining({
+          metadata: { organizationId: "org-new" },
+        }),
+      })
+    );
     expect(mockOrgFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: "user-1", type: "TEAM" } })
     );
   });
 
+  it("switches on the add-ons of a past-due subscription too", async () => {
+    stripeHolds(subscription([TEAM, AUDITS], { status: "past_due" }));
+
+    await linkToNewWorkspace();
+
+    expect(addonsSwitchedOn()).toEqual(["audits:sub_1:org-new"]);
+  });
+
   it("links a plan-only subscription too, so a later plan does not count this workspace as free", async () => {
     stripeHolds(subscription([TEAM], { metadata: { po_number: "PO-1" } }));
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
       metadata: { po_number: "PO-1", organizationId: "org-new" },
     });
+    expect(addonsSwitchedOn()).toEqual([]);
     expect(adminEmailSubjects()).toEqual([]);
   });
 
@@ -595,10 +638,24 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       { id: "org-new", name: "ZZ New" },
     ]);
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: true,
-    });
+    await linkToNewWorkspace();
+
+    expect(addonsSwitchedOn()).toEqual(["barcodes:sub_1:org-new"]);
+  });
+
+  it("does not let an unlinked Plus plan make the Team workspace uncertain", async () => {
+    stripeHolds(
+      subscription([PLUS], {
+        id: "sub_plus",
+        collection_method: "charge_automatically",
+      }),
+      subscription([TEAM, AUDITS])
+    );
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual(["org-new"]);
+    expect(addonsSwitchedOn()).toEqual(["audits:sub_1:org-new"]);
   });
 
   it("asks the admin when waiting add-ons could also belong to another Team workspace", async () => {
@@ -608,11 +665,10 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       { id: "org-new", name: "ZZ New" },
     ]);
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(organizationIdsWritten()).toEqual([]);
+    expect(addonsSwitchedOn()).toEqual([]);
     expect(adminEmailSubjects()).toEqual([
       expect.stringContaining("Needs you"),
     ]);
@@ -620,19 +676,35 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
 
   it("asks the admin when two plan subscriptions without a workspace wait for one workspace", async () => {
     stripeHolds(
-      subscription([TEAM], { id: "sub_checkout" }),
+      subscription([TEAM], {
+        id: "sub_checkout",
+        collection_method: "charge_automatically",
+      }),
       subscription([TEAM, AUDITS], { id: "sub_invoice" })
     );
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(organizationIdsWritten()).toEqual([]);
     const [email] = mockSendEmail.mock.calls[0];
     expect(email.subject).toContain("Needs you");
     expect(email.text).toContain("sub_checkout");
     expect(email.text).toContain("sub_invoice");
+  });
+
+  it("asks the admin instead of putting several add-on subscriptions on one workspace", async () => {
+    stripeHolds(
+      subscription([AUDITS], { id: "sub_audits_a" }),
+      subscription([AUDITS], { id: "sub_audits_b" })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual([]);
+    expect(addonsSwitchedOn()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([
+      expect.stringContaining("Needs you"),
+    ]);
   });
 
   it("stays quiet when only plans without add-ons are ambiguous", async () => {
@@ -641,10 +713,8 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       subscription([TEAM], { id: "sub_b" })
     );
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     expect(adminEmailSubjects()).toEqual([]);
   });
@@ -657,43 +727,10 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       subscription([TEAM, BARCODES], { id: "sub_2", status: "canceled" })
     );
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
     expect(mockOrgFindMany).not.toHaveBeenCalled();
-  });
-
-  it("reads every page when Stripe's plain list has more than one page", async () => {
-    mockSubscriptionsList.mockResolvedValue({
-      data: [
-        subscription([TEAM], {
-          id: "sub_0",
-          metadata: { organizationId: "org-old" },
-        }),
-      ],
-      has_more: true,
-    });
-    mockGetCustomerSubscriptions.mockResolvedValue([
-      subscription([TEAM], {
-        id: "sub_0",
-        metadata: { organizationId: "org-old" },
-      }),
-      subscription([TEAM, AUDITS], { id: "sub_page_2" }),
-    ]);
-    mockOrgFindMany.mockResolvedValue([
-      { id: "org-old", name: "ZZ Old" },
-      { id: "org-new", name: "ZZ New" },
-    ]);
-
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: true,
-      barcodes: false,
-    });
-    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_page_2", {
-      metadata: { organizationId: "org-new" },
-    });
   });
 
   it("leaves Checkout subscriptions to the creation link and makes one Stripe call", async () => {
@@ -703,12 +740,11 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
       })
     );
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(addonsSwitchedOn()).toEqual([]);
     expect(adminEmailSubjects()).toEqual([]);
   });
 
@@ -743,13 +779,38 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     });
   });
 
+  it("reads every page when Stripe's plain list has more than one page", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      data: [
+        subscription([TEAM], {
+          id: "sub_0",
+          metadata: { organizationId: "org-old" },
+        }),
+      ],
+      has_more: true,
+    });
+    mockGetCustomerSubscriptions.mockResolvedValue([
+      subscription([TEAM], {
+        id: "sub_0",
+        metadata: { organizationId: "org-old" },
+      }),
+      subscription([TEAM, AUDITS], { id: "sub_page_2" }),
+    ]);
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(addonsSwitchedOn()).toEqual(["audits:sub_page_2:org-new"]);
+  });
+
   it("reads nothing from Stripe for a user without a customer", async () => {
     mockUserFindUnique.mockResolvedValue({ customerId: null, email: "x" });
 
-    await expect(linkToNewWorkspace()).resolves.toEqual({
-      audits: false,
-      barcodes: false,
-    });
+    await linkToNewWorkspace();
+
     expect(mockSubscriptionsList).not.toHaveBeenCalled();
   });
 });

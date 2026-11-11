@@ -23,16 +23,30 @@ interface SubscriptionGrantedEmailProps {
    * call to action creates one instead of opening the app.
    */
   needsTeamWorkspace?: boolean;
+  /**
+   * Add-ons bought with the plan through Checkout. The workspace creation
+   * link carries them (`includesAudits`, `includesBarcodes`) so the new
+   * workspace gets them, as it does from the Checkout success page.
+   */
+  newWorkspaceAddons?: { audits: boolean; barcodes: boolean };
 }
 
 /** The email's call to action: create a Team workspace, or open the app. */
-function callToAction(needsTeamWorkspace?: boolean) {
-  return needsTeamWorkspace
-    ? {
-        label: "Create your team workspace",
-        href: `${SERVER_URL}/account-details/workspace/new`,
-      }
-    : { label: "Go to your workspace", href: `${SERVER_URL}` };
+function callToAction(
+  needsTeamWorkspace?: boolean,
+  newWorkspaceAddons?: { audits: boolean; barcodes: boolean }
+) {
+  if (!needsTeamWorkspace) {
+    return { label: "Go to your workspace", href: `${SERVER_URL}` };
+  }
+  const params = new URLSearchParams();
+  if (newWorkspaceAddons?.audits) params.set("includesAudits", "true");
+  if (newWorkspaceAddons?.barcodes) params.set("includesBarcodes", "true");
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return {
+    label: "Create your team workspace",
+    href: `${SERVER_URL}/account-details/workspace/new${query}`,
+  };
 }
 
 interface SendSubscriptionGrantedEmailProps
@@ -44,6 +58,7 @@ export const sendSubscriptionGrantedEmail = async ({
   customerName,
   subscriptionName,
   needsTeamWorkspace,
+  newWorkspaceAddons,
   email,
 }: SendSubscriptionGrantedEmailProps) => {
   try {
@@ -52,11 +67,13 @@ export const sendSubscriptionGrantedEmail = async ({
       customerName,
       subscriptionName,
       needsTeamWorkspace,
+      newWorkspaceAddons,
     });
     const text = subscriptionGrantedText({
       customerName,
       subscriptionName,
       needsTeamWorkspace,
+      newWorkspaceAddons,
     });
 
     void sendEmail({
@@ -82,9 +99,10 @@ export const subscriptionGrantedText = ({
   customerName,
   subscriptionName,
   needsTeamWorkspace,
+  newWorkspaceAddons,
 }: SubscriptionGrantedEmailProps) => {
   const greeting = customerName ? `Hey ${customerName}` : "Hey there";
-  const cta = callToAction(needsTeamWorkspace);
+  const cta = callToAction(needsTeamWorkspace, newWorkspaceAddons);
   const getStarted = needsTeamWorkspace
     ? `Your plan is used in a team workspace. ${cta.label}: ${cta.href}`
     : `Get started: ${cta.href}`;
@@ -115,9 +133,10 @@ function SubscriptionGrantedEmailTemplate({
   customerName,
   subscriptionName,
   needsTeamWorkspace,
+  newWorkspaceAddons,
 }: SubscriptionGrantedEmailProps) {
   const { emailPrimaryColor } = config;
-  const cta = callToAction(needsTeamWorkspace);
+  const cta = callToAction(needsTeamWorkspace, newWorkspaceAddons);
 
   return (
     <Html>
@@ -202,11 +221,13 @@ export const subscriptionGrantedHtml = ({
   customerName,
   subscriptionName,
   needsTeamWorkspace,
+  newWorkspaceAddons,
 }: SubscriptionGrantedEmailProps) =>
   render(
     <SubscriptionGrantedEmailTemplate
       customerName={customerName}
       subscriptionName={subscriptionName}
       needsTeamWorkspace={needsTeamWorkspace}
+      newWorkspaceAddons={newWorkspaceAddons}
     />
   );
