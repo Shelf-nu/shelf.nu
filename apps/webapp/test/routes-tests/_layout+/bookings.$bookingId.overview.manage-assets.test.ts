@@ -1415,6 +1415,8 @@ describe("manage-assets loader — Models tab payload", () => {
     expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
       organizationId: "org123",
       booking: mockLoaderBooking,
+      // Models without assets are hidden unless the URL turns them on.
+      showModelsWithoutAssets: false,
     });
 
     // Parity check: same keys, same values, nothing
@@ -1435,7 +1437,10 @@ describe("manage-assets loader — Models tab payload", () => {
     // Models tab keys beside the asset list's own `s`. Restored after, because
     // clearAllMocks keeps implementations.
     vi.mocked(httpServer.getCurrentSearchParams).mockImplementation(
-      () => new URLSearchParams("s=laptop&modelSearch=dell&modelPage=2")
+      () =>
+        new URLSearchParams(
+          "s=laptop&modelSearch=dell&modelPage=2&showEmptyModels=true"
+        )
     );
     try {
       await loader(
@@ -1453,6 +1458,7 @@ describe("manage-assets loader — Models tab payload", () => {
       booking: mockLoaderBooking,
       search: "dell",
       page: 2,
+      showModelsWithoutAssets: true,
     });
   });
 

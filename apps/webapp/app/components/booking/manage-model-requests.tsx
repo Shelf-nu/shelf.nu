@@ -15,10 +15,12 @@
  *     while nothing has been assigned to it;
  *   - fully fulfilled: read-only, kept as the record of what was reserved.
  *
- * Search and page live in the URL under their own keys
- * ({@link MODEL_TAB_SEARCH_PARAM} / {@link MODEL_TAB_PAGE_PARAM}) so they
+ * Search, page and the "Show models without assets" toggle live in the URL
+ * under their own keys ({@link MODEL_TAB_SEARCH_PARAM},
+ * {@link MODEL_TAB_PAGE_PARAM}, {@link MODEL_TAB_SHOW_EMPTY_PARAM}) so they
  * never filter the Assets or Kits list, and the loader reads them through
- * `readModelTabParams`.
+ * `readModelTabParams`. Models with no assets are hidden unless the toggle is
+ * on.
  *
  * Every control submits to
  * {@link file://../../routes/api+/bookings.$bookingId.model-requests.ts}.
@@ -29,7 +31,7 @@
 
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFetcher, useNavigation } from "react-router";
+import { useFetcher, useLocation, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import Input from "~/components/forms/input";
@@ -49,6 +51,7 @@ import {
   isReservationOverCommitted,
   MODEL_TAB_PAGE_PARAM,
   MODEL_TAB_SEARCH_PARAM,
+  MODEL_TAB_SHOW_EMPTY_PARAM,
 } from "~/utils/booking-model-requests";
 import { isSearching } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -144,6 +147,7 @@ export function ManageModelRequests({
   );
   const [searchParams] = useSearchParams();
   const search = searchParams.get(MODEL_TAB_SEARCH_PARAM)?.trim() ?? "";
+  const showingEmpty = searchParams.get(MODEL_TAB_SHOW_EMPTY_PARAM) === "true";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -157,6 +161,9 @@ export function ManageModelRequests({
               {search
                 ? `No models match "${search}". Try a different search.`
                 : "There are no models on this page."}
+              {showingEmpty
+                ? null
+                : ' Models without assets are hidden; tick "Show models without assets" to list them.'}
             </p>
           </div>
         ) : (
@@ -256,8 +263,8 @@ function ModelSearchBar() {
   const isBusy = isDebouncePending || isSearching(navigation);
 
   return (
-    <div className="border-b px-6 py-3">
-      <div className="relative">
+    <div className="flex flex-col gap-3 border-b px-6 py-3 sm:flex-row sm:items-center">
+      <div className="relative flex-1">
         <Input
           type="text"
           name={MODEL_TAB_SEARCH_PARAM}
@@ -284,7 +291,56 @@ function ModelSearchBar() {
           />
         ) : null}
       </div>
+      <ShowEmptyModelsCheckbox />
     </div>
+  );
+}
+
+/**
+ * Toggles {@link MODEL_TAB_SHOW_EMPTY_PARAM}: models with no bookable asset
+ * are hidden unless it is ticked. Mirrors the "Include assets from child
+ * locations" checkbox on the Assets tab, including reading the pending URL so
+ * the box flips the moment it is clicked rather than after the loader runs.
+ */
+function ShowEmptyModelsCheckbox() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { pathname } = useLocation();
+  const navigation = useNavigation();
+  const pendingSearchParams =
+    navigation.location?.pathname === pathname
+      ? new URLSearchParams(navigation.location.search)
+      : null;
+  const checked =
+    (pendingSearchParams ?? searchParams).get(MODEL_TAB_SHOW_EMPTY_PARAM) ===
+    "true";
+
+  const handleChange = (nextChecked: boolean) => {
+    setSearchParams(
+      (prev) => {
+        if (nextChecked) prev.set(MODEL_TAB_SHOW_EMPTY_PARAM, "true");
+        else prev.delete(MODEL_TAB_SHOW_EMPTY_PARAM);
+        prev.delete(MODEL_TAB_PAGE_PARAM);
+        prev.set("tab", "models");
+        return prev;
+      },
+      { replace: true, preventScrollReset: true }
+    );
+  };
+
+  return (
+    <label
+      htmlFor="show-empty-models"
+      className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-sm"
+    >
+      <input
+        id="show-empty-models"
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => handleChange(event.target.checked)}
+        className="rounded-sm checked:bg-primary focus-within:ring-primary checked:hover:bg-primary checked:focus:bg-primary"
+      />
+      <span>Show models without assets</span>
+    </label>
   );
 }
 

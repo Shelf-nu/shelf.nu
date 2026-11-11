@@ -376,21 +376,32 @@ export const MODEL_TAB_SEARCH_PARAM = "modelSearch";
 export const MODEL_TAB_PAGE_PARAM = "modelPage";
 
 /**
- * Reads the Models tab's search and page from the request URL, in the shape
- * `getBookingModelTabData` takes.
+ * URL parameter that, set to `"true"`, lists models with no bookable asset on
+ * the Models tab. They are hidden by default: nothing can be reserved from
+ * them, and an inventory moving to models carries many empty ones.
+ */
+export const MODEL_TAB_SHOW_EMPTY_PARAM = "showEmptyModels";
+
+/**
+ * Reads the Models tab's search, page and empty-model toggle from the request
+ * URL, in the shape `getBookingModelTabData` takes.
  *
  * @param searchParams - The request's search params.
- * @returns `search` (trimmed, omitted when blank) and `page` (omitted unless a
- *   whole number above 1).
+ * @returns `search` (trimmed, omitted when blank), `page` (omitted unless a
+ *   whole number above 1) and `showModelsWithoutAssets` (false unless the
+ *   toggle is on).
  */
 export function readModelTabParams(searchParams: URLSearchParams): {
   search?: string;
   page?: number;
+  showModelsWithoutAssets: boolean;
 } {
   const search = searchParams.get(MODEL_TAB_SEARCH_PARAM)?.trim();
   const page = Number(searchParams.get(MODEL_TAB_PAGE_PARAM));
   return {
     ...(search ? { search } : {}),
     ...(Number.isInteger(page) && page > 1 ? { page } : {}),
+    showModelsWithoutAssets:
+      searchParams.get(MODEL_TAB_SHOW_EMPTY_PARAM) === "true",
   };
 }

@@ -3685,6 +3685,64 @@ describe("getBookingModelTabData", () => {
     expect(result).toMatchObject({ modelsPage: 3, modelsPerPage: 50 });
   });
 
+  it("lists every model by default, without an asset filter", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(3);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    const findManyCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(findManyCall?.where).toEqual({ organizationId: ORG_ID });
+    // No filter and no search: the full-org count is reused, not re-queried.
+    expect(result.matchedAssetModels).toBe(3);
+  });
+
+  it("hides models without assets, keeping ones this booking reserves", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValueOnce(17).mockResolvedValueOnce(4);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: {
+        ...emptyBooking,
+        modelRequests: [
+          {
+            assetModelId: "model-reserved",
+            quantity: 1,
+            fulfilledQuantity: 0,
+            fulfilledAt: null,
+            assetModel: { name: "Reserved model" },
+          },
+        ],
+      },
+      showModelsWithoutAssets: false,
+    });
+
+    const expectedWhere = {
+      organizationId: ORG_ID,
+      OR: [
+        { assets: { some: { type: "INDIVIDUAL", archivedAt: null } } },
+        { id: { in: ["model-reserved"] } },
+      ],
+    };
+    const findManyCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(findManyCall?.where).toEqual(expectedWhere);
+    // The page count follows the filtered list, not the full-org count.
+    expect(db.assetModel.count).toHaveBeenLastCalledWith({
+      where: expectedWhere,
+    });
+    expect(result.matchedAssetModels).toBe(4);
+  });
+
   it("projects modelRequests: assetModelName, ISO date, and null pass-through", async () => {
     expect.assertions(1);
 

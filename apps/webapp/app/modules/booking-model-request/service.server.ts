@@ -2280,6 +2280,7 @@ export async function getBookingModelTabData({
   search,
   page,
   perPage,
+  showModelsWithoutAssets = true,
 }: {
   organizationId: string;
   booking: BookingForModelTab;
@@ -2288,6 +2289,13 @@ export async function getBookingModelTabData({
   page?: number;
   /** Page size, capped at 100. Defaults to `MODEL_PICKER_LIMIT`. */
   perPage?: number;
+  /**
+   * List models that have no bookable asset. Defaults to true. When false, the
+   * list and `matchedAssetModels` keep only models with at least one active
+   * INDIVIDUAL asset (the units `total` counts), plus any model this booking
+   * already reserves, so a reservation never drops out of view.
+   */
+  showModelsWithoutAssets?: boolean;
 }): Promise<BookingModelTabData> {
   try {
     const assetModelsCount = await db.assetModel.count({
@@ -2310,16 +2318,40 @@ export async function getBookingModelTabData({
         }
       : {};
 
+    // Models with something to book, plus those this booking already
+    // reserves. Mirrors the asset filter `total` counts in
+    // `getAssetModelAvailabilities`, so a listed model never shows "No assets".
+    const withAssetsWhere: Prisma.AssetModelWhereInput = showModelsWithoutAssets
+      ? {}
+      : {
+          OR: [
+            {
+              assets: {
+                some: { type: AssetType.INDIVIDUAL, archivedAt: null },
+              },
+            },
+            {
+              id: { in: booking.modelRequests.map((r) => r.assetModelId) },
+            },
+          ],
+        };
+    const listWhere: Prisma.AssetModelWhereInput = {
+      organizationId,
+      ...searchWhere,
+      ...withAssetsWhere,
+    };
+
     let assetModels: BookingModelTabAssetModel[] = [];
 
     /**
-     * Count of models matching the search. Paginating callers need this to
-     * know when they've reached the end; without a search it's the same query
-     * as the full-org count, so reuse that rather than issuing a second one.
+     * Count of models the list can show. Paginating callers need this to know
+     * when they've reached the end; with no search and no filter it's the same
+     * query as the full-org count, so reuse that rather than issuing a second.
      */
-    const matchedAssetModels = trimmedSearch
-      ? await db.assetModel.count({ where: { organizationId, ...searchWhere } })
-      : assetModelsCount;
+    const matchedAssetModels =
+      trimmedSearch || !showModelsWithoutAssets
+        ? await db.assetModel.count({ where: listWhere })
+        : assetModelsCount;
 
     // Page size defaults to the historical cap, so callers that pass neither
     // param (the web loaders) get byte-identical behaviour to before.
@@ -2329,7 +2361,7 @@ export async function getBookingModelTabData({
 
     if (showModelsTab) {
       const rawModels = await db.assetModel.findMany({
-        where: { organizationId, ...searchWhere },
+        where: listWhere,
         select: {
           id: true,
           name: true,

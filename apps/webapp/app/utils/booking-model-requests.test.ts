@@ -11,6 +11,7 @@ import {
   isReservationOverCommitted,
   MODEL_TAB_PAGE_PARAM,
   MODEL_TAB_SEARCH_PARAM,
+  MODEL_TAB_SHOW_EMPTY_PARAM,
   readModelTabParams,
   summarizeUnassignedUnits,
 } from "./booking-model-requests";
@@ -454,17 +455,32 @@ describe("readModelTabParams", () => {
     expect(readModelTabParams(params("  dell ", "3"))).toEqual({
       search: "dell",
       page: 3,
+      showModelsWithoutAssets: false,
     });
   });
 
   it("ignores the asset list's own search", () => {
-    expect(readModelTabParams(params())).toEqual({});
+    expect(readModelTabParams(params())).toEqual({
+      showModelsWithoutAssets: false,
+    });
   });
 
   it("omits a blank search and any page that is not a whole number above 1", () => {
-    expect(readModelTabParams(params("   ", "1"))).toEqual({});
-    expect(readModelTabParams(params(undefined, "0"))).toEqual({});
-    expect(readModelTabParams(params(undefined, "2.5"))).toEqual({});
-    expect(readModelTabParams(params(undefined, "abc"))).toEqual({});
+    const none = { showModelsWithoutAssets: false };
+    expect(readModelTabParams(params("   ", "1"))).toEqual(none);
+    expect(readModelTabParams(params(undefined, "0"))).toEqual(none);
+    expect(readModelTabParams(params(undefined, "2.5"))).toEqual(none);
+    expect(readModelTabParams(params(undefined, "abc"))).toEqual(none);
+  });
+
+  it("hides models without assets unless the toggle is exactly on", () => {
+    const withToggle = (value: string) => {
+      const p = params();
+      p.set(MODEL_TAB_SHOW_EMPTY_PARAM, value);
+      return readModelTabParams(p).showModelsWithoutAssets;
+    };
+    expect(withToggle("true")).toBe(true);
+    expect(withToggle("false")).toBe(false);
+    expect(withToggle("1")).toBe(false);
   });
 });

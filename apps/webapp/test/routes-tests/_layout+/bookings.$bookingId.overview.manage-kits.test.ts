@@ -1368,6 +1368,8 @@ describe("manage-kits loader — Models tab payload", () => {
     expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
       organizationId: "org123",
       booking: mockLoaderBooking,
+      // Models without assets are hidden unless the URL turns them on.
+      showModelsWithoutAssets: false,
     });
   });
 
@@ -1387,7 +1389,7 @@ describe("manage-kits loader — Models tab payload", () => {
         context: mockContext,
         params: mockParams,
         request: new Request(
-          "http://localhost:3000/bookings/booking123/overview/manage-kits?s=kit&modelSearch=dell&modelPage=2"
+          "http://localhost:3000/bookings/booking123/overview/manage-kits?s=kit&modelSearch=dell&modelPage=2&showEmptyModels=true"
         ),
       })
     );
@@ -1397,6 +1399,7 @@ describe("manage-kits loader — Models tab payload", () => {
       booking: mockLoaderBooking,
       search: "dell",
       page: 2,
+      showModelsWithoutAssets: true,
     });
   });
 
