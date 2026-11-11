@@ -127,7 +127,7 @@ describe("otp action with signup disabled", () => {
     expect(response.status).toBe(403);
     expect(createUser).not.toHaveBeenCalled();
     expect(setSession).not.toHaveBeenCalled();
-    // The session the verified code opened is ended, not left behind.
+    // The route asks for the session the verified code opened to be ended.
     expect(endSessionByRefreshToken).toHaveBeenCalledWith("refresh-1");
   });
 

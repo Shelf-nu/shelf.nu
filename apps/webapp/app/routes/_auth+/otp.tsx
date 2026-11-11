@@ -133,7 +133,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           // A verified code with no Shelf account behind it is a signup, so it
           // obeys the same switch as `/join`. Invited and SSO users get their
           // account from their own flows, not from here. A refused signup
-          // ends the session the code just opened, so none is left behind.
+          // asks for the session the code just opened to be ended (best
+          // effort), and its tokens never reach the browser.
           try {
             assertSignupEnabled();
           } catch (refusal) {

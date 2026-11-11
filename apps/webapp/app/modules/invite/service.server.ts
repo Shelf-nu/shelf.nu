@@ -788,7 +788,8 @@ export async function updateInviteStatus({
       } catch (cause) {
         await releaseInviteClaim(invite, status).catch((releaseCause) => {
           // The original failure is what the invitee sees. A failed release
-          // leaves the invite ACCEPTED without access, so it must be logged.
+          // leaves the invite ACCEPTED with its acceptance unfinished
+          // (workspace membership may already exist), so it must be logged.
           Logger.error(
             new ShelfError({
               cause: releaseCause,
