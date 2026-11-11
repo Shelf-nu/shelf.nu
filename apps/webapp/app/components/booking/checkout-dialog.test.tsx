@@ -352,7 +352,9 @@ describe("CheckoutDialog From location question", () => {
     const { container } = renderInForm({ sourceQuestions: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
-    expect(container.ownerDocument.querySelector("select")).toBeNull();
+    expect(
+      container.ownerDocument.querySelector('[aria-haspopup="listbox"]')
+    ).toBeNull();
   });
 
   it("asks where each pool's units leave from before checking out", () => {
@@ -366,18 +368,26 @@ describe("CheckoutDialog From location question", () => {
     expect(
       screen.getByRole("heading", { name: "Where do the units come from?" })
     ).toBeInTheDocument();
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.name).toBe("");
-    expect(select.value).toBe("loc-store");
-    expect(select.getAttribute("form")).toBe("edit-booking-form");
-    expect([...select.options].map((option) => option.text)).toEqual([
-      "Store Room · 60 pcs",
-      "Studio · 40 pcs",
-    ]);
-    // Unchanged, it posts nothing and the server records its own default;
-    // once the operator picks, the answer is posted under the slice's key.
-    fireEvent.change(select, { target: { value: "loc-studio" } });
-    expect(select.name).toBe("sourceLocation.ba-1");
+    // The trigger is named by its label, the pool's title.
+    const picker = screen.getByRole("button", { name: /AA Batteries/ });
+    expect(picker).toHaveTextContent("Store Room · 60 pcs");
+    // Unchanged, it posts nothing and the server records its own default.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
+
+    fireEvent.click(picker);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent)
+    ).toEqual(["Store Room · 60 pcs", "Studio · 40 pcs"]);
+    fireEvent.click(screen.getByRole("option", { name: "Studio · 40 pcs" }));
+
+    // Once the operator picks, the answer is posted under the slice's key,
+    // tied to the booking form the portaled dialog sits outside of.
+    const answer = document.querySelector<HTMLInputElement>(
+      'input[name="sourceLocation.ba-1"]'
+    );
+    expect(answer?.value).toBe("loc-studio");
+    expect(answer?.getAttribute("form")).toBe("edit-booking-form");
+    expect(picker).toHaveTextContent("Studio · 40 pcs");
 
     const submit = screen.getByRole("button", { name: "Check out" });
     expect(submit).toHaveAttribute("type", "submit");

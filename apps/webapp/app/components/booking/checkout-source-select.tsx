@@ -7,11 +7,13 @@
  * dialog, and the scanner drawers. The submitted value is recorded on the
  * booking slice so check-in can take used-up units off the right location.
  *
- * A native `<select>`, like the placements editor, so it posts with the form
- * even when the dialog renders in a portal (pass `formId`).
+ * Built on the shared {@link SourceLocationPicker}, the popover list custody's
+ * "From location" uses. The answer rides a hidden input that names its form
+ * (pass `formId`), so it posts with the form even when the dialog renders in
+ * a portal.
  *
- * It posts only an answer the operator gave. Until they change it the select
- * has no `name`, so nothing is sent and the server records its own default,
+ * It posts only an answer the operator gave. Until they pick one there is no
+ * hidden input, so nothing is sent and the server records its own default,
  * worked out from the data at submit time: the same rule that chose the
  * pre-selected option. A pre-selection that went stale (its placement was
  * deleted while the dialog was open) therefore never comes back as a refused
@@ -21,6 +23,7 @@
  */
 import { useId, useState } from "react";
 
+import { SourceLocationPicker } from "~/components/location/source-location-picker";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import {
   checkoutSourceOptions,
@@ -75,10 +78,13 @@ export function CheckoutSourceSelect({
   className,
 }: CheckoutSourceSelectProps) {
   const id = useId();
-  /** Whether the operator changed the answer: only then is it posted. */
-  const [picked, setPicked] = useState(false);
   const options = checkoutSourceOptions(question);
-  const defaultValue = question.defaultLocationId ?? UNPLACED_SOURCE_FORM_VALUE;
+  /** The pre-selected option: what the server records if nothing is posted. */
+  const [value, setValue] = useState(
+    question.defaultLocationId ?? UNPLACED_SOURCE_FORM_VALUE
+  );
+  /** Whether the operator picked an answer: only then is it posted. */
+  const [picked, setPicked] = useState(false);
   const isInline = variant === "inline";
 
   return (
@@ -88,6 +94,14 @@ export function CheckoutSourceSelect({
         className
       )}
     >
+      {picked ? (
+        <input
+          type="hidden"
+          name={sourceLocationFieldName(fieldKey)}
+          value={value}
+          form={formId}
+        />
+      ) : null}
       <label
         htmlFor={id}
         className={tw(
@@ -107,28 +121,23 @@ export function CheckoutSourceSelect({
           </>
         )}
       </label>
-      <select
-        id={id}
-        name={picked ? sourceLocationFieldName(fieldKey) : undefined}
-        defaultValue={defaultValue}
-        onChange={() => setPicked(true)}
-        form={formId}
-        disabled={disabled}
-        aria-label={
-          isInline ? `From location for ${question.title}` : undefined
-        }
-        className={tw(
-          "h-9 min-w-0 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-900",
-          "focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500",
-          isInline ? "flex-1" : "w-full"
-        )}
-      >
-        {options.map((option) => (
-          <option key={option.value || "unplaced"} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <div className={tw("min-w-0", isInline ? "flex-1" : "w-full")}>
+        <SourceLocationPicker
+          id={id}
+          options={options}
+          value={value}
+          onChange={(next) => {
+            setValue(next);
+            setPicked(true);
+          }}
+          listLabel={`From location for ${question.title}`}
+          triggerAriaLabel={
+            isInline ? `From location for ${question.title}` : undefined
+          }
+          disabled={disabled}
+          triggerClassName="rounded-md"
+        />
+      </div>
     </div>
   );
 }

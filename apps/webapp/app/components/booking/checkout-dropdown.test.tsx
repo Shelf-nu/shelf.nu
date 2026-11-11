@@ -3,7 +3,7 @@
  * header offers, that the explicit check-out requirement removes both
  * quick options ("Check out" and "Check out remaining") in favour of the
  * scanner, that each quick option asks once before it submits, and that the
- * menu's dialog keeps its "From location" select usable with a mouse.
+ * menu's dialog keeps its "From location" picker usable with a mouse.
  *
  * @see {@link file://./checkout-dropdown.tsx}
  */
@@ -224,10 +224,10 @@ describe("CheckoutDropdown", () => {
     expect(submits[0]).toHaveAttribute("value", "checkOutRemaining");
   });
 
-  it("keeps the From location select focused while the mouse moves over it", () => {
+  it("lets the operator pick a From location with the mouse", () => {
     // A menu item takes focus on every mouse move it sees, and React bubbles
-    // a portaled dialog's events to its component parents. A blur shuts a
-    // native select's option list, so the operator could never pick one.
+    // a portaled dialog's events to its component parents. Focus leaving the
+    // picker's list shuts it, so the dialog must not sit inside the menu.
     menuOpen = true;
     renderDropdown({
       canFullCheckOut: true,
@@ -241,15 +241,19 @@ describe("CheckoutDropdown", () => {
         name: "Check out",
       })
     );
-    const select = screen.getByRole("combobox");
-    select.focus();
-    const onBlur = vi.fn();
-    select.addEventListener("blur", onBlur);
+    fireEvent.click(screen.getByRole("button", { name: /Light bulbs/ }));
+    const studio = screen.getByRole("option", { name: "Studio · 5 pcs" });
+    fireEvent.mouseEnter(studio);
+    fireEvent.pointerMove(studio, { pointerType: "mouse" });
 
-    fireEvent.pointerMove(select, { pointerType: "mouse" });
+    expect(document.activeElement).toBe(studio);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
 
-    expect(onBlur).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(select);
-    expect(screen.getAllByRole("option")).toHaveLength(2);
+    fireEvent.click(studio);
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[name="sourceLocation.slice-1"]'
+      )?.value
+    ).toBe("loc-studio");
   });
 });

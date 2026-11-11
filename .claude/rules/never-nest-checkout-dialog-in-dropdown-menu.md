@@ -10,15 +10,15 @@ paths:
 A dialog portals out of the menu in the DOM, but React still bubbles its events
 through its component parents. A Radix `DropdownMenuItem` focuses itself on
 every mouse `pointermove` it sees, so moving the mouse over the dialog's "From
-location" `<select>` blurs it, and a native select shuts its option list on
-blur. The operator cannot pick a location. Nothing throws, and the dialog looks
-fine until someone tries it with a mouse.
+location" picker pulls focus out of it, and the picker's popover list closes
+when focus leaves. The operator cannot pick a location. Nothing throws, and the
+dialog looks fine until someone tries it with a mouse.
 
 The menu row only opens the dialog. Render the dialog outside `<DropdownMenu>`,
 controlled through its `open` / `onOpenChange` props:
 
 ```tsx
-// ❌ Bad: the dialog's select dies on mouse move
+// ❌ Bad: the dialog's picker loses focus on mouse move
 <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
   <CheckoutDialog booking={booking} variant="dropdown" />
 </DropdownMenuItem>
@@ -35,6 +35,6 @@ controlled through its `open` / `onOpenChange` props:
 </DropdownMenu>
 ```
 
-The same holds for any dialog with a `<select>`, date picker or combobox.
+The same holds for any dialog with a popover, select, date picker or combobox.
 References: `checkout-dropdown.tsx`, `list-bulk-actions-dropdown.tsx`. Pinned by
-the "From location select" case in `checkout-dropdown.test.tsx`.
+the "pick a From location with the mouse" case in `checkout-dropdown.test.tsx`.
