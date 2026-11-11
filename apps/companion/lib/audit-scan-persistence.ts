@@ -294,19 +294,20 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
     const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
       key.startsWith(AUDIT_SCAN_KEY_PREFIX)
     );
-    const stale: string[] = [];
+    /** Each stale key with the value it was judged stale on. */
+    const stale: { key: string; raw: string | null }[] = [];
     for (const key of keys) {
       const raw = await AsyncStorage.getItem(key);
       let value: unknown = null;
       try {
         value = raw ? JSON.parse(raw) : null;
       } catch {
-        stale.push(key);
+        stale.push({ key, raw });
         continue;
       }
       // JSON `null`, a number or an array is no draft at all.
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        stale.push(key);
+        stale.push({ key, raw });
         continue;
       }
       const parsed = value as Partial<PersistedScanState> & {
@@ -317,7 +318,7 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
         (Array.isArray(parsed.failedQueue) ? parsed.failedQueue.length : 0);
       if (parsed.version !== 2 || !parsed.userId) {
         if (unsynced === 0) {
-          stale.push(key);
+          stale.push({ key, raw });
           continue;
         }
         // Unsent scans with no recorded owner: nothing can say whose they
@@ -340,10 +341,17 @@ export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
       if (unsynced > 0) continue;
       const savedAt = Date.parse(parsed.savedAt ?? "");
       if (!Number.isFinite(savedAt) || now - savedAt > AUDIT_DRAFT_MAX_AGE_MS) {
-        stale.push(key);
+        stale.push({ key, raw });
       }
     }
-    if (stale.length > 0) await AsyncStorage.removeMany(stale);
+    // Prune runs alongside an open scanner, so a draft judged stale may have
+    // been saved again since (a new scan): only a value that is still the one
+    // read above is removed.
+    for (const { key, raw } of stale) {
+      if ((await AsyncStorage.getItem(key)) === raw) {
+        await AsyncStorage.removeItem(key);
+      }
+    }
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] prune failed:", e);
   }

@@ -11,11 +11,16 @@ import { before, beforeEach, describe, it, mock } from "node:test";
 
 /** The fake device store. */
 const store = new Map<string, string>();
+/** Runs before each read, so a test can write while another task reads. */
+let beforeRead: ((key: string) => void) | null = null;
 
 // why: AsyncStorage is a native module; a Map behaves like the device store.
 mock.module("@react-native-async-storage/async-storage", {
   defaultExport: {
-    getItem: async (key: string) => store.get(key) ?? null,
+    getItem: async (key: string) => {
+      beforeRead?.(key);
+      return store.get(key) ?? null;
+    },
     setItem: async (key: string, value: string) => {
       store.set(key, value);
     },
@@ -64,6 +69,7 @@ before(async () => {
 });
 
 beforeEach(() => {
+  beforeRead = null;
   store.clear();
   reported.length = 0;
 });
@@ -227,6 +233,34 @@ describe("audit scan drafts", () => {
 });
 
 describe("pruneStaleAuditDrafts", () => {
+  it("keeps a stale draft that gained an unsent scan while prune ran", async () => {
+    await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);
+    await persistence.saveAuditScanState("user_a", "au_2", [ITEM], []);
+    const staleKey = `${prefix}user_a:au_1`;
+    const savedAt = Date.parse(JSON.parse(store.get(staleKey)!).savedAt);
+    // A scan is saved into the first draft while prune reads the second.
+    let written = false;
+    beforeRead = (key) => {
+      if (key === `${prefix}user_a:au_2` && !written) {
+        written = true;
+        store.set(
+          staleKey,
+          JSON.stringify({
+            ...JSON.parse(store.get(staleKey)!),
+            pendingQueue: [ENTRY],
+          })
+        );
+      }
+    };
+
+    await persistence.pruneStaleAuditDrafts(
+      savedAt + persistence.AUDIT_DRAFT_MAX_AGE_MS + 1
+    );
+
+    assert.equal(store.has(staleKey), true);
+    assert.equal(store.has(`${prefix}user_a:au_2`), false);
+  });
+
   it("keeps an ownerless draft with unsent scans and reports it once", async () => {
     store.set(
       `${prefix}au_1`,

@@ -19,19 +19,26 @@ import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 const MAX_QUEUE_RETRIES = 3;
 const RETRY_DELAYS = [2_000, 5_000, 15_000];
 
+/** Counts scan screen mounts, so each screen has its own number. */
+let screensMounted = 0;
+
 /**
- * Mount number of the newest scan screen. A drain whose screen has closed
- * stops writing drafts once a newer screen is open: that screen loaded the
- * draft and owns it now, and an older snapshot written over it would drop the
- * scans made since. Scans the old drain already sent and that stay in the
- * draft are sent again on resume, and the server keeps one scan per asset.
+ * The newest scan screen opened for each audit. A drain whose screen has
+ * closed stops writing an audit's draft once a newer screen for that audit is
+ * open: that screen loaded the draft and owns it now, and an older snapshot
+ * written over it would drop the scans made since. A screen for another audit
+ * never loads this draft, so it does not stop those writes. Scans the old
+ * drain already sent and that stay in the draft are sent again on resume, and
+ * the server keeps one scan per asset.
  */
-let newestScreen = 0;
+const newestScreenFor = new Map<string, number>();
 
 // ── Hook ─────────────────────────────────────────────────
 
 type UseScanQueueParams = {
   orgId: string | undefined;
+  /** The audit this screen scans; its draft is the one this screen loads. */
+  auditId: string | undefined;
   /**
    * The signed-in account. The queue belongs to the first account seen here
    * (`lib/scan-queue-owner.ts`): it is saved to that account's draft, and only
@@ -87,6 +94,7 @@ export type ScanQueueResult = {
 
 export function useScanQueue({
   orgId,
+  auditId,
   userId,
   scannedItemsRef,
   onScanSynced,
@@ -107,26 +115,31 @@ export function useScanQueue({
   const gate = gateRef.current;
   /** False once the screen is gone: no new retry timer starts after that. */
   const mountedRef = useRef(true);
-  /** This screen's mount number, compared with {@link newestScreen}. */
+  /** This screen's mount number, compared with {@link newestScreenFor}. */
   const screenRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
-    newestScreen += 1;
-    screenRef.current = newestScreen;
+    screensMounted += 1;
+    screenRef.current = screensMounted;
     return () => {
       mountedRef.current = false;
     };
   }, []);
+  // The screen claims its audit's draft as soon as it knows the audit.
+  useEffect(() => {
+    if (auditId) newestScreenFor.set(auditId, screenRef.current);
+  }, [auditId]);
 
   /**
    * Saves the queues as the owner's draft; nothing while no owner is known,
-   * or once this screen has closed and a newer one is open.
+   * or once this screen has closed and a newer screen for that audit is open.
    */
   const saveDraft = useCallback(
     (auditSessionId: string) => {
       const owner = gate.owner();
       if (!gate.maySave() || !owner) return;
-      if (!mountedRef.current && screenRef.current !== newestScreen) return;
+      const newest = newestScreenFor.get(auditSessionId) ?? screenRef.current;
+      if (!mountedRef.current && newest !== screenRef.current) return;
       void saveAuditScanState(
         owner,
         auditSessionId,

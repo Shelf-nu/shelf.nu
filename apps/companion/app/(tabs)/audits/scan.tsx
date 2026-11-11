@@ -337,6 +337,7 @@ function AuditScannerContent() {
     retryTimerRef,
   } = useScanQueue({
     orgId: currentOrg?.id,
+    auditId,
     userId,
     scannedItemsRef: stableScannedItemsRef,
     onScanSynced: handleScanSynced,

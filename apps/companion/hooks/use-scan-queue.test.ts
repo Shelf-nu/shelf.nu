@@ -91,12 +91,13 @@ beforeEach(() => {
 });
 
 /** Renders the hook for a signed-in user and exposes its latest result. */
-function renderQueue(userId: string | undefined) {
+function renderQueue(userId: string | undefined, auditId = "au_1") {
   const latest: { current: ScanQueueResult | null } = { current: null };
   const scannedItemsRef = { current: [] };
   function Probe(props: { userId: string | undefined }) {
     latest.current = useScanQueue({
       orgId: "org_1",
+      auditId,
       userId: props.userId,
       scannedItemsRef,
     });
@@ -243,6 +244,24 @@ describe("useScanQueue", () => {
 
     assert.deepEqual(server.sent, ["a-1"]);
     assert.deepEqual(draftWrites, []); // the new screen's draft is untouched
+    second.unmount();
+  });
+
+  it("a closed screen's drain keeps its draft when another audit's screen opens", async () => {
+    const first = renderQueue("user_a", "au_1");
+    server.hold = true;
+    first.latest.current!.enqueueScan(entry("a-1"));
+    first.unmount(); // the auditor leaves au_1 while a-1 is in flight
+
+    const second = renderQueue("user_a", "au_2"); // and opens another audit
+    draftWrites.length = 0;
+    server.hold = false;
+    server.pending.shift()!();
+    await flush();
+
+    assert.deepEqual(server.sent, ["a-1"]);
+    // au_1's draft is still updated: no newer screen loaded it.
+    assert.deepEqual(draftWrites, [""]);
     second.unmount();
   });
 });
