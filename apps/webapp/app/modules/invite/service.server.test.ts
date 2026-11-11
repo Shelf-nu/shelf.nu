@@ -621,14 +621,23 @@ describe("createInvite: linking an existing team member", () => {
     expect(dbMock.invite.create).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves a live invite for a different team member pending and writes nothing", async () => {
+  it("supersedes a live invite linked to a different team member", async () => {
     dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
     dbMock.invite.findFirst.mockResolvedValue({ teamMemberId: "tm-other" });
 
-    await expect(createInvite(linkPayload("tm-own"))).resolves.toBeNull();
+    await createInvite(linkPayload("tm-own"));
 
-    expect(dbMock.invite.updateMany).not.toHaveBeenCalled();
-    expect(dbMock.invite.create).not.toHaveBeenCalled();
+    expect(dbMock.invite.updateMany).toHaveBeenCalledWith({
+      where: supersedeWhere,
+      data: { status: InviteStatuses.INVALIDATED },
+    });
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeTeamMember: { connect: { id: "tm-own" } },
+        }),
+      })
+    );
   });
 });
 

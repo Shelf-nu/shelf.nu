@@ -387,36 +387,6 @@ export async function createInvite(
           shouldBeCaptured: false,
         });
       }
-
-      const previousActiveInvite = await db.invite.findFirst({
-        where: {
-          organizationId,
-          inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
-          status: InviteStatuses.PENDING,
-          expiresAt: { gt: new Date() },
-        },
-      });
-
-      if (
-        previousActiveInvite &&
-        previousActiveInvite.teamMemberId !== teamMemberId
-      ) {
-        /**
-         * A live invite links this person to a different team member. A new
-         * invite would supersede it and silently move the person to another
-         * record, so the sender has to resend or cancel the existing one.
-         * Nothing has been written yet, so the earlier invite stays pending.
-         */
-        sendNotification({
-          title: `Cannot invite user ${inviteeEmail}`,
-          message:
-            "There is an active invite for this user linked to different NRM",
-          icon: { name: "x", variant: "error" },
-          senderId: userId,
-        });
-
-        return null;
-      }
     }
 
     const inviter = {
