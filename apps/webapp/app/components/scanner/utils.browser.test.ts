@@ -1,12 +1,14 @@
 /**
- * The camera path, classified with the environment a browser actually has.
+ * The camera and handheld paths, classified with the environment a browser
+ * actually has.
  *
  * Every other test runs under Node, where `isBrowser` is false and `~/utils/env`
  * reads the full server environment. A real browser reads only `window.env`
  * (the payload of `getBrowserEnv`), and `getEnv` answers `""` for anything
- * declared secret. `isShelfQrCode` decides whether a scanned QR is ours from
+ * declared secret. `getShelfQrId` decides whether a scanned QR is ours from
  * those values, so this file loads the env module the way the browser does and
- * sends Shelf labels through `processFrame`, exactly as the camera does.
+ * sends codes through `processFrame` and `handleScannerInputValue`, exactly as
+ * the camera and a handheld scanner do.
  *
  * @see {@link file://./utils.tsx}
  * @see {@link file://../../utils/qr-code.ts}

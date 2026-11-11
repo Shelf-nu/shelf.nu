@@ -59,8 +59,3 @@ export function getShelfQrId(value: string): string | null {
 
   return null;
 }
-
-/** Whether a scanned or typed value is a Shelf QR code; see `getShelfQrId`. */
-export function isShelfQrCode(value: string): boolean {
-  return getShelfQrId(value) !== null;
-}
