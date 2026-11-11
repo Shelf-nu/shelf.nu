@@ -53,6 +53,11 @@ function blockStore() {
       if (this.failWrites) throw new Error("storage full");
       data.set(key, value);
     },
+    async removeItem(key: string) {
+      if (this.failWrites) throw new Error("storage full");
+      data.delete(key);
+    },
+    getAllKeys: async () => [...data.keys()],
   };
 }
 

@@ -280,4 +280,23 @@ describe("useScanQueue", () => {
     assert.deepEqual(draftWrites, []);
     queue.unmount();
   });
+
+  it("a closed screen stops sending once a newer screen for that audit opens", async () => {
+    const first = renderQueue("user_a", "au_1");
+    server.hold = true;
+    first.latest.current!.enqueueScan(entry("a-1"));
+    first.latest.current!.enqueueScan(entry("a-2"));
+    first.unmount(); // a-1 is in flight, a-2 waits
+
+    // The audit reopens; its screen owns the draft (Resume or Discard).
+    const second = renderQueue("user_a", "au_1");
+    server.hold = false;
+    server.pending.shift()!();
+    await flush();
+    await flush();
+
+    assert.deepEqual(server.sent, ["a-1"]);
+    second.unmount();
+  });
 });
+

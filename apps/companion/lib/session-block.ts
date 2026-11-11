@@ -22,17 +22,29 @@ import { sessionStorageKeys } from "./session-storage-keys";
 export const BLOCKED_SESSION_KEYS = "shelf_blocked_session_keys";
 
 /**
- * Key of a second, write-only-when-needed list: keys blocked while the main
- * list could not be read. Merged into the main list on the next good read, so
- * such a block still survives a restart.
+ * Prefix of a parked block: a session key blocked while the main list could
+ * not be read, stored under its own key so that parking or lifting one never
+ * reads or rewrites another. Folded into the main list on the next good read,
+ * so such a block still survives a restart.
  */
-export const BLOCKED_SESSION_KEYS_PENDING =
-  "shelf_blocked_session_keys_pending";
+export const PARKED_BLOCK_KEY_PREFIX = "shelf_blocked_session_parked:";
+
+/**
+ * The store key a parked block for one session key lives under.
+ *
+ * @param storageKey - The blocked session storage key
+ * @returns The parked block's own store key
+ */
+export function parkedBlockKey(storageKey: string): string {
+  return `${PARKED_BLOCK_KEY_PREFIX}${storageKey}`;
+}
 
 /** The slice of a key-value store this module needs (AsyncStorage). */
 export type BlockStore = {
   getItem: (key: string) => Promise<string | null>;
   setItem: (key: string, value: string) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
+  getAllKeys: () => Promise<readonly string[]>;
 };
 
 /** The set of blocked session keys. */
@@ -90,18 +102,20 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
     }
   }
 
-  /** Whether the parked list has been read into `blocked` in this run. */
+  /** Whether the parked blocks have been read into `blocked` in this run. */
   let parkedRead = false;
 
   /**
-   * Folds the parked list into `blocked` (which must be loaded). A failed
-   * read leaves `parkedRead` false, so the next call reads it again instead
-   * of missing a parked block for the rest of the run.
+   * Folds the parked blocks into `blocked` (which must be loaded). A failed
+   * listing leaves `parkedRead` false, so the next call lists them again
+   * instead of missing a parked block for the rest of the run.
    */
   async function readParked(keys: Set<string>): Promise<void> {
     let parked: string[];
     try {
-      parked = parseKeys(await store.getItem(BLOCKED_SESSION_KEYS_PENDING));
+      parked = (await store.getAllKeys())
+        .filter((key) => key.startsWith(PARKED_BLOCK_KEY_PREFIX))
+        .map((key) => key.slice(PARKED_BLOCK_KEY_PREFIX.length));
     } catch {
       return;
     }
@@ -109,12 +123,14 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
     if (parked.length === 0) return;
     for (const key of parked) keys.add(key);
     if (await save(keys)) {
-      // The parked keys are in the main list now; clear the parked list only
-      // once that write succeeded, so a block is never in neither list.
-      try {
-        await store.setItem(BLOCKED_SESSION_KEYS_PENDING, "[]");
-      } catch {
-        // Harmless: the next good read folds them in again.
+      // The parked blocks are in the main list now; remove them only once
+      // that write succeeded, so a block is never in neither place.
+      for (const key of parked) {
+        try {
+          await store.removeItem(parkedBlockKey(key));
+        } catch {
+          // Harmless: the next good read folds it in again.
+        }
       }
     }
   }
@@ -138,35 +154,31 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
   }
 
   /**
-   * Rewrites the parked list as what it holds now plus `add`, minus `remove`.
+   * Parks a block under its own key. Touches no other parked block.
    *
-   * When the parked list cannot be read, a removal fails without writing (the
-   * key may still be parked, so the block stays), while an addition is
-   * written on its own: storing the block being made now outranks keeping
-   * keys parked by an earlier run, which belong to other servers' sessions.
+   * @returns False when the write failed (the block then holds only in
+   *   memory for this app run)
    */
-  async function updateParked(change: {
-    add?: string;
-    remove?: string;
-  }): Promise<boolean> {
+  async function park(storageKey: string): Promise<boolean> {
     try {
-      let parked: string[];
-      try {
-        parked = parseKeys(await store.getItem(BLOCKED_SESSION_KEYS_PENDING));
-      } catch (error) {
-        if (!change.add) throw error;
-        parked = [];
-      }
-      const next = new Set(parked);
-      if (change.add) next.add(change.add);
-      if (change.remove) next.delete(change.remove);
-      await store.setItem(
-        BLOCKED_SESSION_KEYS_PENDING,
-        JSON.stringify([...next])
-      );
+      await store.setItem(parkedBlockKey(storageKey), "1");
       return true;
     } catch {
-      // The in-memory state still holds for this app session.
+      return false;
+    }
+  }
+
+  /**
+   * Removes a session key's parked block, if any. Touches no other one.
+   *
+   * @returns False when the removal failed (the parked block may still be
+   *   stored, so it comes back on the next launch)
+   */
+  async function unpark(storageKey: string): Promise<boolean> {
+    try {
+      await store.removeItem(parkedBlockKey(storageKey));
+      return true;
+    } catch {
       return false;
     }
   }
@@ -191,17 +203,17 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
       keys.add(storageKey);
       // Only a list read from the store is written back, so a failed read can
       // never overwrite the stored list with a partial one. When the read
-      // still fails, the block is parked in a separate list that the next
-      // good read merges in, so it survives a restart.
+      // still fails, the block is parked under its own key, which the next
+      // good read folds in, so it survives a restart.
       if (blocked && (await save(keys))) return true;
-      return updateParked({ add: storageKey });
+      return park(storageKey);
     },
     async unblock(storageKey) {
       pending.delete(storageKey);
       const keys = await load();
       const listed = keys.delete(storageKey);
       // A parked block for this key must not come back on the next read.
-      const parkedCleared = await updateParked({ remove: storageKey });
+      const parkedCleared = await unpark(storageKey);
       if (!blocked) {
         // The main list could not be read, so the lift cannot be stored:
         // the key stays blocked for this run too.

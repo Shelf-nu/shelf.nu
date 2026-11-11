@@ -8,7 +8,8 @@ import { describe, it } from "node:test";
 
 import {
   BLOCKED_SESSION_KEYS,
-  BLOCKED_SESSION_KEYS_PENDING,
+  PARKED_BLOCK_KEY_PREFIX,
+  parkedBlockKey,
   createSessionBlock,
 } from "./session-block";
 
@@ -21,7 +22,19 @@ function mapStore(initial: Record<string, string> = {}) {
     setItem: async (key: string, value: string) => {
       data.set(key, value);
     },
+    removeItem: async (key: string) => {
+      data.delete(key);
+    },
+    getAllKeys: async () => [...data.keys()],
   };
+}
+
+/** The session keys parked in a store, sorted. */
+function parkedIn(data: Map<string, string>): string[] {
+  return [...data.keys()]
+    .filter((key) => key.startsWith(PARKED_BLOCK_KEY_PREFIX))
+    .map((key) => key.slice(PARKED_BLOCK_KEY_PREFIX.length))
+    .sort();
 }
 
 describe("createSessionBlock", () => {
@@ -77,16 +90,16 @@ describe("createSessionBlock", () => {
     );
   });
 
-  it("keeps the block in memory when only the parked list cannot be cleared", async () => {
+  it("keeps the block in memory when only its parked block cannot be removed", async () => {
     const key = "sb-abcd-auth-token";
     const store = mapStore({
       [BLOCKED_SESSION_KEYS]: JSON.stringify([key]),
-      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify([key]),
+      [parkedBlockKey(key)]: "1",
     });
-    const write = store.setItem;
-    store.setItem = async (k: string, v: string) => {
-      if (k === BLOCKED_SESSION_KEYS_PENDING) throw new Error("storage full");
-      await write(k, v);
+    const remove = store.removeItem;
+    store.removeItem = async (k: string) => {
+      if (k === parkedBlockKey(key)) throw new Error("storage full");
+      await remove(k);
     };
     const block = createSessionBlock(store);
 
@@ -96,21 +109,22 @@ describe("createSessionBlock", () => {
     assert.equal(await block.isBlocked(key), true);
   });
 
-  it("refuses an unblock while the parked list cannot be read", async () => {
+  it("lifts a block without listing the parked blocks", async () => {
     const key = "sb-abcd-auth-token";
-    const store = mapStore({ [BLOCKED_SESSION_KEYS]: JSON.stringify([key]) });
-    const read = store.getItem;
-    store.getItem = async (k: string) => {
-      if (k === BLOCKED_SESSION_KEYS_PENDING) throw new Error("read failed");
-      return read(k);
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: JSON.stringify([key]),
+      [parkedBlockKey(key)]: "1",
+    });
+    store.getAllKeys = async () => {
+      throw new Error("listing failed");
     };
     const block = createSessionBlock(store);
 
-    assert.equal(await block.unblock(key), false);
-    assert.equal(await block.isBlocked(key), true);
+    assert.equal(await block.unblock(key), true);
+    assert.equal(store.data.has(parkedBlockKey(key)), false);
   });
 
-  it("still parks a new block when only the parked list cannot be read", async () => {
+  it("parks a new block when the main list cannot be read", async () => {
     const key = "sb-abcd-auth-token";
     const store = mapStore();
     const read = store.getItem;
@@ -136,20 +150,20 @@ describe("createSessionBlock", () => {
     );
   });
 
-  it("reads the parked list again after a failed read", async () => {
+  it("lists the parked blocks again after a failed listing", async () => {
     const key = "sb-abcd-auth-token";
     const store = mapStore({
       [BLOCKED_SESSION_KEYS]: "[]",
-      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify([key]),
+      [parkedBlockKey(key)]: "1",
     });
-    const read = store.getItem;
-    let failParked = true;
-    store.getItem = async (k: string) => {
-      if (k === BLOCKED_SESSION_KEYS_PENDING && failParked) {
-        failParked = false;
-        throw new Error("read failed");
+    const list = store.getAllKeys;
+    let failListing = true;
+    store.getAllKeys = async () => {
+      if (failListing) {
+        failListing = false;
+        throw new Error("listing failed");
       }
-      return read(k);
+      return list();
     };
     const block = createSessionBlock(store);
 
@@ -184,6 +198,12 @@ describe("createSessionBlock", () => {
       setItem: async () => {
         throw new Error("disk");
       },
+      removeItem: async () => {
+        throw new Error("disk");
+      },
+      getAllKeys: async () => {
+        throw new Error("disk");
+      },
     });
     await failing.block("sb-abcd-auth-token");
     assert.equal(await failing.isBlocked("sb-abcd-auth-token"), true);
@@ -200,6 +220,8 @@ describe("createSessionBlock", () => {
         return store.getItem(key);
       },
       setItem: store.setItem,
+      removeItem: store.removeItem,
+      getAllKeys: store.getAllKeys,
     });
 
     assert.equal(await block.isBlocked("sb-abcd-auth-token"), false);
@@ -218,6 +240,8 @@ describe("createSessionBlock", () => {
         return store.getItem(key);
       },
       setItem: store.setItem,
+      removeItem: store.removeItem,
+      getAllKeys: store.getAllKeys,
     });
 
     await block.block("sb-other-auth-token");
@@ -240,10 +264,12 @@ describe("createSessionBlock", () => {
         return store.getItem(key);
       },
       setItem: store.setItem,
+      removeItem: store.removeItem,
+      getAllKeys: store.getAllKeys,
     };
 
     await createSessionBlock(flaky).block("sb-abcd-auth-token");
-    assert.ok(store.data.get(BLOCKED_SESSION_KEYS_PENDING));
+    assert.deepEqual(parkedIn(store.data), ["sb-abcd-auth-token"]);
 
     failMainReads = false; // the app restarts and storage works again
     const afterRestart = createSessionBlock(flaky);
@@ -266,6 +292,8 @@ describe("createSessionBlock", () => {
         return store.getItem(key);
       },
       setItem: store.setItem,
+      removeItem: store.removeItem,
+      getAllKeys: store.getAllKeys,
     });
 
     await block.block("sb-abcd-auth-token");
@@ -286,6 +314,8 @@ describe("createSessionBlock", () => {
         return store.getItem(key);
       },
       setItem: store.setItem,
+      removeItem: store.removeItem,
+      getAllKeys: store.getAllKeys,
     };
     const block = createSessionBlock(flaky);
     await block.block("sb-abcd-auth-token");
@@ -299,13 +329,13 @@ describe("createSessionBlock", () => {
     );
   });
 
-  it("clears the parked list only after folding it into the main list", async () => {
+  it("removes parked blocks only after folding them into the main list", async () => {
     const store = mapStore({
-      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify(["sb-abcd-auth-token"]),
+      [parkedBlockKey("sb-abcd-auth-token")]: "1",
     });
     let failWrites = true;
     const flaky = {
-      getItem: store.getItem,
+      ...store,
       setItem: async (key: string, value: string) => {
         if (failWrites && key === BLOCKED_SESSION_KEYS) {
           throw new Error("disk");
@@ -315,25 +345,19 @@ describe("createSessionBlock", () => {
     };
 
     await createSessionBlock(flaky).isBlocked("sb-abcd-auth-token");
-    assert.deepEqual(
-      JSON.parse(store.data.get(BLOCKED_SESSION_KEYS_PENDING)!),
-      ["sb-abcd-auth-token"]
-    );
+    assert.deepEqual(parkedIn(store.data), ["sb-abcd-auth-token"]);
 
     failWrites = false;
     await createSessionBlock(flaky).isBlocked("sb-abcd-auth-token");
-    assert.deepEqual(
-      JSON.parse(store.data.get(BLOCKED_SESSION_KEYS_PENDING)!),
-      []
-    );
+    assert.deepEqual(parkedIn(store.data), []);
     assert.deepEqual(JSON.parse(store.data.get(BLOCKED_SESSION_KEYS)!), [
       "sb-abcd-auth-token",
     ]);
   });
 
-  it("a later run's parked write keeps keys parked by an earlier run", async () => {
+  it("a later run's parked block keeps blocks parked by an earlier run", async () => {
     const store = mapStore({
-      [BLOCKED_SESSION_KEYS_PENDING]: JSON.stringify(["sb-first-auth-token"]),
+      [parkedBlockKey("sb-first-auth-token")]: "1",
     });
     const flaky = {
       getItem: async (key: string) => {
@@ -341,13 +365,15 @@ describe("createSessionBlock", () => {
         return store.getItem(key);
       },
       setItem: store.setItem,
+      removeItem: store.removeItem,
+      getAllKeys: store.getAllKeys,
     };
 
     await createSessionBlock(flaky).block("sb-second-auth-token");
 
-    assert.deepEqual(
-      JSON.parse(store.data.get(BLOCKED_SESSION_KEYS_PENDING)!).sort(),
-      ["sb-first-auth-token", "sb-second-auth-token"]
-    );
+    assert.deepEqual(parkedIn(store.data), [
+      "sb-first-auth-token",
+      "sb-second-auth-token",
+    ]);
   });
 });

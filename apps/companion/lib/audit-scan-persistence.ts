@@ -423,37 +423,58 @@ export async function adoptUnownedDraft(
   { mayScan }: { mayScan: boolean }
 ): Promise<boolean> {
   if (!mayScan) return false;
+  const legacyKey = `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
   try {
-    const legacyKey = `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
-    const raw = await AsyncStorage.getItem(legacyKey);
-    if (!raw) return false;
-    if (await AsyncStorage.getItem(storageKey(userId, auditId))) return false;
-    const legacy = JSON.parse(raw) as Partial<PersistedScanState> | null;
-    if (!legacy || legacy.auditId !== auditId) return false;
-    const pendingQueue = legacy.pendingQueue ?? [];
-    const failedQueue = legacy.failedQueue ?? [];
-    if (pendingQueue.length + failedQueue.length === 0) return false;
-    const adopted = await saveAuditScanState(
-      userId,
-      auditId,
-      legacy.scannedItems ?? [],
-      pendingQueue,
-      failedQueue
+    // The whole move holds the legacy draft's write order, so two loads at
+    // once (an account change mid-load) cannot both copy the same draft.
+    return await inDraftOrder(legacyKey, () =>
+      adoptHeld(userId, auditId, legacyKey)
     );
-    if (!adopted) return false;
-    // The legacy key goes only once the copy is on disk AND reads back as a
-    // valid draft; a malformed one is dropped again and the legacy key kept,
-    // so it is never stranded where nothing offers or prunes it.
-    if (!(await loadAuditScanState(userId, auditId))) {
-      await clearAuditScanState(userId, auditId);
-      return false;
-    }
-    await inDraftOrder(legacyKey, () => AsyncStorage.removeItem(legacyKey));
-    return true;
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] adopt failed:", e);
     return false;
   }
+}
+
+/**
+ * The body of {@link adoptUnownedDraft}, run while it holds the legacy
+ * draft's write order: removes the legacy key directly.
+ *
+ * @param userId - The account adopting the draft
+ * @param auditId - The audit the draft belongs to
+ * @param legacyKey - The older build's key for that audit
+ * @returns True when the draft was copied to the account and removed
+ */
+async function adoptHeld(
+  userId: string,
+  auditId: string,
+  legacyKey: string
+): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(legacyKey);
+  if (!raw) return false;
+  if (await AsyncStorage.getItem(storageKey(userId, auditId))) return false;
+  const legacy = JSON.parse(raw) as Partial<PersistedScanState> | null;
+  if (!legacy || legacy.auditId !== auditId) return false;
+  const pendingQueue = legacy.pendingQueue ?? [];
+  const failedQueue = legacy.failedQueue ?? [];
+  if (pendingQueue.length + failedQueue.length === 0) return false;
+  const adopted = await saveAuditScanState(
+    userId,
+    auditId,
+    legacy.scannedItems ?? [],
+    pendingQueue,
+    failedQueue
+  );
+  if (!adopted) return false;
+  // The legacy key goes only once the copy is on disk AND reads back as a
+  // valid draft; a malformed one is dropped again and the legacy key kept,
+  // so it is never stranded where nothing offers or prunes it.
+  if (!(await loadAuditScanState(userId, auditId))) {
+    await clearAuditScanState(userId, auditId);
+    return false;
+  }
+  await AsyncStorage.removeItem(legacyKey);
+  return true;
 }
 
 /**

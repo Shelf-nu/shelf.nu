@@ -316,6 +316,24 @@ describe("draft writes across a server switch", () => {
   });
 });
 
+describe("adoptUnownedDraft run twice at once", () => {
+  it("adopts an older build's draft for one account only", async () => {
+    store.set(
+      `${prefix}au_1`,
+      JSON.stringify({ version: 1, auditId: "au_1", pendingQueue: [ENTRY] })
+    );
+
+    const [a, b] = await Promise.all([
+      persistence.adoptUnownedDraft("user_a", "au_1", { mayScan: true }),
+      persistence.adoptUnownedDraft("user_b", "au_1", { mayScan: true }),
+    ]);
+
+    assert.equal([a, b].filter(Boolean).length, 1);
+    const owned = [...store.keys()].filter((k) => k.includes(":au_1"));
+    assert.equal(owned.length, 1);
+  });
+});
+
 describe("pruneStaleAuditDrafts", () => {
   it("keeps a stale draft that gained an unsent scan while prune ran", async () => {
     await persistence.saveAuditScanState("user_a", "au_1", [ITEM], []);

@@ -781,6 +781,10 @@ function AuditScannerContent() {
       } | null;
     }) => {
       if (!auditId) return;
+      // While the Resume prompt is open the draft on disk is the previous
+      // session's: a scan now would be saved over it, and Resume would then
+      // replace the queue and drop the scan.
+      if (recoveryPendingRef.current) return;
       try {
         // 4. Queue the server write first: the scan counts as recorded only
         // once the queue has taken it (`queueThenRecord`). A refused scan
@@ -878,6 +882,7 @@ function AuditScannerContent() {
     },
     [
       auditId,
+      recoveryPendingRef,
       foundCount,
       expectedTotal,
       flashFrame,
@@ -980,6 +985,9 @@ function AuditScannerContent() {
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
       if (!auditId || !currentOrg) return;
+      // The camera keeps running behind the Resume prompt; scans wait for the
+      // answer (see commitScan).
+      if (recoveryPendingRef.current) return;
       if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
       setIsProcessing(true);
@@ -1189,8 +1197,9 @@ function AuditScannerContent() {
     [
       auditId,
       currentOrg,
-      // stable ref object; listed to satisfy exhaustive-deps, never changes
+      // stable ref objects; listed to satisfy exhaustive-deps, never change
       expectedAssetMapRef,
+      recoveryPendingRef,
       flashFrame,
       showToast,
       resetInactivityTimer,

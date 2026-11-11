@@ -168,6 +168,8 @@ export function useScanQueue({
     isProcessingQueueRef.current = true;
 
     const persist = (entry: ScanQueueEntry) => saveDraft(entry.auditSessionId);
+    /** Whether the queue's owner is still the one signed in. */
+    const ownerMayContinue = drainMayContinue(gate, accountGeneration);
 
     // The ordering rules live in `drainScanQueue`, where they are tested.
     const { backoffAttempt } = await drainScanQueue({
@@ -180,8 +182,14 @@ export function useScanQueue({
       // Each request goes out with the token of whoever is signed in when it
       // is sent, so the drain stops (scans stay in the owner's draft) as soon
       // as the owner's session is over. It keeps sending after the screen
-      // closes, within that session.
-      mayContinue: drainMayContinue(gate, accountGeneration),
+      // closes, within that session, until a newer screen for the same audit
+      // opens: that screen loaded the draft and owns its scans now, so its
+      // Resume sends them and its Discard means none are sent.
+      mayContinue: () =>
+        ownerMayContinue() &&
+        (mountedRef.current ||
+          !auditId ||
+          newestScreenFor.get(auditId) === screenRef.current),
       onSynced: onScanSynced,
       onFailed: (entry) => {
         onScanFailed?.(entry.assetId);
@@ -224,7 +232,15 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed, saveDraft, gate]);
+  }, [
+    orgId,
+    auditId,
+    scannedItemsRef,
+    onScanSynced,
+    onScanFailed,
+    saveDraft,
+    gate,
+  ]);
 
   // Record the owner as soon as an account is known, before the first scan.
   // When the owner is signed in again after a pause (the drain stops while
