@@ -126,6 +126,21 @@ describe("resolveModelPick", () => {
     expect(pick.pickedModels).toEqual({});
   });
 
+  it("uses the row picked now over an earlier copy of the same model", () => {
+    const stale = { ...searched, defaultValuation: 1 };
+
+    const pick = resolveModelPick({
+      pickedId: "m-old",
+      pickedRow: searched,
+      previousId: undefined,
+      loaded,
+      pickedModels: { "m-old": stale },
+    });
+
+    expect(pick.model).toBe(searched);
+    expect(pick.pickedModels["m-old"]).toBe(searched);
+  });
+
   it("takes back a searched model's untouched fill when another model is picked", () => {
     const first = resolveModelPick({
       pickedId: "m-old",
