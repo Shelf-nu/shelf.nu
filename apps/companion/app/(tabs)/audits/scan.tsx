@@ -36,7 +36,7 @@ import {
 } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { planScan, runScanPlan } from "@/lib/qr-utils";
-import { getActiveServer } from "@/lib/server";
+import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { playScanSound } from "@/lib/scan-sound";
@@ -917,7 +917,11 @@ function AuditScannerContent() {
         // 1. Resolve code -> asset (QR, SAM id, or barcode). Which lookups the
         // value goes to, and in what order, is decided in one place: see
         // planScan. currentOrg is non-null here (guard above).
-        const plan = planScan(data, getActiveServer().baseUrl, {
+        const servers = {
+          active: getActiveServer().baseUrl,
+          known: getKnownServerUrls(),
+        };
+        const plan = planScan(data, servers, {
           barcodes: currentOrg.barcodesEnabled,
           sequentialIds: true,
         });
@@ -960,17 +964,29 @@ function AuditScannerContent() {
           // the user can see is valid.
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Code Not Found",
-            // Only claim a search when the barcode lookup was asked.
-            outcome.lookedUp
-              ? "Not found in your workspaces. A label from another Shelf server works only there."
-              : "Not a code from this Shelf server. A label from another Shelf server works only there."
-          );
-          announce(
-            "Code not found. A label from another Shelf server works only there."
-          );
+          if (outcome.shelfServer) {
+            // The label's host is a Shelf server the app can name.
+            showToast(
+              "error",
+              "Different Shelf Server",
+              "Sign in to that server to use this code."
+            );
+            announce(
+              "Different Shelf Server. Sign in to that server to use it."
+            );
+          } else {
+            showToast(
+              "error",
+              "Code Not Found",
+              // Only claim a search when the barcode lookup was asked.
+              outcome.lookedUp
+                ? "Not found in your workspaces. A label from another Shelf server works only there."
+                : "Not a code from this Shelf server. A label from another Shelf server works only there."
+            );
+            announce(
+              "Code not found. A label from another Shelf server works only there."
+            );
+          }
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
           // a bare return would leave isProcessingRef.current true forever:
           // the scan guard would then reject every later scan and the camera

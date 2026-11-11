@@ -18,6 +18,10 @@ import {
 } from "./qr-utils";
 
 const ACTIVE = "https://app.shelf.nu";
+/** A dedicated server, for the rows where the app is connected to one. */
+const DEDICATED = "https://shelf.dedicated.example";
+/** The Shelf servers the app can name: its bundled Shelf Cloud default. */
+const KNOWN_SERVERS = [ACTIVE];
 /** A QR id in the shape the shortener regex accepts: 10-25 lowercase alnum. */
 const ID = "abcdefghij";
 
@@ -127,13 +131,15 @@ type Row = {
   input: string;
   /** Whether the workspace can resolve barcodes. Defaults to true. */
   barcodes?: boolean;
+  /** The server the app is connected to. Defaults to Shelf Cloud. */
+  active?: string;
   /** The lookups asked, in order. */
   calls: string[];
   /** How the scan ends: which answer the screen renders. */
   outcome:
     | { kind: "qr"; found: boolean }
     | { kind: "barcode"; found: boolean }
-    | { kind: "outside-link-miss"; lookedUp: boolean }
+    | { kind: "outside-link-miss"; lookedUp: boolean; shelfServer: boolean }
     | { kind: "barcodes-unavailable" };
 };
 
@@ -178,18 +184,42 @@ const ROWS: Row[] = [
     outcome: { kind: "qr", found: false },
   },
   {
-    name: "our link on a different Shelf server",
-    input: OTHER_SHELF,
-    calls: [`barcode:${OTHER_SHELF}`],
-    outcome: { kind: "outside-link-miss", lookedUp: true },
+    name: "Shelf Cloud link, scanned while on a dedicated server",
+    input: `${ACTIVE}/qr/${ID}`,
+    active: DEDICATED,
+    // Still looked up first: it may have been linked here as a barcode.
+    // The miss names the other server, because the app knows that host.
+    calls: [`barcode:${ACTIVE}/qr/${ID}`],
+    outcome: { kind: "outside-link-miss", lookedUp: true, shelfServer: true },
   },
   {
-    name: "our link on a different Shelf server, barcodes off",
+    name: "Shelf Cloud link on a dedicated server, barcodes off",
+    input: `${ACTIVE}/qr/${ID}`,
+    active: DEDICATED,
+    barcodes: false,
+    calls: [],
+    outcome: { kind: "outside-link-miss", lookedUp: false, shelfServer: true },
+  },
+  {
+    name: "dedicated server's own link, scanned on that server",
+    input: `${DEDICATED}/qr/${ID}`,
+    active: DEDICATED,
+    calls: [`qr:${ID}`],
+    outcome: { kind: "qr", found: true },
+  },
+  {
+    name: "link on a Shelf server the app cannot name",
+    input: OTHER_SHELF,
+    calls: [`barcode:${OTHER_SHELF}`],
+    outcome: { kind: "outside-link-miss", lookedUp: true, shelfServer: false },
+  },
+  {
+    name: "link on a Shelf server the app cannot name, barcodes off",
     input: OTHER_SHELF,
     barcodes: false,
     // Nothing was asked, so the screen must not claim a search happened.
     calls: [],
-    outcome: { kind: "outside-link-miss", lookedUp: false },
+    outcome: { kind: "outside-link-miss", lookedUp: false, shelfServer: false },
   },
   {
     name: "outside /qr/ url linked as ExternalQR",
@@ -202,7 +232,7 @@ const ROWS: Row[] = [
     name: "outside /qr/ url that is not linked",
     input: "http://other-vendor.example/qr/zzzz9999",
     calls: ["barcode:http://other-vendor.example/qr/zzzz9999"],
-    outcome: { kind: "outside-link-miss", lookedUp: true },
+    outcome: { kind: "outside-link-miss", lookedUp: true, shelfServer: false },
   },
   {
     name: "outside /qr/ url linked to nothing",
@@ -316,7 +346,8 @@ const ROWS: Row[] = [
 for (const row of ROWS) {
   test(`scan: ${row.name}`, async () => {
     const lookups = fakeLookups();
-    const plan = planScan(row.input, ACTIVE, {
+    const servers = { active: row.active ?? ACTIVE, known: KNOWN_SERVERS };
+    const plan = planScan(row.input, servers, {
       barcodes: row.barcodes ?? true,
       sequentialIds: true,
     });
@@ -335,9 +366,11 @@ for (const row of ROWS) {
 
 // ── Rules the table cannot show ──────────────────────────
 
+const SERVERS = { active: ACTIVE, known: KNOWN_SERVERS };
+
 test("regression: a linked outside /qr/ url resolves through the barcode lookup", async () => {
   const lookups = fakeLookups();
-  const plan = planScan(OUTSIDE_QR, ACTIVE, {
+  const plan = planScan(OUTSIDE_QR, SERVERS, {
     barcodes: true,
     sequentialIds: true,
   });
@@ -353,27 +386,32 @@ test("planScan names the QR id only for a Shelf QR code", () => {
   const options = { barcodes: true, sequentialIds: true };
   // The screens offer the claim and link flows on `qrId`; a SAM id or a
   // barcode must never look like one.
-  assert.equal(planScan(`https://eam.sh/${ID}`, ACTIVE, options).qrId, ID);
-  assert.equal(planScan("SAM-0001", ACTIVE, options).qrId, null);
-  assert.equal(planScan(OUTSIDE_QR, ACTIVE, options).qrId, null);
-  assert.equal(planScan("4006381333931", ACTIVE, options).qrId, null);
+  assert.equal(planScan(`https://eam.sh/${ID}`, SERVERS, options).qrId, ID);
+  assert.equal(planScan("SAM-0001", SERVERS, options).qrId, null);
+  assert.equal(planScan(OUTSIDE_QR, SERVERS, options).qrId, null);
+  assert.equal(planScan("4006381333931", SERVERS, options).qrId, null);
 });
 
 test("planScan treats a SAM-shaped value as a barcode without a workspace", () => {
   // SAM ids are unique per workspace, so with none selected the QR route
   // cannot resolve one.
-  const plan = planScan("SAM-0001", ACTIVE, {
+  const plan = planScan("SAM-0001", SERVERS, {
     barcodes: false,
     sequentialIds: false,
   });
-  assert.deepEqual(plan, { first: "none", qrId: null, outsideLink: false });
+  assert.deepEqual(plan, {
+    first: "none",
+    qrId: null,
+    outsideLink: false,
+    shelfServer: false,
+  });
 });
 
 test("runScanPlan keeps the QR route's answer when the fallback gets no answer", async () => {
   // Offline: neither lookup answers, so nothing says "not found" and the
   // barcode lookup is not tried on top of a failed QR request.
   const lookups = fakeLookups({ offline: true });
-  const plan = planScan(OUTSIDE_SHORT, ACTIVE, {
+  const plan = planScan(OUTSIDE_SHORT, SERVERS, {
     barcodes: true,
     sequentialIds: true,
   });
@@ -390,7 +428,7 @@ test("runScanPlan keeps the QR route's answer when the fallback gets no answer",
 test("runScanPlan shows the server's answer for an outside link when offline", async () => {
   // No answer is not a miss: the label may well be linked.
   const lookups = fakeLookups({ offline: true });
-  const plan = planScan(OUTSIDE_QR, ACTIVE, {
+  const plan = planScan(OUTSIDE_QR, SERVERS, {
     barcodes: true,
     sequentialIds: true,
   });

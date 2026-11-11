@@ -57,9 +57,10 @@ const CANONICAL_QR_URL = /^https?:\/\/[^/]+\/qr\/[a-zA-Z0-9]+$/;
  * - `first: "qr"`: ask the QR route for `lookupId` (a QR id or a SAM id). With
  *   `barcodeFallback`, a not-found there is followed by the barcode lookup.
  * - `first: "barcode"`: ask the workspace barcode lookup for the full value.
- *   `outsideLink` marks a canonical `/qr/<id>` label on another host.
+ *   `outsideLink` marks a canonical `/qr/<id>` label on another host, and
+ *   `shelfServer` says that host is a Shelf server the app can name.
  * - `first: "none"`: the value needs the barcode lookup and the workspace has
- *   none. `outsideLink` as above.
+ *   none. `outsideLink` and `shelfServer` as above.
  *
  * `qrId` is the Shelf QR id when the value is one, and null for a SAM id or a
  * barcode. The claim and link flows key on it.
@@ -71,8 +72,18 @@ export type ScanPlan =
       qrId: string | null;
       barcodeFallback: boolean;
     }
-  | { first: "barcode"; qrId: null; outsideLink: boolean }
-  | { first: "none"; qrId: null; outsideLink: boolean };
+  | {
+      first: "barcode";
+      qrId: null;
+      outsideLink: boolean;
+      shelfServer: boolean;
+    }
+  | {
+      first: "none";
+      qrId: null;
+      outsideLink: boolean;
+      shelfServer: boolean;
+    };
 
 /**
  * Plans the lookups for a scanned value. Counterpart of the webapp's
@@ -88,7 +99,8 @@ export type ScanPlan =
  * - A canonical label on another host is never a QR id here: its tail is
  *   another system's id. It is either a label linked as an alternative barcode
  *   (ExternalQR) or another Shelf server's label, and only the barcode lookup
- *   can tell.
+ *   can tell. When the host is a Shelf server the app can name (`known`),
+ *   a miss says so; for any other host the app cannot know what minted it.
  * - A SAM id goes to the QR route, which resolves it per workspace.
  * - Everything else is a barcode.
  *
@@ -100,14 +112,15 @@ export type ScanPlan =
  * authenticated and org-scoped on the server.
  *
  * @param data - The raw scanned value.
- * @param activeBaseUrl - The active server's base URL.
+ * @param servers - `active`: the active server's base URL. `known`: base URLs
+ *   of the Shelf servers the app can name (its bundled Shelf Cloud default).
  * @param can - What the current workspace allows: `barcodes` when it can
  *   resolve barcodes, `sequentialIds` when a workspace is selected (SAM ids
  *   are unique per workspace).
  */
 export function planScan(
   data: string,
-  activeBaseUrl: string,
+  servers: { active: string; known: readonly string[] },
   can: { barcodes: boolean; sequentialIds: boolean }
 ): ScanPlan {
   const qrId = extractQrId(data);
@@ -122,10 +135,15 @@ export function planScan(
         barcodeFallback: can.barcodes,
       };
     }
-    if (isSameOrigin(data, activeBaseUrl)) {
+    if (isSameOrigin(data, servers.active)) {
       return { first: "qr", lookupId: qrId, qrId, barcodeFallback: false };
     }
-    return { first: barcodeOrNone, qrId: null, outsideLink: true };
+    return {
+      first: barcodeOrNone,
+      qrId: null,
+      outsideLink: true,
+      shelfServer: servers.known.some((url) => isSameOrigin(data, url)),
+    };
   }
 
   const sequentialId = can.sequentialIds ? parseSequentialId(data) : null;
@@ -138,7 +156,12 @@ export function planScan(
     };
   }
 
-  return { first: barcodeOrNone, qrId: null, outsideLink: false };
+  return {
+    first: barcodeOrNone,
+    qrId: null,
+    outsideLink: false,
+    shelfServer: false,
+  };
 }
 
 /**
@@ -160,13 +183,15 @@ export type ScanLookupAnswer = {
  * - `outside-link-miss`: a `/qr/<id>` label on another host that resolved to
  *   nothing. `lookedUp` says whether the barcode lookup was asked (and holds
  *   it in none of the caller's workspaces) or could not be asked at all.
+ *   `shelfServer` says the host is a Shelf server the app can name, so the
+ *   label belongs to that server.
  * - `barcodes-unavailable`: a barcode, scanned where barcodes cannot be
  *   resolved. Nothing was asked.
  */
 export type ScanOutcome<Q, B> =
   | { kind: "qr"; lookupId: string; answer: Q }
   | { kind: "barcode"; answer: B }
-  | { kind: "outside-link-miss"; lookedUp: boolean }
+  | { kind: "outside-link-miss"; lookedUp: boolean; shelfServer: boolean }
   | { kind: "barcodes-unavailable" };
 
 /**
@@ -208,14 +233,22 @@ export async function runScanPlan<
 ): Promise<ScanOutcome<Q, B>> {
   if (plan.first === "none") {
     return plan.outsideLink
-      ? { kind: "outside-link-miss", lookedUp: false }
+      ? {
+          kind: "outside-link-miss",
+          lookedUp: false,
+          shelfServer: plan.shelfServer,
+        }
       : { kind: "barcodes-unavailable" };
   }
 
   if (plan.first === "barcode") {
     const answer = await lookups.barcode(data);
     return plan.outsideLink && isNotFound(answer)
-      ? { kind: "outside-link-miss", lookedUp: true }
+      ? {
+          kind: "outside-link-miss",
+          lookedUp: true,
+          shelfServer: plan.shelfServer,
+        }
       : { kind: "barcode", answer };
   }
 

@@ -49,7 +49,7 @@ import { useTheme } from "@/lib/theme-context";
 import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { planScan, runScanPlan } from "@/lib/qr-utils";
-import { getActiveServer } from "@/lib/server";
+import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
@@ -814,7 +814,11 @@ function ScannerContent() {
       try {
         // Which lookups this value goes to, and in what order, is decided in
         // one place: see planScan.
-        const plan = planScan(data, getActiveServer().baseUrl, {
+        const servers = {
+          active: getActiveServer().baseUrl,
+          known: getKnownServerUrls(),
+        };
+        const plan = planScan(data, servers, {
           barcodes: Boolean(currentOrg?.barcodesEnabled),
           // SAM ids are unique per workspace, so they need one selected.
           sequentialIds: Boolean(currentOrg),
@@ -926,6 +930,18 @@ function ScannerContent() {
         if (outcome.kind === "outside-link-miss") {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          if (outcome.shelfServer) {
+            // The label's host is a Shelf server the app can name.
+            announce("Different Shelf Server");
+            setScanResult({
+              type: "error",
+              title: "Different Shelf Server",
+              message:
+                "This code belongs to a different Shelf server. Sign in to that server to use it.",
+            });
+            finalizeScan();
+            return;
+          }
           announce("Code not found");
           setScanResult({
             type: "not_found",
