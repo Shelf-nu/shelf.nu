@@ -1,10 +1,10 @@
-import { useEffect, useMemo } from "react";
-import { useFetcher } from "react-router";
+import { useMemo } from "react";
+import { TagUseFor } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
-import { TagsAutocomplete } from "../tag/tags-autocomplete";
+import { BulkTagsPicker } from "../tag/bulk-tags-picker";
 
 /**
  * Schema for bulk tag update validation
@@ -24,40 +24,8 @@ export const BulkUpdateTagsSchema = z.object({
     ),
 });
 
-export type TagsFetcherData = { filters: Array<{ name: string; id: string }> };
-
 export default function BulkAssignTagsDialog() {
   const zo = useZorm("BulkAssignTags", BulkUpdateTagsSchema);
-
-  const fetcher = useFetcher<TagsFetcherData>();
-
-  // Transform API response to TagSuggestion format
-  const suggestions = useMemo(() => {
-    if (!fetcher.data?.filters) {
-      return [];
-    }
-
-    return fetcher.data.filters.map((tagResponse) => ({
-      label: tagResponse.name,
-      value: tagResponse.id,
-    }));
-  }, [fetcher.data]);
-
-  useEffect(() => {
-    void fetcher.submit(
-      {
-        name: "tag",
-        queryKey: "name",
-        queryValue: "",
-        useFor: "ASSET",
-      },
-      {
-        method: "GET",
-        action: "/api/model-filters",
-      }
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Handle validation errors
   const validationErrors = useMemo(() => {
@@ -85,7 +53,7 @@ export default function BulkAssignTagsDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
-            <TagsAutocomplete existingTags={[]} suggestions={suggestions} />
+            <BulkTagsPicker useFor={TagUseFor.ASSET} />
 
             {validationErrors.tags && (
               <p className="text-sm text-error-500">{validationErrors.tags}</p>
