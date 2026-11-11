@@ -171,6 +171,29 @@ describe("createSessionBlock", () => {
     assert.equal(await block.isBlocked(key), true);
   });
 
+  it("keeps a parked-only block when the main list cannot be written", async () => {
+    const key = "sb-abcd-auth-token";
+    const store = mapStore({
+      [BLOCKED_SESSION_KEYS]: "[]",
+      [parkedBlockKey(key)]: "1",
+    });
+    let failMainWrites = true;
+    const flaky = {
+      ...store,
+      setItem: async (k: string, v: string) => {
+        if (failMainWrites && k === BLOCKED_SESSION_KEYS) {
+          throw new Error("disk");
+        }
+        return store.setItem(k, v);
+      },
+    };
+
+    assert.equal(await createSessionBlock(flaky).unblock(key), false);
+    failMainWrites = false; // the app restarts and storage works again
+
+    assert.equal(await createSessionBlock(flaky).isBlocked(key), true);
+  });
+
   it("unblock lifts it, for the next sign-in", async () => {
     const store = mapStore();
     const block = createSessionBlock(store);

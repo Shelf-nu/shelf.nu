@@ -219,19 +219,21 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
         return false;
       }
       const listed = keys.delete(storageKey);
-      // A parked block for this key must not come back on the next read.
-      const parkedCleared = await unpark(storageKey);
-      // A parked entry that is still stored comes back on the next launch, so
-      // the block stays in memory and in the main list too: the next sign-in
-      // then goes through `unblock` again instead of writing a session the
-      // next launch refuses.
-      if (!parkedCleared) {
-        if (listed) keys.add(storageKey);
+      // The main list is written first and the parked copy removed only after,
+      // so a failure at either step leaves a stored block behind: a refused
+      // unblock never lifts the block across a restart.
+      if (listed && !(await save(keys))) {
+        keys.add(storageKey);
         return false;
       }
-      const saved = listed ? await save(keys) : true;
-      if (!saved) keys.add(storageKey);
-      return saved;
+      // A parked entry that is still stored comes back on the next launch, so
+      // the block stays in memory too: the next sign-in then goes through
+      // `unblock` again instead of writing a session the next launch refuses.
+      if (!(await unpark(storageKey))) {
+        keys.add(storageKey);
+        return false;
+      }
+      return true;
     },
     async isBlocked(key) {
       const keys = await load();
