@@ -59,6 +59,7 @@ const dbMock = vi.hoisted(() => ({
   },
   booking: { updateMany: vi.fn() },
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
 }));
 
 // why: isolating the invite logic from the database
@@ -772,6 +773,22 @@ describe("createInvite: linking an existing team member", () => {
     ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
 
     expect(dbMock.invite.create).not.toHaveBeenCalled();
+  });
+
+  it("locks the workspace and address before superseding earlier invites", async () => {
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
+    dbMock.invite.findFirst.mockResolvedValue(null);
+
+    await createInvite(linkPayload("tm-own"));
+
+    expect(dbMock.$queryRaw).toHaveBeenCalledTimes(1);
+    const [strings, ...values] = dbMock.$queryRaw.mock.calls[0];
+    expect(String(strings)).toMatch(/pg_advisory_xact_lock/);
+    expect(values).toEqual(["org-1", expect.any(String)]);
+    // The lock is taken before the earlier invites are closed.
+    expect(dbMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.invite.updateMany.mock.invocationCallOrder[0]
+    );
   });
 
   it("supersedes an earlier pending invite for the same team member", async () => {

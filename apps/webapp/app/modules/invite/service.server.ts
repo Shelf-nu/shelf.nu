@@ -435,6 +435,14 @@ export async function createInvite(
      */
     const invite = await db
       .$transaction(async (tx) => {
+        /**
+         * Two invites to the same person created at the same moment would
+         * each close the older ones before the other is saved, leaving both
+         * pending. A transaction-scoped lock on workspace + address makes
+         * them run one after the other; it is released at commit or rollback.
+         */
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${organizationId} || ':' || lower(${inviteeEmail})))`;
+
         await tx.invite.updateMany({
           where: {
             organizationId,
