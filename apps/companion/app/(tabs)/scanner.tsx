@@ -50,10 +50,15 @@ import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
-import { getActiveServer } from "@/lib/server";
+import {
+  claimableQrId,
+  isAlreadyScannedQr,
+  planScan,
+  runScanPlan,
+  scanMissFeedback,
+} from "@/lib/qr-utils";
+import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
-import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
@@ -815,33 +820,17 @@ function ScannerContent() {
       const isStaleScan = () => activeOrgIdRef.current !== originOrgId;
 
       try {
-        // A Shelf URL from ANOTHER server would otherwise be resolved against
-        // this one and reported as "not found" — a baffling error for a code
-        // that is perfectly valid on the instance that minted it.
-        if (
-          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
-          "foreign"
-        ) {
-          setScanResult({
-            type: "error",
-            title: "Different Shelf Server",
-            message:
-              "This code belongs to a different Shelf server. Sign in to that server to use it.",
-          });
-          finalizeScan();
-          return;
-        }
-
-        const qrId = extractQrId(data);
-        // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
-        // via the QR route's sequentialId branch, scoped to the current
-        // workspace (web parity: the web scan resolver tries parseSequentialId
-        // before the QR lookup, ungated by the Barcodes add-on). SAM is unique
-        // per-org, so this needs currentOrg; without it we fall through to the
-        // barcode path, which already errors cleanly.
-        const samId = !qrId && currentOrg ? parseSequentialId(data) : null;
-        // The code to resolve via the QR route: a QR id or a normalized SAM id.
-        const qrLookupId = qrId ?? samId;
+        // Which lookups this value goes to, and in what order, is decided in
+        // one place: see planScan.
+        const servers = {
+          active: getActiveServer().baseUrl,
+          known: getKnownServerUrls(),
+        };
+        const plan = planScan(data, servers, {
+          barcodes: Boolean(currentOrg?.barcodesEnabled),
+          // SAM ids are unique per workspace, so they need one selected.
+          sequentialIds: Boolean(currentOrg),
+        });
         let codeId: string;
         let codeOrgId: string | null;
         let asset:
@@ -875,46 +864,83 @@ function ScannerContent() {
         // kit-linked QRs (see the !asset branch below for the full rationale).
         let kitId: string | null = null;
 
-        if (qrLookupId) {
+        // Early batch dedup by code id (saves a network call)
+        if (
+          isBatchAction(action) &&
+          isAlreadyScannedQr(
+            plan,
+            scannedItems.map((item) => item.qrId)
+          )
+        ) {
+          flashFrame("duplicate");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          setScanResult({
+            type: "duplicate",
+            title: "Already Scanned",
+            message: "This item is already in your scan list.",
+          });
+          finalizeScan();
+          return;
+        }
+
+        const outcome = await runScanPlan(plan, data, {
+          qr: async (lookupId) => {
+            // Best-effort scan geolocation (web parity). Cached / last-known
+            // position only, bounded to ~1.5s worst case and usually instant:
+            // never a fresh GPS fix in the scan hot path (see
+            // scan-location.ts). Null (no permission / no recent fix /
+            // timeout) simply means the scan is recorded without coordinates.
+            const coordinates = await getScanCoordinates();
+            // orgId is only consumed by the server's SAM branch; on the QR
+            // path the org is derived from the QR record and this is ignored.
+            return api.qr(lookupId, currentOrg?.id, coordinates);
+          },
+          barcode: (value) =>
+            // why: planScan plans a barcode lookup only for a workspace that
+            // can resolve barcodes, so currentOrg is always set when this
+            // runs. The null branch exists for the type checker only.
+            currentOrg
+              ? api.barcode(value, currentOrg.id)
+              : Promise.resolve({
+                  data: null,
+                  error: "No workspace selected.",
+                }),
+        });
+
+        // Landed after a workspace switch: this answer describes a workspace
+        // the user has left, so it may not touch their lists or their card.
+        if (isStaleScan()) {
+          finalizeScan();
+          return;
+        }
+
+        // A barcode scanned where barcodes cannot be resolved, or an outside
+        // link that resolved to nothing: no lookup answer to render.
+        if (
+          outcome.kind === "barcodes-unavailable" ||
+          outcome.kind === "outside-link-miss"
+        ) {
+          const feedback = scanMissFeedback(outcome, {
+            hasWorkspace: Boolean(currentOrg),
+          });
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          announce(feedback.announcement);
+          setScanResult({
+            type: feedback.tone,
+            title: feedback.title,
+            message: feedback.message,
+          });
+          finalizeScan();
+          return;
+        }
+
+        // The claim and link flows below key on this: see claimableQrId.
+        const qrId = claimableQrId(plan, outcome);
+
+        if (outcome.kind === "qr") {
           // ── Shelf QR / SAM path ──
-
-          // Early batch dedup by code id (saves a network call)
-          if (
-            isBatchAction(action) &&
-            scannedItems.some((item) => item.qrId === qrLookupId)
-          ) {
-            flashFrame("duplicate");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            setScanResult({
-              type: "duplicate",
-              title: "Already Scanned",
-              message: "This item is already in your scan list.",
-            });
-            finalizeScan();
-            return;
-          }
-
-          // Best-effort scan geolocation (web parity). Cached / last-known
-          // position only, bounded to ~1.5s worst case and usually instant —
-          // never a fresh GPS fix in the scan hot path (see scan-location.ts).
-          // Null (no permission / no recent fix / timeout) simply means the
-          // scan is recorded without coordinates.
-          const coordinates = await getScanCoordinates();
-
-          // orgId is only consumed by the server's SAM branch; on the QR path
-          // the org is derived from the QR record and this is ignored.
-          const {
-            data: qrData,
-            error,
-            errorDetails,
-          } = await api.qr(qrLookupId, currentOrg?.id, coordinates);
-
-          // Landed after a workspace switch: this answer describes a workspace
-          // the user has left, so it may not touch their lists or their card.
-          if (isStaleScan()) {
-            finalizeScan();
-            return;
-          }
+          const { data: qrData, error, errorDetails } = outcome.answer;
 
           if (error || !qrData) {
             flashFrame("error");
@@ -998,52 +1024,14 @@ function ScannerContent() {
             return;
           }
 
-          codeId = qrLookupId;
+          codeId = outcome.lookupId;
           codeOrgId = qrData.qr?.organizationId ?? null;
           asset = qrData.qr?.asset ?? null;
           kit = qrData.qr?.kit ?? null;
           kitId = qrData.qr?.kitId ?? null;
         } else {
-          // ── Barcode fallback path ──
-
-          if (!currentOrg) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            announce("Code not recognized");
-            setScanResult({
-              type: "not_found",
-              title: "Code Not Recognized",
-              message: "This code is not recognized as a Shelf asset code.",
-            });
-            finalizeScan();
-            return;
-          }
-
-          if (!currentOrg.barcodesEnabled) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            announce("Barcode scanning not available");
-            setScanResult({
-              type: "not_found",
-              title: "Barcode Not Supported",
-              message:
-                "Your workspace does not support barcode scanning. Contact your admin to enable this feature.",
-            });
-            finalizeScan();
-            return;
-          }
-
-          const { data: barcodeData, error: barcodeError } = await api.barcode(
-            data,
-            currentOrg.id
-          );
-
-          // Same rule as the QR path: a resolve that outlived the workspace it
-          // was made in is dropped rather than rendered.
-          if (isStaleScan()) {
-            finalizeScan();
-            return;
-          }
+          // ── Barcode path ──
+          const { data: barcodeData, error: barcodeError } = outcome.answer;
 
           if (barcodeError || !barcodeData) {
             flashFrame("error");
