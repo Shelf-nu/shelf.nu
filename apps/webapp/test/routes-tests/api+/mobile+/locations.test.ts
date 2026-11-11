@@ -60,6 +60,7 @@ type FindManyArgs = {
  * name search, `skip` and `take` the way the database would.
  */
 function seedLocations(n: number, others = 0) {
+  /** The `i`th location named with `prefix`, shaped like the route's select. */
   const row = (prefix: string, i: number) => ({
     id: `${prefix.toLowerCase()}-${i + 1}`,
     name: `${prefix} ${String(i + 1).padStart(4, "0")}`,
@@ -72,6 +73,7 @@ function seedLocations(n: number, others = 0) {
     ...Array.from({ length: n }, (_, i) => row("Room", i)),
     ...Array.from({ length: others }, (_, i) => row("Shelf", i)),
   ];
+  /** The seeded rows that pass the query's name search, if it has one. */
   const matching = (args?: FindManyArgs) => {
     const needle = args?.where?.name?.contains?.toLowerCase();
     return needle
