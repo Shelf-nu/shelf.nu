@@ -488,7 +488,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
       access: "inactive",
       error: inactiveError,
     });
-    (makeShelfError as any).mockReturnValue({
+    (makeShelfError as any).mockReturnValueOnce({
       message,
       status: 403,
       title: "Workspace inactive",

@@ -59,7 +59,10 @@ export function FullScreenNotice({
   );
 }
 
-/** Body text of a {@link FullScreenNotice}: `body` for the main line, `hint` for the quieter one. */
+/**
+ * Text of a {@link FullScreenNotice}: `body` for the main line, `emphasis`
+ * for a name or other line that stands out, `hint` for the quieter one.
+ */
 export function NoticeText({
   children,
   variant = "body",
