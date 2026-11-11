@@ -392,6 +392,9 @@ describe("CheckoutDialog opened from outside", () => {
     const form = document.getElementById(
       "edit-booking-form"
     ) as HTMLFormElement;
+    // why: happy-dom's reportValidity does not move focus to the invalid
+    // field, so the call itself is the observable sign that the blocked-submit
+    // branch ran. The spy keeps the real implementation.
     const reportValidity = vi.spyOn(form, "reportValidity");
 
     fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
