@@ -23,6 +23,8 @@ const submit = vi.fn();
 let searchData: TagsFetcherData | undefined;
 let searchState: "idle" | "loading" = "idle";
 let useFetcherCalls = 0;
+/** Whether the mocked dialog shows its content, as the real one does when open. */
+let dialogOpen = true;
 
 // why: the requests the dialog's picker sends are the boundary under test.
 // The hook calls `useFetcher` twice per render (first page, then search).
@@ -35,7 +37,8 @@ vi.mock("react-router", async () => ({
 }));
 
 // why: the dialog chrome (portal, selection atoms, submit fetcher) adds
-// nothing to which tags the picker asks for.
+// nothing to which tags the picker asks for. Like the real dialog, the mock
+// renders its content only while open, so closing unmounts the picker.
 vi.mock("../bulk-update-dialog/bulk-update-dialog", () => ({
   BulkUpdateDialogContent: ({
     children,
@@ -45,7 +48,13 @@ vi.mock("../bulk-update-dialog/bulk-update-dialog", () => ({
       handleCloseDialog: () => void;
       fetcherError?: string;
     }) => ReactNode;
-  }) => <div>{children({ disabled: false, handleCloseDialog: () => {} })}</div>,
+  }) => (
+    <div>
+      {dialogOpen
+        ? children({ disabled: false, handleCloseDialog: () => {} })
+        : null}
+    </div>
+  ),
 }));
 
 /** Parameters of every `/api/model-filters` request, in order. */
@@ -71,6 +80,7 @@ describe("bulk tag dialogs", () => {
     searchData = undefined;
     searchState = "idle";
     useFetcherCalls = 0;
+    dialogOpen = true;
   });
 
   afterEach(() => {
@@ -120,5 +130,33 @@ describe("bulk tag dialogs", () => {
     rerender(<BulkAssignTagsDialog />);
 
     expect(screen.getByText("Request timed out")).toBeTruthy();
+  });
+
+  it("starts each opening fresh: no stale search, error or late request", () => {
+    const { rerender } = render(<BulkAssignTagsDialog />);
+    typeAndWait("ZZ Te");
+    searchData = { error: { message: "Request timed out" } };
+    rerender(<BulkAssignTagsDialog />);
+    expect(screen.getByText("Request timed out")).toBeTruthy();
+
+    // Type again, then close before the debounce fires.
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "ZZ Tem" },
+    });
+    dialogOpen = false;
+    rerender(<BulkAssignTagsDialog />);
+    submit.mockReset();
+    act(() => {
+      vi.advanceTimersByTime(TAG_SEARCH_DEBOUNCE_MS);
+    });
+    expect(requests()).toEqual([]);
+
+    dialogOpen = true;
+    rerender(<BulkAssignTagsDialog />);
+
+    expect(screen.queryByText("Request timed out")).toBeNull();
+    expect(requests()).toEqual([
+      expect.objectContaining({ queryValue: "", useFor: "ASSET" }),
+    ]);
   });
 });

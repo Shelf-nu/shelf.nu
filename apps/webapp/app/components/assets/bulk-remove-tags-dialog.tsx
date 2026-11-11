@@ -3,21 +3,10 @@ import { useZorm } from "react-zorm";
 import { BulkUpdateTagsSchema } from "./bulk-assign-tags-dialog";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
-import { TagsAutocomplete } from "../tag/tags-autocomplete";
-import {
-  TAG_SEARCHING_TEXT,
-  useTagSuggestions,
-} from "../tag/use-tag-suggestions";
+import { BulkTagsPicker } from "../tag/bulk-tags-picker";
 
 export default function BulkRemoveTagsDialog() {
   const zo = useZorm("BulkRemoveTags", BulkUpdateTagsSchema);
-
-  const {
-    suggestions,
-    onInputChange,
-    isSearching,
-    error: searchError,
-  } = useTagSuggestions();
 
   // Handle validation errors
   const validationErrors = useMemo(() => {
@@ -45,16 +34,7 @@ export default function BulkRemoveTagsDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
-            <TagsAutocomplete
-              existingTags={[]}
-              suggestions={suggestions}
-              onInputChange={onInputChange}
-              noOptionsText={isSearching ? TAG_SEARCHING_TEXT : undefined}
-            />
-
-            {searchError && (
-              <p className="text-sm text-error-500">{searchError}</p>
-            )}
+            <BulkTagsPicker />
 
             {validationErrors.tags && (
               <p className="text-sm text-error-500">{validationErrors.tags}</p>

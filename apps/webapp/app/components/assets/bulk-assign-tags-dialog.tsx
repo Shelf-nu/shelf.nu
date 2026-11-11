@@ -4,11 +4,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
-import { TagsAutocomplete } from "../tag/tags-autocomplete";
-import {
-  TAG_SEARCHING_TEXT,
-  useTagSuggestions,
-} from "../tag/use-tag-suggestions";
+import { BulkTagsPicker } from "../tag/bulk-tags-picker";
 
 /**
  * Schema for bulk tag update validation
@@ -30,15 +26,6 @@ export const BulkUpdateTagsSchema = z.object({
 
 export default function BulkAssignTagsDialog() {
   const zo = useZorm("BulkAssignTags", BulkUpdateTagsSchema);
-
-  const {
-    suggestions,
-    onInputChange,
-    isSearching,
-    error: searchError,
-  } = useTagSuggestions({
-    useFor: TagUseFor.ASSET,
-  });
 
   // Handle validation errors
   const validationErrors = useMemo(() => {
@@ -66,16 +53,7 @@ export default function BulkAssignTagsDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
-            <TagsAutocomplete
-              existingTags={[]}
-              suggestions={suggestions}
-              onInputChange={onInputChange}
-              noOptionsText={isSearching ? TAG_SEARCHING_TEXT : undefined}
-            />
-
-            {searchError && (
-              <p className="text-sm text-error-500">{searchError}</p>
-            )}
+            <BulkTagsPicker useFor={TagUseFor.ASSET} />
 
             {validationErrors.tags && (
               <p className="text-sm text-error-500">{validationErrors.tags}</p>
