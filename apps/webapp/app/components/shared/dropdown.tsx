@@ -122,13 +122,55 @@ const DropdownMenuContent = React.forwardRef<
   );
 });
 
+/** The keys Radix treats as "select this item". */
+const ITEM_SELECTION_KEYS = ["Enter", " "];
+
+/** What counts as a row's own control: a link or a button inside the item. */
+const ROW_CONTROL_SELECTOR = "a[href], button";
+
+/**
+ * Forwards Enter or Space on a menu row to the link or button inside it.
+ *
+ * Radix selects an item from the keyboard by clicking the item element itself,
+ * and that click never reaches a control nested inside it. Most rows here put
+ * their action on such a control (a `Button` with `onClick` or `to`, a dialog
+ * trigger), so without this the keyboard does nothing on them. Clicking the
+ * control instead does exactly what a mouse click does: its own handler runs,
+ * then the click bubbles to the item and its `onSelect` runs once.
+ *
+ * A disabled control is not clicked and the row does nothing, the same as a
+ * mouse click on it. A row with no inner control, or one that is itself the
+ * control (`asChild` on a link or button), keeps Radix's own handling.
+ *
+ * @param event - The keydown on the menu item
+ */
+function forwardSelectionToRowControl(event: React.KeyboardEvent<HTMLElement>) {
+  if (!ITEM_SELECTION_KEYS.includes(event.key)) return;
+  const item = event.currentTarget;
+  // Only keys pressed on the row itself: a key inside a nested field is its own.
+  if (event.target !== item || item.matches(ROW_CONTROL_SELECTOR)) return;
+  const control = item.querySelector<HTMLElement>(ROW_CONTROL_SELECTOR);
+  if (!control) return;
+  // Stops Radix clicking the item as well, which would select the row twice.
+  event.preventDefault();
+  const isDisabled =
+    control.matches(":disabled") ||
+    control.getAttribute("aria-disabled") === "true";
+  if (!isDisabled) control.click();
+}
+
+/**
+ * A menu row. Enter and Space do what clicking the row's own link or button
+ * does (see {@link forwardSelectionToRowControl}); a row with no inner control
+ * behaves as a plain Radix item.
+ */
 const DropdownMenuItem = React.forwardRef<
   ElementRef<typeof DropdownMenuPrimitive.Item>,
   ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean;
   }
 >(function DropdownMenuItem(
-  { className, inset, disabled = false, ...props },
+  { className, inset, disabled = false, onKeyDown, ...props },
   ref
 ) {
   return (
@@ -140,6 +182,12 @@ const DropdownMenuItem = React.forwardRef<
         disabled && "pointer-events-none cursor-not-allowed opacity-50",
         className
       )}
+      // Radix runs its own keydown handler after this one, and skips it once
+      // `preventDefault()` has been called.
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented) forwardSelectionToRowControl(event);
+      }}
       {...props}
     />
   );
