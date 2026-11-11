@@ -352,8 +352,18 @@ export default function CheckoutDialog({
    */
   const [newEndDateError, setNewEndDateError] = useState<string | null>(null);
   const newEndDateRef = useRef<HTMLInputElement>(null);
+  /**
+   * Each opening starts with no client-side error. Tracked against the last
+   * rendered `open` rather than in `onOpenChange`, because a controlled dialog
+   * is opened by its caller's prop and never calls that handler. The dialog
+   * stays mounted between openings, so its state would otherwise carry over.
+   */
+  const [lastOpen, setLastOpen] = useState(open);
+  if (open !== lastOpen) {
+    setLastOpen(open);
+    if (open) setNewEndDateError(null);
+  }
   const onOpenChange = (next: boolean) => {
-    if (next) setNewEndDateError(null);
     setOpen(next);
   };
   /** The form a blocked submit belongs to, reported once the dialog closes. */

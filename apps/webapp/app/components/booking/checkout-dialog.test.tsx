@@ -387,6 +387,30 @@ describe("CheckoutDialog opened from outside", () => {
     ).toBeInTheDocument();
   });
 
+  it("clears an old end-date error when it is opened again", () => {
+    render(
+      <ControlledHarness returnFocus booking={expiredBooking} allowNewEndDate />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+    fireEvent.change(screen.getByLabelText("New end date"), {
+      target: { value: "" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check out with new end date" })
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Pick a new end date");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+
+    // A fresh opening starts clean, even though it was opened from outside.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("New end date")).not.toHaveAttribute(
+      "aria-invalid"
+    );
+  });
+
   it("reports a blocked submit instead of returning focus", async () => {
     render(<ControlledHarness returnFocus requiredField />);
     const form = document.getElementById(
