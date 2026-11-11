@@ -26,7 +26,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
-import { findAddonsAwaitingWorkspace } from "~/modules/stripe-webhook/helpers.server";
+import { linkWaitingSubscriptionsToWorkspace } from "~/modules/stripe-webhook/helpers.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -146,12 +146,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currency,
     });
 
-    // Add-ons the user's subscriptions carry without a workspace go to this
-    // one when it is the only Team workspace they could belong to (an
+    // A subscription the user holds without a workspace goes to this one
+    // when it is the only Team workspace it could belong to (an
     // invoice-billed subscription created in Stripe, for instance). A failed
     // lookup adds nothing to the creation-link params below and never blocks
-    // workspace creation.
-    const awaitingAddons = await findAddonsAwaitingWorkspace({
+    // workspace creation; the admin is told so they can link it by hand.
+    const awaitingAddons = await linkWaitingSubscriptionsToWorkspace({
       userId,
       organizationId: newOrg.id,
     }).catch((cause) => {
@@ -159,11 +159,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
         new ShelfError({
           cause,
           message:
-            "Failed to look up add-ons waiting for a workspace during workspace creation",
+            "Failed to link waiting subscriptions to the new workspace during workspace creation",
           additionalData: { userId, organizationId: newOrg.id },
           label: "Stripe",
         })
       );
+
+      void sendEmail({
+        to: ADMIN_EMAIL,
+        subject: "ACTION REQUIRED: Subscription linking failed",
+        text: [
+          "A user created a Team workspace, but Shelf could not check whether",
+          "a subscription without a workspace belongs to it.",
+          "",
+          `User ID: ${userId}`,
+          `Organization ID: ${newOrg.id}`,
+          "",
+          "Check the user's subscriptions in Stripe and set",
+          "metadata.organizationId where one belongs to this workspace.",
+        ].join("\n"),
+      });
+
       return { audits: false, barcodes: false };
     });
 

@@ -4,9 +4,9 @@
  *
  * Add-ons are linked when the creation link asks for them
  * (`includesAudits`, `includesBarcodes`) and also when
- * `findAddonsAwaitingWorkspace` finds them waiting on the user's subscription
+ * `linkWaitingSubscriptionsToWorkspace` finds them waiting on the user's subscription
  * for this workspace. A failed lookup adds nothing to what the creation link
- * asks for and never blocks the workspace.
+ * asks for, never blocks the workspace, and is reported to the admin.
  *
  * @see {@link file://./../../../app/routes/_layout+/account-details.workspace.new.tsx}
  */
@@ -17,7 +17,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { linkAuditAddonToOrganization } from "~/modules/audit/addon.server";
 import { linkBarcodeAddonToOrganization } from "~/modules/barcode/addon.server";
 import { createOrganization } from "~/modules/organization/service.server";
-import { findAddonsAwaitingWorkspace } from "~/modules/stripe-webhook/helpers.server";
+import { linkWaitingSubscriptionsToWorkspace } from "~/modules/stripe-webhook/helpers.server";
 
 import { action } from "~/routes/_layout+/account-details.workspace.new";
 
@@ -42,7 +42,7 @@ vi.mock("~/modules/organization/context.server", () => ({
 // why: the lookup reads the user's Stripe subscriptions; what it answers is
 // the input these tests vary
 vi.mock("~/modules/stripe-webhook/helpers.server", () => ({
-  findAddonsAwaitingWorkspace: vi.fn(),
+  linkWaitingSubscriptionsToWorkspace: vi.fn(),
 }));
 
 // why: the link helpers update the Stripe subscription and the workspace
@@ -86,14 +86,14 @@ describe("new workspace action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(createOrganization).mockResolvedValue({ id: "org-new" } as never);
-    vi.mocked(findAddonsAwaitingWorkspace).mockResolvedValue({
+    vi.mocked(linkWaitingSubscriptionsToWorkspace).mockResolvedValue({
       audits: false,
       barcodes: false,
     });
   });
 
   it("links the add-ons waiting on the user's subscription to the new workspace", async () => {
-    vi.mocked(findAddonsAwaitingWorkspace).mockResolvedValue({
+    vi.mocked(linkWaitingSubscriptionsToWorkspace).mockResolvedValue({
       audits: true,
       barcodes: false,
     });
@@ -102,7 +102,7 @@ describe("new workspace action", () => {
       createActionArgs({ request: createWorkspaceRequest(), context })
     );
 
-    expect(findAddonsAwaitingWorkspace).toHaveBeenCalledWith({
+    expect(linkWaitingSubscriptionsToWorkspace).toHaveBeenCalledWith({
       userId: "user-1",
       organizationId: "org-new",
     });
@@ -129,8 +129,8 @@ describe("new workspace action", () => {
     expect(linkAuditAddonToOrganization).not.toHaveBeenCalled();
   });
 
-  it("still creates the workspace when the lookup fails, and links nothing unasked", async () => {
-    vi.mocked(findAddonsAwaitingWorkspace).mockRejectedValue(
+  it("still creates the workspace when the lookup fails, links nothing unasked and tells the admin", async () => {
+    vi.mocked(linkWaitingSubscriptionsToWorkspace).mockRejectedValue(
       new Error("Stripe unavailable")
     );
 
@@ -141,6 +141,11 @@ describe("new workspace action", () => {
     expect((response as Response).status).toBe(302);
     expect(linkAuditAddonToOrganization).not.toHaveBeenCalled();
     expect(linkBarcodeAddonToOrganization).not.toHaveBeenCalled();
-    expect(sendEmail).not.toHaveBeenCalled();
+    // The admin is told, the same way a failed explicit link is.
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "ACTION REQUIRED: Subscription linking failed",
+      })
+    );
   });
 });

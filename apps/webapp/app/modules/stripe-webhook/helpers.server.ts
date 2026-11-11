@@ -182,6 +182,28 @@ export function sendAdminInvoiceEmail({
 /** A Team workspace a plan subscription can be linked to. */
 export type LinkableWorkspace = { id: string; name: string };
 
+/**
+ * Subscription metadata key set when the admin has been asked to pick the
+ * subscription's workspace, so a retried or later event does not ask again.
+ */
+export const WORKSPACE_PICK_REQUESTED_KEY = "workspacePickRequestedAt";
+
+/**
+ * The Team workspaces a user owns, oldest first.
+ *
+ * @param userId - The owner
+ * @returns The workspaces' ids and names
+ */
+export function findOwnedTeamWorkspaces(
+  userId: string
+): Promise<LinkableWorkspace[]> {
+  return db.organization.findMany({
+    where: { userId, type: "TEAM" },
+    select: { id: true, name: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 /** Whether a subscription carries a plan item (not only add-ons). */
 function carriesPlan(subscription: Stripe.Subscription): boolean {
   return !!highestPlanTier(
@@ -201,29 +223,30 @@ function carriesPlan(subscription: Stripe.Subscription): boolean {
  * rest are the candidates.
  *
  * The answer is a single workspace only when there is exactly one candidate
- * and exactly one live plan subscription names no workspace. A second
+ * and at most one live plan subscription names no workspace. A second
  * unlinked plan subscription may be paying for that candidate already (a
  * Team plan bought through Checkout names no workspace), so then the
  * candidates are returned for someone to pick from instead.
  *
- * @param args.userId - The user the customer belongs to
+ * @param args.owned - The Team workspaces the user owns
+ *   (`findOwnedTeamWorkspaces`)
  * @param args.subscriptions - The customer's subscriptions, products expanded
  *   (`getCustomerSubscriptionsWithProducts`)
- * @returns `ownedCount`: every Team workspace the user owns; `candidates`:
- *   the untaken ones, oldest first; `workspace`: the one to link, or `null`
- *   when there is none or the choice is not certain
+ * @returns `candidates`: the untaken workspaces; `unlinkedPlans`: the live
+ *   plan subscriptions that name no workspace; `workspace`: the one to link,
+ *   or `null` when there is none or the choice is not certain
  */
-export async function resolveTeamWorkspaceForPlan({
-  userId,
+export function resolveTeamWorkspaceForPlan({
+  owned,
   subscriptions,
 }: {
-  userId: string;
+  owned: LinkableWorkspace[];
   subscriptions: Stripe.Subscription[];
-}): Promise<{
-  ownedCount: number;
+}): {
   candidates: LinkableWorkspace[];
+  unlinkedPlans: Stripe.Subscription[];
   workspace: LinkableWorkspace | null;
-}> {
+} {
   const livePlans = subscriptions.filter(
     (sub) => subscriptionStatusGrantsPlan(sub.status) && carriesPlan(sub)
   );
@@ -234,61 +257,64 @@ export async function resolveTeamWorkspaceForPlan({
   );
   const unlinkedPlans = livePlans.filter(
     (sub) => !sub.metadata?.organizationId
-  ).length;
-
-  const owned = await db.organization.findMany({
-    where: { userId, type: "TEAM" },
-    select: { id: true, name: true },
-    orderBy: { createdAt: "asc" },
-  });
+  );
   const candidates = owned.filter((org) => !taken.has(org.id));
 
   return {
-    ownedCount: owned.length,
     candidates,
+    unlinkedPlans,
     workspace:
-      candidates.length === 1 && unlinkedPlans <= 1 ? candidates[0] : null,
+      candidates.length === 1 && unlinkedPlans.length <= 1
+        ? candidates[0]
+        : null,
   };
 }
 
 /** The add-ons a subscription can carry as line items. */
 type BundledAddonType = "audits" | "barcodes";
 
-/**
- * The add-ons that an active or trialing subscription carries without naming
- * a workspace, so no workspace has them switched on yet.
- *
- * @param subscriptions - The customer's subscriptions, products expanded
- * @returns The add-on types waiting for a workspace
- */
-function addonsWithoutWorkspace(
-  subscriptions: Stripe.Subscription[]
-): Set<BundledAddonType> {
-  const waiting = new Set<BundledAddonType>();
-  for (const sub of subscriptions) {
-    if (sub.status !== "active" && sub.status !== "trialing") continue;
-    if (sub.metadata?.organizationId) continue;
-    for (const item of sub.items.data) {
-      const product = item.price?.product;
-      if (!product || typeof product === "string" || product.deleted) continue;
-      if (product.metadata?.product_type !== "addon") continue;
-      const addonType = product.metadata.addon_type;
-      if (addonType === "audits" || addonType === "barcodes") {
-        waiting.add(addonType);
-      }
+/** The add-on types among a subscription's line items. */
+function addonTypesOf(subscription: Stripe.Subscription): BundledAddonType[] {
+  const types: BundledAddonType[] = [];
+  for (const item of subscription.items.data) {
+    const product = item.price?.product;
+    if (!product || typeof product === "string" || product.deleted) continue;
+    if (product.metadata?.product_type !== "addon") continue;
+    const addonType = product.metadata.addon_type;
+    if (addonType === "audits" || addonType === "barcodes") {
+      types.push(addonType);
     }
   }
-  return waiting;
+  return types;
 }
 
 /**
- * Which add-ons a newly created Team workspace should be linked to, when the
- * creation link did not ask for them.
+ * The active or trialing subscriptions that carry an add-on without naming a
+ * workspace, so no workspace has those add-ons switched on yet.
  *
- * An add-on that a live subscription of the user's customer carries without a
- * workspace goes to the new workspace when `resolveTeamWorkspaceForPlan`
- * answers with that workspace. Otherwise the add-on could belong to another
- * workspace, so nothing is linked.
+ * @param subscriptions - The customer's subscriptions, products expanded
+ * @returns Those subscriptions
+ */
+function subscriptionsWithWaitingAddons(
+  subscriptions: Stripe.Subscription[]
+): Stripe.Subscription[] {
+  return subscriptions.filter(
+    (sub) =>
+      (sub.status === "active" || sub.status === "trialing") &&
+      !sub.metadata?.organizationId &&
+      addonTypesOf(sub).length > 0
+  );
+}
+
+/**
+ * Gives a newly created Team workspace what the user's subscriptions hold
+ * without a workspace, when the creation link did not ask for it.
+ *
+ * When `resolveTeamWorkspaceForPlan` answers with the new workspace, the
+ * live plan subscription that names no workspace (if any) gets
+ * `metadata.organizationId`, and the waiting add-ons are returned for the
+ * caller to link. When add-ons are waiting but the answer is not this
+ * workspace, the admin is asked to pick: nothing else would ever place them.
  *
  * Stripe's plain subscription list is read first, and the products are only
  * looked up when a live subscription names no workspace, so a workspace
@@ -298,7 +324,7 @@ function addonsWithoutWorkspace(
  * @param args.organizationId - The workspace just created
  * @returns Whether to link the Audits and the Barcodes add-on
  */
-export async function findAddonsAwaitingWorkspace({
+export async function linkWaitingSubscriptionsToWorkspace({
   userId,
   organizationId,
 }: {
@@ -309,7 +335,7 @@ export async function findAddonsAwaitingWorkspace({
 
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { customerId: true },
+    select: { customerId: true, email: true },
   });
   if (!user?.customerId || !stripe) return none;
 
@@ -321,7 +347,7 @@ export async function findAddonsAwaitingWorkspace({
     listed.has_more ||
     listed.data.some(
       (sub) =>
-        (sub.status === "active" || sub.status === "trialing") &&
+        subscriptionStatusGrantsPlan(sub.status) &&
         !sub.metadata?.organizationId
     );
   if (!anyUnlinked) return none;
@@ -329,16 +355,38 @@ export async function findAddonsAwaitingWorkspace({
   const subscriptions = await getCustomerSubscriptionsWithProducts(
     user.customerId
   );
-  const waiting = addonsWithoutWorkspace(subscriptions);
-  if (waiting.size === 0) return none;
-
-  const { workspace } = await resolveTeamWorkspaceForPlan({
-    userId,
+  const waitingAddonSubscriptions =
+    subscriptionsWithWaitingAddons(subscriptions);
+  const owned = await findOwnedTeamWorkspaces(userId);
+  const { candidates, unlinkedPlans, workspace } = resolveTeamWorkspaceForPlan({
+    owned,
     subscriptions,
   });
-  if (workspace?.id !== organizationId) return none;
 
-  return { audits: waiting.has("audits"), barcodes: waiting.has("barcodes") };
+  if (workspace?.id !== organizationId) {
+    if (waitingAddonSubscriptions.length > 0) {
+      const waiting = new Set([...unlinkedPlans, ...waitingAddonSubscriptions]);
+      sendAdminPickWorkspaceEmail({
+        user,
+        subscriptionIds: [...waiting].map((sub) => sub.id),
+        ownedCount: owned.length,
+        candidates,
+      });
+    }
+    return none;
+  }
+
+  for (const plan of unlinkedPlans) {
+    await stripe.subscriptions.update(plan.id, {
+      metadata: { ...plan.metadata, organizationId },
+    });
+  }
+
+  const waitingTypes = new Set(waitingAddonSubscriptions.flatMap(addonTypesOf));
+  return {
+    audits: waitingTypes.has("audits"),
+    barcodes: waitingTypes.has("barcodes"),
+  };
 }
 
 /**
@@ -380,48 +428,59 @@ export function sendAdminWorkspaceLinkedEmail({
 }
 
 /**
- * Asks the admin to pick the workspace for a plan subscription that
+ * Asks the admin to pick the workspace for subscriptions that
  * `resolveTeamWorkspaceForPlan` could not place with certainty. Sent only
  * when `ADMIN_EMAIL` is configured.
  *
- * Setting `metadata.organizationId` on the subscription in Stripe raises a
- * `customer.subscription.updated` event, which switches the bundled add-ons
- * on for that workspace.
+ * The subject names the reason: several Team workspaces could be meant, or
+ * one workspace but more than one live plan subscription without a
+ * workspace. Setting `metadata.organizationId` on a subscription in Stripe
+ * raises a `customer.subscription.updated` event, which switches its bundled
+ * add-ons on for that workspace.
  *
  * @param args.user - The user the customer belongs to
- * @param args.subscriptionId - The subscription waiting for a workspace
+ * @param args.subscriptionIds - The subscriptions waiting for a workspace
  * @param args.ownedCount - How many Team workspaces the customer owns
- * @param args.candidates - The workspaces no other live plan is linked to
+ * @param args.candidates - The workspaces no live plan is linked to
  */
 export function sendAdminPickWorkspaceEmail({
   user,
-  subscriptionId,
+  subscriptionIds,
   ownedCount,
   candidates,
 }: {
   user: { email: string };
-  subscriptionId: string;
+  subscriptionIds: string[];
   ownedCount: number;
   candidates: LinkableWorkspace[];
 }) {
   if (!ADMIN_EMAIL) return;
+  const subject =
+    candidates.length > 1
+      ? `Needs you: customer owns ${ownedCount} Team workspaces, pick one in Stripe metadata`
+      : "Needs you: more than one plan subscription has no workspace, pick in Stripe metadata";
   sendEmail({
     to: ADMIN_EMAIL,
-    subject: `Needs you: customer owns ${ownedCount} Team workspaces, pick one in Stripe metadata`,
+    subject,
     text: [
-      "A plan subscription has no workspace and Shelf could not tell which",
-      "Team workspace it belongs to, so none was picked. Either several",
-      "workspaces could be meant, or another live plan subscription of the",
-      "customer names no workspace either.",
+      "A subscription has no workspace and Shelf could not tell which Team",
+      "workspace it belongs to, so none was picked. Either several workspaces",
+      "could be meant, or more than one live plan subscription of the",
+      "customer names no workspace.",
       "",
       `Customer: ${user.email}`,
-      `Subscription: ${subscriptionId}`,
+      `Team workspaces owned: ${ownedCount}`,
       "",
-      "Workspaces no other live plan subscription is linked to:",
-      ...candidates.map((org) => `- ${org.name}: ${org.id}`),
+      "Subscriptions without a workspace:",
+      ...subscriptionIds.map((id) => `- ${id}`),
       "",
-      "Set metadata.organizationId on the subscription in Stripe to one of",
-      "these ids. The add-ons on the subscription switch on for that workspace.",
+      "Workspaces no live plan subscription is linked to:",
+      ...(candidates.length
+        ? candidates.map((org) => `- ${org.name}: ${org.id}`)
+        : ["- none"]),
+      "",
+      "Set metadata.organizationId on each subscription in Stripe to the",
+      "workspace id it pays for. Its add-ons switch on for that workspace.",
     ].join("\n"),
   });
 }
