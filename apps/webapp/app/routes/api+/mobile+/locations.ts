@@ -46,9 +46,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * - The asset create and edit forms send neither and search the response
      *   on the device, so a location missing from that one response cannot be
      *   picked there at all. Without paging params the whole list comes back,
-     *   up to `UNPAGED_LOCATIONS_CAP`. Those forms read only `locations`, so
-     *   rows past the cap stay out of reach there. In this mode `totalPages`
-     *   above 1 only says the list was cut; it is not a page to request.
+     *   up to `UNPAGED_LOCATIONS_CAP`, with `totalCount` and `truncated`
+     *   instead of paging fields: there is no next page in this mode, so the
+     *   response never advertises one. Those forms read only `locations`, so
+     *   rows past the cap stay out of reach there.
      */
     const isPaged =
       url.searchParams.has("page") || url.searchParams.has("perPage");
@@ -93,6 +94,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...location,
       image: thumbnailUrl ?? imageUrl,
     }));
+
+    if (!isPaged) {
+      return data({
+        locations,
+        totalCount,
+        truncated: totalCount > locations.length,
+      });
+    }
 
     return data({
       locations,

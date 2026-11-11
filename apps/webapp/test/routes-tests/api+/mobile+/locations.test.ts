@@ -42,10 +42,11 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 type Body = {
   locations: Array<{ id: string; name: string; image: string | null }>;
-  page: number;
-  perPage: number;
+  page?: number;
+  perPage?: number;
   totalCount: number;
-  totalPages: number;
+  totalPages?: number;
+  truncated?: boolean;
 };
 
 type FindManyArgs = {
@@ -125,7 +126,11 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
 
     expect(body.locations).toHaveLength(76);
     expect(body.locations.at(-1)?.id).toBe("room-76");
-    expect(body).toMatchObject({ page: 1, totalCount: 76, totalPages: 1 });
+    expect(body).toEqual({
+      locations: expect.any(Array),
+      totalCount: 76,
+      truncated: false,
+    });
     expect(lastFindManyArgs()).toMatchObject({
       orderBy: [{ name: "asc" }, { id: "asc" }],
       skip: 0,
@@ -139,7 +144,7 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
 
     expect(body.locations).toHaveLength(120);
     expect(body.locations.every((l) => l.name.startsWith("Room"))).toBe(true);
-    expect(body).toMatchObject({ totalCount: 120, totalPages: 1 });
+    expect(body).toMatchObject({ totalCount: 120, truncated: false });
   });
 
   it("sends the thumbnail URL as the image, never the stored image row", async () => {
@@ -171,17 +176,16 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
     expect(body.locations[0]?.image).toBe("https://img.example.com/Room-1.jpg");
   });
 
-  it("stops at the hard cap and reports the remaining pages", async () => {
+  it("stops at the hard cap and says the list was cut, without paging fields", async () => {
     seedLocations(1500);
 
     const body = await get();
 
     expect(body.locations).toHaveLength(1000);
-    expect(body).toMatchObject({
-      page: 1,
-      perPage: 1000,
+    expect(body).toEqual({
+      locations: expect.any(Array),
       totalCount: 1500,
-      totalPages: 2,
+      truncated: true,
     });
   });
 });
