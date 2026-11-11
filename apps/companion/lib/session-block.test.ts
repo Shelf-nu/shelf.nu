@@ -303,7 +303,7 @@ describe("createSessionBlock", () => {
     ]);
   });
 
-  it("a parked block unblocked before storage recovers stays unblocked", async () => {
+  it("an unblock refused while the main list is unreadable keeps the parked block", async () => {
     const store = mapStore();
     let failMainReads = true;
     const flaky = {
@@ -320,12 +320,13 @@ describe("createSessionBlock", () => {
     const block = createSessionBlock(flaky);
     await block.block("sb-abcd-auth-token");
 
-    await block.unblock("sb-abcd-auth-token");
+    assert.equal(await block.unblock("sb-abcd-auth-token"), false);
     failMainReads = false;
 
+    // The sign-in was refused, so nothing was lifted: the block survives.
     assert.equal(
       await createSessionBlock(flaky).isBlocked("sb-abcd-auth-token"),
-      false
+      true
     );
   });
 

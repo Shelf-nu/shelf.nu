@@ -786,8 +786,18 @@ function AuditScannerContent() {
       if (!auditId) return;
       // While the Resume prompt is open the draft on disk is the previous
       // session's: a scan now would be saved over it, and Resume would then
-      // replace the queue and drop the scan.
-      if (recoveryPendingRef.current) return;
+      // replace the queue and drop the scan. The prompt can open after the
+      // scan began (a reload), so the scan lock is released and the operator
+      // told, or every later scan would be refused.
+      if (recoveryPendingRef.current) {
+        showToast(
+          "error",
+          asset.title,
+          "Not recorded. Resume or discard the previous session first."
+        );
+        finalizeScan();
+        return;
+      }
       try {
         // 4. Queue the server write first: the scan counts as recorded only
         // once the queue has taken it (`queueThenRecord`). A refused scan

@@ -211,15 +211,16 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
     async unblock(storageKey) {
       pending.delete(storageKey);
       const keys = await load();
-      const listed = keys.delete(storageKey);
-      // A parked block for this key must not come back on the next read.
-      const parkedCleared = await unpark(storageKey);
       if (!blocked) {
         // The main list could not be read, so the lift cannot be stored:
-        // the key stays blocked for this run too.
+        // nothing is lifted, the parked block included, and the key stays
+        // blocked for this run too.
         pending.add(storageKey);
         return false;
       }
+      const listed = keys.delete(storageKey);
+      // A parked block for this key must not come back on the next read.
+      const parkedCleared = await unpark(storageKey);
       // A parked entry that is still stored comes back on the next launch, so
       // the block stays in memory and in the main list too: the next sign-in
       // then goes through `unblock` again instead of writing a session the
