@@ -51,8 +51,19 @@ const SERVER = {
   unclaimedQrIds: new Set(["unclaimed0"]),
   /** Barcode values linked to an asset or kit, stored as scanned. */
   barcodes: new Set([OUTSIDE_QR, OUTSIDE_SHORT, OUTSIDE_BARE, "4006381333931"]),
-  /** A barcode that exists but is linked to nothing (422). */
-  unlinkedBarcodes: new Set(["http://other-vendor.example/qr/unlinked1"]),
+  /** Barcodes that exist but are linked to nothing (422). */
+  unlinkedBarcodes: new Set([
+    "http://other-vendor.example/qr/unlinked1",
+    "https://other-vendor.example/unlinked001",
+  ]),
+  /** A barcode held by more than one of the caller's workspaces (409). */
+  ambiguousBarcodes: new Set(["twoworkspaces"]),
+  /** A QR that belongs to a workspace the caller is not in (403). */
+  forbiddenQrIds: new Set(["forbidden00"]),
+  /** A value something in front of the server answers 404 for. */
+  proxyRejected: new Set(["http://other-vendor.example/qr/proxied1"]),
+  /** A value the barcode route refuses outright (403). */
+  forbiddenBarcodes: new Set(["http://other-vendor.example/qr/refused1"]),
 };
 
 type Answer = ScanLookupAnswer & { data: string | null; error?: string };
@@ -70,13 +81,16 @@ function fakeLookups(options: { offline?: boolean } = {}) {
       calls.push(`qr:${id}`);
       if (options.offline) return Promise.resolve(offline);
       if (SERVER.qrIds.has(id)) return Promise.resolve({ data: `qr:${id}` });
+      if (SERVER.forbiddenQrIds.has(id)) {
+        return Promise.resolve({ data: null, error: "forbidden", status: 403 });
+      }
       return Promise.resolve({
         data: null,
         error: "QR code not found",
         status: 404,
         errorDetails: SERVER.unclaimedQrIds.has(id)
           ? { reason: "unclaimed" }
-          : null,
+          : {},
       });
     },
     barcode: (value: string): Promise<Answer> => {
@@ -85,10 +99,22 @@ function fakeLookups(options: { offline?: boolean } = {}) {
       if (SERVER.barcodes.has(value)) {
         return Promise.resolve({ data: `barcode:${value}` });
       }
+      const status = SERVER.unlinkedBarcodes.has(value)
+        ? 422
+        : SERVER.ambiguousBarcodes.has(value)
+        ? 409
+        : SERVER.forbiddenBarcodes.has(value)
+        ? 403
+        : 404;
+      if (SERVER.proxyRejected.has(value)) {
+        // A 404 that is not the API's envelope: no errorDetails.
+        return Promise.resolve({ data: null, error: "refused", status: 404 });
+      }
       return Promise.resolve({
         data: null,
-        error: "not found",
-        status: SERVER.unlinkedBarcodes.has(value) ? 422 : 404,
+        error: "refused",
+        status,
+        errorDetails: {},
       });
     },
   };
@@ -107,7 +133,8 @@ type Row = {
   outcome:
     | { kind: "qr"; found: boolean }
     | { kind: "barcode"; found: boolean }
-    | { kind: "outside-link-miss" };
+    | { kind: "outside-link-miss"; lookedUp: boolean }
+    | { kind: "barcodes-unavailable" };
 };
 
 const ROWS: Row[] = [
@@ -154,14 +181,15 @@ const ROWS: Row[] = [
     name: "our link on a different Shelf server",
     input: OTHER_SHELF,
     calls: [`barcode:${OTHER_SHELF}`],
-    outcome: { kind: "outside-link-miss" },
+    outcome: { kind: "outside-link-miss", lookedUp: true },
   },
   {
     name: "our link on a different Shelf server, barcodes off",
     input: OTHER_SHELF,
     barcodes: false,
+    // Nothing was asked, so the screen must not claim a search happened.
     calls: [],
-    outcome: { kind: "outside-link-miss" },
+    outcome: { kind: "outside-link-miss", lookedUp: false },
   },
   {
     name: "outside /qr/ url linked as ExternalQR",
@@ -174,7 +202,7 @@ const ROWS: Row[] = [
     name: "outside /qr/ url that is not linked",
     input: "http://other-vendor.example/qr/zzzz9999",
     calls: ["barcode:http://other-vendor.example/qr/zzzz9999"],
-    outcome: { kind: "outside-link-miss" },
+    outcome: { kind: "outside-link-miss", lookedUp: true },
   },
   {
     name: "outside /qr/ url linked to nothing",
@@ -194,6 +222,44 @@ const ROWS: Row[] = [
     input: OUTSIDE_BARE,
     calls: ["qr:k3x9q2m7ab", `barcode:${OUTSIDE_BARE}`],
     outcome: { kind: "barcode", found: true },
+  },
+  {
+    name: "outside /qr/ url answered 404 by a proxy, not the API",
+    input: "http://other-vendor.example/qr/proxied1",
+    // Not the API's "not found", so the label may well be linked.
+    calls: ["barcode:http://other-vendor.example/qr/proxied1"],
+    outcome: { kind: "barcode", found: false },
+  },
+  {
+    name: "outside /qr/ url the barcode route refuses",
+    input: "http://other-vendor.example/qr/refused1",
+    // Only a plain not-found reads as a miss; a 403 keeps its own message.
+    calls: ["barcode:http://other-vendor.example/qr/refused1"],
+    outcome: { kind: "barcode", found: false },
+  },
+  {
+    name: "short-link-shaped url that is a barcode linked to nothing",
+    input: "https://other-vendor.example/unlinked001",
+    // 422 knows the value, so it replaces the QR route's "not found".
+    calls: [
+      "qr:unlinked001",
+      "barcode:https://other-vendor.example/unlinked001",
+    ],
+    outcome: { kind: "barcode", found: false },
+  },
+  {
+    name: "bare value held as a barcode by two workspaces",
+    input: "twoworkspaces",
+    // 409 knows the value too.
+    calls: ["qr:twoworkspaces", "barcode:twoworkspaces"],
+    outcome: { kind: "barcode", found: false },
+  },
+  {
+    name: "short link to a QR in a workspace the user is not in",
+    input: "https://eam.sh/forbidden00",
+    // 403 is not "not found": the QR route knows the code, so no fallback.
+    calls: ["qr:forbidden00"],
+    outcome: { kind: "qr", found: false },
   },
   {
     name: "short-link-shaped url nobody knows",
@@ -231,6 +297,13 @@ const ROWS: Row[] = [
     outcome: { kind: "barcode", found: false },
   },
   {
+    name: "plain barcode, barcodes off",
+    input: "4006381333931",
+    barcodes: false,
+    calls: [],
+    outcome: { kind: "barcodes-unavailable" },
+  },
+  {
     name: "SAM id",
     input: "sam-0001",
     barcodes: false,
@@ -251,7 +324,10 @@ for (const row of ROWS) {
 
     assert.deepEqual(lookups.calls, row.calls);
     assert.equal(outcome.kind, row.outcome.kind);
-    if (outcome.kind !== "outside-link-miss" && "found" in row.outcome) {
+    if (outcome.kind === "outside-link-miss") {
+      assert.deepEqual(outcome, row.outcome);
+    }
+    if ("answer" in outcome && "found" in row.outcome) {
       assert.equal(outcome.answer.data !== null, row.outcome.found);
     }
   });
@@ -283,14 +359,14 @@ test("planScan names the QR id only for a Shelf QR code", () => {
   assert.equal(planScan("4006381333931", ACTIVE, options).qrId, null);
 });
 
-test("planScan sends a SAM-shaped value to the barcode lookup without a workspace", () => {
+test("planScan treats a SAM-shaped value as a barcode without a workspace", () => {
   // SAM ids are unique per workspace, so with none selected the QR route
   // cannot resolve one.
   const plan = planScan("SAM-0001", ACTIVE, {
     barcodes: false,
     sequentialIds: false,
   });
-  assert.equal(plan.first, "barcode");
+  assert.deepEqual(plan, { first: "none", qrId: null, outsideLink: false });
 });
 
 test("runScanPlan keeps the QR route's answer when the fallback gets no answer", async () => {

@@ -8,6 +8,14 @@
  *
  * Pure (no React Native, Expo or `@/` imports), so its test runs under Node.
  *
+ * MIRROR of `apps/webapp/app/utils/qr-code.ts` (`isShelfQrCode`) for the "is
+ * this a Shelf QR" part. Routing only: the server resolves and authorizes
+ * every lookup. Two deliberate differences: the app does not know the
+ * server's shortener host, so it tries the QR route first and the barcode
+ * lookup second for a short link; and a raw id is accepted at 10 to 25
+ * characters here, where the web's `isQrId` accepts 10 or 25. Extraction
+ * target: a pure `packages/*` scanner module (none yet).
+ *
  * @see ./server/contract.ts: `isSameOrigin`, used for the server check
  * @see ./qr-utils.test.ts: one row per input class
  */
@@ -34,7 +42,7 @@ export function extractQrId(data: string): string | null {
   );
   if (shortenerMatch) return shortenerMatch[1];
 
-  // Raw QR IDs (10 or 25 char lowercase alphanumeric starting with letter)
+  // Raw QR IDs (10-25 char lowercase alphanumeric starting with a letter)
   if (/^[a-z][a-z0-9]{9,24}$/.test(data)) return data;
 
   return null;
@@ -50,7 +58,8 @@ const CANONICAL_QR_URL = /^https?:\/\/[^/]+\/qr\/[a-zA-Z0-9]+$/;
  *   `barcodeFallback`, a not-found there is followed by the barcode lookup.
  * - `first: "barcode"`: ask the workspace barcode lookup for the full value.
  *   `outsideLink` marks a canonical `/qr/<id>` label on another host.
- * - `first: "none"`: an outside link with no barcode lookup to ask.
+ * - `first: "none"`: the value needs the barcode lookup and the workspace has
+ *   none. `outsideLink` as above.
  *
  * `qrId` is the Shelf QR id when the value is one, and null for a SAM id or a
  * barcode. The claim and link flows key on it.
@@ -63,7 +72,7 @@ export type ScanPlan =
       barcodeFallback: boolean;
     }
   | { first: "barcode"; qrId: null; outsideLink: boolean }
-  | { first: "none"; qrId: null };
+  | { first: "none"; qrId: null; outsideLink: boolean };
 
 /**
  * Plans the lookups for a scanned value. Counterpart of the webapp's
@@ -102,6 +111,7 @@ export function planScan(
   can: { barcodes: boolean; sequentialIds: boolean }
 ): ScanPlan {
   const qrId = extractQrId(data);
+  const barcodeOrNone = can.barcodes ? "barcode" : "none";
 
   if (qrId) {
     if (!CANONICAL_QR_URL.test(data)) {
@@ -115,9 +125,7 @@ export function planScan(
     if (isSameOrigin(data, activeBaseUrl)) {
       return { first: "qr", lookupId: qrId, qrId, barcodeFallback: false };
     }
-    return can.barcodes
-      ? { first: "barcode", qrId: null, outsideLink: true }
-      : { first: "none", qrId: null };
+    return { first: barcodeOrNone, qrId: null, outsideLink: true };
   }
 
   const sequentialId = can.sequentialIds ? parseSequentialId(data) : null;
@@ -130,7 +138,7 @@ export function planScan(
     };
   }
 
-  return { first: "barcode", qrId: null, outsideLink: false };
+  return { first: barcodeOrNone, qrId: null, outsideLink: false };
 }
 
 /**
@@ -140,6 +148,7 @@ export type ScanLookupAnswer = {
   data: unknown;
   /** HTTP status of a refusal; absent when there was no answer at all. */
   status?: number;
+  /** The mobile API's error envelope; absent when the body was not one. */
   errorDetails?: { reason?: string } | null;
 };
 
@@ -148,21 +157,30 @@ export type ScanLookupAnswer = {
  *
  * - `qr` / `barcode`: that lookup's answer is the one to render, hit or not.
  *   `lookupId` is the id the QR route was asked for.
- * - `outside-link-miss`: a `/qr/<id>` label on another host that no workspace
- *   of the caller holds as a barcode.
+ * - `outside-link-miss`: a `/qr/<id>` label on another host that resolved to
+ *   nothing. `lookedUp` says whether the barcode lookup was asked (and holds
+ *   it in none of the caller's workspaces) or could not be asked at all.
+ * - `barcodes-unavailable`: a barcode, scanned where barcodes cannot be
+ *   resolved. Nothing was asked.
  */
 export type ScanOutcome<Q, B> =
   | { kind: "qr"; lookupId: string; answer: Q }
   | { kind: "barcode"; answer: B }
-  | { kind: "outside-link-miss" };
+  | { kind: "outside-link-miss"; lookedUp: boolean }
+  | { kind: "barcodes-unavailable" };
 
 /**
- * A plain "the server does not know this value". A refusal that carries a
- * `reason` (an unclaimed QR) knows the code, and no status means no answer.
+ * A plain "the server does not know this value": a 404 in the mobile API's
+ * error envelope, with no `reason`. A refusal that carries a `reason` (an
+ * unclaimed QR) knows the code, a 404 without the envelope came from
+ * something in front of the server, and no status means no answer.
  */
 function isNotFound(answer: ScanLookupAnswer): boolean {
   return (
-    answer.data == null && answer.status === 404 && !answer.errorDetails?.reason
+    answer.data == null &&
+    answer.status === 404 &&
+    answer.errorDetails != null &&
+    !answer.errorDetails.reason
   );
 }
 
@@ -188,12 +206,16 @@ export async function runScanPlan<
     barcode: (value: string) => Promise<B>;
   }
 ): Promise<ScanOutcome<Q, B>> {
-  if (plan.first === "none") return { kind: "outside-link-miss" };
+  if (plan.first === "none") {
+    return plan.outsideLink
+      ? { kind: "outside-link-miss", lookedUp: false }
+      : { kind: "barcodes-unavailable" };
+  }
 
   if (plan.first === "barcode") {
     const answer = await lookups.barcode(data);
     return plan.outsideLink && isNotFound(answer)
-      ? { kind: "outside-link-miss" }
+      ? { kind: "outside-link-miss", lookedUp: true }
       : { kind: "barcode", answer };
   }
 

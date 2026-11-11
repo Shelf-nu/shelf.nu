@@ -925,23 +925,6 @@ function AuditScannerContent() {
         let codeOrgId: string | null;
         let asset: { id: string; title: string } | null;
 
-        // A plain barcode needs a workspace that can resolve barcodes.
-        if (
-          plan.first === "barcode" &&
-          !plan.outsideLink &&
-          !currentOrg.barcodesEnabled
-        ) {
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Barcode Not Supported",
-            "Barcode scanning is not enabled for your workspace."
-          );
-          finalizeScan();
-          return;
-        }
-
         const outcome = await runScanPlan(plan, data, {
           // Audit lookups only identify the code: the AuditScan is recorded
           // separately, so use the non-recording resolve. Otherwise every
@@ -958,6 +941,19 @@ function AuditScannerContent() {
             ),
         });
 
+        // A barcode, scanned in a workspace that cannot resolve barcodes.
+        if (outcome.kind === "barcodes-unavailable") {
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          showToast(
+            "error",
+            "Barcode Not Supported",
+            "Barcode scanning is not enabled for your workspace."
+          );
+          finalizeScan();
+          return;
+        }
+
         if (outcome.kind === "outside-link-miss") {
           // Same feedback shape as every other rejected scan in this handler:
           // a silent return would look like the camera simply ignored a code
@@ -966,11 +962,14 @@ function AuditScannerContent() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           showToast(
             "error",
-            "Code Not Linked",
-            "Not linked in your workspaces. A label from another Shelf server works only there."
+            "Code Not Found",
+            // Only claim a search when the barcode lookup was asked.
+            outcome.lookedUp
+              ? "Not found in your workspaces. A label from another Shelf server works only there."
+              : "Not a code from this Shelf server. A label from another Shelf server works only there."
           );
           announce(
-            "Code not linked. A label from another Shelf server works only there."
+            "Code not found. A label from another Shelf server works only there."
           );
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
           // a bare return would leave isProcessingRef.current true forever:

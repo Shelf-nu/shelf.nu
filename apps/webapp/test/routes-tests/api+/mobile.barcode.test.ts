@@ -437,6 +437,12 @@ describe("GET /api/mobile/barcode/:value", () => {
     ["ABC%41", "ABC%41"], // a literal escape that must not be decoded
     ["50%", "50%"], // a lone % that decodeURIComponent would throw on
     ["PLAIN123", "PLAIN123"],
+    // An outside QR label linked as a barcode: the whole URL, case kept. The
+    // companion sends these to this route (see planScan in lib/qr-utils.ts).
+    [
+      "http://other-vendor.example/qr/a1B2c3D4",
+      "http:%2F%2Fother-vendor.example%2Fqr%2Fa1B2c3D4",
+    ],
   ])("looks up %s from the request URL", async (scanned, param) => {
     const result = await loader(
       createLoaderArgs({

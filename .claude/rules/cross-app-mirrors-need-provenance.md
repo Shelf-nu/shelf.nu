@@ -58,6 +58,7 @@ Existing mirrors:
 | `lib/push/preferences.ts` → `NotificationPreferences`                                          | `apps/webapp/app/modules/push/types.ts` (lands with PUSH-2)                                                                      | a pure `packages/*` push module (none yet)         |
 | `lib/audit-scan-queue.ts` → `countTargetFor`                                                   | `apps/webapp/app/modules/audit/quantity.ts` → `expectedQuantityFor`                                                              | `@shelf/quantity-control`                          |
 | `lib/open-link.ts` → `WEB_ONLY_PAGES`                                                          | the static routes beside `$id` routes in `apps/webapp/app/routes/_layout+/` (`assets.export`, `assets.import`, `kits.new`, ...)  | a pure `packages/*` routes module (none yet)       |
+| `lib/qr-utils.ts` → `planScan` (which values are a Shelf QR)                                   | `apps/webapp/app/utils/qr-code.ts` → `isShelfQrCode`                                                                             | a pure `packages/*` scanner module (none yet)      |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

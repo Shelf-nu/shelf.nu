@@ -869,36 +869,6 @@ function ScannerContent() {
           return;
         }
 
-        // A plain barcode needs a workspace that can resolve barcodes.
-        if (plan.first === "barcode" && !plan.outsideLink) {
-          if (!currentOrg) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            announce("Code not recognized");
-            setScanResult({
-              type: "not_found",
-              title: "Code Not Recognized",
-              message: "This code is not recognized as a Shelf asset code.",
-            });
-            finalizeScan();
-            return;
-          }
-
-          if (!currentOrg.barcodesEnabled) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            announce("Barcode scanning not available");
-            setScanResult({
-              type: "not_found",
-              title: "Barcode Not Supported",
-              message:
-                "Your workspace does not support barcode scanning. Contact your admin to enable this feature.",
-            });
-            finalizeScan();
-            return;
-          }
-        }
-
         const outcome = await runScanPlan(plan, data, {
           qr: async (lookupId) => {
             // Best-effort scan geolocation (web parity). Cached / last-known
@@ -913,7 +883,7 @@ function ScannerContent() {
           },
           barcode: (value) =>
             // planScan plans a barcode lookup only for a workspace that can
-            // resolve barcodes, and the gate above covers the plain barcode.
+            // resolve barcodes, so one is selected whenever this runs.
             currentOrg
               ? api.barcode(value, currentOrg.id)
               : Promise.resolve({
@@ -929,15 +899,41 @@ function ScannerContent() {
           return;
         }
 
+        // A barcode, scanned where barcodes cannot be resolved.
+        if (outcome.kind === "barcodes-unavailable") {
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          if (!currentOrg) {
+            announce("Code not recognized");
+            setScanResult({
+              type: "not_found",
+              title: "Code Not Recognized",
+              message: "This code is not recognized as a Shelf asset code.",
+            });
+          } else {
+            announce("Barcode scanning not available");
+            setScanResult({
+              type: "not_found",
+              title: "Barcode Not Supported",
+              message:
+                "Your workspace does not support barcode scanning. Contact your admin to enable this feature.",
+            });
+          }
+          finalizeScan();
+          return;
+        }
+
         if (outcome.kind === "outside-link-miss") {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          announce("Code not linked");
+          announce("Code not found");
           setScanResult({
             type: "not_found",
-            title: "Code Not Linked",
-            message:
-              "This code is not linked to anything in your workspaces. If it is a label from another Shelf server, sign in to that server to use it.",
+            title: "Code Not Found",
+            // Only claim a search when the barcode lookup was asked.
+            message: outcome.lookedUp
+              ? "This code was not found in your workspaces. If it is a label from another Shelf server, sign in to that server to use it."
+              : "This link is not a code from this Shelf server. If it is a label from another Shelf server, sign in to that server to use it.",
           });
           finalizeScan();
           return;
