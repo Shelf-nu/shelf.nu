@@ -393,7 +393,8 @@ export const handleDetection = async ({
     }
   }
 
-  // If we have a specific barcode type passed in (like ExternalQR), use it
+  // A structured barcode the camera read keeps its format when its value is
+  // valid for that format.
   if (barcodeType) {
     // Validate the value for the specific barcode type
     const normalizedValue = normalizeBarcodeValue(barcodeType, result);
@@ -409,17 +410,15 @@ export const handleDetection = async ({
     }
   }
 
-  // If not a QR code, check if it's a valid barcode
+  // Untyped, or invalid for the format the camera read: report the type the
+  // value actually validates as, so the lookup searches the type it can match.
   const barcodeCheck = isValidBarcode(result);
 
-  if (barcodeCheck.isValid) {
-    // It's a valid barcode
-    const detectedBarcodeType = barcodeType || barcodeCheck.type;
-    const normalizedValue = normalizeBarcodeValue(detectedBarcodeType!, result);
+  if (barcodeCheck.isValid && barcodeCheck.type) {
     await onCodeDetectionSuccess?.({
-      value: normalizedValue,
+      value: normalizeBarcodeValue(barcodeCheck.type, result),
       type: "barcode",
-      barcodeType: detectedBarcodeType,
+      barcodeType: barcodeCheck.type,
     });
     return;
   }

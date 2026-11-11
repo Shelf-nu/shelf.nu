@@ -256,6 +256,15 @@ const ROWS: Row[] = [
     camera: barcode(BarcodeType.Code128, "SAM-0001"),
     handheld: { value: "SAM-0001", type: "samId" },
   },
+  {
+    name: "Code128 too short to be a valid Code128",
+    value: "ab1",
+    cameraFormat: "Code128",
+    // Invalid for the format it was read as, so it is reported as the type it
+    // does validate as, never as a Code128 no stored value can match.
+    camera: barcode(BarcodeType.ExternalQR, "ab1"),
+    handheld: barcode(BarcodeType.ExternalQR, "ab1"),
+  },
 ];
 
 describe("scanned code classification", () => {
