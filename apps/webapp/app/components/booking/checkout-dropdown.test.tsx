@@ -2,14 +2,16 @@
  * Tests for {@link CheckoutDropdown}: which check-out entry points a booking
  * header offers, that the explicit check-out requirement removes both
  * quick options ("Check out" and "Check out remaining") in favour of the
- * scanner, and that each quick option asks once before it submits.
+ * scanner, that each quick option asks once before it submits, and that the
+ * menu's dialog keeps its "From location" picker usable with a mouse.
  *
  * @see {@link file://./checkout-dropdown.tsx}
  */
 import { useState, type ComponentProps } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter, useNavigation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 
 import CheckoutDropdown from "./checkout-dropdown";
 
@@ -66,6 +68,35 @@ const booking = {
   id: "booking-1",
   name: "Field kit",
   from: new Date(Date.now() - 60 * 60 * 1000),
+};
+
+/** A pool kept at two locations, so the check-out asks where units leave from. */
+const sourceQuestion: CheckoutSourceQuestion = {
+  sliceId: "slice-1",
+  assetId: "asset-1",
+  title: "Light bulbs",
+  unitOfMeasure: "pcs",
+  quantity: 3,
+  placements: [
+    {
+      locationId: "loc-warehouse",
+      name: "Warehouse",
+      placed: 8,
+      inCustody: 0,
+      onBooking: 0,
+      left: 8,
+    },
+    {
+      locationId: "loc-studio",
+      name: "Studio",
+      placed: 5,
+      inCustody: 0,
+      onBooking: 0,
+      left: 5,
+    },
+  ],
+  unplaced: 0,
+  defaultLocationId: "loc-warehouse",
 };
 
 const SCAN_PAGE = "/bookings/booking-1/overview/checkout-assets";
@@ -191,5 +222,131 @@ describe("CheckoutDropdown", () => {
     const submits = quickCheckoutSubmits(document.body);
     expect(submits).toHaveLength(1);
     expect(submits[0]).toHaveAttribute("value", "checkOutRemaining");
+  });
+
+  it.each(["Enter", " "])(
+    "opens the check-out dialog from the menu row with the %j key",
+    (key) => {
+      menuOpen = true;
+      renderDropdown({
+        canFullCheckOut: true,
+        canCheckOutRemaining: false,
+        canScanCheckOut: true,
+      });
+
+      // Arrow-key focus lands on the menu item, not the button inside it.
+      const row = screen.getAllByRole("menuitem")[0];
+      row.focus();
+      fireEvent.keyDown(row, { key });
+
+      expect(
+        screen.getByRole("alertdialog", { name: "Check out booking" })
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    }
+  );
+
+  it("does not open the check-out dialog from a disabled menu row", () => {
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      checkOutDisabled: { reason: "Some assets are in custody." },
+    });
+
+    const row = screen.getAllByRole("menuitem")[0];
+    row.focus();
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("announces a disabled Check out row and its reason on the row itself", () => {
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      checkOutDisabled: { reason: "Some assets are in custody." },
+    });
+
+    // Arrow-key focus lands on the row, so the row has to say it is disabled,
+    // and read the reason once (from the button's hidden description).
+    const row = screen.getAllByRole("menuitem")[0];
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    expect(row.textContent?.split("Some assets are in custody.").length).toBe(
+      2
+    );
+  });
+
+  it("marks the Scan to check out row disabled with the control", () => {
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      disabled: true,
+    });
+
+    expect(screen.getAllByRole("menuitem")[1]).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
+  });
+
+  it("does not open the check-out dialog while a submission is in flight", () => {
+    // why: an in-flight submission is the navigation state under test, and
+    // the file already mocks `useNavigation` for the data-router dependency.
+    vi.mocked(useNavigation).mockReturnValue({ state: "submitting" } as never);
+    try {
+      menuOpen = true;
+      renderDropdown({
+        canFullCheckOut: true,
+        canCheckOutRemaining: false,
+        canScanCheckOut: true,
+      });
+
+      const row = screen.getAllByRole("menuitem")[0];
+      row.focus();
+      fireEvent.keyDown(row, { key: "Enter" });
+
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    } finally {
+      vi.mocked(useNavigation).mockReturnValue({ state: "idle" } as never);
+    }
+  });
+
+  it("lets the operator pick a From location with the mouse", () => {
+    // A menu item takes focus on every mouse move it sees, and React bubbles
+    // a portaled dialog's events to its component parents. Focus leaving the
+    // picker's list shuts it, so the dialog must not sit inside the menu.
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      sourceQuestions: [sourceQuestion],
+    });
+
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByRole("button", {
+        name: "Check out",
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Light bulbs/ }));
+    const studio = screen.getByRole("option", { name: "Studio · 5 pcs" });
+    fireEvent.mouseEnter(studio);
+    fireEvent.pointerMove(studio, { pointerType: "mouse" });
+
+    expect(document.activeElement).toBe(studio);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.click(studio);
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[name="sourceLocation.slice-1"]'
+      )?.value
+    ).toBe("loc-studio");
   });
 });
