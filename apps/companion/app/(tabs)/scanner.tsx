@@ -48,7 +48,7 @@ import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { isForeignCodeMiss, planScanLookup } from "@/lib/qr-utils";
+import { classifyScannedCode, isForeignCodeMiss } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { parseSequentialId } from "@/lib/sequential-id";
@@ -827,22 +827,19 @@ function ScannerContent() {
       };
 
       try {
-        // A `/qr/` URL on another host is either another Shelf server's label
-        // or an old label linked here as a barcode (ExternalQR). The barcode
-        // lookup is asked first; only a miss, or no way to ask, means the
-        // other server. Resolving it as a QR id here would be a baffling
-        // "not found" for a code that is valid where it was minted.
-        const plan = planScanLookup(
+        // Which lookup this value goes to is decided in one place; see
+        // classifyScannedCode for the rule, including linked outside QR urls.
+        const scanned = classifyScannedCode(
           data,
           getActiveServer().baseUrl,
           Boolean(currentOrg?.barcodesEnabled)
         );
-        if (plan.kind === "foreign") {
+        if (scanned.kind === "foreign") {
           showDifferentServerResult();
           return;
         }
 
-        const qrId = plan.kind === "qr" ? plan.qrId : null;
+        const qrId = scanned.kind === "qr" ? scanned.qrId : null;
         // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
         // via the QR route's sequentialId branch, scoped to the current
         // workspace (web parity: the web scan resolver tries parseSequentialId
@@ -1056,7 +1053,7 @@ function ScannerContent() {
             return;
           }
 
-          if (isForeignCodeMiss(plan, barcodeStatus)) {
+          if (isForeignCodeMiss(scanned, barcodeStatus)) {
             showDifferentServerResult();
             return;
           }

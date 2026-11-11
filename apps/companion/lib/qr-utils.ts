@@ -1,12 +1,17 @@
 /**
- * QR/barcode value parsing for the scanner.
+ * QR/barcode value parsing for the scanner, and the one rule for which lookup
+ * a scanned value goes to. The scanner screens act on
+ * {@link classifyScannedCode} and {@link isForeignCodeMiss} and make no
+ * judgement of their own about whether a value is a Shelf code.
  *
- * @see ./server/contract.ts — `isSameOrigin`, used for the server check
+ * @see ./server/contract.ts: `isSameOrigin`, used for the server check
  */
 import { isSameOrigin } from "./server/contract";
 
 /**
- * Extracts a Shelf QR ID from a scanned barcode value.
+ * Extracts a Shelf QR ID from a scanned barcode value, judging the shape only.
+ * It matches `/qr/<id>` on ANY host, so it cannot say whether the value belongs
+ * to this server; {@link classifyScannedCode} decides that.
  * Supports three formats:
  * 1. Full URL: https://example.com/qr/<id>
  * 2. URL shortener: https://example.com/<id> (10-25 char lowercase alphanumeric)
@@ -29,124 +34,87 @@ export function extractQrId(data: string): string | null {
   return null;
 }
 
-/** Outcome of checking a scanned value against the active server. */
-export type ScannedCodeClassification =
-  | { kind: "id"; qrId: string }
-  | { kind: "foreign" }
-  | { kind: "unknown" };
-
 /**
- * Classifies a scanned value against the server the app is connected to.
- *
- * `extractQrId` matches ANY host by design, so without this check a code minted
- * by a different Shelf server would be resolved against the active one and
- * reported as "not found" — a baffling error for a code that is perfectly valid
- * elsewhere.
- *
- * Only the canonical `/qr/<id>` label names the instance that minted it, so it
- * is the only form the origin rule may judge. A short link is minted on a
- * separate shortener domain (`URL_SHORTENER`) that the server never advertises
- * — `/api/mobile/config` carries no shortener field — so its origin says
- * nothing about which instance owns it, and treating a mismatch as foreign
- * would reject every short-link code, including this instance's own.
- *
- * This is an affordance, not an authorization control: resolution stays
- * authenticated and org-scoped on the server, so admitting an ambiguous format
- * costs a "not found" at worst.
- *
- * @param data - The raw scanned value.
- * @param activeBaseUrl - The active server's base URL.
- * @returns `{ kind: "id" }` when usable here, `{ kind: "foreign" }` for a
- *   canonical Shelf QR URL belonging to another server, `{ kind: "unknown" }`
- *   for anything that isn't a Shelf code at all.
- */
-export function classifyScannedCode(
-  data: string,
-  activeBaseUrl: string
-): ScannedCodeClassification {
-  const qrId = extractQrId(data);
-  if (!qrId) return { kind: "unknown" };
-
-  // A bare id carries no host, so it can only be meant for this server.
-  if (!/^https?:\/\//i.test(data)) return { kind: "id", qrId };
-
-  // Anything other than the canonical label — i.e. a short link — carries an
-  // origin that cannot be attributed to any instance. Admit it.
-  if (!/^https?:\/\/[^/]+\/qr\/[a-zA-Z0-9]+$/.test(data)) {
-    return { kind: "id", qrId };
-  }
-
-  return isSameOrigin(data, activeBaseUrl)
-    ? { kind: "id", qrId }
-    : { kind: "foreign" };
-}
-
-/**
- * Which lookup a scanned value should go to.
+ * Which lookup a scanned value goes to.
  *
  * - `qr`: a Shelf QR id for this server; resolve it on the QR route.
  * - `code`: not a Shelf QR at all; the SAM id and workspace barcode paths
  *   decide what it is.
- * - `foreign-barcode`: a canonical `/qr/<id>` URL on another host. It may be
+ * - `foreign-barcode`: a canonical `/qr/<id>` URL on another host. It is either
  *   another Shelf server's label, or a label from a previous system that the
  *   workspace linked to an asset or kit as an alternative barcode (ExternalQR).
- *   Only the barcode lookup can tell, so it is asked first; see
- *   {@link isForeignCodeMiss} for the miss.
+ *   The value alone cannot tell the two apart, so the workspace barcode lookup
+ *   is asked with the full value; {@link isForeignCodeMiss} reads its answer.
  * - `foreign`: the same kind of URL when no barcode lookup is possible, so the
  *   other-server message is the only useful answer.
  */
-export type ScanLookupPlan =
+export type ScannedCodeClassification =
   | { kind: "qr"; qrId: string }
   | { kind: "code" }
   | { kind: "foreign-barcode" }
   | { kind: "foreign" };
 
 /**
- * Plans the lookup for a scanned value.
+ * Classifies a scanned value against the server the app is connected to. This
+ * is the app's single rule for "is this a Shelf QR code for this server", the
+ * counterpart of the webapp's `isShelfQrCode`.
  *
- * The full scanned value is what the barcode lookup must receive for a
- * `foreign-barcode` plan: ExternalQR values are stored as the whole URL with
+ * Only the canonical `/qr/<id>` label names the instance that minted it, so it
+ * is the only form the origin rule may judge. A short link is minted on a
+ * separate shortener domain (`URL_SHORTENER`) that the server never advertises
+ * (`/api/mobile/config` carries no shortener field), so its origin says nothing
+ * about which instance owns it; it is always treated as this server's.
+ *
+ * A canonical label on another host never goes to the QR route: its tail is
+ * another system's id, not one this server minted. It goes to the barcode
+ * lookup instead, because ExternalQR values are stored as the whole URL with
  * their case kept, and the server tries that exact value before uppercasing.
+ *
+ * This is an affordance, not an authorization control: resolution stays
+ * authenticated and org-scoped on the server.
  *
  * @param data - The raw scanned value.
  * @param activeBaseUrl - The active server's base URL.
  * @param barcodeLookupAvailable - Whether this workspace can resolve barcodes
  *   (a workspace is selected and holds the barcode capability).
  */
-export function planScanLookup(
+export function classifyScannedCode(
   data: string,
   activeBaseUrl: string,
   barcodeLookupAvailable: boolean
-): ScanLookupPlan {
-  const classification = classifyScannedCode(data, activeBaseUrl);
-  switch (classification.kind) {
-    case "id":
-      return { kind: "qr", qrId: classification.qrId };
-    case "foreign":
-      return barcodeLookupAvailable
-        ? { kind: "foreign-barcode" }
-        : { kind: "foreign" };
-    case "unknown":
-      return { kind: "code" };
+): ScannedCodeClassification {
+  const qrId = extractQrId(data);
+  if (!qrId) return { kind: "code" };
+
+  // A bare id carries no host, so it can only be meant for this server.
+  // Anything other than the canonical label (a short link) carries an origin
+  // that cannot be attributed to any instance, so it is admitted too.
+  const isCanonicalUrl = /^https?:\/\/[^/]+\/qr\/[a-zA-Z0-9]+$/.test(data);
+  if (!isCanonicalUrl || isSameOrigin(data, activeBaseUrl)) {
+    return { kind: "qr", qrId };
   }
+
+  return barcodeLookupAvailable
+    ? { kind: "foreign-barcode" }
+    : { kind: "foreign" };
 }
 
 /**
  * Whether a failed barcode lookup should be reported as "Different Shelf
  * Server" rather than with the server's own message.
  *
- * Only a plain not-found (404) qualifies: nothing in the caller's workspaces
- * holds the value, so the other-server reading is the likely one. Every other
- * failure (linked to nothing, in several workspaces, offline) says something
- * more precise and keeps its own message.
+ * Only a plain not-found (404) for a `foreign-barcode` value qualifies: none of
+ * the caller's workspaces holds it as a barcode, so it is another server's
+ * label. Every other failure (linked to nothing, in several workspaces,
+ * offline) says something more precise and keeps its own message.
  *
- * @param plan - The plan the scan was routed by.
+ * @param classification - What {@link classifyScannedCode} returned.
  * @param status - The HTTP status of the failed lookup, absent when there was
  *   no answer.
  */
 export function isForeignCodeMiss(
-  plan: ScanLookupPlan,
+  classification: ScannedCodeClassification,
   status: number | undefined
 ): boolean {
-  return plan.kind === "foreign-barcode" && status === 404;
+  return classification.kind === "foreign-barcode" && status === 404;
 }
