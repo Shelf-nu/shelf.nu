@@ -142,10 +142,15 @@ export async function generateQrObj({
           });
         }
 
+        // Same scope as getQrByAssetId / getQrByKitId: the owner is in this
+        // workspace, and the code is unclaimed or claimed by it.
         const existing = await tx.qr.findFirst({
-          where: assetId
-            ? { assetId, asset: { organizationId } }
-            : { kitId, kit: { organizationId } },
+          where: {
+            ...(assetId
+              ? { assetId, asset: { organizationId } }
+              : { kitId, kit: { organizationId } }),
+            OR: [{ organizationId: null }, { organizationId }],
+          },
         });
         if (existing) {
           return existing;

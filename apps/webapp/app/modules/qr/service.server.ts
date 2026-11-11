@@ -28,8 +28,8 @@ const label: ErrorLabel = "QR";
  * Finds the QR code linked to an asset in the given workspace.
  *
  * @param args.assetId - The asset the code is linked to
- * @param args.organizationId - The caller's workspace; an asset in any other
- *   workspace resolves to no code
+ * @param args.organizationId - The caller's workspace. The asset must be in it,
+ *   and the code must be unclaimed or claimed by it.
  * @returns The code, or null when the asset has none in this workspace
  */
 export async function getQrByAssetId({
@@ -38,7 +38,11 @@ export async function getQrByAssetId({
 }: Pick<Qr, "assetId"> & { organizationId: Organization["id"] }) {
   try {
     return await db.qr.findFirst({
-      where: { assetId, asset: { organizationId } },
+      where: {
+        assetId,
+        asset: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -55,8 +59,8 @@ export async function getQrByAssetId({
  * Finds the QR code linked to a kit in the given workspace.
  *
  * @param args.kitId - The kit the code is linked to
- * @param args.organizationId - The caller's workspace; a kit in any other
- *   workspace resolves to no code
+ * @param args.organizationId - The caller's workspace. The kit must be in it,
+ *   and the code must be unclaimed or claimed by it.
  * @returns The code, or null when the kit has none in this workspace
  */
 export async function getQrByKitId({
@@ -65,7 +69,11 @@ export async function getQrByKitId({
 }: Pick<Qr, "kitId"> & { organizationId: Organization["id"] }) {
   try {
     return await db.qr.findFirst({
-      where: { kitId, kit: { organizationId } },
+      where: {
+        kitId,
+        kit: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
     });
   } catch (cause) {
     throw new ShelfError({

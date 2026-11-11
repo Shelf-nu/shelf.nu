@@ -45,9 +45,8 @@ export const addScannedAssetsOrKitsToLocationSchema = z.object({
 });
 
 /**
- * Extend the type so we can use it. This is based on the extra asset
- * includes passed to the row — location is reached through the
- * `AssetLocation` pivot, so the extra include projects `assetLocations`.
+ * A scanned asset with its placement. Location is reached through the
+ * `AssetLocation` pivot, which `ASSET_INCLUDE` always selects (`id`, `name`).
  */
 type AssetFromQrWithLocation = AssetFromQr & {
   assetLocations: {
@@ -145,18 +144,6 @@ export default function AddAssetsKitsToLocationDrawer({
           return <KitRow kit={data as KitFromQr} location={location} />;
         }
         return null;
-      }}
-      assetExtraInclude={{
-        assetLocations: {
-          select: {
-            location: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
       }}
       // Tell the API which destination this drawer is feeding so it
       // can compute the strict-available pool and attach

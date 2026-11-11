@@ -27,6 +27,34 @@ export function normalizeRequestPath(path: string): string {
 }
 
 /**
+ * Suffix React Router's single fetch appends to a path to request the route's
+ * data, or to submit to its action, without rendering HTML.
+ */
+const SINGLE_FETCH_SUFFIX = ".data";
+
+/**
+ * Path single fetch uses for a request to the root route (`/`).
+ */
+const ROOT_SINGLE_FETCH_PATH = "/_root.data";
+
+/**
+ * Normalise a request path to the route it reaches: {@link normalizeRequestPath}
+ * plus the single-fetch suffix removed. `/x.data` reaches the same loader and
+ * action as `/x`, so a guard or bucket scoped to a route uses this form to
+ * cover both.
+ *
+ * @param path - The request path, as `c.req.path` returns it
+ * @returns The normalised path of the route the request reaches
+ */
+export function normalizeRoutePath(path: string): string {
+  const normalized = normalizeRequestPath(path);
+  if (normalized === ROOT_SINGLE_FETCH_PATH) return "/";
+  return normalized.endsWith(SINGLE_FETCH_SUFFIX)
+    ? normalizeRequestPath(normalized.slice(0, -SINGLE_FETCH_SUFFIX.length))
+    : normalized;
+}
+
+/**
  * Whether a normalised path is `prefix` itself or sits beneath it.
  *
  * @param path - A path already passed through {@link normalizeRequestPath}

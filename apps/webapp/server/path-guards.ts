@@ -23,7 +23,7 @@ import {
   mobileIpRateLimit,
   sentryTunnelRateLimit,
 } from "./rate-limit";
-import { isPathWithin, normalizeRequestPath } from "./request-path";
+import { isPathWithin, normalizeRoutePath } from "./request-path";
 
 /**
  * Methods that never deliver a body to a route action: GET and HEAD go to the
@@ -48,8 +48,8 @@ export function methodCarriesBody(method: string): boolean {
  * To apply several guards in order, compose them first with `every` from
  * `hono/combine`, which keeps Hono's own `next()` semantics.
  *
- * @param matches - Receives the normalised path and the context; return
- *   `true` to apply the middleware
+ * @param matches - Receives the normalised route path (single-fetch `.data`
+ *   suffix removed) and the context; return `true` to apply the middleware
  * @param middleware - The guard to apply. The caller instantiates it once so
  *   its state (such as a limiter's store) persists across requests.
  * @returns A single middleware for `server.use("*", ...)`
@@ -59,7 +59,7 @@ export function guardWhen(
   middleware: MiddlewareHandler
 ): MiddlewareHandler {
   return (c: Context, next: Next) =>
-    matches(normalizeRequestPath(c.req.path), c) ? middleware(c, next) : next();
+    matches(normalizeRoutePath(c.req.path), c) ? middleware(c, next) : next();
 }
 
 /** Prefix of the mobile companion API, normalised. */
@@ -71,7 +71,7 @@ const CALENDAR_FEED_PREFIX = "/api/calendar/feed";
 /**
  * Whether a normalised path is a mobile companion API request.
  *
- * @param path - A path already passed through {@link normalizeRequestPath}
+ * @param path - A path already passed through {@link normalizeRoutePath}
  */
 export function isMobileApiPath(path: string): boolean {
   return isPathWithin(path, MOBILE_API_PREFIX);
@@ -80,7 +80,7 @@ export function isMobileApiPath(path: string): boolean {
 /**
  * Whether a normalised path is an iCal feed request.
  *
- * @param path - A path already passed through {@link normalizeRequestPath}
+ * @param path - A path already passed through {@link normalizeRoutePath}
  */
 export function isCalendarFeedPath(path: string): boolean {
   return isPathWithin(path, CALENDAR_FEED_PREFIX);
@@ -88,10 +88,11 @@ export function isCalendarFeedPath(path: string): boolean {
 
 /**
  * Whether a request is one the Sentry tunnel's action would receive: the
- * tunnel path in any spelling, with any method that carries a body. GET, HEAD
+ * tunnel path in any spelling (including its single-fetch `.data` form), with
+ * any method that carries a body. GET, HEAD
  * and CORS preflights are left out so they never spend an address's budget.
  *
- * @param path - A path already passed through {@link normalizeRequestPath}
+ * @param path - A path already passed through {@link normalizeRoutePath}
  * @param c - The Hono context, for the method
  */
 export function isSentryTunnelEnvelope(path: string, c: Context): boolean {

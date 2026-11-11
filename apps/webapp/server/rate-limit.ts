@@ -4,7 +4,7 @@ import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { getClientIp } from "./client-ip";
-import { normalizeRequestPath } from "./request-path";
+import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -222,7 +222,9 @@ const bucketKeys = {
     `app:${resolveAppLoaderIdentity(c).identity}:${normalizeRequestPath(
       c.req.path
     )}`,
-  calendarFeed: (c: Context) => `calendar:${normalizeRequestPath(c.req.path)}`,
+  // The route path also drops the single-fetch `.data` suffix, so a feed and
+  // its `.data` form share one bucket.
+  calendarFeed: (c: Context) => `calendar:${normalizeRoutePath(c.req.path)}`,
   sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
 };
 

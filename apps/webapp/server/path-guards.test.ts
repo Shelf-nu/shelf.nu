@@ -20,7 +20,7 @@ import {
   mobileApiGuard,
   sentryTunnelGuard,
 } from "./path-guards";
-import { normalizeRequestPath } from "./request-path";
+import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
 
 // @vitest-environment node
 
@@ -97,6 +97,19 @@ describe("normalizeRequestPath", () => {
   });
 });
 
+describe("normalizeRoutePath", () => {
+  it.each([
+    ["/api/mobile/me.data", "/api/mobile/me"],
+    ["/API/Mobile/Me.DATA", "/api/mobile/me"],
+    ["/api/mobile.data", "/api/mobile"],
+    ["/_root.data", "/"],
+    ["/api/mobile/me", "/api/mobile/me"],
+    ["/api/mobile/me.ics", "/api/mobile/me.ics"],
+  ])("normalises %s to %s", (input, expected) => {
+    expect(normalizeRoutePath(input)).toBe(expected);
+  });
+});
+
 describe("mobileApiGuard", () => {
   it("counts every spelling of the mobile prefix in one bucket", async () => {
     const app = buildApp();
@@ -104,6 +117,7 @@ describe("mobileApiGuard", () => {
       "/api/mobile/me",
       "/API/MOBILE/me",
       "/api/Mobile/me/",
+      "/api/mobile/me.data",
     ] as const;
 
     for (let i = 0; i < MOBILE_LIMIT; i++) {
@@ -133,6 +147,7 @@ describe("calendarFeedGuard", () => {
       "/api/calendar/feed/token-a.ics",
       "/api/Calendar/feed/token-a.ics",
       "/API/CALENDAR/FEED/token-a.ics/",
+      "/api/calendar/feed/token-a.ics.data",
     ] as const;
 
     for (let i = 0; i < CALENDAR_LIMIT; i++) {
@@ -161,6 +176,7 @@ describe("sentryTunnelGuard", () => {
     ["PUT", SENTRY_TUNNEL_PATH],
     ["PATCH", SENTRY_TUNNEL_PATH],
     ["DELETE", `${SENTRY_TUNNEL_PATH}/`],
+    ["POST", `${SENTRY_TUNNEL_PATH}.data`],
   ])("refuses an oversized %s to %s", async (method, path) => {
     const app = buildApp();
 
@@ -187,7 +203,7 @@ describe("sentryTunnelGuard", () => {
       ["PUT", SENTRY_TUNNEL_PATH],
       ["POST", `${SENTRY_TUNNEL_PATH}/`],
       ["PATCH", SENTRY_TUNNEL_PATH.toUpperCase()],
-      ["DELETE", SENTRY_TUNNEL_PATH],
+      ["POST", `${SENTRY_TUNNEL_PATH}.data`],
     ] as const;
 
     for (const [method, path] of attempts.slice(0, TUNNEL_LIMIT)) {

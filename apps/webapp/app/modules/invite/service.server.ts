@@ -8,6 +8,10 @@
  * Invitee emails are stored lowercased, and every match against a stored
  * email ignores letter case, because stored rows can still hold capitals.
  *
+ * Only the newest invite to a person in a workspace is live: creating one
+ * invalidates the earlier pending ones. Acceptance links the invite's team
+ * member only while no other user has claimed it.
+ *
  * @see {@link file://./helpers.ts}
  * @see {@link file://./../../routes/_auth+/accept-invite.$inviteId.tsx}
  * @see {@link file://./../../routes/api+/settings.import-users.ts}
@@ -328,9 +332,25 @@ export async function createInvite(
         orderBy: { createdAt: "asc" },
       });
 
-      if (previousInvite?.teamMemberId) {
-        //we already invited this user before, so dont create 1 more team member
-        teamMemberId = previousInvite.teamMemberId;
+      /**
+       * The earlier invite's team member is reused only while it is still an
+       * unclaimed member of this workspace. A deleted member qualifies, because
+       * acceptance restores it. A member that a user has claimed since then
+       * belongs to that user, so the invite gets a fresh team member instead.
+       */
+      const reusableTeamMember = previousInvite?.teamMemberId
+        ? await db.teamMember.findFirst({
+            where: {
+              id: previousInvite.teamMemberId,
+              organizationId,
+              userId: null,
+            },
+            select: { id: true },
+          })
+        : null;
+
+      if (reusableTeamMember) {
+        teamMemberId = reusableTeamMember.id;
       } else {
         const member = await createTeamMember({
           name: teamMemberName,
@@ -381,7 +401,12 @@ export async function createInvite(
         previousActiveInvite &&
         previousActiveInvite.teamMemberId !== teamMemberId
       ) {
-        //there is already an active invite for different team member, so dont allow new invite
+        /**
+         * A live invite links this person to a different team member. A new
+         * invite would supersede it and silently move the person to another
+         * record, so the sender has to resend or cancel the existing one.
+         * Nothing has been written yet, so the earlier invite stays pending.
+         */
         sendNotification({
           title: `Cannot invite user ${inviteeEmail}`,
           message:
@@ -431,19 +456,36 @@ export async function createInvite(
       });
     }
 
-    const invite = await db.invite
-      .create({
-        data,
-        include: {
-          organization: true,
-          inviter: {
-            select: {
-              firstName: true,
-              lastName: true,
-              displayName: true,
+    /**
+     * A new invite supersedes every earlier pending invite to the same person
+     * in this workspace: only the newest one can be accepted. Both writes run
+     * in one transaction so the earlier invites close only if the new one is
+     * created.
+     */
+    const invite = await db
+      .$transaction(async (tx) => {
+        await tx.invite.updateMany({
+          where: {
+            organizationId,
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
+            status: InviteStatuses.PENDING,
+          },
+          data: { status: InviteStatuses.INVALIDATED },
+        });
+
+        return tx.invite.create({
+          data,
+          include: {
+            organization: true,
+            inviter: {
+              select: {
+                firstName: true,
+                lastName: true,
+                displayName: true,
+              },
             },
           },
-        },
+        });
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -482,6 +524,30 @@ export async function createInvite(
     });
   }
 }
+
+/**
+ * The refusal for an invite whose team member another user has claimed, for
+ * example through a second invite to the same team member accepted first.
+ */
+function teamMemberAlreadyClaimedError(
+  invite: Pick<Invite, "id" | "teamMemberId" | "organizationId">
+) {
+  return new ShelfError({
+    cause: null,
+    title: "Invite is no longer valid",
+    message:
+      "The team member this invite is for is already linked to another user. Please ask your administrator to send you a new invite.",
+    additionalData: {
+      inviteId: invite.id,
+      teamMemberId: invite.teamMemberId,
+      organizationId: invite.organizationId,
+    },
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
 //when user clicks on accept/reject route action will validate the jwt if its valid it will call this
 export async function updateInviteStatus({
   id,
@@ -566,7 +632,32 @@ export async function updateInviteStatus({
         });
       }
 
-      const { firstName, lastName } = splitName(invite.inviteeTeamMember.name);
+      /**
+       * The team member must still be free for this person before any access
+       * is granted: unclaimed, or already linked to the invitee's own account.
+       * Two invites can name the same team member, and the one accepted first
+       * claims it.
+       */
+      const { inviteeTeamMember } = invite;
+      if (inviteeTeamMember.organizationId !== invite.organizationId) {
+        throw teamMemberAlreadyClaimedError(invite);
+      }
+
+      if (inviteeTeamMember.userId) {
+        const claimedByInvitee = await db.user.findFirst({
+          where: {
+            id: inviteeTeamMember.userId,
+            email: caseInsensitiveEmailFilter(invite.inviteeEmail),
+          },
+          select: { id: true },
+        });
+
+        if (!claimedByInvitee) {
+          throw teamMemberAlreadyClaimedError(invite);
+        }
+      }
+
+      const { firstName, lastName } = splitName(inviteeTeamMember.name);
 
       const user = await createUserOrAttachOrg({
         // A stored invite can hold capitals; the account is keyed on the
@@ -589,27 +680,37 @@ export async function updateInviteStatus({
         },
       });
 
-      await db.teamMember.update({
-        where: {
-          id: invite.teamMemberId,
-          organizationId: invite.organizationId,
-        },
-        data: {
-          deletedAt: null,
-          user: { connect: { id: user.id } },
-          /**
-           * This handles a special case.
-           * If an invite is still pending, the team member is not yet linked to a user.
-           * However the admin is allowed to assign bookings to that team member.
-           * When the invite is accepted, we need to update all those bookings to also be linked to the user so they can see it on their bookings index.
-           */
-          bookings: {
-            updateMany: {
-              where: { custodianTeamMemberId: invite.teamMemberId },
-              data: { custodianUserId: user.id },
-            },
+      await db.$transaction(async (tx) => {
+        /**
+         * Links the team member only while it is unclaimed or already this
+         * user's, so an acceptance racing another one for the same team
+         * member cannot take it over. A deleted team member is restored.
+         */
+        const linked = await tx.teamMember.updateMany({
+          where: {
+            id: invite.teamMemberId,
+            organizationId: invite.organizationId,
+            OR: [{ userId: null }, { userId: user.id }],
           },
-        },
+          data: { deletedAt: null, userId: user.id },
+        });
+
+        if (linked.count === 0) {
+          throw teamMemberAlreadyClaimedError(invite);
+        }
+
+        /**
+         * Bookings can be assigned to a team member while its invite is still
+         * pending. Linking them to the user lets the user see them on their
+         * bookings index.
+         */
+        await tx.booking.updateMany({
+          where: {
+            custodianTeamMemberId: invite.teamMemberId,
+            organizationId: invite.organizationId,
+          },
+          data: { custodianUserId: user.id },
+        });
       });
     }
 

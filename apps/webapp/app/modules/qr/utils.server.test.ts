@@ -122,7 +122,11 @@ describe("generateQrObj", () => {
     expect(String(strings)).toMatch(/"organizationId"/);
     expect(values).toEqual(["asset-1", "org-1"]);
     expect(db.qr.findFirst).toHaveBeenCalledWith({
-      where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        OR: [{ organizationId: null }, { organizationId: "org-1" }],
+      },
     });
   });
 

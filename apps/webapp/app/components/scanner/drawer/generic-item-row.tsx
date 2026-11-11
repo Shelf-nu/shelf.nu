@@ -57,15 +57,18 @@ type GenericItemRowProps<T> = {
   renderItem: (item: T) => ReactNode;
   renderLoading: (qrId: string, error?: string) => ReactNode;
   /**
-   * Optional array of strings to be sent as search params to the get-scanned-item endpoint
-   * This can allow for additional data to be fetched or included in the asset request for better UX
-   * The strings inside the array should be a json representation of prisma's include/select syntax,
+   * Extra relations to add to the scanned asset, sent as JSON in the
+   * `assetExtraInclude` search param. The server keeps only allowlisted
+   * relations and their allowlisted scalar fields (see
+   * `scanner-extra-include.server.ts`) and silently drops the rest, so
+   * request only what that allowlist offers. Placement and kit membership
+   * are always included and need no extra include.
    */
   assetExtraInclude?: Prisma.AssetInclude;
   /**
-   * Optional array of strings to be sent as search params to the get-scanned-item endpoint
-   * This can allow for additional data to be fetched or included in the kit request for better UX
-   * The strings inside the array should be a json representation of prisma's include/select syntax,
+   * Extra relations to add to the scanned kit, sent as JSON in the
+   * `kitExtraInclude` search param. Same server-side allowlist rules as
+   * `assetExtraInclude`.
    */
   kitExtraInclude?: Prisma.KitInclude;
   /**
