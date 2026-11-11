@@ -7,8 +7,9 @@
  * reads `undefined` at runtime. These cases are the only thing standing between
  * a narrowed `select` and a drawer that quietly stops matching.
  *
- * `ASSET_INCLUDE` needs no equivalent — it is a Prisma `include`, so every
- * Asset scalar ships by default.
+ * `ASSET_INCLUDE` is a Prisma `include`, so every Asset scalar ships by
+ * default. Its nested relation selects still need pins: the kit and location
+ * drawers read `assetKits` and `assetLocations` from them.
  *
  * @see {@link file://./scanner-includes.server.ts}
  * @see {@link file://./../components/scanner/drawer/uses/fulfil-reservations-drawer.tsx}
@@ -17,7 +18,11 @@
 import type { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { ASSET_CUSTODY_INCLUDE, KIT_INCLUDE } from "./scanner-includes.server";
+import {
+  ASSET_CUSTODY_INCLUDE,
+  ASSET_INCLUDE,
+  KIT_INCLUDE,
+} from "./scanner-includes.server";
 
 describe("KIT_INCLUDE", () => {
   it("carries each member's model id, so kit scans can match reservations", () => {
@@ -89,5 +94,22 @@ describe("custody selections", () => {
     } satisfies Prisma.KitInclude;
 
     expect(withAssetOnlyField.custody.select).toBeDefined();
+  });
+});
+
+describe("ASSET_INCLUDE", () => {
+  it("carries each kit membership's kit id and name, for the kit drawer", () => {
+    expect(ASSET_INCLUDE.assetKits.select.kitId).toBe(true);
+    expect(ASSET_INCLUDE.assetKits.select.kit.select).toMatchObject({
+      id: true,
+      name: true,
+    });
+  });
+
+  it("carries each placement's location id and name, for the location drawer", () => {
+    expect(ASSET_INCLUDE.assetLocations.select.location.select).toMatchObject({
+      id: true,
+      name: true,
+    });
   });
 });

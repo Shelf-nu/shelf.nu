@@ -162,8 +162,11 @@ export default function AddAssetsKitsToLocationDrawer({
     <ConfigurableDrawer
       schema={addScannedAssetsOrKitsToLocationSchema}
       /**
-       * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
-       * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
+       * Add-only submission: the scanned asset ids, scanned kit ids and
+       * per-asset quantities. Nothing already at the location is sent, and the
+       * scan action passes empty removal lists, so a scan never takes anything
+       * out of the location.
+       */
       formData={{
         assetIds: assetIdsForLocation,
         kitIds: kitIdsForLocation,

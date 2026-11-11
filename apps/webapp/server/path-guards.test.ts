@@ -185,6 +185,24 @@ describe("sentryTunnelGuard", () => {
     expect(res.status).toBe(413);
   });
 
+  it("answers an address over its budget with 429 before reading the body", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < TUNNEL_LIMIT; i++) {
+      await send(app, SENTRY_TUNNEL_PATH, "3.3.3.9", {
+        method: "POST",
+        body: "{}",
+      });
+    }
+
+    const res = await send(app, SENTRY_TUNNEL_PATH, "3.3.3.9", {
+      method: "POST",
+      body: oversized,
+    });
+
+    expect(res.status).toBe(429);
+  });
+
   it("accepts an envelope at the ceiling", async () => {
     const app = buildApp();
 

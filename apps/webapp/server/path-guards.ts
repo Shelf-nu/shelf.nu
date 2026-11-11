@@ -119,12 +119,14 @@ export function calendarFeedGuard(): MiddlewareHandler {
 }
 
 /**
- * The Sentry tunnel's two bounds, body size then rate, applied to every
- * request its action would receive.
+ * The Sentry tunnel's two bounds, rate then body size, applied to every
+ * request its action would receive, including the single-fetch `.data` form.
  *
- * The body bound comes first: the route reads the whole envelope, so the size
- * is refused before anything reads it. The route also enforces the same cap
- * itself, so the bound holds even where this guard does not run.
+ * The rate bound comes first: for a chunked body the size bound reads and
+ * buffers the stream, so an address over its budget is answered 429 before
+ * any of its body is read. The size bound then refuses an oversized envelope
+ * before the route reads it. The route also enforces the same cap itself, so
+ * the size bound holds even where this guard does not run.
  *
  * @param limit - Envelopes per bucket per minute; tests pass a low value,
  *   production uses the limiter's default
@@ -134,12 +136,12 @@ export function sentryTunnelGuard(limit?: number): MiddlewareHandler {
   return guardWhen(
     isSentryTunnelEnvelope,
     every(
+      sentryTunnelRateLimit(limit),
       bodyLimit({
         maxSize: SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
         onError: (c) =>
           c.json({ error: { message: "Envelope too large." } }, 413),
-      }),
-      sentryTunnelRateLimit(limit)
+      })
     )
   );
 }
