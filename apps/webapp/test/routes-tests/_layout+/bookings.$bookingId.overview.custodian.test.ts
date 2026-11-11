@@ -107,6 +107,7 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 }));
 
 import { action } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { ShelfError } from "~/utils/error";
 
 // @vitest-environment node
 
@@ -148,7 +149,15 @@ async function post({
   });
   getTeamMemberMock.mockImplementation(async ({ id }: { id: string }) => {
     const row = TEAM_MEMBERS[id];
-    if (!row) throw new Error("Not found");
+    // getTeamMember reports a missing member as an uncaptured 404.
+    if (!row)
+      throw new ShelfError({
+        cause: null,
+        message: "Team member not found",
+        label: "Team Member",
+        status: 404,
+        shouldBeCaptured: false,
+      });
     return row;
   });
   updateBasicBookingMock.mockResolvedValue({ id: "booking-1" });

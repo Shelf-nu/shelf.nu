@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
 import { permissionContext } from "@helpers/role-access";
 
 import {
@@ -185,7 +186,16 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Custodian not found due to org filter
-    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
+    // getTeamMember reports a missing member as an uncaptured 404.
+    mockGetTeamMember.mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Team member not found",
+        label: "Team Member",
+        status: 404,
+        shouldBeCaptured: false,
+      })
+    );
 
     const formData = new FormData();
     formData.set("name", "Test Booking");

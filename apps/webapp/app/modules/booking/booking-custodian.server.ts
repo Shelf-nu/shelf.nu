@@ -17,7 +17,7 @@
 import type { TeamMember, User } from "@prisma/client";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 
 /** Arguments for {@link resolveBookingCustodian}. */
@@ -63,14 +63,22 @@ export async function resolveBookingCustodian({
     organizationId,
     select: { id: true, userId: true },
   }).catch((cause) => {
+    // A missing team member is the caller's mistake (404, not reported); a
+    // database failure keeps its own status and still reaches Sentry.
+    // `getTeamMember` marks only a genuine not-found as not worth capturing.
+    const notFound = isLikeShelfError(cause)
+      ? !cause.shouldBeCaptured
+      : isNotFoundError(cause);
     throw new ShelfError({
       cause,
-      title: "Team member not found",
-      message: "The selected team member could not be found.",
+      title: notFound ? "Team member not found" : undefined,
+      message: notFound
+        ? "The selected team member could not be found."
+        : "Something went wrong while loading the selected team member.",
       additionalData: { userId, custodianTeamMemberId },
       label: "Booking",
-      status: 404,
-      shouldBeCaptured: false,
+      status: notFound ? 404 : 500,
+      shouldBeCaptured: !notFound,
     });
   });
 
