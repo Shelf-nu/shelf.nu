@@ -131,6 +131,8 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
       totalCount: 130,
       truncated: false,
     });
+    // Under the cap the list is complete, so its length is the count.
+    expect(db.location.count).not.toHaveBeenCalled();
     expect(lastFindManyArgs()).toMatchObject({
       orderBy: [{ name: "asc" }, { id: "asc" }],
       skip: 0,
@@ -187,6 +189,7 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
       totalCount: 1500,
       truncated: true,
     });
+    expect(db.location.count).toHaveBeenCalledTimes(1);
   });
 });
 

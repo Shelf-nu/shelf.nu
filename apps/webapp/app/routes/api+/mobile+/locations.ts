@@ -67,26 +67,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
     };
 
-    const [rows, totalCount] = await Promise.all([
-      db.location.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          // Never the `image` relation: that row carries the stored file bytes.
-          thumbnailUrl: true,
-          imageUrl: true,
-          parentId: true,
-        },
-        // `id` breaks ties between same-named locations so a row never moves
-        // across a page boundary between requests.
-        orderBy: [{ name: "asc" }, { id: "asc" }],
-        skip,
-        take: perPage,
-      }),
-      db.location.count({ where }),
-    ]);
+    const rowsQuery = db.location.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        // Never the `image` relation: that row carries the stored file bytes.
+        thumbnailUrl: true,
+        imageUrl: true,
+        parentId: true,
+      },
+      // `id` breaks ties between same-named locations so a row never moves
+      // across a page boundary between requests.
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      skip,
+      take: perPage,
+    });
+
+    let rows: Awaited<typeof rowsQuery>;
+    let totalCount: number;
+    if (isPaged) {
+      [rows, totalCount] = await Promise.all([
+        rowsQuery,
+        db.location.count({ where }),
+      ]);
+    } else {
+      // An unpaged list under the cap is the whole list, so its length is the
+      // count. Only a list that reached the cap needs the separate count.
+      rows = await rowsQuery;
+      totalCount =
+        rows.length < UNPAGED_LOCATIONS_CAP
+          ? rows.length
+          : await db.location.count({ where });
+    }
 
     // The companion's `Location.image` is a URL string or null: the
     // thumbnail, else the full image, as the web location image shows.
