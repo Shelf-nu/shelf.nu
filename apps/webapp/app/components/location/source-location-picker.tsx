@@ -144,6 +144,18 @@ export function SourceLocationPicker({
           sideOffset={4}
           className="z-[999999] max-h-[280px] w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-gray-200 bg-white shadow-md"
           onKeyDown={handleKeyDown}
+          // A modal dialog around the picker (the check-out confirmation, the
+          // custody dialogs) mounts `react-remove-scroll`, which cancels any
+          // `wheel` or `touchmove` that reaches `document` from outside the
+          // dialog content. This list is portalled to `document.body`, so it
+          // counts as outside: stopping the events here keeps a long list
+          // scrollable. Removing these makes the wheel do nothing in a dialog.
+          onWheel={(event) => {
+            event.stopPropagation();
+          }}
+          onTouchMove={(event) => {
+            event.stopPropagation();
+          }}
           // Open on the selected option (set in `onOpenChange`), not on the
           // first one the popover would focus by default.
           onOpenAutoFocus={(event) => {
