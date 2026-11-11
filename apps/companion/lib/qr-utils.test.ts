@@ -9,7 +9,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { classifyScannedCode, extractQrId } from "./qr-utils";
+import {
+  classifyScannedCode,
+  extractQrId,
+  isForeignCodeMiss,
+  planScanLookup,
+} from "./qr-utils";
 
 const ACTIVE = "https://app.shelf.nu";
 /** A QR id in the shape the shortener regex accepts: 10-25 lowercase alnum. */
@@ -66,4 +71,82 @@ test("classifyScannedCode accepts a bare id, which names no host", () => {
 test("classifyScannedCode reports a non-Shelf value as unknown", () => {
   const result = classifyScannedCode("https://example.com/not-a-code", ACTIVE);
   assert.deepEqual(result, { kind: "unknown" });
+});
+
+// ── planScanLookup ───────────────────────────────────────
+
+/**
+ * A label from a system the workspace used before Shelf, linked to an asset or
+ * kit as an alternative barcode (ExternalQR). Its path happens to look like a
+ * Shelf label, which is exactly why it was being mistaken for one.
+ */
+const OTHER_VENDOR_URL = "http://other-vendor.example/qr/a1b2c3d4";
+
+test("planScanLookup sends this server's QR URL down the QR path", () => {
+  assert.deepEqual(planScanLookup(`${ACTIVE}/qr/${ID}`, ACTIVE, true), {
+    kind: "qr",
+    qrId: ID,
+  });
+});
+
+test("planScanLookup sends a short link and a bare id down the QR path", () => {
+  assert.deepEqual(planScanLookup(`https://eam.sh/${ID}`, ACTIVE, true), {
+    kind: "qr",
+    qrId: ID,
+  });
+  assert.deepEqual(planScanLookup(ID, ACTIVE, false), { kind: "qr", qrId: ID });
+});
+
+test("planScanLookup tries a foreign /qr/ URL as a linked barcode first", () => {
+  // The bug: this used to be rejected as "Different Shelf Server" before the
+  // workspace barcode lookup was ever asked, so a linked label never resolved.
+  assert.deepEqual(planScanLookup(OTHER_VENDOR_URL, ACTIVE, true), {
+    kind: "foreign-barcode",
+  });
+});
+
+test("planScanLookup never hands a foreign URL's tail to the QR path", () => {
+  // The tail is another system's id, not a Shelf QR id; resolving it here
+  // could only miss, or worse, hit an unrelated code that shares the id.
+  const plan = planScanLookup(`https://other.example/qr/${ID}`, ACTIVE, true);
+  assert.notEqual(plan.kind, "qr");
+});
+
+test("planScanLookup reports a foreign URL as foreign when barcodes are off", () => {
+  // Without the barcode lookup there is nothing that could match it, so the
+  // other-server message is still the most useful answer.
+  assert.deepEqual(planScanLookup(OTHER_VENDOR_URL, ACTIVE, false), {
+    kind: "foreign",
+  });
+});
+
+test("planScanLookup leaves a non-Shelf value to the SAM and barcode paths", () => {
+  for (const value of ["SAM-0001", "4006381333931", "https://example.com/x"]) {
+    assert.deepEqual(
+      planScanLookup(value, ACTIVE, true),
+      { kind: "code" },
+      value
+    );
+  }
+});
+
+// ── isForeignCodeMiss ────────────────────────────────────
+
+test("isForeignCodeMiss is true only for a foreign URL the lookup did not find", () => {
+  const foreign = planScanLookup(OTHER_VENDOR_URL, ACTIVE, true);
+  assert.equal(isForeignCodeMiss(foreign, 404), true);
+});
+
+test("isForeignCodeMiss keeps the server's answer for every other failure", () => {
+  const foreign = planScanLookup(OTHER_VENDOR_URL, ACTIVE, true);
+  // 422 = found but linked to nothing; 409 = in several workspaces; no status
+  // = no answer (offline). Each has its own, more accurate message.
+  for (const status of [422, 409, 500, undefined]) {
+    assert.equal(isForeignCodeMiss(foreign, status), false, String(status));
+  }
+  // An ordinary barcode miss stays "not found" in this workspace.
+  assert.equal(
+    isForeignCodeMiss(planScanLookup("4006381333931", ACTIVE, true), 404),
+    false
+  );
 });

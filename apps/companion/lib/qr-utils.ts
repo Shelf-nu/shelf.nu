@@ -80,3 +80,73 @@ export function classifyScannedCode(
     ? { kind: "id", qrId }
     : { kind: "foreign" };
 }
+
+/**
+ * Which lookup a scanned value should go to.
+ *
+ * - `qr`: a Shelf QR id for this server; resolve it on the QR route.
+ * - `code`: not a Shelf QR at all; the SAM id and workspace barcode paths
+ *   decide what it is.
+ * - `foreign-barcode`: a canonical `/qr/<id>` URL on another host. It may be
+ *   another Shelf server's label, or a label from a previous system that the
+ *   workspace linked to an asset or kit as an alternative barcode (ExternalQR).
+ *   Only the barcode lookup can tell, so it is asked first; see
+ *   {@link isForeignCodeMiss} for the miss.
+ * - `foreign`: the same kind of URL when no barcode lookup is possible, so the
+ *   other-server message is the only useful answer.
+ */
+export type ScanLookupPlan =
+  | { kind: "qr"; qrId: string }
+  | { kind: "code" }
+  | { kind: "foreign-barcode" }
+  | { kind: "foreign" };
+
+/**
+ * Plans the lookup for a scanned value.
+ *
+ * The full scanned value is what the barcode lookup must receive for a
+ * `foreign-barcode` plan: ExternalQR values are stored as the whole URL with
+ * their case kept, and the server tries that exact value before uppercasing.
+ *
+ * @param data - The raw scanned value.
+ * @param activeBaseUrl - The active server's base URL.
+ * @param barcodeLookupAvailable - Whether this workspace can resolve barcodes
+ *   (a workspace is selected and holds the barcode capability).
+ */
+export function planScanLookup(
+  data: string,
+  activeBaseUrl: string,
+  barcodeLookupAvailable: boolean
+): ScanLookupPlan {
+  const classification = classifyScannedCode(data, activeBaseUrl);
+  switch (classification.kind) {
+    case "id":
+      return { kind: "qr", qrId: classification.qrId };
+    case "foreign":
+      return barcodeLookupAvailable
+        ? { kind: "foreign-barcode" }
+        : { kind: "foreign" };
+    case "unknown":
+      return { kind: "code" };
+  }
+}
+
+/**
+ * Whether a failed barcode lookup should be reported as "Different Shelf
+ * Server" rather than with the server's own message.
+ *
+ * Only a plain not-found (404) qualifies: nothing in the caller's workspaces
+ * holds the value, so the other-server reading is the likely one. Every other
+ * failure (linked to nothing, in several workspaces, offline) says something
+ * more precise and keeps its own message.
+ *
+ * @param plan - The plan the scan was routed by.
+ * @param status - The HTTP status of the failed lookup, absent when there was
+ *   no answer.
+ */
+export function isForeignCodeMiss(
+  plan: ScanLookupPlan,
+  status: number | undefined
+): boolean {
+  return plan.kind === "foreign-barcode" && status === 404;
+}

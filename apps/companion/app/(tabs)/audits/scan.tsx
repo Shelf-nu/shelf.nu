@@ -35,7 +35,7 @@ import {
   useTabScreenWidth,
 } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
+import { isForeignCodeMiss, planScanLookup } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
@@ -914,35 +914,43 @@ function AuditScannerContent() {
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
+      /** A Shelf label minted by another server: nothing here can open it. */
+      const showDifferentServerToast = () => {
+        // Same feedback shape as every other rejected scan in this handler:
+        // a silent return would look like the camera simply ignored a code
+        // the user can see is valid.
+        flashFrame("error");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        showToast(
+          "error",
+          "Different Shelf Server",
+          "Sign in to that server to use this code."
+        );
+        announce("Different Shelf Server. Sign in to that server to use it.");
+        // finalizeScan() BEFORE returning: this handler has no `finally`, and
+        // a bare return would leave isProcessingRef.current true forever:
+        // the scan guard would then reject every later scan and the camera
+        // would stop delivering codes entirely.
+        finalizeScan();
+      };
+
       try {
-        // A Shelf URL from ANOTHER server would otherwise be resolved against
-        // this one and reported as "not found" — a baffling error for a code
-        // that is perfectly valid on the instance that minted it.
-        if (
-          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
-          "foreign"
-        ) {
-          // Same feedback shape as every other rejected scan in this handler:
-          // a silent return would look like the camera simply ignored a code
-          // the user can see is valid.
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Different Shelf Server",
-            "Sign in to that server to use this code."
-          );
-          announce("Different Shelf Server. Sign in to that server to use it.");
-          // finalizeScan() BEFORE returning: this handler has no `finally`, and
-          // a bare return would leave isProcessingRef.current true forever —
-          // the guard above would then reject every later scan and the camera
-          // would stop delivering codes entirely.
-          finalizeScan();
+        // A `/qr/` URL on another host is either another Shelf server's label
+        // or an old label linked here as a barcode (ExternalQR). The barcode
+        // lookup is asked first; only a miss, or no way to ask, means the
+        // other server. Same routing as the main scanner (see planScanLookup).
+        const plan = planScanLookup(
+          data,
+          getActiveServer().baseUrl,
+          currentOrg.barcodesEnabled
+        );
+        if (plan.kind === "foreign") {
+          showDifferentServerToast();
           return;
         }
 
         // 1. Resolve code -> asset (QR, SAM id, or barcode)
-        const qrId = extractQrId(data);
+        const qrId = plan.kind === "qr" ? plan.qrId : null;
         // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's
         // sequentialId branch, scoped to the workspace (web parity, ungated
         // by the Barcodes add-on). currentOrg is non-null here (guard above).
@@ -991,13 +999,22 @@ function AuditScannerContent() {
             return;
           }
 
-          const { data: barcodeData, error: barcodeError } = await api.barcode(
+          const {
+            data: barcodeData,
+            error: barcodeError,
+            status: barcodeStatus,
+          } = await api.barcode(
             data,
             currentOrg.id,
             // why: records an AUDIT scan with no Activity note; the audit
             // keeps its own trail (the normal scanner omits this).
             "audit"
           );
+
+          if (isForeignCodeMiss(plan, barcodeStatus)) {
+            showDifferentServerToast();
+            return;
+          }
 
           if (barcodeError || !barcodeData?.barcode?.asset) {
             flashFrame("error");

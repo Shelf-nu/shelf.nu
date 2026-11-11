@@ -48,7 +48,7 @@ import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { useTabScreenInsets } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
+import { isForeignCodeMiss, planScanLookup } from "@/lib/qr-utils";
 import { getActiveServer } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { parseSequentialId } from "@/lib/sequential-id";
@@ -812,25 +812,37 @@ function ScannerContent() {
       const originOrgId = currentOrg?.id;
       const isStaleScan = () => activeOrgIdRef.current !== originOrgId;
 
+      /** A Shelf label minted by another server: nothing here can open it. */
+      const showDifferentServerResult = () => {
+        flashFrame("error");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        announce("Different Shelf Server");
+        setScanResult({
+          type: "error",
+          title: "Different Shelf Server",
+          message:
+            "This code belongs to a different Shelf server. Sign in to that server to use it.",
+        });
+        finalizeScan();
+      };
+
       try {
-        // A Shelf URL from ANOTHER server would otherwise be resolved against
-        // this one and reported as "not found" — a baffling error for a code
-        // that is perfectly valid on the instance that minted it.
-        if (
-          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
-          "foreign"
-        ) {
-          setScanResult({
-            type: "error",
-            title: "Different Shelf Server",
-            message:
-              "This code belongs to a different Shelf server. Sign in to that server to use it.",
-          });
-          finalizeScan();
+        // A `/qr/` URL on another host is either another Shelf server's label
+        // or an old label linked here as a barcode (ExternalQR). The barcode
+        // lookup is asked first; only a miss, or no way to ask, means the
+        // other server. Resolving it as a QR id here would be a baffling
+        // "not found" for a code that is valid where it was minted.
+        const plan = planScanLookup(
+          data,
+          getActiveServer().baseUrl,
+          Boolean(currentOrg?.barcodesEnabled)
+        );
+        if (plan.kind === "foreign") {
+          showDifferentServerResult();
           return;
         }
 
-        const qrId = extractQrId(data);
+        const qrId = plan.kind === "qr" ? plan.qrId : null;
         // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
         // via the QR route's sequentialId branch, scoped to the current
         // workspace (web parity: the web scan resolver tries parseSequentialId
@@ -1031,15 +1043,21 @@ function ScannerContent() {
             return;
           }
 
-          const { data: barcodeData, error: barcodeError } = await api.barcode(
-            data,
-            currentOrg.id
-          );
+          const {
+            data: barcodeData,
+            error: barcodeError,
+            status: barcodeStatus,
+          } = await api.barcode(data, currentOrg.id);
 
           // Same rule as the QR path: a resolve that outlived the workspace it
           // was made in is dropped rather than rendered.
           if (isStaleScan()) {
             finalizeScan();
+            return;
+          }
+
+          if (isForeignCodeMiss(plan, barcodeStatus)) {
+            showDifferentServerResult();
             return;
           }
 
