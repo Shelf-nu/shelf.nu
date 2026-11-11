@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,9 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useFormatPrefs } from "@/lib/use-date-formatter";
-import { markdocToPlainText } from "@/lib/note-plain-text";
+import { markdocToSegments } from "@/lib/note-plain-text";
+import { getActiveServer } from "@/lib/server/active-server";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 
 interface NotesSectionProps {
   notes: AssetNote[] | undefined;
@@ -131,6 +133,25 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
       "User"
     : "System";
   const isUpdate = note.type === "UPDATE";
+  // The connected server, read each render: a note link resolves against it.
+  const baseUrl = getActiveServer().baseUrl;
+  const segments = useMemo(
+    () =>
+      markdocToSegments(
+        note.content,
+        {
+          date: (iso) => formatDate(iso, prefs),
+          // why: the shared helper rather than a local sentence-caser, so a
+          // wording change in @shelf/labels reaches this preview too.
+          status: formatStatus,
+        },
+        baseUrl,
+        // A comment's Markdown links read as their labels; a system note's
+        // typed values never hide an outside link (as on the web).
+        { allowExternalLinks: !isUpdate }
+      ),
+    [note.content, prefs, isUpdate, baseUrl]
+  );
 
   return (
     <View style={[styles.noteItem, isUpdate && styles.noteItemUpdate]}>
@@ -149,14 +170,12 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
         </View>
         <Text style={styles.noteTime}>{timeAgo(note.createdAt, prefs)}</Text>
       </View>
-      <Text style={styles.noteContent} selectable>
-        {markdocToPlainText(note.content, {
-          date: (iso) => formatDate(iso, prefs),
-          // why: the shared helper rather than a local sentence-caser, so a
-          // wording change in @shelf/labels reaches this preview too.
-          status: formatStatus,
-        })}
-      </Text>
+      <LinkedParagraph
+        text={note.content}
+        segments={segments}
+        style={styles.noteContent}
+        selectable
+      />
     </View>
   );
 });

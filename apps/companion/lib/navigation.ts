@@ -1,8 +1,8 @@
-import { Linking } from "react-native";
+import { Platform } from "react-native";
 import { router, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { resolveLinkOpening } from "./open-link";
-import { getActiveServer } from "./server/active-server";
+import { joinOpensInFlight, openPastStaleLock } from "./browser-lock";
+import { lightColors } from "./theme-colors";
 
 /**
  * Tab index routes. Pushing one of these roots that tab's stack at its list
@@ -32,7 +32,8 @@ export type TabRoot =
  * same-stack list→detail navigation.
  *
  * Every cross-surface navigation into a tab's nested route MUST go through
- * this helper. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
+ * this helper, or through `openLinkedRoute` for a route a claimed web link
+ * maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
  * from outside that tab's own stack.
  *
  * @param tabRoot - the target tab's index route
@@ -41,14 +42,36 @@ export type TabRoot =
  * @throws Propagates any navigation error thrown by expo-router's `router`
  */
 export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
+  navigateAnchored(nestedHref ?? tabRoot);
+}
+
+/**
+ * Open the in-app route a claimed web link maps to (`nativeRouteForLink`),
+ * anchored the same way as `pushIntoTab` so "back" returns to that tab's list.
+ *
+ * @param route - an in-app path such as `/assets/as_1` or `/assets/new?qrId=q`
+ */
+export function openLinkedRoute(route: string) {
+  // why: routes from nativeRouteForLink are runtime strings that the
+  // typed-routes `Href` union cannot describe statically.
+  navigateAnchored(route as Href);
+}
+
+/**
+ * The one anchored navigation call behind `pushIntoTab` and
+ * `openLinkedRoute`, so a change to how tabs are anchored reaches both.
+ *
+ * @param href - the route to open
+ */
+function navigateAnchored(href: Href) {
   // `withAnchor` tells expo-router to include the target stack's anchor
   // screen (its `unstable_settings.initialRouteName`, set to "index" in
   // each tab's _layout) beneath the navigated route, so the list sits
-  // under the detail and "back" works — even when the tab was never
+  // under the detail and "back" works, even when the tab was never
   // mounted (e.g. the app launched straight onto the Scanner tab). This
   // is the documented in-app mechanism; a bare push or a push("/tab")
   // then push(detail) does NOT anchor the list and strands the user.
-  router.navigate(nestedHref ?? tabRoot, { withAnchor: true });
+  router.navigate(href, { withAnchor: true });
 }
 
 /**
@@ -69,51 +92,54 @@ export function openBookingAfterAlert(bookingId: string): void {
 }
 
 /**
- * Open a `shelf.nu` web URL in an in-app browser (Custom Tab on Android,
- * SFSafariViewController on iOS).
- *
- * Use this — NOT `Linking.openURL` — for any `https://app.shelf.nu/...` link
- * whose path the app claims as a Universal Link / App Link (`/qr`, `/assets`,
- * `/bookings`, `/audits`). On Android, `Linking.openURL` of a *verified*
- * app-link is re-intercepted by the system and re-launches this app — so a
- * deep link that fails to resolve in-app and falls back to its own web URL
- * would loop straight back into the failing handler. An in-app browser renders
- * the page directly without re-triggering link interception, making web
- * fallbacks loop-safe on both platforms.
- *
- * @param url - the absolute https URL to open
- * @returns the `WebBrowser.openBrowserAsync` promise (resolves when dismissed)
+ * How the in-app browser looks: a sheet over the screen the person tapped
+ * on (iOS), with Shelf orange on its controls (iOS) or toolbar (Android),
+ * the page title shown, and reader mode off so a page opens as published.
+ * Dismissing it returns to that screen exactly as it was.
  */
-export function openShelfWebUrl(url: string) {
-  return WebBrowser.openBrowserAsync(url);
-}
+const IN_APP_BROWSER_OPTIONS: WebBrowser.WebBrowserOpenOptions = {
+  presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+  controlsColor: lightColors.primary,
+  dismissButtonStyle: "close",
+  readerMode: false,
+  enableBarCollapsing: true,
+  // why: Android only. On iOS `toolbarColor` is the bar background, and an
+  // orange bar under orange controls would hide them; iOS keeps its system
+  // bar (light or dark) with orange controls instead.
+  ...(Platform.OS === "android" ? { toolbarColor: lightColors.primary } : {}),
+  showTitle: true,
+  enableDefaultShareMenuItem: true,
+};
 
 /**
- * Open a link a person stored on an asset (a custom field value).
+ * Open a web page in the in-app browser (SFSafariViewController on iOS, a
+ * Custom Tab on Android). Files behind a URL (PDF, images, Office documents)
+ * open in it too, with no download step.
  *
- * Shelf's own web pages (`app.shelf.nu` and the connected server) open in the
- * in-app browser through {@link openShelfWebUrl}; every other http(s) link is
- * handed to the OS with `ref=shelf-companion`, so a OneDrive, Google Drive or
- * Office app can take it over. Anything else opens nothing. The rule lives in
- * `./open-link.ts`.
+ * Use this, NOT `Linking.openURL`, for every web page the app opens. On
+ * Android, `Linking.openURL` of a *verified* app-link (`app.shelf.nu/qr`,
+ * `/assets`, `/bookings`, `/audits`) is re-intercepted by the system and
+ * re-launches this app, so a deep link that falls back to its own web URL
+ * would loop straight back into the failing handler. An in-app browser
+ * renders the page directly without re-triggering link interception, making
+ * web fallbacks loop-safe on both platforms.
  *
- * Never throws: a link that fails to open leaves the screen as it was.
+ * A session iOS never released (see `./browser-lock.ts`) is released and
+ * the page opened once more, so a link never silently opens nothing. A
+ * second tap while the first page is still being presented joins that open
+ * (`joinOpensInFlight`), so a double tap never closes and reopens the
+ * browser.
  *
- * @param url - The stored http(s) URL
- * @returns Resolves once the link has been handed off, or immediately when
- *   there is nothing to open or opening failed
+ * @param url - the absolute http(s) URL to open
+ * @returns the `WebBrowser.openBrowserAsync` result, once the browser is
+ *   dismissed
  */
-export async function openExternalLink(url: string): Promise<void> {
-  const opening = resolveLinkOpening(url, getActiveServer().baseUrl);
-  if (!opening) return;
-  try {
-    if (opening.opener === "shelf-browser") {
-      await openShelfWebUrl(opening.url);
-    } else {
-      await Linking.openURL(opening.url);
-    }
-  } catch {
-    // Non-fatal by design: the screen stays as it was and the person can tap
-    // the link again.
-  }
-}
+export const openShelfWebUrl: (
+  url: string
+) => Promise<WebBrowser.WebBrowserResult> = joinOpensInFlight((url) =>
+  openPastStaleLock(
+    () => WebBrowser.openBrowserAsync(url, IN_APP_BROWSER_OPTIONS),
+    () => WebBrowser.dismissBrowser(),
+    WebBrowser.WebBrowserResultType.LOCKED
+  )
+);

@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
-  Linking,
   Platform,
   Alert,
   AppState,
@@ -23,9 +22,13 @@ import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams, useIsFocused } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, type AuditExpectedAsset } from "@/lib/api";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
+import {
+  CAMERA_SETTINGS_FALLBACK,
+  openAppSettings,
+} from "@/lib/open-app-settings";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { scanSplit } from "@/lib/safe-edges";
@@ -35,9 +38,8 @@ import {
   useTabScreenWidth,
 } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
-import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
-import { getActiveServer } from "@/lib/server";
-import { parseSequentialId } from "@/lib/sequential-id";
+import { planScan, runScanPlan, scanMissFeedback } from "@/lib/qr-utils";
+import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { playScanSound } from "@/lib/scan-sound";
@@ -46,8 +48,10 @@ import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { endScan, tryBeginScan } from "@/lib/scan-lock";
 import { useAuditInit } from "@/hooks/use-audit-init";
 import { useScanQueue } from "@/hooks/use-scan-queue";
+import { useCameraScanHandler } from "@/hooks/use-camera-scan-handler";
 import {
   useToastNotification,
   type ScanResult,
@@ -63,11 +67,35 @@ import {
   type ListTab,
 } from "@/components/audit/segmented-control";
 import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import type { PendingRecount } from "@/lib/audit-scan-queue";
+import {
+  auditScanDecision,
+  countExpectation,
+  countSheetDefault,
+  recountAnswerToast,
+  recountQueueEntry,
+  MAX_AUDIT_COUNT,
+} from "@/lib/audit-scan-queue";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
 import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // ── Main Export ──────────────────────────────────────────
+
+/** The count the sheet is asking for. See `countRequest` in the screen. */
+type AuditCountRequest = {
+  mode: "first" | "recount";
+  assetId: string;
+  assetTitle: string;
+  /** The scanned code, sent with the recorded scan. */
+  codeId: string;
+  isExpected: boolean;
+  expectedQuantity: number;
+  /** The count already recorded; null on a first scan. */
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+};
 
 export default function AuditScanScreen() {
   return (
@@ -125,13 +153,24 @@ function AuditScannerContent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(false);
 
+  // The count sheet for a quantity-tracked asset: open on its first scan
+  // ("first", the scan is recorded on confirm) and on a re-scan ("recount",
+  // the count is replaced). Scanning stays paused while it is open.
+  const [countRequest, setCountRequest] = useState<AuditCountRequest | null>(
+    null
+  );
+  // What the open sheet can promise: a target only when units are expected.
+  const countExpectationValue = countRequest
+    ? countExpectation(countRequest)
+    : null;
+  // Records the first scan once its count is confirmed.
+  const pendingCommitRef = useRef<((foundQuantity: number) => void) | null>(
+    null
+  );
+
   // ── Cooldown (shared hook) ───────────────────────────
 
-  const {
-    shouldSkip: shouldSkipScan,
-    startCooldown,
-    lastScanRef,
-  } = useScanCooldown();
+  const { startCooldown, lastScanRef } = useScanCooldown();
 
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
@@ -188,23 +227,72 @@ function AuditScannerContent() {
     React.SetStateAction<ScannedItem | null>
   > | null>(null);
 
+  // Recounts confirmed on this device and not answered yet, by asset. The
+  // result toast waits for the server: a finished audit keeps its count.
+  const pendingRecountsRef = useRef(new Map<string, PendingRecount>());
+
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
-    (assetId: string, auditAssetId: string) => {
-      // Update the scanned items list (clear any prior sync-failed marker)
+    (
+      assetId: string,
+      auditAssetId: string | null,
+      storedCount?: number | null,
+      countRefused?: boolean
+    ) => {
+      // Update the scanned items list (clear any prior sync-failed marker).
+      // The count the server stored, when given, replaces the local one.
       setScannedItemsRef.current?.((prev) =>
         prev.map((item) =>
           item.assetId === assetId
-            ? { ...item, auditAssetId, syncFailed: false }
+            ? {
+                ...item,
+                ...(auditAssetId ? { auditAssetId } : {}),
+                syncFailed: false,
+                ...(storedCount !== undefined
+                  ? { foundQuantity: storedCount }
+                  : {}),
+              }
             : item
         )
       );
       // Also update selectedItem if evidence modal is open for this asset
       setSelectedItemRef.current?.((prev) =>
-        prev?.assetId === assetId ? { ...prev, auditAssetId } : prev
+        prev?.assetId === assetId && auditAssetId
+          ? { ...prev, auditAssetId }
+          : prev
       );
+      // A recount from this device: report what the server stored.
+      const pending = pendingRecountsRef.current.get(assetId);
+      const recountToast = pending
+        ? recountAnswerToast(pending, storedCount)
+        : null;
+      if (pending && recountToast) {
+        pendingRecountsRef.current.delete(assetId);
+        Haptics.notificationAsync(
+          recountToast.type === "found"
+            ? Haptics.NotificationFeedbackType.Success
+            : Haptics.NotificationFeedbackType.Error
+        );
+        showToast(recountToast.type, recountToast.title, recountToast.subtitle);
+        return;
+      }
+      // The count the auditor entered did not stick: say so, since the row
+      // has just changed back under them.
+      if (countRefused) {
+        const name =
+          stableScannedItemsRef.current
+            .find((item) => item.assetId === assetId)
+            ?.name?.trim() || "Count not saved";
+        showToast(
+          "error",
+          name,
+          storedCount === null || storedCount === undefined
+            ? "Count not saved: the scan is no longer in this audit"
+            : `Count not saved: the audit kept ${storedCount}`
+        );
+      }
     },
-    []
+    [showToast]
   );
 
   // Callback for when a scan exhausts its retries — surface it in the list so
@@ -628,72 +716,265 @@ function AuditScannerContent() {
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = useCallback(() => {
-    isProcessingRef.current = false;
+    endScan(isProcessingRef);
     setIsProcessing(false);
     startCooldown();
   }, [startCooldown]);
+
+  /**
+   * Records a resolved scan: optimistic row, counters, feedback, the queued
+   * server write and the crash-recovery snapshot. A quantity-tracked asset
+   * arrives here with its count, after the count sheet.
+   */
+  const commitScan = useCallback(
+    ({
+      asset,
+      codeId,
+      isExpected,
+      expectedRecord,
+      count,
+    }: {
+      asset: { id: string; title: string };
+      codeId: string;
+      isExpected: boolean;
+      expectedRecord: AuditExpectedAsset | undefined;
+      count: {
+        expectedQuantity: number;
+        foundQuantity: number;
+        unitOfMeasure: string | null;
+      } | null;
+    }) => {
+      if (!auditId) return;
+      try {
+        // 4. Optimistic update: instant feedback
+        scannedAssetIdsRef.current.add(asset.id);
+
+        // why: an expected asset's full record is already in memory, so the
+        // row can show WHERE it belongs immediately. An unexpected asset has
+        // no such record; its location fills in on the next audit load.
+        const newItem: ScannedItem = {
+          assetId: asset.id,
+          name: asset.title,
+          isExpected,
+          scannedAt: new Date().toISOString(),
+          locationName: expectedRecord?.locationName ?? null,
+          thumbnailImage:
+            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
+          ...(count ? count : {}),
+        };
+        setScannedItems((prev) => {
+          const next = [newItem, ...prev];
+          scannedItemsRef.current = next;
+          return next;
+        });
+
+        if (isExpected) {
+          // Found an expected asset
+          const newFound = foundCount + 1;
+          setFoundCount(newFound);
+          animateProgress(newFound);
+          flashFrame("found");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          playScanSound();
+          announce("Asset found");
+          showToast(
+            "found",
+            asset.title,
+            count
+              ? `Counted ${count.foundQuantity} of ${count.expectedQuantity} · ${newFound}/${expectedTotal}`
+              : `Found · ${newFound}/${expectedTotal}`
+          );
+        } else {
+          // Unexpected asset
+          setUnexpectedCount((prev) => prev + 1);
+          flashFrame("unexpected");
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          announce("Asset not in audit");
+          showToast("unexpected", asset.title, "Unexpected asset");
+        }
+
+        // 5. Background persistence: submit to server
+        enqueueScan({
+          auditSessionId: auditId,
+          qrId: codeId,
+          assetId: asset.id,
+          isExpected,
+          ...(count ? { foundQuantity: count.foundQuantity } : {}),
+        });
+
+        // 6. Persist to disk for crash recovery (debounced)
+        debouncedSaverRef.current?.save(
+          scannedItemsRef.current,
+          scanQueueRef.current,
+          failedQueueRef.current
+        );
+
+        finalizeScan();
+      } catch (err) {
+        if (__DEV__) console.error("[AuditScanner] Error:", err);
+        flashFrame("error");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        showToast("error", "Scan Error", "Something went wrong.");
+        finalizeScan();
+      }
+    },
+    [
+      auditId,
+      foundCount,
+      expectedTotal,
+      flashFrame,
+      showToast,
+      animateProgress,
+      enqueueScan,
+      finalizeScan,
+      scannedAssetIdsRef,
+      setScannedItems,
+      scannedItemsRef,
+      setFoundCount,
+      setUnexpectedCount,
+      debouncedSaverRef,
+      scanQueueRef,
+      failedQueueRef,
+    ]
+  );
+
+  /** Confirmed count: record the first scan, or send the recount. */
+  const handleCountSubmit = useCallback(
+    (foundQuantity: number) => {
+      const request = countRequest;
+      if (!request || !auditId) return;
+      setCountRequest(null);
+
+      if (request.mode === "first") {
+        const commit = pendingCommitRef.current;
+        pendingCommitRef.current = null;
+        commit?.(foundQuantity);
+        return;
+      }
+
+      setScannedItems((prev) => {
+        const next = prev.map((item) =>
+          item.assetId === request.assetId
+            ? {
+                ...item,
+                expectedQuantity: request.expectedQuantity,
+                foundQuantity,
+                unitOfMeasure: request.unitOfMeasure,
+              }
+            : item
+        );
+        scannedItemsRef.current = next;
+        return next;
+      });
+      // The server replaces the count of a scan it already has.
+      enqueueScan(
+        recountQueueEntry({
+          auditSessionId: auditId,
+          qrId: request.codeId,
+          assetId: request.assetId,
+          isExpected: request.isExpected,
+          foundQuantity,
+        })
+      );
+      // The result toast waits for the server's answer (handleScanSynced).
+      pendingRecountsRef.current.set(request.assetId, {
+        assetTitle: request.assetTitle,
+        entered: foundQuantity,
+        expectedQuantity: request.expectedQuantity,
+        isExpected: request.isExpected,
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      showToast("duplicate", request.assetTitle, "Saving count…");
+      finalizeScan();
+    },
+    [
+      countRequest,
+      auditId,
+      setScannedItems,
+      scannedItemsRef,
+      enqueueScan,
+      showToast,
+      finalizeScan,
+    ]
+  );
+
+  /** Sheet closed without a count: a first scan is dropped, a recount kept. */
+  const handleCountClose = useCallback(() => {
+    pendingCommitRef.current = null;
+    setCountRequest(null);
+    finalizeScan();
+  }, [finalizeScan]);
 
   // ── Barcode scan handler ─────────────────────────────
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || shouldSkipScan(data)) return;
       if (!auditId || !currentOrg) return;
+      if (!tryBeginScan(isProcessingRef, lastScanRef, data)) return;
 
-      isProcessingRef.current = true;
-      lastScanRef.current = data;
       setIsProcessing(true);
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
-        // A Shelf URL from ANOTHER server would otherwise be resolved against
-        // this one and reported as "not found" — a baffling error for a code
-        // that is perfectly valid on the instance that minted it.
+        // 1. Resolve code -> asset (QR, SAM id, or barcode). Which lookups the
+        // value goes to, and in what order, is decided in one place: see
+        // planScan. currentOrg is non-null here (guard above).
+        const servers = {
+          active: getActiveServer().baseUrl,
+          known: getKnownServerUrls(),
+        };
+        const plan = planScan(data, servers, {
+          barcodes: currentOrg.barcodesEnabled,
+          sequentialIds: true,
+        });
+        let codeId: string;
+        let codeOrgId: string | null;
+        let asset: { id: string; title: string } | null;
+
+        const outcome = await runScanPlan(plan, data, {
+          // Audit lookups only identify the code: the AuditScan is recorded
+          // separately, so use the non-recording resolve. Otherwise every
+          // audited item would also get an ad-hoc "last scanned" entry (web
+          // parity: audits resolve through the non-recording get-scanned-item).
+          qr: (lookupId) => api.getScannedItem(lookupId, currentOrg.id),
+          barcode: (value) =>
+            api.barcode(
+              value,
+              currentOrg.id,
+              // why: records an AUDIT scan with no Activity note; the audit
+              // keeps its own trail (the normal scanner omits this).
+              "audit"
+            ),
+        });
+
+        // A barcode scanned in a workspace that cannot resolve barcodes, or an
+        // outside link that resolved to nothing: no lookup answer to render.
         if (
-          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
-          "foreign"
+          outcome.kind === "barcodes-unavailable" ||
+          outcome.kind === "outside-link-miss"
         ) {
           // Same feedback shape as every other rejected scan in this handler:
           // a silent return would look like the camera simply ignored a code
           // the user can see is valid.
+          const feedback = scanMissFeedback(outcome, { hasWorkspace: true });
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Different Shelf Server",
-            "Sign in to that server to use this code."
-          );
-          announce("Different Shelf Server. Sign in to that server to use it.");
+          // The toast subtitle is one line: the short text keeps the action
+          // visible, and the announcement carries the full guidance.
+          showToast("error", feedback.title, feedback.shortMessage);
+          announce(feedback.announcement);
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
-          // a bare return would leave isProcessingRef.current true forever —
-          // the guard above would then reject every later scan and the camera
+          // a bare return would leave isProcessingRef.current true forever:
+          // the scan guard would then reject every later scan and the camera
           // would stop delivering codes entirely.
           finalizeScan();
           return;
         }
 
-        // 1. Resolve code -> asset (QR, SAM id, or barcode)
-        const qrId = extractQrId(data);
-        // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's
-        // sequentialId branch, scoped to the workspace (web parity, ungated
-        // by the Barcodes add-on). currentOrg is non-null here (guard above).
-        const samId = !qrId ? parseSequentialId(data) : null;
-        const qrLookupId = qrId ?? samId;
-        let codeId: string;
-        let codeOrgId: string | null;
-        let asset: { id: string; title: string } | null;
-
-        if (qrLookupId) {
+        if (outcome.kind === "qr") {
           // ── Shelf QR / SAM path ──
-          // Audit lookups only identify the code: the AuditScan is recorded
-          // separately, so use the non-recording resolve. Otherwise every
-          // audited item would also get an ad-hoc "last scanned" entry (web
-          // parity: audits resolve through the non-recording get-scanned-item).
-          const { data: qrData, error } = await api.getScannedItem(
-            qrLookupId,
-            currentOrg.id
-          );
+          const { data: qrData, error } = outcome.answer;
           if (error || !qrData?.qr?.asset) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -706,30 +987,12 @@ function AuditScannerContent() {
             return;
           }
 
-          codeId = qrLookupId;
+          codeId = outcome.lookupId;
           codeOrgId = qrData.qr.organizationId ?? null;
           asset = qrData.qr.asset;
         } else {
-          // ── Barcode fallback path ──
-          if (!currentOrg.barcodesEnabled) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            showToast(
-              "error",
-              "Barcode Not Supported",
-              "Barcode scanning is not enabled for your workspace."
-            );
-            finalizeScan();
-            return;
-          }
-
-          const { data: barcodeData, error: barcodeError } = await api.barcode(
-            data,
-            currentOrg.id,
-            // why: records an AUDIT scan with no Activity note; the audit
-            // keeps its own trail (the normal scanner omits this).
-            "audit"
-          );
+          // ── Barcode path ──
+          const { data: barcodeData, error: barcodeError } = outcome.answer;
 
           if (barcodeError || !barcodeData?.barcode?.asset) {
             flashFrame("error");
@@ -763,8 +1026,42 @@ function AuditScannerContent() {
           return;
         }
 
-        // 2. O(1) duplicate check
-        if (scannedAssetIdsRef.current.has(asset.id)) {
+        // A quantity-tracked asset is counted, not just found. The audit's
+        // own row says so for an expected asset; the lookup's asset type
+        // covers an unexpected one.
+        const expectedRecord = expectedAssetMapRef.current.get(asset.id);
+        const lookedUp = asset as {
+          type?: string;
+          quantity?: number | null;
+          unitOfMeasure?: string | null;
+        };
+        // 2. O(1) duplicate check, then 3. expected vs unexpected
+        const decision = auditScanDecision({
+          scannedRow: scannedAssetIdsRef.current.has(asset.id)
+            ? scannedItemsRef.current.find((item) => item.assetId === asset.id)
+            : undefined,
+          expectedRecord,
+          lookedUp,
+          isExpected: expectedAssetIdsRef.current.has(asset.id),
+        });
+
+        if (decision.kind === "recount") {
+          // Scanning a quantity-tracked asset again corrects its count. The
+          // camera stays paused until the sheet closes (finalizeScan).
+          setCountRequest({
+            mode: "recount",
+            assetId: asset.id,
+            assetTitle: asset.title,
+            codeId,
+            isExpected: decision.isExpected,
+            expectedQuantity: decision.expectedQuantity,
+            foundQuantity: decision.foundQuantity,
+            unitOfMeasure: decision.unitOfMeasure,
+          });
+          return;
+        }
+
+        if (decision.kind === "duplicate") {
           flashFrame("duplicate");
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           showToast("duplicate", "Already Scanned", asset.title);
@@ -772,70 +1069,38 @@ function AuditScannerContent() {
           return;
         }
 
-        // 3. Determine expected vs unexpected
-        const isExpected = expectedAssetIdsRef.current.has(asset.id);
-
-        // 4. Optimistic update — instant feedback
-        scannedAssetIdsRef.current.add(asset.id);
-
-        // why: an expected asset's full record is already in memory, so the
-        // row can show WHERE it belongs immediately. An unexpected asset has
-        // no such record — its location fills in on the next audit load.
-        const expectedRecord = expectedAssetMapRef.current.get(asset.id);
-        const newItem = {
-          assetId: asset.id,
-          name: asset.title,
-          isExpected,
-          scannedAt: new Date().toISOString(),
-          locationName: expectedRecord?.locationName ?? null,
-          thumbnailImage:
-            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
-        };
-        setScannedItems((prev) => {
-          const next = [newItem, ...prev];
-          scannedItemsRef.current = next;
-          return next;
-        });
-
-        if (isExpected) {
-          // Found an expected asset
-          const newFound = foundCount + 1;
-          setFoundCount(newFound);
-          animateProgress(newFound);
-          flashFrame("found");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          playScanSound();
-          announce("Asset found");
-          showToast(
-            "found",
-            asset.title,
-            `Found · ${newFound}/${expectedTotal}`
-          );
-        } else {
-          // Unexpected asset
-          setUnexpectedCount((prev) => prev + 1);
-          flashFrame("unexpected");
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          announce("Asset not in audit");
-          showToast("unexpected", asset.title, "Unexpected asset");
+        if (decision.kind === "first") {
+          // Ask for the count first; the scan is recorded on confirm and
+          // dropped if the sheet is closed.
+          const { expectedQuantity, isExpected, unitOfMeasure } = decision;
+          setCountRequest({
+            mode: "first",
+            assetId: asset.id,
+            assetTitle: asset.title,
+            codeId,
+            isExpected,
+            expectedQuantity,
+            foundQuantity: null,
+            unitOfMeasure,
+          });
+          pendingCommitRef.current = (foundQuantity: number) =>
+            commitScan({
+              asset,
+              codeId,
+              isExpected,
+              expectedRecord,
+              count: { expectedQuantity, foundQuantity, unitOfMeasure },
+            });
+          return;
         }
 
-        // 5. Background persistence — submit to server
-        enqueueScan({
-          auditSessionId: auditId,
-          qrId: codeId,
-          assetId: asset.id,
-          isExpected,
+        commitScan({
+          asset,
+          codeId,
+          isExpected: decision.isExpected,
+          expectedRecord,
+          count: null,
         });
-
-        // 6. Persist to disk for crash recovery (debounced)
-        debouncedSaverRef.current?.save(
-          scannedItemsRef.current,
-          scanQueueRef.current,
-          failedQueueRef.current
-        );
-
-        finalizeScan();
       } catch (err) {
         if (__DEV__) console.error("[AuditScanner] Error:", err);
         flashFrame("error");
@@ -847,29 +1112,22 @@ function AuditScannerContent() {
     [
       auditId,
       currentOrg,
-      foundCount,
-      expectedTotal,
       // stable ref object; listed to satisfy exhaustive-deps, never changes
       expectedAssetMapRef,
       flashFrame,
       showToast,
       resetInactivityTimer,
-      animateProgress,
-      enqueueScan,
       finalizeScan,
       scannedAssetIdsRef,
       expectedAssetIdsRef,
-      setScannedItems,
       scannedItemsRef,
-      setFoundCount,
-      setUnexpectedCount,
-      debouncedSaverRef,
-      scanQueueRef,
-      failedQueueRef,
-      shouldSkipScan,
+      commitScan,
       lastScanRef,
     ]
   );
+
+  /** The camera's frame callback; the handler's processing lock drops frames during a lookup. */
+  const handleCameraScan = useCameraScanHandler(handleBarCodeScanned, false);
 
   // ── Complete audit ───────────────────────────────────
 
@@ -1026,6 +1284,11 @@ function AuditScannerContent() {
     // succeed), so we must NOT trap the audit. Offer to retry or to complete
     // anyway (acknowledging those assets will be marked missing).
     const failedCount = failedQueueRef.current.length;
+    // A failed recount only loses the correction: the scan itself is saved and
+    // keeps its last saved count. Say so instead of "marked as missing".
+    const failedRecounts = failedQueueRef.current.filter(
+      (entry) => entry.recount
+    ).length;
     if (failedCount > 0) {
       // Highest-signal case: the worker is completing an audit that has scans
       // which exhausted retries — those assets will be marked MISSING unless
@@ -1037,11 +1300,20 @@ function AuditScannerContent() {
       );
       Alert.alert(
         "Some scans didn't sync",
-        `${failedCount} scan${
-          failedCount === 1 ? "" : "s"
-        } couldn't be saved ` +
-          `to the server after several tries. Retry, or complete anyway ` +
-          `(${failedCount === 1 ? "it" : "they"} will be marked as missing).`,
+        failedRecounts === failedCount
+          ? `${failedCount} count correction${
+              failedCount === 1 ? "" : "s"
+            } couldn't be saved to the server after several tries. Retry, ` +
+              `or complete anyway (the last saved count${
+                failedCount === 1 ? " is" : "s are"
+              } kept).`
+          : `${failedCount} scan${
+              failedCount === 1 ? "" : "s"
+            } couldn't be saved ` +
+              `to the server after several tries. Retry, or complete anyway ` +
+              `(${
+                failedCount === 1 ? "it" : "they"
+              } will be marked as missing).`,
         [
           { text: "Cancel", style: "cancel" },
           { text: "Retry sync", onPress: retryFailedScans },
@@ -1114,6 +1386,8 @@ function AuditScannerContent() {
           mainImage: asset.mainImage,
           locationName: asset.locationName,
           categoryName: asset.categoryName,
+          expectedQuantity: asset.expectedQuantity ?? null,
+          unitOfMeasure: asset.unitOfMeasure ?? null,
         });
       }
     }
@@ -1149,13 +1423,7 @@ function AuditScannerContent() {
         ) : (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => {
-              if (Platform.OS === "ios") {
-                Linking.openURL("app-settings:");
-              } else {
-                Linking.openSettings();
-              }
-            }}
+            onPress={() => void openAppSettings(CAMERA_SETTINGS_FALLBACK)}
           >
             <Text style={styles.primaryButtonText}>Open Settings</Text>
           </TouchableOpacity>
@@ -1230,7 +1498,10 @@ function AuditScannerContent() {
           barcodeScannerSettings={{
             barcodeTypes: ["qr", "code128", "code39", "datamatrix", "ean13"],
           }}
-          onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+          // Always a function: swapping it for undefined reconfigures the iOS
+          // capture session and switches the torch off. The handler's
+          // processing lock drops frames during a lookup instead.
+          onBarcodeScanned={handleCameraScan}
         />
       )}
 
@@ -1591,6 +1862,40 @@ function AuditScannerContent() {
         {manualEntry}
       </View>
       {panel}
+
+      <QuantityInputSheet
+        visible={countRequest !== null}
+        title={
+          countRequest?.mode === "recount" ? "Update count" : "Count units"
+        }
+        subtitle={
+          countRequest
+            ? `${countRequest.assetTitle} · ${
+                countExpectationValue === "expected"
+                  ? `${countRequest.expectedQuantity} expected`
+                  : countExpectationValue === "none-expected"
+                  ? "none expected here"
+                  : "not on this audit's list"
+              }`
+            : undefined
+        }
+        min={0}
+        // A count may go past the expectation (a surplus), so the sheet's
+        // ceiling is the server's and the expectation is only its target. An
+        // asset not on the audit's list has no expectation to count against.
+        max={MAX_AUDIT_COUNT}
+        target={
+          countExpectationValue === "expected"
+            ? countRequest?.expectedQuantity
+            : undefined
+        }
+        placeholder="Units found"
+        defaultValue={countRequest ? countSheetDefault(countRequest) : null}
+        unitOfMeasure={countRequest?.unitOfMeasure}
+        confirmLabel={countRequest?.mode === "recount" ? "Update" : "Record"}
+        onSubmit={handleCountSubmit}
+        onClose={handleCountClose}
+      />
 
       <CompleteAuditSheet
         key={auditId}

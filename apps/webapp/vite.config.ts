@@ -122,6 +122,15 @@ export default defineConfig({
     assetsDir: `file-assets`,
     rollupOptions: {
       output: {
+        // Every Lucide icon the app uses goes into one shared file (about
+        // 11 KB compressed) instead of one tiny file per icon. A page cannot
+        // start until every file it lists has loaded, so fewer files means
+        // fewer chances for one slow request to stall it. This relies on
+        // icons being imported by name: a whole-namespace import of
+        // "lucide-react" would put every icon into this file, on every page.
+        manualChunks(id) {
+          if (id.includes("/node_modules/lucide-react/")) return "icons";
+        },
         entryFileNames: `file-assets/${buildHash}/[name]-[hash].js`,
         chunkFileNames() {
           return `file-assets/${buildHash}/[name]-[hash].js`;

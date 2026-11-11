@@ -7,6 +7,7 @@ import {
   Outlet,
   redirect,
   useActionData,
+  useLoaderData,
   useLocation,
   useNavigation,
 } from "react-router";
@@ -337,6 +338,87 @@ describe("useUnsavedChanges", () => {
       timeout: 2000,
     });
     expect(status()).toBe("clean");
+  });
+});
+
+/**
+ * A record page whose route component stays mounted across records, as a
+ * booking's overview does when a duplicate or the record navigation moves
+ * it from one booking to the next. Fields are keyed by the record id, so
+ * they show the new record's values while the form element itself stays.
+ */
+function RecordForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+  const record = useLoaderData<{ id: string; name: string }>();
+  const actionData = useActionData();
+  const { state } = useUnsavedChanges({ formRef, actionData });
+
+  return (
+    <Form ref={formRef} method="post">
+      <input
+        key={record.id}
+        aria-label="Name"
+        name="name"
+        defaultValue={record.name}
+        disabled={useNavigation().state !== "idle"}
+      />
+      <input type="hidden" name="id" value={record.id} />
+      <span data-testid="status">{state.status}</span>
+      {state.status === "blocked" ? (
+        <button type="button" onClick={state.proceed}>
+          Leave page
+        </button>
+      ) : null}
+      <Link to="/records/b">Next record</Link>
+      <Link to="/other">Other page</Link>
+    </Form>
+  );
+}
+
+function renderRecords() {
+  const names: Record<string, string> = { a: "Booking A", b: "Booking B" };
+  const Stub = createRoutesStub([
+    {
+      path: "/records/:id",
+      Component: RecordForm,
+      loader: ({ params }) => ({
+        id: params.id ?? "",
+        name: names[params.id ?? ""] ?? "",
+      }),
+    },
+    { path: "/other", Component: () => <p>Other page loaded</p> },
+  ]);
+  render(<Stub initialEntries={["/records/a"]} />);
+}
+
+describe("useUnsavedChanges across records", () => {
+  it("is clean on the next record when the page component stays mounted", async () => {
+    renderRecords();
+    await waitForBaseline();
+    fireEvent.click(screen.getByRole("link", { name: "Next record" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Name")).toHaveValue("Booking B")
+    );
+    // why: past the 1 s interval check, which compares against the baseline
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(status()).toBe("clean");
+  });
+
+  it("tracks edits on the next record against that record's values", async () => {
+    renderRecords();
+    await waitForBaseline();
+    fireEvent.click(screen.getByRole("link", { name: "Next record" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Name")).toHaveValue("Booking B")
+    );
+    await waitForBaseline();
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Booking B, renamed" },
+    });
+    await waitFor(() => expect(status()).toBe("dirty"), { timeout: 3000 });
+    fireEvent.click(screen.getByRole("link", { name: "Other page" }));
+    await waitFor(() => expect(status()).toBe("blocked"));
   });
 });
 

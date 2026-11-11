@@ -1,11 +1,8 @@
 /**
  * BulkActionsDropdown: which items a selection enables, and why not.
  *
- * Delete is disabled for two unrelated causes: a request already in flight
- * (`isLoading`), or the caller's role being held to drafts-only deletion
- * (`roleAccess.policy.bookings.deleteOnlyDrafts`) on a selection that is not
- * all drafts. Only the second has a reason worth showing; a plain loading
- * state must disable the control without claiming the selection is invalid.
+ * Delete is disabled only while a request is already in flight (`isLoading`).
+ * The menu itself is shown only to roles that may delete any booking.
  *
  * Check out takes a selection of RESERVED bookings only and Check in a
  * selection of ONGOING or OVERDUE ones; both are disabled with a reason
@@ -138,10 +135,8 @@ function item(name: RegExp) {
   return button;
 }
 
-const draftsOnlyReason = /not in draft or you have self user permissions/i;
-
 describe("BulkActionsDropdown: Delete while a request is in flight", () => {
-  it("disables Delete for an ADMIN with an all-draft selection, without the drafts-only reason", () => {
+  it("disables Delete for an ADMIN while a request is in flight", () => {
     setup({
       roles: [OrganizationRoles.ADMIN],
       bookings: [{ id: "b1", status: BookingStatus.DRAFT }],
@@ -150,19 +145,6 @@ describe("BulkActionsDropdown: Delete while a request is in flight", () => {
 
     const [deleteButton] = screen.getAllByRole("button", { name: /delete/i });
     expect(deleteButton).toBeDisabled();
-    expect(screen.queryByText(draftsOnlyReason)).toBeNull();
-  });
-
-  it("still gives the drafts-only reason for a SELF_SERVICE caller on a non-draft selection", () => {
-    setup({
-      roles: [OrganizationRoles.SELF_SERVICE],
-      bookings: [{ id: "b1", status: BookingStatus.RESERVED }],
-      isLoading: true,
-    });
-
-    const [deleteButton] = screen.getAllByRole("button", { name: /delete/i });
-    expect(deleteButton).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(draftsOnlyReason)).toBeTruthy();
   });
 });
 

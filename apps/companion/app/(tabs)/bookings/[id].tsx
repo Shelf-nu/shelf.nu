@@ -73,6 +73,10 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  canOfferDiscardDraft,
+  discardOutcome,
+} from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
@@ -85,7 +89,7 @@ import {
 } from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
-import { ExpandableText } from "@/components/shared/expandable-text";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import {
   bookingRowKey,
   buildBookingRows,
@@ -197,6 +201,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   >({
     canCancel: false,
     canArchive: false,
+    canDiscardDraft: false,
     canDuplicate: false,
     canDelete: false,
   });
@@ -895,6 +900,54 @@ function BookingDetailScreen({ id }: { id: string }) {
     );
   };
 
+  // Discarding a draft archives it: it leaves the caller's list but stays in
+  // the workspace history, so a plain confirm is enough.
+  const handleDiscardDraft = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Discard Draft",
+      `Discard "${booking.name}"? It moves to your archived bookings.`,
+      [
+        { text: "Keep draft", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.discardDraftBooking(
+              currentOrg.id,
+              booking.id
+            );
+            // An error can still mean the discard landed (a timed-out
+            // response), so re-read the booking before reporting a failure.
+            const outcome = err
+              ? discardOutcome(
+                  (await api.booking(booking.id, currentOrg.id)).data
+                    ?.booking ?? null
+                )
+              : "landed";
+            setIsActioning(false);
+            // Either way the booking may have changed: refresh list and detail.
+            markBookingsListDirty();
+            fetchBooking();
+            if (outcome === "unknown") {
+              Alert.alert(
+                "Discard status unknown",
+                "We couldn't confirm whether the draft was discarded. Pull to refresh to check its status."
+              );
+              return;
+            }
+            if (outcome === "not-landed") {
+              Alert.alert("Couldn't discard", err ?? "Please try again.");
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  };
+
   // A permanent delete asks for the booking's name to be typed first, the
   // same rule as the webapp's delete dialog.
   const handleDelete = () => {
@@ -1019,6 +1072,14 @@ function BookingDetailScreen({ id }: { id: string }) {
       icon: "archive-outline",
       destructive: false,
       onPress: handleArchive,
+    });
+  if (canOfferDiscardDraft(bookingActions))
+    lifecycleActions.push({
+      key: "discardDraft",
+      label: "Discard draft",
+      icon: "archive-outline",
+      destructive: true,
+      onPress: handleDiscardDraft,
     });
   if (bookingActions.canCancel)
     lifecycleActions.push({
@@ -1838,11 +1899,10 @@ function BookingDetailScreen({ id }: { id: string }) {
               </View>
 
               {booking.description ? (
-                <ExpandableText
+                <LinkedParagraph
                   key={booking.id}
                   text={booking.description}
-                  label="description"
-                  numberOfLines={3}
+                  expandable={{ label: "description", numberOfLines: 3 }}
                   style={styles.description}
                   testID="booking-description"
                 />

@@ -3,6 +3,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
 import type { FieldLinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
@@ -769,6 +770,11 @@ export type LocationsResponse = {
   perPage?: number;
   totalCount?: number;
   totalPages?: number;
+  /**
+   * Set only on requests sent without `page` and `perPage`: true when the
+   * server's 1000-row cap cut the list, so `locations` is not every location.
+   */
+  truncated?: boolean;
 };
 
 export type CustodyResponse = {
@@ -1241,6 +1247,12 @@ export type BookingDetailResponse = {
     canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
+    /**
+     * Whether the caller may discard this draft (archive a DRAFT): offered to
+     * members who may archive but not delete. Optional: servers that predate
+     * the flag omit it, and an absent flag hides the action.
+     */
+    canDiscardDraft?: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
     /**
@@ -1578,6 +1590,15 @@ export type AuditExpectedAsset = {
   name: string;
   auditAssetId: string;
   /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
+  /**
    * Evidence recorded against this asset, whether or not anyone scanned it —
    * a note or photo can be attached to an expected asset directly.
    *
@@ -1642,6 +1663,15 @@ export type AuditScanData = {
    * Absent on servers that predate archiving.
    */
   archivedAt?: string | null;
+  /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
 };
 
 export type AuditDetailResponse = {
@@ -1713,6 +1743,10 @@ export type AuditEvidenceImage = {
   /** Always populated — the server falls back to `imageUrl`. */
   thumbnailUrl: string;
   description: string | null;
+  /** When the photo was taken (from its EXIF), ISO; null when unknown. */
+  capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;
@@ -1757,6 +1791,9 @@ export type RecordScanResponse = {
   auditAssetId: string | null;
   foundAssetCount: number;
   unexpectedAssetCount: number;
+  /** The row's counts after this scan. Absent on servers without audit counts. */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
 };
 
 /**

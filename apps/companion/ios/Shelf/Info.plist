@@ -57,6 +57,10 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Shelf needs camera access to scan QR codes and barcodes on your assets.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Shelf does not record audio. iOS asks for this text because the library that plays the scan sound can also record.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Shelf does not use motion data. iOS asks for this text because the location library Shelf uses can also read motion activity.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Shelf records where assets were scanned so your team can see each item's last known location.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

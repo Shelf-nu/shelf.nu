@@ -4,6 +4,7 @@ paths:
   - "apps/webapp/app/routes/*well-known*"
   - "apps/companion/app.json"
   - "apps/companion/lib/deep-links.ts"
+  - "apps/companion/lib/link-routing.ts"
   - "apps/companion/app/**/*.tsx"
   - "apps/companion/app/+native-intent.ts"
   - "apps/companion/lib/resource-path.ts"
@@ -24,13 +25,20 @@ they MUST stay in sync. Touch one → check the other three.
 | 4   | `apps/companion/lib/deep-links.ts`                                    | a `case "locations":` in `parseDeepLink` + `navigateToLink` (custom-scheme links)      |
 
 **The claimed host** (`app.shelf.nu`) is also written in
-`apps/companion/lib/open-link.ts` (`CLAIMED_WEB_HOST`), which keeps a stored
-link to a claimed host in the in-app browser. Change it with `app.json`.
+`apps/companion/lib/open-link.ts` (`CLAIMED_WEB_HOST`), which sends a tapped
+link on a claimed host to the app screen its path names (through
+`matchResourcePath`) or else the in-app browser, never `Linking.openURL`.
+Change it with `app.json`.
 
-**Division of labour:** HTTPS universal links are routed natively by
-expo-router via the `+native-intent.ts` rewrite (#3). The JS hook (#4) only
-navigates custom-scheme links and resolves `/qr/:id` (async API call). Acting
-on other HTTPS links in the JS hook double-navigates.
+**Division of labour:** `isOpenedByRouter` (`apps/companion/lib/link-routing.ts`)
+decides, per link, whether expo-router opens it through the `+native-intent.ts`
+rewrite (#3) or the JS hook (#4) does. The hook opens custom-scheme links,
+resolves `/qr/:id` (async API call), and opens the HTTPS link that launches the
+app on iOS, where the router does not open the launch URL under the scene life
+cycle. It opens that link through `webLaunchRoute`, the router's own mapping, so
+nested kit ids and the query survive. Every other HTTPS link is the router's:
+opening it in the hook as well navigates twice. Change the split only in
+`link-routing.ts`, with its tests.
 
 **Prerequisite:** the destination screen must already exist (e.g.
 `apps/companion/app/(tabs)/locations/[id].tsx`) and be reachable via
@@ -59,7 +67,8 @@ breaks web login / password reset / invites for everyone with the app.
 ❌ **Never `Linking.openURL` a claimed path.** A web-fallback to a claimed URL
 (e.g. `https://app.shelf.nu/qr/...`) is re-intercepted by Android App Links and
 re-opens the app → infinite loop. Use `openShelfWebUrl()` (`lib/navigation.ts`,
-in-app browser) instead — today only the QR not-resolvable fallback needs it.
+in-app browser) instead. Every web page the app opens goes through it,
+tapped links included (`openLink` in `lib/link-actions.ts`).
 
 ✅ Allowlist mirrors a real native screen, is path-scoped (trailing slash so
 index pages aren't claimed), has a `+native-intent` mapping for cold starts,

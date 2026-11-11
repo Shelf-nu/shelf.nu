@@ -8,6 +8,7 @@ import {
   findingsListKey,
   findingsListReducer,
   initFindingsList,
+  reviveFindingsPage,
 } from "./audit-findings-helpers";
 
 /** The cursor pointing after the asset with this id. */
@@ -136,7 +137,15 @@ describe("findingsListKey", () => {
             },
           ],
           images: [
-            { id: "i1", imageUrl: "u", thumbnailUrl: null, description },
+            {
+              id: "i1",
+              imageUrl: "u",
+              thumbnailUrl: null,
+              description,
+              capturedAt: null,
+              captureSource: null,
+              createdAt: new Date("2026-11-01"),
+            },
           ],
         },
       ],
@@ -164,5 +173,48 @@ describe("findingSummary", () => {
     expect(findingSummary({ notes: 1, photos: 3 })).toBe("1 note · 3 photos");
     expect(findingSummary({ notes: 0, photos: 3 })).toBe("3 photos");
     expect(findingSummary({ notes: 1, photos: 0 })).toBe("1 note");
+  });
+});
+
+describe("reviveFindingsPage", () => {
+  it("turns note and photo dates from the JSON page back into dates", () => {
+    const page = reviveFindingsPage({
+      after: null,
+      nextCursor: null,
+      hasMore: false,
+      totalFindings: 1,
+      findings: [
+        {
+          assetId: "a1",
+          assetName: "Camera",
+          notes: [],
+          images: [
+            {
+              id: "i1",
+              imageUrl: "u",
+              thumbnailUrl: null,
+              description: null,
+              capturedAt: "2026-10-01T08:30:00.000Z",
+              captureSource: "LIBRARY",
+              createdAt: "2026-11-02T10:00:00.000Z",
+            },
+            {
+              id: "i2",
+              imageUrl: "u",
+              thumbnailUrl: null,
+              description: null,
+              capturedAt: null,
+              captureSource: null,
+              createdAt: "2026-11-02T10:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    const [taken, undated] = page.findings[0].images;
+    expect(taken.capturedAt).toEqual(new Date("2026-10-01T08:30:00.000Z"));
+    expect(taken.createdAt).toEqual(new Date("2026-11-02T10:00:00.000Z"));
+    expect(undated.capturedAt).toBeNull();
   });
 });

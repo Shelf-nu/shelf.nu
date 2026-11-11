@@ -13,6 +13,8 @@ export const TagsAutocomplete = ({
   hideLabel = false,
   error,
   required = false,
+  onInputChange,
+  noOptionsText,
 }: {
   existingTags: Tag[];
   suggestions: TagSuggestion[];
@@ -20,6 +22,10 @@ export const TagsAutocomplete = ({
   hideLabel?: boolean;
   error?: string;
   required?: boolean;
+  /** Called with the typed text, to search the server. See `useTagSuggestions`. */
+  onInputChange?: (value: string) => void;
+  /** Text shown when no suggestion matches, e.g. while a search runs. */
+  noOptionsText?: string;
 }) => (
   <MultiSelect
     className="w-full"
@@ -33,5 +39,7 @@ export const TagsAutocomplete = ({
     hideLabel={hideLabel}
     error={error}
     required={required}
+    onInputChange={onInputChange}
+    noOptionsText={noOptionsText}
   />
 );
