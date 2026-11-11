@@ -6,7 +6,7 @@ import type {
   ColumnLabelKey,
 } from "~/modules/asset-index-settings/helpers";
 import { getTodayInUserTimezone } from "~/utils/date-fns";
-import { isShelfQrCode } from "~/utils/qr-code";
+import { getShelfQrId } from "~/utils/qr-code";
 import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
@@ -326,45 +326,17 @@ export function getAvailableColumns(
 }
 
 /**
- * Extracts the QR ID from a Shelf QR URL or returns the full value for external QR codes
+ * Extracts the QR ID from a Shelf QR code, or returns the value unchanged for
+ * anything else. What counts as a Shelf QR is decided by `getShelfQrId`.
  *
- * For Shelf QR codes, extracts the ID:
- * - localhost:3000/qr/abc123?hello=world -> abc123
- * - https://shelf.nu/qr/abc123 -> abc123
- * - https://eam.sh/abc123 -> abc123
- * - abc123 -> abc123
- *
- * For external QR codes, returns full value:
- * - https://example.com/product/123 -> https://example.com/product/123
- * - Any other QR content -> original value
+ * - `<app origin>/qr/abc123` -> abc123
+ * - `https://<URL_SHORTENER>/abc123` -> abc123
+ * - abc123 (a raw QR id) -> abc123
+ * - https://example.com/product/123 -> unchanged
  *
  * @param value - The input value (URL or QR ID)
- * @returns The extracted QR ID for Shelf QRs or full value for external QRs
+ * @returns The QR id for a Shelf QR, otherwise the original value
  */
 export function extractQrIdFromValue(value: string): string {
-  // First check if it's a Shelf QR code
-  if (isShelfQrCode(value)) {
-    try {
-      // Try to parse as URL first
-      const url = new URL(value);
-
-      // Remove leading and trailing slashes and split path
-      const pathParts = url.pathname.split("/").filter(Boolean);
-
-      // Get the last part of the path (if exists)
-      if (pathParts.length > 0) {
-        return pathParts[pathParts.length - 1];
-      }
-
-      return value;
-    } catch (_e) {
-      // If URL parsing fails, return original value (raw QR ID case)
-      return value;
-    }
-  }
-
-  // For external QR codes, return the full value
-  return value;
+  return getShelfQrId(value) ?? value;
 }
-
-// isShelfQrCode function moved to ~/utils/qr-code.ts for shared usage

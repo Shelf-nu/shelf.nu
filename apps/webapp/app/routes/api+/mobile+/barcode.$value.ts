@@ -222,21 +222,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isAuditScan =
       request.headers.get("x-scan-context")?.toLowerCase() === "audit";
 
+    // An audit runs in the requesting workspace, so an AUDIT scan of a code
+    // owned by a sibling workspace belongs to no audit: the app rejects it as
+    // "Different Workspace", and recording it would leave an audit-sourced
+    // row in a workspace that is not being audited.
+    const isAuditScanOfSibling =
+      isAuditScan && foundOrganizationId !== organizationId;
+
     // Non-fatal: a failed record never fails the resolve. The note and the
     // row belong to the workspace that owns the barcode.
-    await recordScanNonFatal({
-      codeType: ScanCodeType.BARCODE,
-      code: value,
-      source: isAuditScan ? ScanSource.AUDIT : ScanSource.COMPANION,
-      userAgent: request.headers.get("user-agent") ?? "mobile-companion",
-      userId: user.id,
-      barcodeId: foundBarcode.id,
-      assetId: foundBarcode.assetId,
-      kitId: foundBarcode.kitId,
-      organizationId: foundOrganizationId,
-      ...(parseScanGeolocation(request.headers) ?? {}),
-      writeNote: !isAuditScan,
-    });
+    if (!isAuditScanOfSibling) {
+      await recordScanNonFatal({
+        codeType: ScanCodeType.BARCODE,
+        code: value,
+        source: isAuditScan ? ScanSource.AUDIT : ScanSource.COMPANION,
+        userAgent: request.headers.get("user-agent") ?? "mobile-companion",
+        userId: user.id,
+        barcodeId: foundBarcode.id,
+        assetId: foundBarcode.assetId,
+        kitId: foundBarcode.kitId,
+        organizationId: foundOrganizationId,
+        ...(parseScanGeolocation(request.headers) ?? {}),
+        writeNote: !isAuditScan,
+      });
+    }
 
     return data({
       barcode: {

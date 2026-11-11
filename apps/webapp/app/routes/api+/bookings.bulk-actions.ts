@@ -57,8 +57,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
-      // Archive and cancel have their own grants, which BASE does not hold.
-      // `update` is not the gate for them: BASE holds it.
+      // Archive and cancel have their own grants. `update` is not the gate
+      // for them: every role that writes bookings holds it.
       "bulk-archive": PermissionAction.archive,
       "bulk-cancel": PermissionAction.cancel,
       // The list's check-out and check-in ask for the same grants the booking

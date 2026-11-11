@@ -187,6 +187,10 @@
       // Regex lookbehind is the one syntax the build cannot lower to the browser
       // floor: esbuild rewrites the literal into `new RegExp(...)`, so the chunk
       // parses and then throws when that line runs on Safari below 16.4.
+      //
+      // Lucide icons are imported by name. The build groups every icon into one
+      // shared file (`manualChunks` in vite.config.ts), so a namespace import of
+      // "lucide-react" would put the whole icon set into every page.
       "files": ["app/**/*.ts", "app/**/*.tsx"],
       "excludedFiles": ["app/**/*.server.ts", "app/utils/id/client-id.ts"],
       "rules": {
@@ -199,6 +203,10 @@
           {
             "selector": "Literal[regex.pattern=/\\(\\?<(=|!)/], :matches(NewExpression, CallExpression)[callee.name='RegExp'] > Literal[value=/\\(\\?<(=|!)/]",
             "message": "Regex lookbehind throws on Safari below 16.4, which is above the browser floor, and the build cannot lower it. Rewrite without lookbehind, or keep it in a *.server.ts module."
+          },
+          {
+            "selector": "ImportDeclaration[source.value='lucide-react'] > ImportNamespaceSpecifier",
+            "message": "Import Lucide icons by name. A namespace import keeps every icon in the shared icons file that every page loads."
           }
         ]
       }

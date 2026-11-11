@@ -80,6 +80,12 @@ vitest.mock("~/utils/subscription.server", () => ({
   canUseBarcodes: vitest.fn(),
 }));
 
+// why: the scan record writes to the database; a spy lets the audit cases
+// assert which workspace gets a scan row without a real write.
+vitest.mock("~/modules/scan/service.server", () => ({
+  recordScanNonFatal: vitest.fn(),
+}));
+
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn(),
   ShelfError: class ShelfError extends Error {
@@ -98,6 +104,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -291,6 +298,66 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect((result as unknown as Response).status).toBe(404);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("not found");
+    // The companion's barcode fallback reads exactly this shape as a plain
+    // "not found": the error envelope with no `reason`.
+    expect(body.error).not.toHaveProperty("reason");
+  });
+
+  it("records an audit scan in the current workspace", async () => {
+    const request = createBarcodeRequest("BC001234");
+    request.headers.set("X-Scan-Context", "audit");
+    await loader(createLoaderArgs({ request, params: { value: "BC001234" } }));
+
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "AUDIT",
+        organizationId: "org-1",
+        writeNote: false,
+      })
+    );
+  });
+
+  it("records no audit scan for a barcode owned by a sibling workspace", async () => {
+    // The audit runs in org-1; the code resolves in sibling org-2, which the
+    // app rejects as "Different Workspace".
+    (getBarcodeByValue as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+    ]);
+    (db.barcode.findMany as any).mockResolvedValue([
+      { organizationId: "org-2" },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    request.headers.set("X-Scan-Context", "audit");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    const body = await (result as unknown as Response).json();
+    expect(body.barcode.organizationId).toBe("org-2");
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("records a normal scan of a sibling workspace's barcode there", async () => {
+    (getBarcodeByValue as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+    ]);
+    (db.barcode.findMany as any).mockResolvedValue([
+      { organizationId: "org-2" },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    await loader(createLoaderArgs({ request, params: { value: "BC001234" } }));
+
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "COMPANION", organizationId: "org-2" })
+    );
   });
 
   it("resolves a sibling workspace's barcode and names the owning workspace", async () => {
@@ -441,6 +508,12 @@ describe("GET /api/mobile/barcode/:value", () => {
     ["ABC%41", "ABC%41"], // a literal escape that must not be decoded
     ["50%", "50%"], // a lone % that decodeURIComponent would throw on
     ["PLAIN123", "PLAIN123"],
+    // An outside QR label linked as a barcode: the whole URL, case kept. The
+    // companion sends these to this route (see planScan in lib/qr-utils.ts).
+    [
+      "http://other-vendor.example/qr/a1B2c3D4",
+      "http:%2F%2Fother-vendor.example%2Fqr%2Fa1B2c3D4",
+    ],
   ])("looks up %s from the request URL", async (scanned, param) => {
     const result = await loader(
       createLoaderArgs({
