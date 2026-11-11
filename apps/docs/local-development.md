@@ -357,7 +357,7 @@ DIRECT_URL="your-supabase-direct-connection"
 ENABLE_PREMIUM_FEATURES="false"
 
 # Session security
-# Production mode refuses example values: generate one with openssl rand -hex 32
+# Production logs an INSECURE CONFIGURATION error for example values: generate one with openssl rand -hex 32
 SESSION_SECRET="generate-with-openssl-rand-hex-32"
 ```
 
