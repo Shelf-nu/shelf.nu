@@ -299,9 +299,19 @@ export default function CheckoutDropdown({
           portalContainer={portalContainer}
         >
           <div className="fixed bottom-0 left-0">
+            {/* The item opens the dialog, not the button inside it: arrow-key
+                focus lands on the item, and Enter or Space clicks the item
+                only. A mouse click on the button bubbles up to it. The guard
+                lives here because the shared item does not hand `disabled` to
+                Radix, and the button keeps its disabled-reason tooltip. */}
             <DropdownMenuItem
               className="py-1 lg:p-0"
-              onSelect={(event) => event.preventDefault()}
+              onSelect={(event) => {
+                event.preventDefault();
+                if (quickCheckoutDisabled || isNavigating) return;
+                setCheckoutDialogOpen(true);
+                closeMenu();
+              }}
             >
               <Button
                 type="button"
@@ -309,10 +319,6 @@ export default function CheckoutDropdown({
                 width="full"
                 className="w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                 disabled={quickCheckoutDisabled || isNavigating}
-                onClick={() => {
-                  setCheckoutDialogOpen(true);
-                  closeMenu();
-                }}
               >
                 <span className="flex items-center gap-2">
                   <Zap className="size-4" /> {quickCheckoutLabel}

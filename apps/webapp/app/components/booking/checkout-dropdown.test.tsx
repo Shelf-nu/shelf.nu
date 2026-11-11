@@ -224,6 +224,44 @@ describe("CheckoutDropdown", () => {
     expect(submits[0]).toHaveAttribute("value", "checkOutRemaining");
   });
 
+  it.each(["Enter", " "])(
+    "opens the check-out dialog from the menu row with the %j key",
+    (key) => {
+      menuOpen = true;
+      renderDropdown({
+        canFullCheckOut: true,
+        canCheckOutRemaining: false,
+        canScanCheckOut: true,
+      });
+
+      // Arrow-key focus lands on the menu item, not the button inside it.
+      const row = screen.getAllByRole("menuitem")[0];
+      row.focus();
+      fireEvent.keyDown(row, { key });
+
+      expect(
+        screen.getByRole("alertdialog", { name: "Check out booking" })
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    }
+  );
+
+  it("does not open the check-out dialog from a disabled menu row", () => {
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      checkOutDisabled: { reason: "Some assets are in custody." },
+    });
+
+    const row = screen.getAllByRole("menuitem")[0];
+    row.focus();
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
   it("lets the operator pick a From location with the mouse", () => {
     // A menu item takes focus on every mouse move it sees, and React bubbles
     // a portaled dialog's events to its component parents. Focus leaving the
