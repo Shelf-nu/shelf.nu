@@ -120,15 +120,15 @@ beforeEach(() => {
 
 describe("GET /api/mobile/locations: requests without paging params", () => {
   it("returns every location when the workspace has more than 50", async () => {
-    seedLocations(76);
+    seedLocations(130);
 
     const body = await get();
 
-    expect(body.locations).toHaveLength(76);
-    expect(body.locations.at(-1)?.id).toBe("room-76");
+    expect(body.locations).toHaveLength(130);
+    expect(body.locations.at(-1)?.id).toBe("room-130");
     expect(body).toEqual({
       locations: expect.any(Array),
-      totalCount: 76,
+      totalCount: 130,
       truncated: false,
     });
     expect(lastFindManyArgs()).toMatchObject({
@@ -192,36 +192,36 @@ describe("GET /api/mobile/locations: requests without paging params", () => {
 
 describe("GET /api/mobile/locations: paged requests", () => {
   it("returns the requested page", async () => {
-    seedLocations(76);
+    seedLocations(130);
 
-    const body = await get("&page=2&perPage=50");
+    const body = await get("&page=3&perPage=50");
 
-    expect(body.locations).toHaveLength(26);
-    expect(body.locations[0]?.id).toBe("room-51");
+    expect(body.locations).toHaveLength(30);
+    expect(body.locations[0]?.id).toBe("room-101");
     expect(body).toMatchObject({
-      page: 2,
+      page: 3,
       perPage: 50,
-      totalCount: 76,
-      totalPages: 2,
+      totalCount: 130,
+      totalPages: 3,
     });
   });
 
   it("pages from 1 when only perPage is sent", async () => {
-    seedLocations(76);
+    seedLocations(130);
 
     const body = await get("&perPage=20");
 
     expect(body.locations).toHaveLength(20);
-    expect(body).toMatchObject({ page: 1, perPage: 20, totalPages: 4 });
+    expect(body).toMatchObject({ page: 1, perPage: 20, totalPages: 7 });
   });
 
   it("uses 50 per page when only page is sent", async () => {
-    seedLocations(76);
+    seedLocations(130);
 
     const body = await get("&page=1");
 
     expect(body.locations).toHaveLength(50);
-    expect(body).toMatchObject({ page: 1, perPage: 50, totalPages: 2 });
+    expect(body).toMatchObject({ page: 1, perPage: 50, totalPages: 3 });
   });
 
   it("still caps perPage at 100", async () => {
@@ -234,7 +234,7 @@ describe("GET /api/mobile/locations: paged requests", () => {
   });
 
   it("falls back to the first page when the requested page cannot be reached", async () => {
-    seedLocations(76);
+    seedLocations(130);
 
     const body = await get("&page=99999999999999999999&perPage=50");
 
