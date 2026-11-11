@@ -8,6 +8,11 @@
  *
  * @see {@link file://./api/client.ts} the fetch wrapper, retries and auth
  */
-export { api, onAuthError, invalidateResponseCache } from "./api/index";
+export {
+  api,
+  onAuthError,
+  onForbidden,
+  invalidateResponseCache,
+} from "./api/index";
 export * from "./api/types";
 export { getApiBaseUrl } from "./api/client";

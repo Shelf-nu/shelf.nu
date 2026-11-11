@@ -49,7 +49,13 @@ vi.mock("~/database/db.server", () => ({
 // why: JWT validation and org access are out of scope, and the real module
 // loads the Supabase admin client. The shared re-sign step has its own tests;
 // here it tags the row so the response shows the asset went through it.
-vi.mock("~/modules/api/mobile-auth.server", () => ({
+vi.mock("~/modules/api/mobile-auth.server", async () => ({
+  // The real error body, so a test pins what the scanner receives.
+  mobileScanErrorBody: (
+    await vi.importActual<typeof import("~/modules/api/mobile-auth.server")>(
+      "~/modules/api/mobile-auth.server"
+    )
+  ).mobileScanErrorBody,
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   // why: the workspace lapse gate has its own tests
@@ -240,6 +246,7 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
       access: "inactive",
       error: new ShelfError({
         cause: null,
+        title: "Workspace inactive",
         message: INACTIVE_CODE_MESSAGE,
         label: "Auth",
         status: 403,
@@ -257,8 +264,9 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
 
     assertIsDataWithResponseInit(response);
     expect(response.init?.status).toBe(403);
+    // The reason lets the scanner title the answer "Workspace inactive".
     expect(response.data).toEqual({
-      error: { message: INACTIVE_CODE_MESSAGE },
+      error: { message: INACTIVE_CODE_MESSAGE, reason: "workspace_inactive" },
     });
     expect(getMobileWorkspaceAccess).toHaveBeenCalledWith({
       userId: "user-1",

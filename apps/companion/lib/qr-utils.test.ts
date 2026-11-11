@@ -76,6 +76,8 @@ const SERVER = {
   ]),
   /** A value whose barcode request gets no answer (network failure). */
   unreachableBarcodes: new Set(["noanswercode"]),
+  /** A barcode held by a workspace of the caller's that is inactive (403). */
+  inactiveWorkspaceBarcodes: new Set(["inactivecode"]),
 };
 
 type Answer = ScanLookupAnswer & { data: string | null; error?: string };
@@ -119,7 +121,8 @@ function fakeLookups(options: { offline?: boolean } = {}) {
         ? 422
         : SERVER.ambiguousBarcodes.has(value)
         ? 409
-        : SERVER.forbiddenBarcodes.has(value)
+        : SERVER.forbiddenBarcodes.has(value) ||
+          SERVER.inactiveWorkspaceBarcodes.has(value)
         ? 403
         : 404;
       if (SERVER.unreachableBarcodes.has(value)) {
@@ -133,7 +136,9 @@ function fakeLookups(options: { offline?: boolean } = {}) {
         data: null,
         error: "refused",
         status,
-        errorDetails: {},
+        errorDetails: SERVER.inactiveWorkspaceBarcodes.has(value)
+          ? { reason: "workspace_inactive" }
+          : {},
       });
     },
   };
@@ -313,6 +318,14 @@ const ROWS: Row[] = [
     // A 403 says nothing about the value, so the QR route's answer stays.
     calls: ["qr:refusedcode", "barcode:refusedcode"],
     outcome: { kind: "qr", found: false },
+  },
+  {
+    name: "bare value held by an inactive workspace of the user's",
+    input: "inactivecode",
+    // The barcode route found the code and named why it cannot open it, so
+    // that answer is shown, not the QR route's "not found".
+    calls: ["qr:inactivecode", "barcode:inactivecode"],
+    outcome: { kind: "barcode", found: false },
   },
   {
     name: "short link to a QR in a workspace the user is not in",

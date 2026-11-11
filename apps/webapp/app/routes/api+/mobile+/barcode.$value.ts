@@ -24,6 +24,7 @@ import {
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
   shapeMobileKitResponse,
+  mobileScanErrorBody,
 } from "~/modules/api/mobile-auth.server";
 import { shapeScannedAssetForViewer } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
@@ -296,7 +297,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
-      { error: { message: reason.message } },
+      { error: mobileScanErrorBody(reason) },
       { status: reason.status }
     );
   }

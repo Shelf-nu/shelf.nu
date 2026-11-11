@@ -47,6 +47,11 @@ import {
 import ConnectServerSheet from "@/components/connect-server-sheet";
 import { getApiBaseUrl } from "@/lib/api";
 import { openShelfWebUrl } from "@/lib/navigation";
+import { openWorkspaceSwitcher } from "@/lib/workspace-switcher";
+import {
+  inactiveWorkspaceMessage,
+  isWorkspaceInactive,
+} from "@/lib/workspace-access";
 import { usePushSettings } from "@/hooks/use-push-settings";
 import { notificationsRowValue } from "@/lib/push/preferences";
 
@@ -188,16 +193,11 @@ export default function SettingsScreen() {
   const handleSwitchOrg = () => {
     if (organizations.length <= 1) return;
 
-    Alert.alert("Switch Workspace", "Select a workspace:", [
-      ...organizations.map((org) => ({
-        text: `${org.name}${org.id === currentOrg?.id ? " (current)" : ""}`,
-        onPress: () => {
-          Haptics.selectionAsync();
-          setCurrentOrg(org);
-        },
-      })),
-      { text: "Cancel", style: "cancel" as const },
-    ]);
+    openWorkspaceSwitcher({
+      organizations,
+      currentOrg,
+      onSelect: setCurrentOrg,
+    });
   };
 
   return (
@@ -256,10 +256,16 @@ export default function SettingsScreen() {
                 <Text style={styles.settingLabel}>
                   {currentOrg?.name ?? "No workspace"}
                 </Text>
-                {organizations.length > 1 && (
+                {currentOrg && isWorkspaceInactive(currentOrg) ? (
                   <Text style={styles.settingHint}>
-                    {organizations.length} workspaces available
+                    {inactiveWorkspaceMessage(currentOrg)}
                   </Text>
+                ) : (
+                  organizations.length > 1 && (
+                    <Text style={styles.settingHint}>
+                      {organizations.length} workspaces available
+                    </Text>
+                  )
                 )}
               </View>
             </View>

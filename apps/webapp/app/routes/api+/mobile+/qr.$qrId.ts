@@ -1,7 +1,10 @@
 import { ScanSource } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  mobileScanErrorBody,
+  requireMobileAuth,
+} from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { parseScanGeolocation } from "~/modules/scan/geolocation.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
@@ -80,7 +83,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
-      { error: { message: reason.message } },
+      { error: mobileScanErrorBody(reason) },
       { status: reason.status }
     );
   }

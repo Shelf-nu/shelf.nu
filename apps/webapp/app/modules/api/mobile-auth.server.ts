@@ -309,6 +309,58 @@ const CONTACT_OWNER_SUFFIX =
   "Contact the workspace owner for more information.";
 
 /**
+ * Title of the 403 an inactive workspace gets. Routes that answer with a
+ * structured `reason` (the scan lookups) recognise the refusal by it, through
+ * {@link isMobileWorkspaceInactiveError}.
+ */
+const MOBILE_WORKSPACE_INACTIVE_TITLE = "Workspace inactive";
+
+/**
+ * The `reason` a scan lookup sends with an inactive-workspace refusal, so the
+ * companion can title the answer without reading the message text.
+ */
+export const MOBILE_WORKSPACE_INACTIVE_REASON = "workspace_inactive";
+
+/** Why a workspace is inactive: switched off by a Shelf admin, or a lapsed Team plan. */
+export type MobileWorkspaceInactiveReason = "disabled" | "lapsed";
+
+/**
+ * The message for an inactive workspace, as the caller sees it.
+ *
+ * @param args.inactiveReason - Why the workspace is inactive.
+ * @param args.scope - `"workspace"` when the caller acts in it, `"code"` when
+ *   they opened a scanned code it owns.
+ * @param args.isOwner - Whether the caller owns the workspace. Anyone else is
+ *   told to contact the owner, who is the one who can act on it.
+ * @returns The message, without purchase wording.
+ */
+function inactiveWorkspaceMessage({
+  inactiveReason,
+  scope,
+  isOwner,
+}: {
+  inactiveReason: MobileWorkspaceInactiveReason;
+  scope: "workspace" | "code";
+  isOwner: boolean;
+}): string {
+  const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][scope];
+  return isOwner ? base : `${base} ${CONTACT_OWNER_SUFFIX}`;
+}
+
+/**
+ * Whether an error is the 403 an inactive workspace gets from
+ * {@link getMobileWorkspaceAccess}, wrapped or not.
+ *
+ * @param error - Any error, usually the result of `makeShelfError`.
+ * @returns `true` for the inactive-workspace refusal.
+ */
+export function isMobileWorkspaceInactiveError(error: ShelfError): boolean {
+  return (
+    error.status === 403 && error.title === MOBILE_WORKSPACE_INACTIVE_TITLE
+  );
+}
+
+/**
  * Whether the web app shows a workspace as disabled. Mobile twin of the
  * `disabledTeamOrg` loader flag in `routes/_layout+/_layout.tsx`, with the same
  * three inputs:
@@ -335,7 +387,7 @@ async function getMobileWorkspaceInactiveReason({
     Organization,
     "id" | "type" | "name" | "imageId" | "userId" | "workspaceDisabled"
   >;
-}): Promise<"disabled" | "lapsed" | null> {
+}): Promise<MobileWorkspaceInactiveReason | null> {
   if (isShelfAdmin) return null;
   if (organization.workspaceDisabled) return "disabled";
   // Only a TEAM workspace depends on the owner's paid tier, so the tier lookup
@@ -404,22 +456,86 @@ export async function getMobileWorkspaceAccess({
 
   if (!inactiveReason) return { access: "active" };
 
-  const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][reason];
-  // `organization.userId` is the workspace owner.
-  const isOwner = organization.userId === userId;
-
   return {
     access: "inactive",
     error: new ShelfError({
       cause: null,
-      title: "Workspace inactive",
-      message: isOwner ? base : `${base} ${CONTACT_OWNER_SUFFIX}`,
+      title: MOBILE_WORKSPACE_INACTIVE_TITLE,
+      message: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: reason,
+        // `organization.userId` is the workspace owner.
+        isOwner: organization.userId === userId,
+      }),
       additionalData: { userId, organizationId },
       label: "Auth",
       status: 403,
       shouldBeCaptured: false,
     }),
   };
+}
+
+/** Whether one of the caller's workspaces is active, as `/api/mobile/me` reports it. */
+export type MobileWorkspaceState = {
+  /** `true` when the mobile API refuses requests in this workspace. */
+  inactive: boolean;
+  /** Why it is inactive, or `null` when it is active. */
+  inactiveReason: MobileWorkspaceInactiveReason | null;
+  /** What the app shows for it, or `null` when it is active. */
+  inactiveMessage: string | null;
+};
+
+/**
+ * Reads, for each of the caller's workspaces, whether the mobile API refuses
+ * requests there. Same rules as {@link getMobileWorkspaceAccess}, so the app
+ * can mark an inactive workspace before any request in it fails.
+ *
+ * @param args.userId - The signed-in caller.
+ * @param args.organizationIds - The caller's workspaces, as `/me` lists them.
+ * @returns The state of each workspace, keyed by its id. An id the caller is
+ *   not a member of is left out.
+ */
+export async function getMobileWorkspaceStates({
+  userId,
+  organizationIds,
+}: {
+  userId: string;
+  organizationIds: string[];
+}): Promise<Map<string, MobileWorkspaceState>> {
+  const states = new Map<string, MobileWorkspaceState>();
+  if (organizationIds.length === 0) return states;
+
+  const memberships = await db.userOrganization.findMany({
+    where: { userId, organizationId: { in: organizationIds } },
+    select: {
+      organization: { select: MOBILE_WORKSPACE_GATE_SELECT },
+      user: { select: { roles: { select: { name: true } } } },
+    },
+  });
+
+  await Promise.all(
+    memberships.map(async ({ organization, user }) => {
+      const inactiveReason = await getMobileWorkspaceInactiveReason({
+        // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
+        isShelfAdmin: user.roles.some((role) => role.name === Roles.ADMIN),
+        organization,
+      });
+      states.set(organization.id, {
+        inactive: inactiveReason !== null,
+        inactiveReason,
+        inactiveMessage: inactiveReason
+          ? inactiveWorkspaceMessage({
+              inactiveReason,
+              scope: "workspace",
+              // `organization.userId` is the workspace owner.
+              isOwner: organization.userId === userId,
+            })
+          : null,
+      });
+    })
+  );
+
+  return states;
 }
 
 /**
@@ -1079,4 +1195,22 @@ export async function getMobileAssetForViewer({
     viewerUserId,
     canSeeAllCustody,
   });
+}
+
+/**
+ * The `{ error }` body a scan lookup sends for a thrown error. An
+ * inactive-workspace refusal carries `reason: "workspace_inactive"`, so the
+ * companion scanner can title it as such; any other error carries the message
+ * alone, as every mobile route does.
+ *
+ * @param error - The error, as `makeShelfError` returns it.
+ * @returns The value for the response's `error` field.
+ */
+export function mobileScanErrorBody(error: ShelfError): {
+  message: string;
+  reason?: typeof MOBILE_WORKSPACE_INACTIVE_REASON;
+} {
+  return isMobileWorkspaceInactiveError(error)
+    ? { message: error.message, reason: MOBILE_WORKSPACE_INACTIVE_REASON }
+    : { message: error.message };
 }

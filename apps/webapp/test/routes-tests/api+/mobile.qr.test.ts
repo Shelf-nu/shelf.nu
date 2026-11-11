@@ -488,13 +488,18 @@ describe("GET /api/mobile/qr/:qrId", () => {
       access: "inactive",
       error: inactiveError,
     });
-    (makeShelfError as any).mockReturnValue({ message, status: 403 });
+    (makeShelfError as any).mockReturnValue({
+      message,
+      status: 403,
+      title: "Workspace inactive",
+    });
 
     const result = await run(createQrRequest());
 
     expect((result as unknown as Response).status).toBe(403);
+    // The reason lets the scanner title the answer "Workspace inactive".
     expect(await (result as unknown as Response).json()).toEqual({
-      error: { message },
+      error: { message, reason: "workspace_inactive" },
     });
     expect(makeShelfError).toHaveBeenCalledWith(inactiveError);
     expect(db.asset.findFirst).not.toHaveBeenCalled();

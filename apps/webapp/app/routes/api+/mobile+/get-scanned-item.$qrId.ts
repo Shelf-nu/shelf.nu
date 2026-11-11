@@ -1,5 +1,8 @@
 import { data, type LoaderFunctionArgs } from "react-router";
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  mobileScanErrorBody,
+  requireMobileAuth,
+} from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -47,7 +50,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
-      { error: { message: reason.message } },
+      { error: mobileScanErrorBody(reason) },
       { status: reason.status }
     );
   }

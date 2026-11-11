@@ -31,6 +31,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { isWorkspaceInactive } from "@/lib/workspace-access";
 import {
   fontSize,
   spacing,
@@ -594,7 +595,10 @@ function BookingsListContent() {
   // Bookings belong to team workspaces. In a personal workspace, explain that
   // and hand the user the shortest path to one instead of an empty list.
   if (currentOrg?.type === "PERSONAL") {
-    const teamOrgs = organizations.filter((org) => org.type === "TEAM");
+    // An inactive team workspace refuses every request, so it is not offered.
+    const teamOrgs = organizations.filter(
+      (org) => org.type === "TEAM" && !isWorkspaceInactive(org)
+    );
     const onlyTeam = teamOrgs.length === 1 ? teamOrgs[0] : null;
     return (
       <View style={styles.centered}>

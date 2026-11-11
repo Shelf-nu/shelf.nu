@@ -57,6 +57,7 @@ import {
   runScanPlan,
   scanMissFeedback,
 } from "@/lib/qr-utils";
+import { isWorkspaceInactiveRefusal } from "@/lib/workspace-access";
 import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { announce } from "@/lib/a11y";
@@ -1013,6 +1014,14 @@ function ScannerContent() {
                   },
                 },
               });
+            } else if (isWorkspaceInactiveRefusal(errorDetails)) {
+              announce("Workspace inactive");
+              setScanResult({
+                type: "error",
+                title: "Workspace Inactive",
+                message:
+                  error || "The workspace this code belongs to is inactive.",
+              });
             } else {
               setScanResult({
                 type: "error",
@@ -1031,18 +1040,35 @@ function ScannerContent() {
           kitId = qrData.qr?.kitId ?? null;
         } else {
           // ── Barcode path ──
-          const { data: barcodeData, error: barcodeError } = outcome.answer;
+          const {
+            data: barcodeData,
+            error: barcodeError,
+            errorDetails: barcodeErrorDetails,
+          } = outcome.answer;
 
           if (barcodeError || !barcodeData) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            announce("Code not recognized");
-            setScanResult({
-              type: "not_found",
-              title: "Code Not Recognized",
-              message:
-                barcodeError || "This code was not found in your workspace.",
-            });
+            // The code was found, in a workspace of the person's that is
+            // inactive: say so, rather than that it is unknown.
+            if (isWorkspaceInactiveRefusal(barcodeErrorDetails)) {
+              announce("Workspace inactive");
+              setScanResult({
+                type: "error",
+                title: "Workspace Inactive",
+                message:
+                  barcodeError ||
+                  "The workspace this code belongs to is inactive.",
+              });
+            } else {
+              announce("Code not recognized");
+              setScanResult({
+                type: "not_found",
+                title: "Code Not Recognized",
+                message:
+                  barcodeError || "This code was not found in your workspace.",
+              });
+            }
             finalizeScan();
             return;
           }

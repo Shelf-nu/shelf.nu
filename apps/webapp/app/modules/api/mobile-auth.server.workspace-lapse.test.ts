@@ -17,15 +17,18 @@ import { db } from "~/database/db.server";
 import {
   MOBILE_INACTIVE_MESSAGES,
   getMobileWorkspaceAccess,
+  getMobileWorkspaceStates,
+  mobileScanErrorBody,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 
 // why: importing the module loads `~/database/db.server`, which connects a
 // real Prisma client at module load. The gate reads the membership row and the
 // owner's tier; those two reads are the stubs the tests drive.
 vi.mock("~/database/db.server", () => ({
   db: {
-    userOrganization: { findUnique: vi.fn() },
+    userOrganization: { findUnique: vi.fn(), findMany: vi.fn() },
     user: { findUniqueOrThrow: vi.fn() },
     customTierLimit: { findUniqueOrThrow: vi.fn() },
   },
@@ -238,6 +241,178 @@ describe("getMobileWorkspaceAccess", () => {
         status: 403,
         message: `${MOBILE_INACTIVE_MESSAGES.lapsed.code} Contact the workspace owner for more information.`,
       },
+    });
+  });
+});
+
+describe("getMobileWorkspaceStates", () => {
+  /** A membership row as the state reader selects it. */
+  function stateRow({
+    id,
+    type = "TEAM",
+    ownerId = OWNER_ID,
+    workspaceDisabled = false,
+    callerSystemRoles = ["USER"],
+  }: {
+    id: string;
+    type?: "TEAM" | "PERSONAL";
+    ownerId?: string;
+    workspaceDisabled?: boolean;
+    callerSystemRoles?: string[];
+  }) {
+    return {
+      organization: {
+        id,
+        type,
+        name: id,
+        imageId: null,
+        userId: ownerId,
+        workspaceDisabled,
+      },
+      user: { roles: callerSystemRoles.map((name) => ({ name })) },
+    };
+  }
+
+  /** Gives each owner a tier, by owner id, as `getUserTierLimit` reads it. */
+  function ownerTiers(tiers: Record<string, "free" | "tier_1" | "tier_2">) {
+    ownerFindUniqueOrThrow.mockImplementation(((args: {
+      where: { id: string };
+    }) => {
+      const tierId = tiers[args.where.id];
+      return Promise.resolve({
+        tier: { id: tierId, tierLimit: { id: tierId } },
+      });
+    }) as never);
+  }
+
+  it("marks each workspace active or inactive by the same rules as the gate", async () => {
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      stateRow({ id: "team-paid", ownerId: "owner-paid" }),
+      stateRow({ id: "team-lapsed", ownerId: "owner-lapsed" }),
+      stateRow({ id: "team-own-lapsed", ownerId: CALLER_ID }),
+      stateRow({
+        id: "team-disabled",
+        ownerId: "owner-paid",
+        workspaceDisabled: true,
+      }),
+      stateRow({ id: "personal", type: "PERSONAL", ownerId: CALLER_ID }),
+    ] as never);
+    ownerTiers({
+      "owner-paid": "tier_2",
+      "owner-lapsed": "free",
+      [CALLER_ID]: "tier_1",
+    });
+
+    const states = await getMobileWorkspaceStates({
+      userId: CALLER_ID,
+      organizationIds: [
+        "team-paid",
+        "team-lapsed",
+        "team-own-lapsed",
+        "team-disabled",
+        "personal",
+      ],
+    });
+
+    expect(Object.fromEntries(states)).toEqual({
+      "team-paid": {
+        inactive: false,
+        inactiveReason: null,
+        inactiveMessage: null,
+      },
+      "team-lapsed": {
+        inactive: true,
+        inactiveReason: "lapsed",
+        inactiveMessage: `${MOBILE_INACTIVE_MESSAGES.lapsed.workspace} Contact the workspace owner for more information.`,
+      },
+      // The owner is not told to contact themselves.
+      "team-own-lapsed": {
+        inactive: true,
+        inactiveReason: "lapsed",
+        inactiveMessage: MOBILE_INACTIVE_MESSAGES.lapsed.workspace,
+      },
+      "team-disabled": {
+        inactive: true,
+        inactiveReason: "disabled",
+        inactiveMessage: `${MOBILE_INACTIVE_MESSAGES.disabled.workspace} Contact the workspace owner for more information.`,
+      },
+      // A personal workspace is never refused for its owner's tier.
+      personal: {
+        inactive: false,
+        inactiveReason: null,
+        inactiveMessage: null,
+      },
+    });
+    expect(db.userOrganization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: CALLER_ID,
+          organizationId: {
+            in: [
+              "team-paid",
+              "team-lapsed",
+              "team-own-lapsed",
+              "team-disabled",
+              "personal",
+            ],
+          },
+        },
+      })
+    );
+  });
+
+  it("reports a lapsed workspace as active for a Shelf admin, as the gate lets them in", async () => {
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      stateRow({ id: "team-lapsed", callerSystemRoles: ["ADMIN"] }),
+    ] as never);
+    ownerTiers({ [OWNER_ID]: "free" });
+
+    const states = await getMobileWorkspaceStates({
+      userId: CALLER_ID,
+      organizationIds: ["team-lapsed"],
+    });
+
+    expect(states.get("team-lapsed")?.inactive).toBe(false);
+  });
+
+  it("reads nothing for a caller with no workspace", async () => {
+    const states = await getMobileWorkspaceStates({
+      userId: CALLER_ID,
+      organizationIds: [],
+    });
+
+    expect(states.size).toBe(0);
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("mobileScanErrorBody", () => {
+  it("tags the inactive-workspace refusal, even once makeShelfError has wrapped it", async () => {
+    givenMembership(membershipRow());
+    ownerTier("free");
+    const answer = await getMobileWorkspaceAccess({
+      userId: CALLER_ID,
+      organizationId: ORG_ID,
+      reason: "code",
+    });
+    if (answer.access !== "inactive") throw new Error("expected inactive");
+
+    expect(mobileScanErrorBody(makeShelfError(answer.error))).toEqual({
+      message: answer.error.message,
+      reason: "workspace_inactive",
+    });
+  });
+
+  it("sends the message alone for any other 403", () => {
+    const notMember = new ShelfError({
+      cause: null,
+      message: "You don't have access to this organization",
+      label: "Auth",
+      status: 403,
+    });
+
+    expect(mobileScanErrorBody(makeShelfError(notMember))).toEqual({
+      message: "You don't have access to this organization",
     });
   });
 });

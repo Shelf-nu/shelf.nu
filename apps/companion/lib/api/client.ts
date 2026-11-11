@@ -44,6 +44,21 @@ export function notifyAuthError() {
   authErrorListeners.forEach((fn) => fn());
 }
 
+/**
+ * Global 403 listener. A refused request can mean the workspace became
+ * inactive while the app was open, which only `/api/mobile/me` can confirm,
+ * so the workspace context re-reads it when this fires.
+ */
+type ForbiddenListener = () => void;
+const forbiddenListeners = new Set<ForbiddenListener>();
+export function onForbidden(listener: ForbiddenListener): () => void {
+  forbiddenListeners.add(listener);
+  return () => forbiddenListeners.delete(listener);
+}
+function notifyForbidden() {
+  forbiddenListeners.forEach((fn) => fn());
+}
+
 /** Default request timeout (20 seconds -- generous for first cold-start request) */
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -314,6 +329,7 @@ export async function apiFetch<T>(
       const errorDetails = extractErrorDetails(json);
       // 403 = forbidden → user lacks permission, but session is valid
       if (response.status === 403) {
+        notifyForbidden();
         return {
           data: null,
           error:
@@ -428,6 +444,7 @@ export async function apiUpload<T>(
         return { data: null, error: "Session expired. Please sign in again." };
       }
       if (response.status === 403) {
+        notifyForbidden();
         return {
           data: null,
           error:

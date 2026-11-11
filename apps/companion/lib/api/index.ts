@@ -7,7 +7,7 @@ import { dashboardApi } from "./dashboard";
 import { kitsApi } from "./kits";
 import { notificationsApi } from "./notifications";
 
-export { onAuthError } from "./client";
+export { onAuthError, onForbidden } from "./client";
 export { invalidateResponseCache } from "./cache";
 
 // ── API Functions ──────────────────────────────────────
