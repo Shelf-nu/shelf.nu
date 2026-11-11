@@ -26,6 +26,12 @@
  * Calls that satisfy the DOM contract go straight to the native method, so
  * React's normal operation is unchanged. Install once, before hydration.
  *
+ * The guard keeps the route alive; it cannot keep text correct. A skipped
+ * removal leaves the translator's copy of the old text on screen, and React's
+ * updates to a replaced text node change a node nobody sees. Text that changes
+ * while mounted must therefore be the only child of its element (see
+ * `.claude/rules/live-text-is-an-elements-only-child.md`).
+ *
  * @see {@link file://./../entry.client.tsx} — the install site
  * @see {@link file://./sentry-filters.ts} — drops the same `NotFoundError`
  *      shape from Sentry for browsers where the guard is not active

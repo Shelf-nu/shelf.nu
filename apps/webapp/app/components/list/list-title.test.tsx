@@ -7,9 +7,16 @@
  * sentence, and only a reader who knows what the list contains can tell that
  * "3 asset models out of 4" describes four rows of which one is not a model.
  */
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { createStore, Provider } from "jotai";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { selectedBulkItemsAtom } from "~/atoms/list";
+import {
+  installDomMutationGuard,
+  uninstallDomMutationGuard,
+} from "~/utils/dom-mutation-guard";
 import ListTitle from "./list-title";
+import { translateTextNodes } from "../../../test/helpers/page-translation";
 
 // why: ListTitle reads the list payload straight from the route loader, so a
 // router context would have to serve a whole index loader to render one line.
@@ -62,5 +69,43 @@ describe("ListTitle count line", () => {
 
     expect(screen.getByText("3 asset models")).toBeTruthy();
     expect(screen.queryByText(/out of/)).toBeNull();
+  });
+});
+
+describe("ListTitle selection count on a translated page", () => {
+  beforeEach(() => {
+    // why: production installs the guard before hydration (entry.client).
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    installDomMutationGuard();
+  });
+
+  afterEach(() => {
+    uninstallDomMutationGuard();
+    vi.restoreAllMocks();
+  });
+
+  it("shows the current count after the page was translated", () => {
+    const store = createStore();
+    const { container } = render(
+      <Provider store={store}>
+        <ListTitle title="Assets" hasBulkActions />
+      </Provider>
+    );
+    // why: the selection atom resets itself on mount, so select after render.
+    act(() => {
+      store.set(selectedBulkItemsAtom, [{ id: "a" }]);
+    });
+    expect(container).toHaveTextContent("1 selected");
+    translateTextNodes(container);
+
+    act(() => {
+      store.set(selectedBulkItemsAtom, [{ id: "a" }, { id: "b" }]);
+    });
+
+    // why: "{count} selected" rendered the count as its own text node beside
+    // others. Translation replaced it, React kept updating the detached
+    // original, and the reader saw the old count (or old and new piled up).
+    expect(container).toHaveTextContent("2 selected");
+    expect(container).not.toHaveTextContent(/1\s*selected/);
   });
 });

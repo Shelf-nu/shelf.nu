@@ -167,7 +167,12 @@ export default function ListTitle({
             >
               <X size={12} strokeWidth={3} className="text-gray-600" />
             </Button>
-            {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
+            {/* One string per element: text that changes while mounted must
+                be the element's only child, or page translation leaves the
+                old count on screen. */}
+            <span>{`${
+              hasSelectedAllItems ? totalItems : selectedBulkItemsCount
+            } selected`}</span>
             {!disableSelectAllItems &&
               !hasSelectedAllItems &&
               selectedBulkItemsCount < totalItems && (
@@ -176,7 +181,7 @@ export default function ListTitle({
                   onClick={handleSelectAllItems}
                   variant="block-link"
                 >
-                  Select all {totalItems} entries
+                  {`Select all ${totalItems} entries`}
                 </Button>
               )}
           </div>

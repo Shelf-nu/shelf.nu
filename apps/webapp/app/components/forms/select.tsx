@@ -11,10 +11,11 @@ const SelectGroup = SelectPrimitive.Group;
 
 /**
  * Radix renders a string `placeholder` as a bare text node inside the value
- * span and removes that node when a value is picked. Page translation rewrites
- * text nodes in place, which would make that removal target a node that is no
- * longer there. Rendering the placeholder inside an element keeps the swap an
- * element removal, which stays valid on a translated page.
+ * span and removes that node when a value is picked. Page translation replaces
+ * text nodes with its own `<font>` wrappers, so that removal would target a
+ * node that is no longer there. Rendering the placeholder inside an element
+ * keeps the swap an element removal, which stays valid on a translated page.
+ * `SelectItem` does the same for the picked option's text.
  */
 const SelectValue = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Value>,
@@ -183,7 +184,14 @@ const SelectItem = React.forwardRef<
     >
       <div className="flex w-full items-center justify-between">
         <div className="flex min-w-0 flex-col">
-          <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+          {/* Radix portals the ItemText children of the picked option into
+              the trigger and unmounts them on the next pick. As a bare text
+              node, page translation replaces them, the unmount misses, and
+              every pick piles its text next to the old ones. Inside a span the
+              unmount removes an element that translation leaves in place. */}
+          <SelectPrimitive.ItemText>
+            <span>{children}</span>
+          </SelectPrimitive.ItemText>
           {description ? (
             <span
               id={descriptionId}

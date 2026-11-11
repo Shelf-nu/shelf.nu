@@ -309,7 +309,9 @@ export default function ManageLocationKits() {
 
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
-          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
+          {`${
+            hasSelectedAllItems ? totalItems : selectedBulkItemsCount
+          } selected`}
         </p>
 
         <div className="flex gap-3">
