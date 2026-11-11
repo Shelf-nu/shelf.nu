@@ -394,9 +394,12 @@ export const handleDetection = async ({
    * cuid would be claimed the same way.
    */
   if (!barcodeType) {
-    // Check if it's a QR code (URL pattern)
+    // Check if it's a QR code (URL pattern). Only a url on our own host or
+    // shortener is ours: a handheld scanner sends every QR here unclassified,
+    // and a url on another host is an outside QR that falls through to the
+    // barcode lookup as ExternalQR, as the camera path sends it.
     const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-    const qrMatch = result.match(qrRegex);
+    const qrMatch = isShelfQrCode(result) ? result.match(qrRegex) : null;
 
     if (qrMatch) {
       // It's a QR code URL

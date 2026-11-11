@@ -12,6 +12,7 @@
  */
 import { BarcodeType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as EnvModule from "~/utils/env";
 
 // why: the module imports the zxing decoder at load time for the camera path,
 // which is a wasm binary these tests never reach.
@@ -19,10 +20,24 @@ vi.mock("zxing-wasm/reader", () => ({
   readBarcodes: vi.fn(),
 }));
 
+// why: code-scanner renders a lottie animation on success, and lottie paints
+// on a canvas at import time, which the test DOM does not provide.
+vi.mock("./success-animation", () => ({ default: () => null }));
+
+// why: the test env sets no shortener, and a Shelf label can carry one.
+vi.mock("~/utils/env", async (importOriginal) => ({
+  ...(await importOriginal<typeof EnvModule>()),
+  URL_SHORTENER: "short.example",
+}));
+
+import { handleScannerInputValue } from "./code-scanner";
 import { handleDetection } from "./utils";
 
 /** A value `isQrId` accepts: 10 characters, lowercase, leading letter. */
 const QR_ID = "abc1234567";
+
+/** The origin `isShelfQrCode` treats as ours under test: `SERVER_URL`. */
+const APP_ORIGIN = "http://localhost:3000";
 
 const onCodeDetectionSuccess = vi.fn();
 
@@ -50,7 +65,7 @@ beforeEach(() => {
 
 describe("handleDetection without a barcode type", () => {
   it("reads the id out of a Shelf QR url", async () => {
-    expect(await detect(`https://app.shelf.nu/qr/${QR_ID}`)).toEqual({
+    expect(await detect(`${APP_ORIGIN}/qr/${QR_ID}`)).toEqual({
       value: QR_ID,
       type: "qr",
       error: undefined,
@@ -63,7 +78,7 @@ describe("handleDetection without a barcode type", () => {
 
   it("reports a Shelf QR url carrying an id we cannot use", async () => {
     // Our host, our /qr/ path, so it is ours to complain about.
-    expect(await detect("https://app.shelf.nu/qr/BADID")).toEqual({
+    expect(await detect(`${APP_ORIGIN}/qr/BADID`)).toEqual({
       value: "BADID",
       type: "qr",
       error: "Invalid QR code format",
@@ -76,6 +91,59 @@ describe("handleDetection without a barcode type", () => {
       type: "barcode",
       barcodeType: BarcodeType.ExternalQR,
     });
+  });
+
+  it("leaves a QR url on somebody else's host to the barcode lookup", async () => {
+    // Same /qr/<alphanumerics> shape as ours, but not our host or shortener,
+    // so it is an outside QR code linked as an alternative barcode.
+    expect(await detect("http://other-vendor.example/qr/01383d6c")).toEqual({
+      value: "http://other-vendor.example/qr/01383d6c",
+      type: "barcode",
+      barcodeType: BarcodeType.ExternalQR,
+    });
+  });
+});
+
+describe("a handheld scanner", () => {
+  // A keyboard-wedge scanner types the code into an input, so nothing knows
+  // the symbology. It must reach the same answer the camera does.
+  async function typeIn(rawValue: string) {
+    await handleScannerInputValue({
+      rawValue,
+      paused: false,
+      onCodeDetectionSuccess,
+      allowNonShelfCodes: false,
+    });
+
+    expect(onCodeDetectionSuccess).toHaveBeenCalledTimes(1);
+
+    return onCodeDetectionSuccess.mock.calls[0][0];
+  }
+
+  it("resolves an outside QR url as an external QR", async () => {
+    expect(await typeIn("http://other-vendor.example/qr/01383d6c")).toEqual({
+      value: "http://other-vendor.example/qr/01383d6c",
+      type: "barcode",
+      barcodeType: BarcodeType.ExternalQR,
+    });
+  });
+
+  it("resolves a Shelf QR url to its id", async () => {
+    expect(await typeIn(`${APP_ORIGIN}/qr/${QR_ID}`)).toEqual({
+      value: QR_ID,
+      type: "qr",
+    });
+  });
+
+  it("resolves a shortened Shelf QR url to its id", async () => {
+    expect(await typeIn(`https://short.example/${QR_ID}`)).toEqual({
+      value: QR_ID,
+      type: "qr",
+    });
+  });
+
+  it("resolves a raw QR id", async () => {
+    expect(await typeIn(QR_ID)).toEqual({ value: QR_ID, type: "qr" });
   });
 });
 
