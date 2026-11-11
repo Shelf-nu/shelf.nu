@@ -283,7 +283,7 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
  * @param visibility.userId - The viewer.
  * @returns A shallow copy with disallowed custodian identities emptied.
  */
-export function redactScannedItemForViewer<T extends RowWithCustody>(
+export function redactScannedItemForViewer<T extends object>(
   item: T,
   visibility: { canSeeAllCustody: boolean; userId: string }
 ): T {
@@ -291,7 +291,13 @@ export function redactScannedItemForViewer<T extends RowWithCustody>(
     return item;
   }
 
-  const [redacted] = redactCustodianForViewer([item], visibility);
+  // Structural probe: the scanner endpoints build their `include` at runtime,
+  // so Prisma types `custody` as bare scalars although the custodian is
+  // selected. Read the row as carrying custody and redact what is there.
+  const [redacted] = redactCustodianForViewer(
+    [item as RowWithCustody],
+    visibility
+  ) as T[];
 
   // Kit members: structural probe, for the reason `BookingCustodianCarrier`
   // gives. An asset's own `assetKits` entries carry no `asset` and pass as is.

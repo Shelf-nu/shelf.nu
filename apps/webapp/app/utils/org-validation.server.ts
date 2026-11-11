@@ -84,8 +84,8 @@ export type OrgValidationTxClient = {
   teamMember: {
     findFirst: (args: {
       where: { id: string; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string } | null>;
+      select: { id: true; userId: true };
+    }) => Promise<{ id: string; userId: string | null } | null>;
     findMany: (args: {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };

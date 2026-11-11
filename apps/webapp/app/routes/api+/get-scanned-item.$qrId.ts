@@ -15,7 +15,6 @@ import {
   ScannerPickerContextSchema,
   type ScannerPickerMeta,
 } from "~/modules/scanner/picker-meta.server";
-import type { RowWithCustody } from "~/utils/custody-visibility.server";
 import { redactScannedItemForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -59,7 +58,7 @@ export type KitFromQr = KitFromScanner;
  */
 type ScannedBarcodeMatch = {
   id: string;
-  asset: (AssetWithResolvableImage & { id: string } & RowWithCustody) | null;
+  asset: (AssetWithResolvableImage & { id: string }) | null;
   kit: KitFromScanner | null;
 };
 
@@ -84,7 +83,7 @@ type ScannedBarcodeMatch = {
  * @returns The asset as the endpoint responds with it.
  */
 async function serializeScannedAsset<
-  T extends AssetWithResolvableImage & { id: string } & RowWithCustody,
+  T extends AssetWithResolvableImage & { id: string },
 >({
   asset,
   organizationId,
