@@ -206,6 +206,21 @@ export function resolveTappedQr(
  */
 export function useDeepLinkHandler() {
   useEffect(() => {
+    // The launch link opens after a short delay. A different link arriving
+    // first, or the hook unmounting, cancels it so it cannot cover the newer
+    // screen. The same URL arriving again as a `url` event does not cancel
+    // it: that is the launch link delivered twice, not a newer one.
+    let disposed = false;
+    let launchUrl: string | undefined;
+    let launchTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastEventUrl: string | undefined;
+
+    /** Stops a scheduled launch-link navigation, if one is pending. */
+    function cancelLaunchLink() {
+      if (launchTimer) clearTimeout(launchTimer);
+      launchTimer = undefined;
+    }
+
     /**
      * Opens a link that arrives while the app is running, unless the router
      * opens it itself.
@@ -213,6 +228,8 @@ export function useDeepLinkHandler() {
      * @param event - the `url` event from expo-linking
      */
     function handleUrl(event: { url: string }) {
+      lastEventUrl = event.url;
+      if (event.url !== launchUrl) cancelLaunchLink();
       const link = parseDeepLink(event.url);
       if (
         isOpenedByRouter({
@@ -263,7 +280,9 @@ export function useDeepLinkHandler() {
     // Handle the URL that launched the app (cold start). `launchAction`
     // decides what to open; links the router opens itself come back `none`.
     Linking.getInitialURL().then((url) => {
-      if (!url) return;
+      if (!url || disposed) return;
+      // A different link already arrived: it is newer than the launch link.
+      if (lastEventUrl && lastEventUrl !== url) return;
       const link = parseDeepLink(url);
       const action = launchAction({
         url,
@@ -273,15 +292,21 @@ export function useDeepLinkHandler() {
       // The delay lets navigation mount.
       if (action.kind === "route") {
         const { route } = action;
-        setTimeout(() => openLinkedRoute(route), 500);
+        launchUrl = url;
+        launchTimer = setTimeout(() => openLinkedRoute(route), 500);
       } else if (action.kind === "link") {
-        setTimeout(() => navigateToLink(link), 500);
+        launchUrl = url;
+        launchTimer = setTimeout(() => navigateToLink(link), 500);
       }
     });
 
     // Handle URLs received while the app is already open (warm start)
     const subscription = Linking.addEventListener("url", handleUrl);
 
-    return () => subscription.remove();
+    return () => {
+      disposed = true;
+      cancelLaunchLink();
+      subscription.remove();
+    };
   }, []);
 }
