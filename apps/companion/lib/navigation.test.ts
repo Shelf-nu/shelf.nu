@@ -1,6 +1,7 @@
 /**
- * Tests for leaving the booking scanner: `returnToBooking` goes back to the
- * booking the scanner sits on, on the frame after the call.
+ * Tests for leaving the booking scanner: `returnToBooking` goes back through
+ * the scanner screen's own navigation, on the frame after the call, and never
+ * through the global router (which acts on whatever tab is in front).
  *
  * @see {@link file://./navigation.ts}
  */
@@ -41,7 +42,7 @@ mock.module("expo-web-browser", {
   },
 });
 
-let returnToBooking: () => void;
+let returnToBooking: (scannerNavigation: { goBack: () => void }) => void;
 
 before(async () => {
   // why: Node has no requestAnimationFrame; the fake holds callbacks until
@@ -58,6 +59,9 @@ beforeEach(() => {
   frames = [];
 });
 
+/** The scanner screen's navigation; records into the same call list. */
+const scannerNavigation = { goBack: () => calls.push("scanner.goBack") };
+
 /** Runs every waiting frame callback. */
 function runFrame() {
   const pending = frames;
@@ -65,15 +69,15 @@ function runFrame() {
   for (const cb of pending) cb();
 }
 
-test("returnToBooking goes back, the path the discard guard sees", () => {
-  returnToBooking();
+test("returnToBooking goes back through the scanner's own navigation, not the router", () => {
+  returnToBooking(scannerNavigation);
   runFrame();
-  assert.deepEqual(calls, ["back"]);
+  assert.deepEqual(calls, ["scanner.goBack"]);
 });
 
 test("returnToBooking waits for the next frame, so it is safe in an Alert button", () => {
-  returnToBooking();
+  returnToBooking(scannerNavigation);
   assert.deepEqual(calls, []);
   runFrame();
-  assert.deepEqual(calls, ["back"]);
+  assert.deepEqual(calls, ["scanner.goBack"]);
 });

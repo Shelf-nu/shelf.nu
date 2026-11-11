@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { useRouter, useIsFocused } from "expo-router";
+import { useRouter, useIsFocused, useNavigation } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
@@ -264,6 +264,9 @@ function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
 
 function ScannerContent({ booking }: ScannerScreenProps) {
   const router = useRouter();
+  // This screen's own navigation: the booking scanner leaves through it, so
+  // going back always removes this screen, whichever tab is in front.
+  const navigation = useNavigation();
   const bookingId = booking?.bookingId;
   const bookingAction = booking?.action;
   const isFocused = useIsFocused();
@@ -2373,7 +2376,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    returnToBooking();
+                    returnToBooking(navigation);
                   },
                 },
               ]
@@ -2490,7 +2493,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          returnToBooking();
+          returnToBooking(navigation);
         },
       },
     ]);
@@ -2741,7 +2744,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                   // The check-in mutated the booking — flag the detail to
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
-                  if (result?.isComplete) returnToBooking();
+                  if (result?.isComplete) returnToBooking(navigation);
                 },
               },
             ]);
@@ -2862,7 +2865,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
               // Nothing left to scan.
-              returnToBooking();
+              returnToBooking(navigation);
             }
           },
         },
@@ -3238,7 +3241,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             {isBookingMode ? (
               <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
-                  onPress={returnToBooking}
+                  onPress={() => returnToBooking(navigation)}
                   accessibilityLabel="Go back"
                   accessibilityRole="button"
                 >
