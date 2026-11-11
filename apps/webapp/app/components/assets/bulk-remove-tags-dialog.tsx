@@ -1,44 +1,12 @@
-import { useEffect, useMemo } from "react";
-import { useFetcher } from "react-router";
+import { useMemo } from "react";
 import { useZorm } from "react-zorm";
-import {
-  type TagsFetcherData,
-  BulkUpdateTagsSchema,
-} from "./bulk-assign-tags-dialog";
+import { BulkUpdateTagsSchema } from "./bulk-assign-tags-dialog";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
-import { TagsAutocomplete } from "../tag/tags-autocomplete";
+import { BulkTagsPicker } from "../tag/bulk-tags-picker";
 
 export default function BulkRemoveTagsDialog() {
   const zo = useZorm("BulkRemoveTags", BulkUpdateTagsSchema);
-
-  const fetcher = useFetcher<TagsFetcherData>();
-
-  const suggestions = useMemo(() => {
-    if (!fetcher.data?.filters) {
-      return [];
-    }
-
-    return fetcher.data.filters.map((tagResponse) => ({
-      label: tagResponse.name,
-      value: tagResponse.id,
-    }));
-  }, [fetcher.data]);
-
-  useEffect(() => {
-    void fetcher.submit(
-      {
-        name: "tag",
-        queryKey: "name",
-        queryValue: "",
-      },
-      {
-        method: "GET",
-        action: "/api/model-filters",
-      }
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Handle validation errors
   const validationErrors = useMemo(() => {
@@ -66,7 +34,7 @@ export default function BulkRemoveTagsDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
-            <TagsAutocomplete existingTags={[]} suggestions={suggestions} />
+            <BulkTagsPicker />
 
             {validationErrors.tags && (
               <p className="text-sm text-error-500">{validationErrors.tags}</p>
