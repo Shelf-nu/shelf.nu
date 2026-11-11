@@ -120,6 +120,7 @@ function pendingInvite(
     roles,
     status: InviteStatuses.PENDING,
     expiresAt: new Date(Date.now() + 86_400_000),
+    createdAt: new Date("2026-01-01T00:00:00Z"),
     inviteeTeamMember: {
       id: "tm-1",
       name: "Invitee Person",
@@ -276,9 +277,10 @@ describe("updateInviteStatus: claiming the invite", () => {
   });
 
   it("releases the claim when granting access fails", async () => {
-    dbMock.invite.findFirst.mockResolvedValue(
-      pendingInvite([OrganizationRoles.BASE])
-    );
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.BASE]))
+      // The release finds no newer invite to the same person.
+      .mockResolvedValueOnce(null);
     dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
@@ -295,9 +297,10 @@ describe("updateInviteStatus: claiming the invite", () => {
   });
 
   it("releases the claim when recording the invitee fails", async () => {
-    dbMock.invite.findFirst.mockResolvedValue(
-      pendingInvite([OrganizationRoles.BASE])
-    );
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.BASE]))
+      // The release finds no newer invite to the same person.
+      .mockResolvedValueOnce(null);
     // The last write of the acceptance transaction fails.
     dbMock.invite.update.mockRejectedValueOnce(new Error("write failed"));
 
@@ -355,6 +358,34 @@ describe("updateInviteStatus: claiming the invite", () => {
       })
     );
     expect(createUserOrAttachOrg).not.toHaveBeenCalled();
+  });
+
+  it("closes a claimed invite instead of reopening it when a newer invite replaced it", async () => {
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.ADMIN]))
+      // The release finds a newer invite to the same person.
+      .mockResolvedValueOnce({ id: "invite-2" });
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    expect(dbMock.invite.findFirst).toHaveBeenLastCalledWith({
+      where: {
+        organizationId: "org-1",
+        inviteeEmail: expect.anything(),
+        id: { not: "invite-1" },
+        createdAt: { gt: new Date("2026-01-01T00:00:00Z") },
+      },
+      select: { id: true },
+    });
+    expect(dbMock.invite.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.ACCEPTED,
+      },
+      data: { status: InviteStatuses.INVALIDATED },
+    });
   });
 });
 

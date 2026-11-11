@@ -555,6 +555,44 @@ async function claimPendingInvite(
 }
 
 /**
+ * Hands a claimed invite back after its acceptance failed.
+ *
+ * The invite goes back to PENDING so the invitee can retry, unless a newer
+ * invite to the same person in the workspace now exists: a replacement sent
+ * while the acceptance was running did not close this one (it was not pending
+ * then), and reopening it would let it grant its older roles. In that case it
+ * is closed instead. The check and the write run in one transaction.
+ *
+ * @param invite - The invite that was claimed
+ * @param status - The status the claim wrote
+ */
+async function releaseInviteClaim(
+  invite: Pick<Invite, "id" | "organizationId" | "inviteeEmail" | "createdAt">,
+  status: Invite["status"]
+) {
+  await db.$transaction(async (tx) => {
+    const newerInvite = await tx.invite.findFirst({
+      where: {
+        organizationId: invite.organizationId,
+        inviteeEmail: caseInsensitiveEmailFilter(invite.inviteeEmail),
+        id: { not: invite.id },
+        createdAt: { gt: invite.createdAt },
+      },
+      select: { id: true },
+    });
+
+    await tx.invite.updateMany({
+      where: { id: invite.id, organizationId: invite.organizationId, status },
+      data: {
+        status: newerInvite
+          ? InviteStatuses.INVALIDATED
+          : InviteStatuses.PENDING,
+      },
+    });
+  });
+}
+
+/**
  * Invalidates every other pending invite to the same person in the invite's
  * workspace. Once a person answers one invite, any other pending one (sent
  * twice by mistake, or resent) is moot.
@@ -689,7 +727,8 @@ export async function updateInviteStatus({
 
       /**
        * The invite is claimed from here on. If granting access fails, the claim
-       * is released so the invite stays answerable.
+       * is released (see `releaseInviteClaim`) so the invite stays answerable,
+       * unless a newer invite has replaced it meanwhile.
        */
       try {
         const { firstName, lastName } = splitName(inviteeTeamMember.name);
@@ -747,24 +786,19 @@ export async function updateInviteStatus({
           });
         });
       } catch (cause) {
-        await db.invite
-          .updateMany({
-            where: { id, organizationId: invite.organizationId, status },
-            data: { status: InviteStatuses.PENDING },
-          })
-          .catch((releaseCause) => {
-            // The original failure is what the invitee sees. A failed release
-            // leaves the invite ACCEPTED without access, so it must be logged.
-            Logger.error(
-              new ShelfError({
-                cause: releaseCause,
-                message:
-                  "Failed to release a claimed invite after its acceptance failed",
-                additionalData: { inviteId: id },
-                label,
-              })
-            );
-          });
+        await releaseInviteClaim(invite, status).catch((releaseCause) => {
+          // The original failure is what the invitee sees. A failed release
+          // leaves the invite ACCEPTED without access, so it must be logged.
+          Logger.error(
+            new ShelfError({
+              cause: releaseCause,
+              message:
+                "Failed to release a claimed invite after its acceptance failed",
+              additionalData: { inviteId: id },
+              label,
+            })
+          );
+        });
         throw cause;
       }
     } else {
