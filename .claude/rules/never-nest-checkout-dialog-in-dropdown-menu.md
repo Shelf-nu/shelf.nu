@@ -7,34 +7,23 @@ paths:
 
 # Never Put `CheckoutDialog` Inside A `DropdownMenu`
 
-A dialog portals out of the menu in the DOM, but React still bubbles its events
-through its component parents. A Radix `DropdownMenuItem` focuses itself on
-every mouse `pointermove` it sees, so moving the mouse over the dialog's "From
-location" picker pulls focus out of it, and the picker's popover list closes
-when focus leaves. The operator cannot pick a location. Nothing throws, and the
-dialog looks fine until someone tries it with a mouse.
+React bubbles a portaled dialog's events through its component parents, and a
+Radix `DropdownMenuItem` takes focus on every mouse move it sees. Inside a menu
+item, the dialog's "From location" picker loses focus as the mouse moves and its
+list closes, so no location can be picked. Nothing throws.
 
-The menu row only opens the dialog. Render the dialog outside `<DropdownMenu>`,
-controlled through its `open` / `onOpenChange` props:
+Render the dialog beside the menu, controlled, and open it from the item's
+`onSelect` (Enter and Space click the item, never a button inside it):
 
 ```tsx
-// ❌ Bad: the dialog's picker loses focus on mouse move
-<DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-  <CheckoutDialog booking={booking} variant="dropdown" />
-</DropdownMenuItem>
+// ❌ Bad
+<DropdownMenuItem><CheckoutDialog booking={booking} /></DropdownMenuItem>
 
-// ✅ Good: the row opens it, the dialog lives beside the menu
-<CheckoutDialog booking={booking} open={open} onOpenChange={setOpen} />
-<DropdownMenu modal={false}>
-  …
-  <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-    <Button type="button" variant="link" onClick={() => { setOpen(true); closeMenu(); }}>
-      Check out
-    </Button>
-  </DropdownMenuItem>
-</DropdownMenu>
+// ✅ Good
+<CheckoutDialog booking={booking} open={open} onOpenChange={setOpen}
+  returnFocusTo={() => triggerRef.current} />
+<DropdownMenuItem onSelect={(e) => { e.preventDefault(); setOpen(true); closeMenu(); }}>
 ```
 
-The same holds for any dialog with a popover, select, date picker or combobox.
-References: `checkout-dropdown.tsx`, `list-bulk-actions-dropdown.tsx`. Pinned by
-the "pick a From location with the mouse" case in `checkout-dropdown.test.tsx`.
+The same holds for any dialog with a popover, select or date picker. See
+`checkout-dropdown.tsx`; pinned by `checkout-dropdown.test.tsx`.
