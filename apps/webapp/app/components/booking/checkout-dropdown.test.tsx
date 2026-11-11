@@ -2,14 +2,16 @@
  * Tests for {@link CheckoutDropdown}: which check-out entry points a booking
  * header offers, that the explicit check-out requirement removes both
  * quick options ("Check out" and "Check out remaining") in favour of the
- * scanner, and that each quick option asks once before it submits.
+ * scanner, that each quick option asks once before it submits, and that the
+ * menu's dialog keeps its "From location" select usable with a mouse.
  *
  * @see {@link file://./checkout-dropdown.tsx}
  */
 import { useState, type ComponentProps } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 
 import CheckoutDropdown from "./checkout-dropdown";
 
@@ -66,6 +68,35 @@ const booking = {
   id: "booking-1",
   name: "Field kit",
   from: new Date(Date.now() - 60 * 60 * 1000),
+};
+
+/** A pool kept at two locations, so the check-out asks where units leave from. */
+const sourceQuestion: CheckoutSourceQuestion = {
+  sliceId: "slice-1",
+  assetId: "asset-1",
+  title: "Light bulbs",
+  unitOfMeasure: "pcs",
+  quantity: 3,
+  placements: [
+    {
+      locationId: "loc-warehouse",
+      name: "Warehouse",
+      placed: 8,
+      inCustody: 0,
+      onBooking: 0,
+      left: 8,
+    },
+    {
+      locationId: "loc-studio",
+      name: "Studio",
+      placed: 5,
+      inCustody: 0,
+      onBooking: 0,
+      left: 5,
+    },
+  ],
+  unplaced: 0,
+  defaultLocationId: "loc-warehouse",
 };
 
 const SCAN_PAGE = "/bookings/booking-1/overview/checkout-assets";
@@ -191,5 +222,34 @@ describe("CheckoutDropdown", () => {
     const submits = quickCheckoutSubmits(document.body);
     expect(submits).toHaveLength(1);
     expect(submits[0]).toHaveAttribute("value", "checkOutRemaining");
+  });
+
+  it("keeps the From location select focused while the mouse moves over it", () => {
+    // A menu item takes focus on every mouse move it sees, and React bubbles
+    // a portaled dialog's events to its component parents. A blur shuts a
+    // native select's option list, so the operator could never pick one.
+    menuOpen = true;
+    renderDropdown({
+      canFullCheckOut: true,
+      canCheckOutRemaining: false,
+      canScanCheckOut: true,
+      sourceQuestions: [sourceQuestion],
+    });
+
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByRole("button", {
+        name: "Check out",
+      })
+    );
+    const select = screen.getByRole("combobox");
+    select.focus();
+    const onBlur = vi.fn();
+    select.addEventListener("blur", onBlur);
+
+    fireEvent.pointerMove(select, { pointerType: "mouse" });
+
+    expect(onBlur).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(select);
+    expect(screen.getAllByRole("option")).toHaveLength(2);
   });
 });

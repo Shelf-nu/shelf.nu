@@ -22,11 +22,19 @@
  * quick option is refused on the server, so the component renders only the
  * "Scan to check out" button.
  *
+ * The menu row only opens the check-out dialog; the dialog itself renders
+ * beside the menu, never inside a `DropdownMenuItem`. React bubbles a portaled
+ * dialog's events through its component parents, and a menu item takes focus
+ * on every mouse move, which shuts the dialog's "From location" select before
+ * an option can be picked.
+ *
  * @see {@link file://./checkout-dialog.tsx} - the "Check Out" trigger/flow
  * @see {@link file://./forms/edit-booking-form.tsx} - the call site
  */
-import { ChevronRightIcon, ScanLine } from "lucide-react";
+import { useState } from "react";
+import { ChevronRightIcon, ScanLine, Zap } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useDisabled } from "~/hooks/use-disabled";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { tw } from "~/utils/tw";
 import CheckoutDialog, { type CheckoutDialogBooking } from "./checkout-dialog";
@@ -114,6 +122,9 @@ export default function CheckoutDropdown({
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
+  /** The menu row's check-out dialog, rendered outside the menu. */
+  const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
+  const isNavigating = useDisabled();
 
   function closeMenu() {
     setOpen(false);
@@ -223,6 +234,20 @@ export default function CheckoutDropdown({
         <div className="fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-700/50 transition duration-300 ease-in-out md:hidden" />
       )}
 
+      <CheckoutDialog
+        booking={booking}
+        disabled={quickCheckoutDisabled}
+        portalContainer={portalContainer}
+        formId={formId}
+        intent={quickCheckoutIntent}
+        label={quickCheckoutLabel}
+        suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+        sourceQuestions={sourceQuestions}
+        allowNewEndDate={allowNewEndDate && canFullCheckOut}
+        open={checkoutDialogOpen}
+        onOpenChange={setCheckoutDialogOpen}
+      />
+
       <DropdownMenu
         modal={false}
         open={open}
@@ -274,24 +299,25 @@ export default function CheckoutDropdown({
           portalContainer={portalContainer}
         >
           <div className="fixed bottom-0 left-0">
-            {/* The row opens a dialog that lives inside this menu, so selecting
-                it must not close the menu: closing unmounts the dialog. */}
             <DropdownMenuItem
               className="py-1 lg:p-0"
               onSelect={(event) => event.preventDefault()}
             >
-              <CheckoutDialog
-                booking={booking}
-                disabled={quickCheckoutDisabled}
-                portalContainer={portalContainer}
-                formId={formId}
-                intent={quickCheckoutIntent}
-                label={quickCheckoutLabel}
-                variant="dropdown"
-                suppressEarlyCheckoutPrompt={canCheckOutRemaining}
-                sourceQuestions={sourceQuestions}
-                allowNewEndDate={allowNewEndDate && canFullCheckOut}
-              />
+              <Button
+                type="button"
+                variant="link"
+                width="full"
+                className="w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                disabled={quickCheckoutDisabled || isNavigating}
+                onClick={() => {
+                  setCheckoutDialogOpen(true);
+                  closeMenu();
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <Zap className="size-4" /> {quickCheckoutLabel}
+                </span>
+              </Button>
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">
               {scanToCheckOutLink}

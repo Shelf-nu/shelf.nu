@@ -176,6 +176,18 @@ type CheckoutDialogProps = {
    * the dialog either way.
    */
   confirm?: boolean;
+  /**
+   * Opens the dialog from outside. When set, the dialog renders no trigger of
+   * its own and always asks (`confirm` is ignored): the caller owns the
+   * control that opens it. Use this to open the dialog from a menu row, and
+   * render the dialog outside the `DropdownMenu`, never inside a
+   * `DropdownMenuItem`. React bubbles the dialog's events through the item,
+   * which takes focus on every mouse move, and that shuts the "From location"
+   * select before an option can be picked.
+   */
+  open?: boolean;
+  /** Called when a controlled dialog asks to open or close. Pair with `open`. */
+  onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -249,6 +261,8 @@ export default function CheckoutDialog({
   allowNewEndDate = false,
   expiredRescheduleHint = "Or use Check out on the booking page to give the whole booking a new end date.",
   confirm = true,
+  open: controlledOpen,
+  onOpenChange: onControlledOpenChange,
 }: CheckoutDialogProps) {
   const isNavigating = useDisabled();
   const { prefs } = useDateFormatter();
@@ -335,7 +349,14 @@ export default function CheckoutDialog({
    * is gone, and cancelling Radix's focus restore keeps focus on that field
    * rather than pulling it back to the trigger.
    */
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  /** A caller passing `open` drives the dialog and supplies its own trigger. */
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    onControlledOpenChange?.(next);
+  };
   /**
    * "Check out with new end date" with the date field cleared. Caught on the
    * button, not with a native `required`: both expired buttons post the same
@@ -374,7 +395,7 @@ export default function CheckoutDialog({
     form.reportValidity();
   };
 
-  if (isPlainCheckout && !confirm) {
+  if (isPlainCheckout && !confirm && !isControlled) {
     return (
       <Button
         {...triggerProps}
@@ -389,9 +410,11 @@ export default function CheckoutDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogTrigger asChild>
-        <Button {...triggerProps} disabled={isDisabled} type="button" />
-      </AlertDialogTrigger>
+      {isControlled ? null : (
+        <AlertDialogTrigger asChild>
+          <Button {...triggerProps} disabled={isDisabled} type="button" />
+        </AlertDialogTrigger>
+      )}
 
       <AlertDialogContent
         portalProps={{ container: portalContainer }}
