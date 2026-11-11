@@ -212,6 +212,39 @@ describe("createSessionBlock", () => {
     assert.equal(await createSessionBlock(flaky).isBlocked(key), true);
   });
 
+  it("keeps both blocks when two land at once and the store finishes them out of order", async () => {
+    const store = mapStore({ [BLOCKED_SESSION_KEYS]: "[]" });
+    let release: () => void = () => {};
+    let held = false;
+    const flaky = {
+      ...store,
+      setItem: async (k: string, v: string) => {
+        // The first list write is held until the second has been issued, as
+        // AsyncStorage on Android may finish them.
+        if (k === BLOCKED_SESSION_KEYS && !held) {
+          held = true;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return store.setItem(k, v);
+      },
+    };
+    const block = createSessionBlock(flaky);
+    await block.isBlocked("warm-up"); // the list is loaded
+
+    const first = block.block("sb-first-auth-token");
+    const second = block.block("sb-second-auth-token");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release();
+    await Promise.all([first, second]);
+
+    assert.deepEqual(JSON.parse(store.data.get(BLOCKED_SESSION_KEYS)!).sort(), [
+      "sb-first-auth-token",
+      "sb-second-auth-token",
+    ]);
+  });
+
   it("unblock lifts it, for the next sign-in", async () => {
     const store = mapStore();
     const block = createSessionBlock(store);

@@ -185,8 +185,11 @@ export function useScanQueue({
       // closes, within that session, until a newer screen for the same audit
       // opens: that screen loaded the draft and owns its scans now, so its
       // Resume sends them and its Discard means none are sent.
+      // A full server switch ends the queue for good: its audit ids belong to
+      // the server the app left, even when the new server has the same user.
       mayContinue: () =>
         ownerMayContinue() &&
+        serverScope.current() === serverScopeRef.current &&
         (mountedRef.current ||
           !auditId ||
           newestScreenFor.get(auditId) === screenRef.current),
@@ -265,6 +268,8 @@ export function useScanQueue({
       // Only the owner, signed in, adds scans: never another account, and
       // never a signed-out scanner into the previous owner's draft.
       if (!gate.mayUse()) return false;
+      // Nor after a full server switch: the audit is the outgoing server's.
+      if (serverScope.current() !== serverScopeRef.current) return false;
       const queued = { ...incoming, queuedAt: incoming.queuedAt ?? Date.now() };
       // A new count replaces any older count for the same asset still
       // waiting. The request in flight (queue head while processing) stays:

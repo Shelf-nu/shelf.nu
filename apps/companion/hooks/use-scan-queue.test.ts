@@ -298,5 +298,22 @@ describe("useScanQueue", () => {
     assert.deepEqual(server.sent, ["a-1"]);
     second.unmount();
   });
-});
 
+  it("stops sending and refuses scans after a server switch", async () => {
+    const { serverScope } = await import("../lib/server/server-scope");
+    const queue = renderQueue("user_a");
+    server.hold = true;
+    queue.latest.current!.enqueueScan(entry("a-1"));
+    queue.latest.current!.enqueueScan(entry("a-2"));
+
+    serverScope.bump(); // a full server switch
+    server.hold = false;
+    server.pending.shift()!();
+    await flush();
+    await flush();
+
+    assert.deepEqual(server.sent, ["a-1"]); // only the request in flight
+    assert.equal(queue.latest.current!.enqueueScan(entry("a-3")), false);
+    queue.unmount();
+  });
+});

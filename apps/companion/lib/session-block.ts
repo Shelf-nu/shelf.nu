@@ -183,15 +183,27 @@ export function createSessionBlock(store: BlockStore): SessionBlock {
     }
   }
 
-  /** Writes the main list. Returns false when the write failed. */
-  async function save(keys: Set<string>): Promise<boolean> {
-    try {
-      await store.setItem(BLOCKED_SESSION_KEYS, JSON.stringify([...keys]));
-      return true;
-    } catch {
-      // The in-memory block still holds for this app session.
-      return false;
-    }
+  /** The last main-list write queued; the next one waits for it. */
+  let saveTail: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Writes the main list, in call order, with the set as it is at call time.
+   * AsyncStorage on Android may finish two writes in either order, and an
+   * older snapshot landing last would drop a block added since.
+   *
+   * @returns False when the write failed
+   */
+  function save(keys: Set<string>): Promise<boolean> {
+    const json = JSON.stringify([...keys]);
+    const run = saveTail
+      .catch(() => {})
+      .then(() => store.setItem(BLOCKED_SESSION_KEYS, json));
+    saveTail = run;
+    // On a failure the in-memory block still holds for this app session.
+    return run.then(
+      () => true,
+      () => false
+    );
   }
 
   return {
