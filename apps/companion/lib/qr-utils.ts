@@ -212,9 +212,11 @@ function isNotFound(answer: ScanLookupAnswer): boolean {
 /**
  * Runs a plan against the two lookups and returns the answer to render.
  *
- * The barcode fallback replaces the QR route's answer only when it says more:
- * a hit, or a refusal that knows the value (422 linked to nothing, 409 in
- * several workspaces). Otherwise the QR route's answer stays.
+ * After a QR-route miss, the barcode fallback's answer is the one to render:
+ * a hit, a refusal that knows the value (422 linked to nothing, 409 in several
+ * workspaces), or a failed request, which must not be hidden behind the QR
+ * route's "not found". Only when the fallback also says not found, or refuses
+ * the lookup outright (403), does the QR route's answer stay.
  *
  * @param plan - From {@link planScan}.
  * @param data - The raw scanned value, sent whole to the barcode lookup.
@@ -258,9 +260,9 @@ export async function runScanPlan<
   }
 
   const fallback = await lookups.barcode(data);
-  const saysMore =
-    fallback.data != null || fallback.status === 422 || fallback.status === 409;
-  return saysMore
-    ? { kind: "barcode", answer: fallback }
-    : { kind: "qr", lookupId: plan.lookupId, answer };
+  // Not found there too, or refused outright: the QR route's answer stands.
+  const addsNothing = isNotFound(fallback) || fallback.status === 403;
+  return addsNothing
+    ? { kind: "qr", lookupId: plan.lookupId, answer }
+    : { kind: "barcode", answer: fallback };
 }

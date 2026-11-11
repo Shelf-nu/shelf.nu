@@ -66,8 +66,13 @@ const SERVER = {
   forbiddenQrIds: new Set(["forbidden00"]),
   /** A value something in front of the server answers 404 for. */
   proxyRejected: new Set(["http://other-vendor.example/qr/proxied1"]),
-  /** A value the barcode route refuses outright (403). */
-  forbiddenBarcodes: new Set(["http://other-vendor.example/qr/refused1"]),
+  /** Values the barcode route refuses outright (403). */
+  forbiddenBarcodes: new Set([
+    "http://other-vendor.example/qr/refused1",
+    "refusedcode",
+  ]),
+  /** A value whose barcode request gets no answer (network failure). */
+  unreachableBarcodes: new Set(["noanswercode"]),
 };
 
 type Answer = ScanLookupAnswer & { data: string | null; error?: string };
@@ -110,6 +115,9 @@ function fakeLookups(options: { offline?: boolean } = {}) {
         : SERVER.forbiddenBarcodes.has(value)
         ? 403
         : 404;
+      if (SERVER.unreachableBarcodes.has(value)) {
+        return Promise.resolve(offline);
+      }
       if (SERVER.proxyRejected.has(value)) {
         // A 404 that is not the API's envelope: no errorDetails.
         return Promise.resolve({ data: null, error: "refused", status: 404 });
@@ -283,6 +291,21 @@ const ROWS: Row[] = [
     // 409 knows the value too.
     calls: ["qr:twoworkspaces", "barcode:twoworkspaces"],
     outcome: { kind: "barcode", found: false },
+  },
+  {
+    name: "bare value whose barcode lookup gets no answer",
+    input: "noanswercode",
+    // The QR route said not found, but the barcode lookup failed: show that
+    // failure, not a "not found" the app cannot stand behind.
+    calls: ["qr:noanswercode", "barcode:noanswercode"],
+    outcome: { kind: "barcode", found: false },
+  },
+  {
+    name: "bare value the barcode route refuses",
+    input: "refusedcode",
+    // A 403 says nothing about the value, so the QR route's answer stays.
+    calls: ["qr:refusedcode", "barcode:refusedcode"],
+    outcome: { kind: "qr", found: false },
   },
   {
     name: "short link to a QR in a workspace the user is not in",
