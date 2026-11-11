@@ -176,15 +176,19 @@ export function useTagSuggestions({ useFor }: { useFor?: TagUseFor } = {}) {
   );
 
   const activeFetcher = query === "" ? firstPageFetcher : searchFetcher;
+  const isSearching = isDebouncePending || activeFetcher.state !== "idle";
+
+  // A fetcher keeps its last response while the next request runs, so the
+  // error is reported only once the search behind it has settled.
   const error =
-    activeFetcher.data && !activeFetcher.data.filters
+    !isSearching && activeFetcher.data && !activeFetcher.data.filters
       ? activeFetcher.data.error?.message ?? "Could not search tags"
       : undefined;
 
   return {
     suggestions: query === "" ? firstPage : lastSearch.suggestions,
     onInputChange,
-    isSearching: isDebouncePending || activeFetcher.state !== "idle",
+    isSearching,
     error,
   };
 }

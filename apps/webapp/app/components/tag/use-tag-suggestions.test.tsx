@@ -176,6 +176,31 @@ describe("useTagSuggestions", () => {
     expect(result.current.error).toBe("Request timed out");
   });
 
+  it("hides a failed search's error while the next search runs", () => {
+    const { result, rerender } = renderHook(() => useTagSuggestions());
+    act(() => result.current.onInputChange("ZZ"));
+    flushDebounce();
+    searchData = { error: { message: "Request timed out" } };
+    rerender();
+    expect(result.current.error).toBe("Request timed out");
+
+    // Typing again: the debounce is pending, the old error must go.
+    act(() => result.current.onInputChange("ZZ T"));
+    expect(result.current.error).toBeUndefined();
+
+    // The retry is in flight; the fetcher still holds the failed response.
+    flushDebounce();
+    searchState = "loading";
+    rerender();
+    expect(result.current.error).toBeUndefined();
+
+    // The retry fails too: its error shows.
+    searchState = "idle";
+    searchData = { error: { message: "Still timing out" } };
+    rerender();
+    expect(result.current.error).toBe("Still timing out");
+  });
+
   it("is searching while a typed search runs", () => {
     const { result, rerender } = renderHook(() => useTagSuggestions());
     act(() => result.current.onInputChange("ZZ"));
