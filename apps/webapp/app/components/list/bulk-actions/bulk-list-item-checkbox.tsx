@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkSelectionKey,
+  clearSelectedBulkItemsAtom,
   disabledBulkItemsAtom,
   removeSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
@@ -13,6 +14,7 @@ import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Td } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import type { ListItemData } from "../list-item";
 
@@ -23,12 +25,19 @@ type BulkListItemCheckboxProps = {
    * To select a kit, we need to select all items in the kit.
    */
   bulkItems?: ListItemData[];
+  /**
+   * Every row on the page this checkbox sits on. Unticking one row while
+   * "Select all" is on keeps the rest of these ticked. Without it, the
+   * selection falls back to the rows "Select all" listed.
+   */
+  pageItems?: ListItemData[];
   className?: string;
 };
 
 export default function BulkListItemCheckbox({
   item,
   bulkItems,
+  pageItems,
   className,
 }: BulkListItemCheckboxProps) {
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
@@ -36,6 +45,7 @@ export default function BulkListItemCheckbox({
   const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const removeSelectedBulkItems = useSetAtom(removeSelectedBulkItemsAtom);
+  const clearSelectedBulkItems = useSetAtom(clearSelectedBulkItemsAtom);
 
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -47,14 +57,33 @@ export default function BulkListItemCheckbox({
   const disabled = disabledBulkItems.some(
     (i) => bulkSelectionKey(i) === itemKey
   );
-  const checked = !!selectedBulkItems.find(
-    (i) => bulkSelectionKey(i) === itemKey
-  );
+  // "Select all" stores ALL_SELECTED_KEY, not the ids of rows on other pages,
+  // and the server acts on every row matching the list's filters. So with the
+  // key present every selectable row is ticked, listed or not.
+  const selectingAll = isSelectingAllItems(selectedBulkItems);
+  const listed = selectedBulkItems.some((i) => bulkSelectionKey(i) === itemKey);
+  const checked = listed || (selectingAll && !disabled);
 
   function handleBulkItemSelection(e: MouseEvent<HTMLTableCellElement>) {
     e.preventDefault();
     e.stopPropagation();
     if (disabled) return;
+
+    if (selectingAll) {
+      // The selection cannot say "every match except this row", so unticking
+      // a row leaves "Select all" and keeps what the reader sees ticked: this
+      // page, minus the row (and, for a kit row, its assets).
+      const untickedKeys = new Set(
+        [item, ...(bulkItems ?? [])].map(bulkSelectionKey)
+      );
+      const stillTicked = (pageItems ?? selectedBulkItems).filter(
+        (i) =>
+          i.id !== ALL_SELECTED_KEY && !untickedKeys.has(bulkSelectionKey(i))
+      );
+      clearSelectedBulkItems();
+      setSelectedBulkItems(stillTicked);
+      return;
+    }
 
     if (bulkItems && bulkItems.length > 0) {
       const itemsToSet = [...bulkItems, item];
