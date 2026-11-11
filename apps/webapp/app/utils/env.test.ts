@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  assertStrongSigningSecrets,
   findWeakSigningSecrets,
   getEnv,
+  warnAboutWeakSigningSecrets,
 } from "./env";
 import { ShelfError } from "./error";
 
@@ -254,26 +254,35 @@ describe("signing secrets in production", () => {
     }
   );
 
-  it("stops the server from starting, without printing the value", () => {
-    const start = () =>
-      assertStrongSigningSecrets(
-        {
-          SESSION_SECRET: "super-duper-s3cret",
-          INVITE_TOKEN_SECRET: "secret-test-invite",
-        },
-        "production"
-      );
+  it("logs a loud error without stopping the server or printing the value", () => {
+    const log = vi.fn();
 
-    expect(start).toThrow(ShelfError);
-    const message = (() => {
-      try {
-        start();
-        return "";
-      } catch (error) {
-        return (error as Error).message;
-      }
-    })();
+    const problems = warnAboutWeakSigningSecrets(
+      {
+        SESSION_SECRET: "super-duper-s3cret",
+        INVITE_TOKEN_SECRET: "secret-test-invite",
+      },
+      "production",
+      log
+    );
+
+    expect(problems).toHaveLength(2);
+    expect(log).toHaveBeenCalledTimes(1);
+    const message = log.mock.calls[0][0] as string;
+    expect(message).toMatch(/INSECURE CONFIGURATION/);
     expect(message).toMatch(/SESSION_SECRET.*INVITE_TOKEN_SECRET/);
     expect(message).not.toMatch(/super-duper-s3cret|secret-test-invite/);
+  });
+
+  it("stays quiet when the secrets are generated", () => {
+    const log = vi.fn();
+
+    warnAboutWeakSigningSecrets(
+      { SESSION_SECRET: STRONG, INVITE_TOKEN_SECRET: STRONG },
+      "production",
+      log
+    );
+
+    expect(log).not.toHaveBeenCalled();
   });
 });

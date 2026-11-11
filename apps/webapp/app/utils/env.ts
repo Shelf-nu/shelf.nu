@@ -200,31 +200,41 @@ export function findWeakSigningSecrets(
 }
 
 /**
- * Refuses to start a production server whose signing secrets are published
- * placeholders. Generate real ones with `openssl rand -hex 32`.
+ * Prints a loud error at boot when a production server signs with a
+ * published placeholder secret. The server still starts, so an upgrade never
+ * takes a self-hosted instance offline. Generate real secrets with
+ * `openssl rand -hex 32`.
  *
  * @param source - The environment to read (usually `process.env`)
  * @param nodeEnv - The NODE_ENV the server runs under
- * @throws {ShelfError} When {@link findWeakSigningSecrets} finds a problem
+ * @param log - Where the error is written (`console.error` by default)
+ * @returns The problems found; empty when the secrets are acceptable
  */
-export function assertStrongSigningSecrets(
+export function warnAboutWeakSigningSecrets(
   source: SigningSecrets,
-  nodeEnv: string | undefined
-) {
+  nodeEnv: string | undefined,
+  // why: the Logger module reads env, so it cannot be imported here
+  // eslint-disable-next-line no-console
+  log: (message: string) => void = console.error
+): string[] {
   const problems = findWeakSigningSecrets(source, nodeEnv);
-  if (problems.length === 0) return;
+  if (problems.length === 0) return problems;
 
-  throw new ShelfError({
-    cause: null,
-    message: `Refusing to start: ${problems.join(
-      "; "
-    )}. Generate a value with \`openssl rand -hex 32\`.`,
-    label: "Environment",
-  });
+  const banner = "!".repeat(72);
+  log(
+    [
+      banner,
+      `INSECURE CONFIGURATION: ${problems.join("; ")}.`,
+      "Anyone who knows that value can forge signed cookies and invite links.",
+      "Generate a new value with `openssl rand -hex 32`, set it and restart.",
+      banner,
+    ].join("\n")
+  );
+  return problems;
 }
 
 if (!isBrowser) {
-  assertStrongSigningSecrets(process.env, process.env.NODE_ENV);
+  warnAboutWeakSigningSecrets(process.env, process.env.NODE_ENV);
 }
 
 export function initEnv() {

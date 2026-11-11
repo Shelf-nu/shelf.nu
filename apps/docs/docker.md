@@ -48,7 +48,7 @@ docker run -d \
 > - `your-instance-name` - Your Supabase project reference
 > - Other tokens and secrets as needed
 >
-> `SESSION_SECRET` and `INVITE_TOKEN_SECRET` sign session cookies and invite links. Generate each one once with `openssl rand -hex 32` and keep it: changing `SESSION_SECRET` signs everyone out, and changing `INVITE_TOKEN_SECRET` breaks invite links already sent. In production the server refuses to start when either one is an example value from these docs.
+> `SESSION_SECRET` and `INVITE_TOKEN_SECRET` sign session cookies and invite links. Generate each one once with `openssl rand -hex 32` and keep it: changing `SESSION_SECRET` signs everyone out, and changing `INVITE_TOKEN_SECRET` breaks invite links already sent. In production the server logs a loud `INSECURE CONFIGURATION` error at boot when either one is an example value from these docs.
 
 `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in the [Supabase Setup Guide](./supabase-setup.md).
 
