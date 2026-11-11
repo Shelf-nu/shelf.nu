@@ -19,6 +19,7 @@ export * from "./contract";
 // a bare `setActiveServer(CLOUD_SERVER)` at the call site.
 export {
   getActiveServer,
+  getKnownServerUrls,
   getServerVersion,
   hydrateActiveServer,
   subscribeToServerChange,

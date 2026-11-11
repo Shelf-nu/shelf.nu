@@ -22,6 +22,13 @@ type MultiSelectProps<T> = {
   placeholder?: string;
   hideLabel?: boolean;
   required?: boolean;
+  /**
+   * Called with the typed text on every change. Use it to search the server
+   * when `items` is only a page of the full list.
+   */
+  onInputChange?: (value: string) => void;
+  /** Text shown when no suggestion matches. Defaults to "No matching <label>". */
+  noOptionsText?: string;
 };
 
 export default function MultiSelect<T>({
@@ -38,6 +45,8 @@ export default function MultiSelect<T>({
   placeholder,
   hideLabel = false,
   required = false,
+  onInputChange,
+  noOptionsText,
 }: MultiSelectProps<T>) {
   /* This is a workaround for the SSR issue with react-tag-autocomplete */
   if (typeof document === "undefined") {
@@ -112,7 +121,8 @@ export default function MultiSelect<T>({
           suggestions={suggestions}
           onAdd={onAdd}
           onDelete={onDelete}
-          noOptionsText={`No matching ${label}`}
+          onInput={onInputChange}
+          noOptionsText={noOptionsText ?? `No matching ${label}`}
           placeholderText={placeholder}
           isInvalid={!!error}
           renderRoot={({ children, isDisabled }) => (
