@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { keepEndAfterStart } from "./booking-dates";
+import { clampToMinimum, keepEndAfterStart } from "./booking-dates";
 
 // ── keepEndAfterStart ────────────────────────────────────
 
@@ -85,4 +85,29 @@ test("keepEndAfterStart resolves the day in the given zone, not a fixed 24h", ()
   assert.ok(inUtc);
   assert.equal(inLosAngeles.toISOString(), "2026-03-08T17:00:00.000Z");
   assert.equal(inUtc.toISOString(), "2026-03-08T18:00:00.000Z");
+});
+
+// ── clampToMinimum ───────────────────────────────────────
+
+test("clampToMinimum keeps a value on or after the minimum", () => {
+  const minimum = new Date("2026-08-20T09:00:00Z");
+  const later = new Date("2026-08-21T09:00:00Z");
+
+  assert.equal(clampToMinimum(later, minimum), later);
+  assert.equal(clampToMinimum(minimum, minimum), minimum);
+});
+
+test("clampToMinimum raises a value earlier than the minimum to the minimum", () => {
+  const minimum = new Date("2026-08-20T09:00:00Z");
+
+  assert.equal(
+    clampToMinimum(new Date("2026-08-19T09:00:00Z"), minimum),
+    minimum
+  );
+});
+
+test("clampToMinimum leaves the value alone when there is no minimum", () => {
+  const value = new Date("2026-08-19T09:00:00Z");
+
+  assert.equal(clampToMinimum(value), value);
 });

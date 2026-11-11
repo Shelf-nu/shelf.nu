@@ -770,6 +770,11 @@ export type LocationsResponse = {
   perPage?: number;
   totalCount?: number;
   totalPages?: number;
+  /**
+   * Set only on requests sent without `page` and `perPage`: true when the
+   * server's 1000-row cap cut the list, so `locations` is not every location.
+   */
+  truncated?: boolean;
 };
 
 export type CustodyResponse = {

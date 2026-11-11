@@ -41,3 +41,17 @@ export function keepEndAfterStart(
   if (!end || end > start) return end;
   return addDaysInZone(start, 1, timeZone);
 }
+
+/**
+ * The date a picker may show: `value`, or `minimumDate` when `value` is
+ * earlier. The native iOS date picker throws when the date it shows is earlier
+ * than its minimum, so a picker is never handed one.
+ *
+ * @param value - the date the picker would open on
+ * @param minimumDate - the earliest selectable instant, if the picker has one
+ * @returns `value` when it is on or after `minimumDate` (or there is none),
+ *   else `minimumDate`
+ */
+export function clampToMinimum(value: Date, minimumDate?: Date): Date {
+  return minimumDate && value < minimumDate ? minimumDate : value;
+}
