@@ -530,7 +530,7 @@ export function sendAdminWorkspaceLinkedEmail({
  * when `ADMIN_EMAIL` is configured.
  *
  * The subject names the reason: several Team workspaces could be meant, or
- * one workspace but more than one live plan subscription without a
+ * one workspace but more than one subscription (plans or add-ons) without a
  * workspace. Setting `metadata.organizationId` on a subscription in Stripe
  * raises a `customer.subscription.updated` event, which switches its bundled
  * add-ons on for that workspace.
@@ -555,15 +555,15 @@ export function sendAdminPickWorkspaceEmail({
   const subject =
     candidates.length > 1
       ? `Needs you: customer owns ${ownedCount} Team workspaces, pick one in Stripe metadata`
-      : "Needs you: more than one plan subscription has no workspace, pick in Stripe metadata";
+      : "Needs you: more than one subscription has no workspace, pick in Stripe metadata";
   sendEmail({
     to: ADMIN_EMAIL,
     subject,
     text: [
       "A subscription has no workspace and Shelf could not tell which Team",
       "workspace it belongs to, so none was picked. Either several workspaces",
-      "could be meant, or more than one live plan subscription of the",
-      "customer names no workspace.",
+      "could be meant, or more than one subscription of the customer (plans",
+      "or add-ons) names no workspace.",
       "",
       `Customer: ${user.email}`,
       `Team workspaces owned: ${ownedCount}`,

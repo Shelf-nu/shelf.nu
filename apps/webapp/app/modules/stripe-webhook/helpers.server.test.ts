@@ -712,8 +712,11 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     expect(organizationIdsWritten()).toEqual([]);
     expect(addonsSwitchedOn()).toEqual([]);
     expect(adminEmailSubjects()).toEqual([
-      expect.stringContaining("Needs you"),
+      "Needs you: more than one subscription has no workspace, pick in Stripe metadata",
     ]);
+    const [email] = mockSendEmail.mock.calls[0];
+    expect(email.text).toContain("sub_audits_a");
+    expect(email.text).toContain("sub_audits_b");
   });
 
   it("stays quiet when only plans without add-ons are ambiguous", async () => {

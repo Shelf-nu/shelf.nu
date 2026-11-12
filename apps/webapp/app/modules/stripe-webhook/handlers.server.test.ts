@@ -551,7 +551,7 @@ describe("handleSubscriptionCreated", () => {
         expect.stringContaining("Needs you"),
       ]);
       expect(adminEmailSubjects()).toEqual([
-        "Needs you: more than one plan subscription has no workspace, pick in Stripe metadata",
+        "Needs you: more than one subscription has no workspace, pick in Stripe metadata",
       ]);
       expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
         expect.objectContaining({ needsTeamWorkspace: false })
