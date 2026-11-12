@@ -12,11 +12,16 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import ts from "typescript";
 
 import {
   BOOKING_DETAIL_ROUTE_NAME,
+  BOOKING_SCAN_BACK_ACTIONS,
   BOOKING_SCAN_PATHNAME,
   BOOKING_SCAN_SENT,
+  bookingScanGuard,
+  bookingScanScreenDecision,
+  takeScannerOpening,
   bookingScanHref,
   bookingScanLeaveDecision,
   parseBookingScanParams,
@@ -124,12 +129,83 @@ test("no screen opens the Scan tab with a booking", () => {
   assert.deepEqual(offenders, []);
 });
 
-test("the booking screen opens each flow from its own button", () => {
-  const source = readFileSync(routeFile("/(tabs)/bookings/[id]"), "utf8");
-  const opened = [...source.matchAll(/bookingScanHref\(booking, "(\w+)"\)/g)]
-    .map((match) => match[1])
+/** Parses a TSX source file into a TypeScript syntax tree. */
+function parseTsx(file: string): ts.SourceFile {
+  return ts.createSourceFile(
+    file,
+    readFileSync(file, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+}
+
+/** Every call in a file to a function with this name. */
+function callsTo(source: ts.SourceFile, name: string): ts.CallExpression[] {
+  const found: ts.CallExpression[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === name
+    ) {
+      found.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** The name of the `const` a node is declared in, if any. */
+function enclosingConst(node: ts.Node): string | undefined {
+  for (let at: ts.Node | undefined = node; at; at = at.parent) {
+    if (ts.isVariableDeclaration(at) && ts.isIdentifier(at.name)) {
+      return at.name.text;
+    }
+  }
+  return undefined;
+}
+
+/** The JSX element whose attribute holds a node, with that attribute's name. */
+function enclosingJsxAttribute(
+  node: ts.Node
+): { attribute: string; element: ts.JsxAttributes } | undefined {
+  for (let at: ts.Node | undefined = node; at; at = at.parent) {
+    if (ts.isJsxAttribute(at) && ts.isJsxAttributes(at.parent)) {
+      return { attribute: at.name.getText(), element: at.parent };
+    }
+  }
+  return undefined;
+}
+
+test("the booking screen opens the scanner only through its one-push gate", () => {
+  const source = parseTsx(routeFile("/(tabs)/bookings/[id]"));
+  // Every push to the booking scanner goes through openBookingScanner, which
+  // ignores a second tap while the first push is in flight.
+  for (const call of callsTo(source, "bookingScanHref")) {
+    assert.equal(enclosingConst(call), "openBookingScanner");
+  }
+  const flows = callsTo(source, "openBookingScanner")
+    .map((call) => (call.arguments[0] as ts.StringLiteral).text)
     .sort();
-  assert.deepEqual(opened, ["add", "checkin", "checkout", "fulfil"]);
+  assert.deepEqual(flows, ["add", "checkin", "checkout", "fulfil"]);
+});
+
+test("the booking screen clears the Scan gate whenever it gains focus", () => {
+  const source = parseTsx(routeFile("/(tabs)/bookings/[id]"));
+  const clears = callsTo(source, "useFocusEffect").some((call) =>
+    /scannerOpening\.current = false/.test(call.getText())
+  );
+  assert.ok(clears, "a useFocusEffect must reset scannerOpening");
+});
+
+test("a second tap on a Scan button is ignored until the booking regains focus", () => {
+  const gate = { current: false };
+  assert.equal(takeScannerOpening(gate), true);
+  assert.equal(takeScannerOpening(gate), false);
+  gate.current = false; // the booking screen gained focus again
+  assert.equal(takeScannerOpening(gate), true);
 });
 
 const SCAN: StackRoute = {
@@ -203,14 +279,107 @@ test("a finished flow leaves without asking to discard what it sent", () => {
   assert.equal(bookingScanLeaveDecision(BOOKING_SCAN_SENT), "leave");
 });
 
-test("every finished booking flow returns through leaveAfterSubmit", () => {
-  // The four success paths (add, fulfil, check-in, check-out) must mark the
-  // scans sent before going back; only the back arrow goes back directly.
-  const source = readFileSync(SCANNER_SCREEN, "utf8");
-  assert.equal(source.match(/leaveAfterSubmit\(\)/g)?.length, 4);
-  assert.equal(source.match(/returnToBooking\(navigation\)/g)?.length, 2);
-  assert.match(
-    source,
-    /bookingLeaveRef\.current = BOOKING_SCAN_SENT;\s*returnToBooking\(navigation\);/
+test("finished flows go back only through leaveAfterSubmit", () => {
+  const source = parseTsx(SCANNER_SCREEN);
+  // Going back to the booking is returnToBooking. Outside the back arrow, it
+  // runs only inside leaveAfterSubmit, which marks the scans sent first; so
+  // no finished flow can go back and be asked to discard what it sent.
+  const calls = callsTo(source, "returnToBooking");
+  assert.ok(calls.length > 0, "the scanner must go back somewhere");
+  for (const call of calls) {
+    if (enclosingConst(call) === "leaveAfterSubmit") continue;
+    const jsx = enclosingJsxAttribute(call);
+    assert.equal(jsx?.attribute, "onPress", "returnToBooking outside onPress");
+    assert.match(
+      jsx?.element.getText() ?? "",
+      /accessibilityLabel="Go back"/,
+      "only the back arrow may call returnToBooking directly"
+    );
+  }
+
+  // Every handler that records a finished flow (it marks the booking for a
+  // refetch) goes back, when it does, through leaveAfterSubmit.
+  const finished = callsTo(source, "markBookingDirty");
+  assert.ok(finished.length > 0, "the finished flows must be found");
+  for (const call of finished) {
+    let handler: ts.Node | undefined = call.parent;
+    while (handler && !ts.isArrowFunction(handler)) handler = handler.parent;
+    assert.ok(handler, "markBookingDirty outside a handler");
+    assert.match(
+      handler.getText(),
+      /leaveAfterSubmit\(\)/,
+      `a finished flow at line ${
+        source.getLineAndCharacterOfPosition(call.getStart()).line + 1
+      } must leave through leaveAfterSubmit`
+    );
+  }
+
+  // leaveAfterSubmit marks the scans sent before it goes back.
+  const helper = callsTo(source, "returnToBooking").find(
+    (call) => enclosingConst(call) === "leaveAfterSubmit"
   );
+  assert.ok(helper, "leaveAfterSubmit must go back through returnToBooking");
+  const body = helper.parent.parent as ts.Block;
+  const statements = body.statements.map((st) => st.getText());
+  const marks = statements.findIndex((text) =>
+    /bookingLeaveRef\.current = BOOKING_SCAN_SENT/.test(text)
+  );
+  const leaves = statements.findIndex((text) =>
+    text.startsWith("returnToBooking(")
+  );
+  assert.ok(marks !== -1 && marks < leaves, "mark the scans sent first");
+});
+
+test("the booking scanner route opens the list, the booking or the scanner", () => {
+  const onBooking: StackRoute[] = [
+    { key: "list", name: "index" },
+    { key: "a", name: BOOKING_DETAIL_ROUTE_NAME, params: { id: "bk_1" } },
+    SCAN,
+  ];
+  assert.deepEqual(
+    bookingScanScreenDecision({
+      params: {},
+      routes: onBooking,
+      ownKey: "scan-1",
+    }),
+    { kind: "list" }
+  );
+  assert.deepEqual(
+    bookingScanScreenDecision({
+      params: { bookingId: "bk_2", bookingAction: "checkout" },
+      routes: onBooking,
+      ownKey: "scan-1",
+    }),
+    { kind: "booking", bookingId: "bk_2" }
+  );
+  assert.deepEqual(
+    bookingScanScreenDecision({
+      params: { bookingId: "bk_1", bookingAction: "checkout" },
+      routes: onBooking,
+      ownKey: "scan-1",
+    }),
+    { kind: "scan", booking: { bookingId: "bk_1", action: "checkout" } }
+  );
+  // A double tap: the second scanner sits on the first, not on the booking.
+  const doubled: StackRoute[] = [...onBooking, { ...SCAN, key: "scan-2" }];
+  assert.deepEqual(
+    bookingScanScreenDecision({
+      params: { bookingId: "bk_1", bookingAction: "add" },
+      routes: doubled,
+      ownKey: "scan-2",
+    }),
+    { kind: "booking", bookingId: "bk_1" }
+  );
+});
+
+test("the booking scanner guard stops only a person's own back", () => {
+  for (const type of ["GO_BACK", "POP", "POP_TO_TOP"]) {
+    assert.ok(BOOKING_SCAN_BACK_ACTIONS.includes(type), type);
+  }
+  for (const type of ["RESET", "NAVIGATE", "REPLACE", "POP_TO"]) {
+    assert.ok(!BOOKING_SCAN_BACK_ACTIONS.includes(type), type);
+  }
+  const guard = bookingScanGuard(() => ({ submitting: true, itemCount: 2 }));
+  assert.equal(guard.decide(), "hold");
+  assert.ok(guard.holdNotice.message.length > 0);
 });

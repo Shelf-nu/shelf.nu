@@ -30,8 +30,9 @@ import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import {
   BOOKING_SCAN_SENT,
-  bookingScanLeaveDecision,
+  bookingScanGuard,
   type BookingScanContext,
+  type BookingScanLeaveState,
 } from "@/lib/booking-scan-route";
 import { useOrg } from "@/lib/org-context";
 import {
@@ -415,27 +416,31 @@ function ScannerContent({ booking }: ScannerScreenProps) {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
-  // The booking scanner is a stack screen: back, the back swipe and Android
-  // back remove it, and its scan list with it. It stays put while a request
-  // is pending and asks first while the list holds anything not yet sent
-  // (see bookingScanLeaveDecision). A finished flow leaves through
-  // leaveAfterSubmit below, so it never asks.
-  const bookingLeaveRef = useRef({ submitting: false, itemCount: 0 });
+  // The booking scanner is a stack screen: back, the back swipe, Android back
+  // and a Bookings tab re-tap remove it, and its scan list with it. For those
+  // (BOOKING_SCAN_BACK_ACTIONS) it stays put with a notice while a request is
+  // pending and asks first while the list holds anything not yet sent; the
+  // rules are in bookingScanGuard. Removals the app starts (sign-in redirect,
+  // push notification) pass. A finished flow leaves through leaveAfterSubmit
+  // below, so it never asks.
+  const bookingLeaveRef = useRef<BookingScanLeaveState>(BOOKING_SCAN_SENT);
   useEffect(() => {
     bookingLeaveRef.current = {
       submitting: isBookingSubmitting,
       itemCount: bookingCheckinItems.length,
     };
   }, [isBookingSubmitting, bookingCheckinItems]);
+  // The guard only reads the ref, so one config serves every render.
+  const bookingLeaveGuard = useMemo(
+    () => bookingScanGuard(() => bookingLeaveRef.current),
+    []
+  );
   useDiscardGuard({
     active:
       isBookingMode && (isBookingSubmitting || bookingCheckinItems.length > 0),
-    // Read at the moment of leaving: a finished flow empties the list just
-    // before it goes back, possibly before the guard's own update lands.
-    decide: () => bookingScanLeaveDecision(bookingLeaveRef.current),
-    title: "Discard scanned items?",
-    message:
-      "Nothing you scanned has been sent to the booking yet. Leaving the scanner discards the list.",
+    // The state is read at the moment of leaving: a finished flow empties the
+    // list just before it goes back, possibly before the guard's update lands.
+    ...bookingLeaveGuard,
   });
   /**
    * Returns to the booking after a flow sent its scans. The guard's ref is
@@ -3283,7 +3288,9 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                     {/* The name arrives with the booking; until then the
                         line says what to scan. */}
                     {bookingName ||
-                      (isBookingAddMode
+                      (isBookingFulfilMode
+                        ? "Scan the reserved units to assign"
+                        : isBookingAddMode
                         ? "Scan assets or kits to add"
                         : isBookingCheckoutMode
                         ? "Scan assets to check out"

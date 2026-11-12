@@ -5,10 +5,7 @@ import {
   useRoute,
 } from "expo-router";
 import { ScannerScreen } from "@/components/scanner/scanner-screen";
-import {
-  parseBookingScanParams,
-  sitsOnItsBooking,
-} from "@/lib/booking-scan-route";
+import { bookingScanScreenDecision } from "@/lib/booking-scan-route";
 
 /**
  * The booking scanner: the camera scanner serving one booking and flow
@@ -21,9 +18,9 @@ import {
  * was last opened with, so a booking passed to it would still be there the
  * next time someone taps Scan in the tab bar.
  *
- * It only runs on top of its own booking (see `sitsOnItsBooking`). Opened any
- * other way, such as from a link, it opens that booking instead; without a
- * booking id, the bookings list.
+ * It only runs on top of its own booking. Opened any other way, such as from
+ * a link, it opens that booking instead; without a booking id, the bookings
+ * list (see `bookingScanScreenDecision`).
  *
  * @see {@link file://../../../lib/booking-scan-route.ts} the route and params
  * @returns the scanner for the booking named in the route params
@@ -35,16 +32,21 @@ export default function BookingScanScreen() {
   }>();
   const navigation = useNavigation();
   const route = useRoute();
-  const booking = parseBookingScanParams(params);
+  const decision = bookingScanScreenDecision({
+    params,
+    routes: navigation.getState()?.routes ?? [],
+    ownKey: route.key,
+  });
 
-  if (!booking) return <Redirect href="/(tabs)/bookings" withAnchor />;
-  const routes = navigation.getState()?.routes ?? [];
-  if (!sitsOnItsBooking(routes, route.key, booking.bookingId)) {
-    // Anchored, so the bookings list sits under the booking and back works
-    // even when nothing was beneath the scanner.
+  // Anchored, so the bookings list sits under what opens and back works even
+  // when nothing was beneath the scanner.
+  if (decision.kind === "list") {
+    return <Redirect href="/(tabs)/bookings" withAnchor />;
+  }
+  if (decision.kind === "booking") {
     return (
-      <Redirect href={`/(tabs)/bookings/${booking.bookingId}`} withAnchor />
+      <Redirect href={`/(tabs)/bookings/${decision.bookingId}`} withAnchor />
     );
   }
-  return <ScannerScreen booking={booking} />;
+  return <ScannerScreen booking={decision.booking} />;
 }

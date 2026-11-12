@@ -114,12 +114,101 @@ export function sitsOnItsBooking(
  * @param state - whether a request is pending and how many rows are listed
  * @returns `hold`, `prompt` or `leave`
  */
-export function bookingScanLeaveDecision(state: {
-  submitting: boolean;
-  itemCount: number;
-}): "hold" | "prompt" | "leave" {
+export function bookingScanLeaveDecision(
+  state: BookingScanLeaveState
+): "hold" | "prompt" | "leave" {
   if (state.submitting) return "hold";
   return state.itemCount > 0 ? "prompt" : "leave";
+}
+
+/** What the leave guard reads at the moment someone tries to leave. */
+export type BookingScanLeaveState = {
+  /** A booking request is waiting for its answer. */
+  submitting: boolean;
+  /** Rows in the scan list, not yet sent to the booking. */
+  itemCount: number;
+};
+
+/**
+ * Navigation actions a person starts to leave the scanner: the back arrow
+ * and Android back (`GO_BACK`), the back swipe (`POP`), and a re-tap on the
+ * Bookings tab (`POP_TO_TOP`). The guard stops only these. Removals the app
+ * starts (the sign-in redirect when a session ends, a push notification
+ * opening another screen) pass, even while a request is pending: its later
+ * `goBack()` names the scanner's own route, which is gone, so it does
+ * nothing.
+ */
+export const BOOKING_SCAN_BACK_ACTIONS: readonly string[] = Object.freeze([
+  "GO_BACK",
+  "POP",
+  "POP_TO_TOP",
+]);
+
+/**
+ * The booking scanner's leave guard, as `useDiscardGuard` takes it (all but
+ * `active`).
+ *
+ * @param readLeaveState - reads the current leave state when someone leaves
+ * @returns the decision, the discard prompt, the notice for a held leave and
+ *   the actions the guard stops
+ */
+export function bookingScanGuard(readLeaveState: () => BookingScanLeaveState) {
+  return {
+    decide: () => bookingScanLeaveDecision(readLeaveState()),
+    title: "Discard scanned items?",
+    message:
+      "Nothing you scanned has been sent to the booking yet. Leaving the scanner discards the list.",
+    holdNotice: {
+      title: "Still sending",
+      message:
+        "Your scans are still being sent to the booking. Wait for it to finish.",
+    },
+    guardedActions: BOOKING_SCAN_BACK_ACTIONS,
+  };
+}
+
+/** What the booking scanner route renders. */
+export type BookingScanScreenDecision =
+  | { kind: "list" }
+  | { kind: "booking"; bookingId: string }
+  | { kind: "scan"; booking: BookingScanContext };
+
+/**
+ * What the booking scanner route shows for its params and place in the stack.
+ *
+ * - No booking id: the bookings list.
+ * - Not directly on its own booking (a link, a double tap): that booking.
+ * - Otherwise: the scanner for the booking and flow.
+ *
+ * @param args - the route params, the Bookings stack's routes and the
+ *   scanner's own route key
+ * @returns which of the three the route renders
+ */
+export function bookingScanScreenDecision(args: {
+  params: { bookingId?: RouteParam; bookingAction?: RouteParam };
+  routes: readonly StackRoute[];
+  ownKey: string;
+}): BookingScanScreenDecision {
+  const booking = parseBookingScanParams(args.params);
+  if (!booking) return { kind: "list" };
+  if (!sitsOnItsBooking(args.routes, args.ownKey, booking.bookingId)) {
+    return { kind: "booking", bookingId: booking.bookingId };
+  }
+  return { kind: "scan", booking };
+}
+
+/**
+ * Claims the booking screen's "open the scanner" for one push. A second tap
+ * before the screen loses focus is ignored, so two fast taps never push two
+ * scanners. The booking screen clears the gate when it gains focus again.
+ *
+ * @param gate - the booking screen's ref; true while a push is in flight
+ * @returns true when this tap may push the scanner
+ */
+export function takeScannerOpening(gate: { current: boolean }): boolean {
+  if (gate.current) return false;
+  gate.current = true;
+  return true;
 }
 
 /**
@@ -127,7 +216,7 @@ export function bookingScanLeaveDecision(state: {
  * left to lose. A finished flow sets it before it goes back, so leaving never
  * asks to discard scans that are already on the booking.
  */
-export const BOOKING_SCAN_SENT = Object.freeze({
+export const BOOKING_SCAN_SENT: BookingScanLeaveState = Object.freeze({
   submitting: false,
   itemCount: 0,
 });
