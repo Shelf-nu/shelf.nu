@@ -4,16 +4,28 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import {
+  endSessionOnDevice,
   getServerVersion,
+  signOutMayClearState,
   runBeforeSessionEnd,
   subscribeToServerChange,
 } from "./server";
-import { getSupabase } from "./supabase";
+import { reportSignOutIncomplete } from "./sentry";
+import {
+  blockStoredSession,
+  currentSessionStorageKey,
+  getSupabase,
+  getSupabaseClientUrl,
+  persistedSessionRemover,
+  prepareStoredSessionForSignIn,
+} from "./supabase";
+import { signInWithPreparedSession } from "./session-storage";
 
 type AuthState = {
   session: Session | null;
@@ -37,14 +49,32 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  /** Counts sign-ins, so a sign-out can tell whether one happened meanwhile. */
+  const signInsRef = useRef(0);
 
   // Changes whenever the app switches servers. The session effect below keys
   // off it so it re-reads and re-subscribes against the REBUILT Supabase
   // client — a `[]` dep array would leave it bound to the discarded one.
   const [serverVersion, setServerVersion] = useState(() => getServerVersion());
 
+  // The client the session state below belongs to. A server switch that
+  // rebuilds it starts from a clean, loading state: a forced teardown emits no
+  // SIGNED_OUT, so the outgoing session would otherwise stay on screen against
+  // the new server until the new client answers. A notice that keeps the
+  // client (a rename, refreshed sign-in options) changes no session.
+  const sessionClientRef = useRef(getSupabase());
+
   useEffect(
-    () => subscribeToServerChange(() => setServerVersion(getServerVersion())),
+    () =>
+      subscribeToServerChange(() => {
+        const client = getSupabase();
+        if (client !== sessionClientRef.current) {
+          sessionClientRef.current = client;
+          setSession(null);
+          setIsLoading(true);
+        }
+        setServerVersion(getServerVersion());
+      }),
     []
   );
 
@@ -73,7 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = client.auth.onAuthStateChange((_event, session) => {
+    } = client.auth.onAuthStateChange((event, session) => {
+      // A forced sign-out stops background token refresh; every sign-in
+      // starts it again.
+      if (event === "SIGNED_IN") {
+        signInsRef.current += 1;
+        void client.auth.startAutoRefresh();
+      }
       setSession(session);
     });
 
@@ -88,11 +124,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // server is a separate, explicit act (`resolveServerForDomain`), so nothing
     // here inspects the email — a login is only ever sent where the user
     // already connected the app.
-    const { error } = await getSupabase().auth.signInWithPassword({
-      email,
-      password,
+    //
+    // A session a past sign-out could not delete stays refused until it is
+    // verifiably removed (`prepareStoredSessionForSignIn`).
+    const serverAtStart = getServerVersion();
+    return signInWithPreparedSession({
+      prepare: prepareStoredSessionForSignIn,
+      serverUnchanged: () => getServerVersion() === serverAtStart,
+      signIn: async () => {
+        const { error } = await getSupabase().auth.signInWithPassword({
+          email,
+          password,
+        });
+        return { error: error?.message ?? null };
+      },
     });
-    return { error: error?.message ?? null };
   }, []);
 
   // Signing out deliberately KEEPS the active server: the user almost always
@@ -103,9 +149,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // The before-session-end tasks run first, while the token still works: they
   // forget this device for push, so a shared phone stops receiving the
   // previous person's notifications.
+  //
+  // Sign-out always clears the signed-in state here, so the person reaches the
+  // login screen even when the server cannot be reached. `endSessionOnDevice`
+  // tries a server revoke, then a local sign-out, then deletes the stored
+  // session itself; a forced delete emits no auth event, which is why the state
+  // is cleared here. When the stored session cannot be confirmed gone, it is
+  // blocked from being restored ("incomplete"), or blocked only for this app
+  // run when the block cannot be stored ("unprotected"), and both are reported.
   const signOut = useCallback(async () => {
+    // Bound to the session being signed out before anything awaits: a server
+    // switch while the before-session-end tasks run must not make this
+    // teardown act on the new server's client or session.
+    const client = getSupabase();
+    const removeStoredSession = persistedSessionRemover();
+    const serverAtStart = getServerVersion();
+    const serverUrlAtStart = getSupabaseClientUrl();
+    const storageKeyAtStart = currentSessionStorageKey();
+    const signInsAtStart = signInsRef.current;
+
     await runBeforeSessionEnd();
-    await getSupabase().auth.signOut();
+    const outcome = await endSessionOnDevice(client, removeStoredSession, {
+      stillCurrent: () => getServerVersion() === serverAtStart,
+      // A stored session that survives every delete is refused from then on,
+      // so a restart cannot restore the previous person.
+      blockStoredSession: async () =>
+        storageKeyAtStart ? blockStoredSession(storageKeyAtStart) : false,
+    });
+    if (outcome === "incomplete" || outcome === "unprotected") {
+      reportSignOutIncomplete(serverUrlAtStart, {
+        blockStored: outcome === "incomplete",
+      });
+    }
+
+    // A forced sign-out emits no auth event, so the state is cleared here,
+    // unless someone signed in or the server changed while it ran.
+    if (
+      signOutMayClearState(
+        { signIns: signInsAtStart, serverVersion: serverAtStart },
+        { signIns: signInsRef.current, serverVersion: getServerVersion() }
+      )
+    ) {
+      setSession(null);
+    }
   }, []);
 
   const value = useMemo(

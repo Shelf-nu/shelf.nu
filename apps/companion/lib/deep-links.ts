@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Platform } from "react-native";
 import * as Linking from "expo-linking";
-import { api, getApiBaseUrl } from "./api";
+import { accountGeneration, api, getApiBaseUrl } from "./api";
 import { isOpenedByRouter, launchAction } from "./link-routing";
 import { openLinkedRoute, openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
@@ -9,6 +9,11 @@ import {
   type QrLookups,
   type QrOutcome,
 } from "./link-dispatch";
+import {
+  matchResourcePath,
+  queryIdsArePlain,
+  splitLinkUrl,
+} from "./resource-path";
 import { getScanCoordinates } from "./scan-location";
 
 /**
@@ -54,7 +59,8 @@ import { getScanCoordinates } from "./scan-location";
  * Opening a link the router already opens would navigate twice.
  */
 
-type ParsedLink =
+/** A link the OS delivered, read into the screen it names. */
+export type ParsedLink =
   | { type: "asset"; id: string }
   | { type: "kit"; id: string }
   | { type: "booking"; id: string }
@@ -74,14 +80,16 @@ type ParsedLink =
   | { type: "unknown" };
 
 /**
- * Reads the link kind and id out of a custom-scheme or HTTPS link. Matches on
- * path segments only, so it works for any Shelf host.
+ * Reads a link the OS delivered into the screen it names.
  *
- * @param url - the raw URL the OS delivered
- * @returns the parsed link, or `{ type: "unknown" }` when it names nothing
- *   the app opens
+ * Matching goes through {@link matchResourcePath}, the same allowlist the
+ * `+native-intent` rewrite uses, so a warm start and a cold start agree on
+ * every link, and an id that is not a plain record id names nothing.
+ *
+ * @param url - The raw URL (custom scheme or http(s))
+ * @returns The parsed link, or `unknown` when it names no screen
  */
-function parseDeepLink(url: string): ParsedLink {
+export function parseDeepLink(url: string): ParsedLink {
   try {
     const parsed = Linking.parse(url);
     const path = parsed.path ?? "";
@@ -95,41 +103,40 @@ function parseDeepLink(url: string): ParsedLink {
       isHttp ? path.split("/") : [parsed.hostname ?? "", ...path.split("/")]
     ).filter(Boolean);
 
-    if (segments.length === 0) return { type: "unknown" };
-
     // A path that nests deeper than `resource/id` (e.g. /assets/:id/overview,
-    // the canonical web asset URL) resolves to the resource detail — that is
-    // what the tapper wants, and it matches the +native-intent rewrite so warm
-    // and cold starts behave identically.
-    const [resource, id] = segments;
+    // the canonical web asset URL) resolves to the resource detail, which is
+    // what the tapper wants.
+    const match = matchResourcePath(segments);
+    if (!match) return { type: "unknown" };
+    // Same rule as the native rewrite: an id-named query value that is not a
+    // plain record id makes the whole link name nothing.
+    if (!queryIdsArePlain(splitLinkUrl(url).query)) return { type: "unknown" };
+    const { resource, id } = match;
+
+    if (resource === "scanner") return { type: "scanner" };
+    if (!id) return { type: "unknown" };
 
     switch (resource) {
       case "assets":
-        return id ? { type: "asset", id } : { type: "unknown" };
+        return { type: "asset", id };
       case "kits":
-        return id ? { type: "kit", id } : { type: "unknown" };
+        return { type: "kit", id };
       case "bookings":
-        return id ? { type: "booking", id } : { type: "unknown" };
+        return { type: "booking", id };
       case "audits":
-        return id ? { type: "audit", id } : { type: "unknown" };
+        return { type: "audit", id };
       case "qr": {
-        if (!id) return { type: "unknown" };
         // Only an http(s) link names a server. `new URL()` reports the string
         // "null" as the origin of a custom-scheme URL, and carrying that
         // forward would mark the app's own `shelf://qr/<id>` links foreign and
         // send them to "null/qr/<id>".
-        const parsed = new URL(url);
+        const parsedUrl = new URL(url);
         const origin =
-          parsed.protocol === "http:" || parsed.protocol === "https:"
-            ? parsed.origin
+          parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+            ? parsedUrl.origin
             : undefined;
         return { type: "qr", id, origin };
       }
-      case "scanner":
-      case "scan":
-        return { type: "scanner" };
-      default:
-        return { type: "unknown" };
     }
   } catch {
     return { type: "unknown" };
@@ -148,8 +155,13 @@ const QR_LOOKUPS: QrLookups = {
 };
 
 /**
- * Resolves a QR code the OS delivered (a camera scan of a label) and opens
- * its asset or kit, recording the scan like the in-app scanner does.
+ * Resolves a QR code link the OS delivered and opens its asset or kit.
+ *
+ * An https link from the connected server records a scan, exactly as opening
+ * the same address on the web does (a label scanned with the system camera
+ * arrives this way). A `shelf://qr/<id>` link records nothing: no label
+ * encodes the custom scheme, so only another app or a web page can open it.
+ * See `qrLinkRecordsScan` in `./link-dispatch.ts`.
  *
  * A code that does not resolve in the app (another workspace, unclaimed,
  * not authorized, or a failed lookup), or one from another Shelf server,
@@ -158,17 +170,21 @@ const QR_LOOKUPS: QrLookups = {
  * {@link openShelfWebUrl}, never `Linking.openURL`: `/qr/*` is a verified
  * App Link, and `Linking.openURL` would re-enter the app and loop back here.
  *
- * @param qrId - The scanned QR code id.
+ * @param qrId - The linked QR code id.
  * @param origin - The origin the link carried, when it had one.
  */
 export async function resolveQrAndNavigate(qrId: string, origin?: string) {
+  const accountAtStart = accountGeneration.current();
   const outcome = await resolveQrOutcome(
     qrId,
     origin,
     getApiBaseUrl(),
-    { recordScan: true },
+    { source: "os-link" },
     QR_LOOKUPS
   );
+  // A sign-out, another account or a server switch during the lookup ends
+  // the session the link was resolved for: open nothing over the login screen.
+  if (accountGeneration.current() !== accountAtStart) return;
   if (outcome.kind === "screen") {
     pushIntoTab(outcome.tabRoot, outcome.href ?? undefined);
     return;
@@ -177,9 +193,9 @@ export async function resolveQrAndNavigate(qrId: string, origin?: string) {
 }
 
 /**
- * Looks up a QR link tapped in text someone wrote. It is not a scan, so it
- * records nothing (no scan, location or note), and a code that does not
- * resolve gets the web-only notice instead of the web login.
+ * Looks up a QR link tapped in text someone wrote. It records nothing (no
+ * scan, location or note), and a code that does not resolve gets the
+ * web-only notice instead of the web login.
  *
  * @param qrId - The linked QR code id.
  * @param origin - The origin of the link.
@@ -195,7 +211,7 @@ export function resolveTappedQr(
     qrId,
     origin,
     getApiBaseUrl(),
-    { recordScan: false, orgId },
+    { source: "tapped", orgId },
     QR_LOOKUPS
   );
 }

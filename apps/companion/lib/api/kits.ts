@@ -10,6 +10,7 @@
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/kits.bulk-actions.ts}
  */
 import { apiFetch } from "./client";
+import { mobilePaths } from "./paths";
 import type {
   BulkActionResponse,
   KitDetailResponse,
@@ -40,9 +41,7 @@ export const kitsApi = {
 
   /** Full kit detail including contained assets. */
   kit: (kitId: string, orgId: string) =>
-    apiFetch<KitDetailResponse>(
-      `/api/mobile/kits/${encodeURIComponent(kitId)}?orgId=${orgId}`
-    ),
+    apiFetch<KitDetailResponse>(mobilePaths.kit(kitId, orgId)),
 
   /** Assign custody of the given kits (cascades to contained assets). */
   bulkAssignKitCustody: (
