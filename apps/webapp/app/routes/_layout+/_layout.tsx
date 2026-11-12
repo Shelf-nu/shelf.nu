@@ -27,6 +27,7 @@ import {
   CommandPaletteButton,
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
+import { NewVersionPrompt } from "~/components/layout/new-version-prompt";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
@@ -480,6 +481,7 @@ export default function App() {
             </>
           )}
           <Toaster />
+          <NewVersionPrompt />
           {isFullImportPayload(activeAssetImport) ? (
             <AssetImportCard
               key={activeAssetImport.id}

@@ -15,6 +15,12 @@ export default defineConfig({
     // every tsconfig in the monorepo.
     tsconfigPaths({ projects: ["./tsconfig.json"] }),
   ],
+  define: {
+    // Vitest loads this file instead of `vite.config.ts`, so the build id
+    // global needs its own value. A non-numeric id makes every build
+    // comparison read "unknown".
+    __SHELF_BUILD_ID__: JSON.stringify("test"),
+  },
   test: {
     globals: true,
     environment: "happy-dom",

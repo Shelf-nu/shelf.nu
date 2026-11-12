@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { getDefaultStore } from "jotai";
 import {
   createRoutesStub,
   Form,
@@ -13,6 +14,7 @@ import {
 } from "react-router";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dirtyFormCountAtom } from "~/atoms/unsaved-changes";
 import {
   serializeFormSnapshot,
   UNSAVED_CHANGES_DEFAULT_IGNORE,
@@ -135,7 +137,7 @@ function renderForm(
     },
     { path: "/other", Component: () => <p>Other page loaded</p> },
   ]);
-  render(<Stub initialEntries={["/edit"]} />);
+  return render(<Stub initialEntries={["/edit"]} />);
 }
 
 const status = () => screen.getByTestId("status").textContent;
@@ -148,6 +150,11 @@ beforeEach(() => {
   rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
 });
 afterEach(() => rafSpy.mockRestore());
+
+/** The app renders without a jotai Provider, so the hook writes here. */
+const jotaiStore = getDefaultStore();
+const dirtyFormCount = () => jotaiStore.get(dirtyFormCountAtom);
+beforeEach(() => jotaiStore.set(dirtyFormCountAtom, 0));
 
 /** Resolves once the hook has read its baseline snapshot. */
 async function waitForBaseline() {
@@ -419,6 +426,32 @@ describe("useUnsavedChanges across records", () => {
     await waitFor(() => expect(status()).toBe("dirty"), { timeout: 3000 });
     fireEvent.click(screen.getByRole("link", { name: "Other page" }));
     await waitFor(() => expect(status()).toBe("blocked"));
+  });
+});
+
+describe("useUnsavedChanges dirty form count", () => {
+  it("counts the form while it is dirty", async () => {
+    renderForm();
+    await waitForBaseline();
+    expect(dirtyFormCount()).toBe(0);
+    await makeDirtyByTyping();
+    expect(dirtyFormCount()).toBe(1);
+  });
+
+  it("stops counting the form once it is clean again", async () => {
+    renderForm();
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(status()).toBe("clean"));
+    expect(dirtyFormCount()).toBe(0);
+  });
+
+  it("stops counting a dirty form when it unmounts", async () => {
+    const { unmount } = renderForm();
+    await makeDirtyByTyping();
+    expect(dirtyFormCount()).toBe(1);
+    unmount();
+    expect(dirtyFormCount()).toBe(0);
   });
 });
 
