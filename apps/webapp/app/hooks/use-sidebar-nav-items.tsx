@@ -33,6 +33,7 @@ import {
 } from "~/utils/permissions/settings-tabs";
 import { useCurrentOrganization } from "./use-current-organization";
 import { useOrganizationRoles } from "./use-organization-roles";
+import { useRememberedListHref } from "./use-remembered-list-href";
 
 type BaseNavItem = {
   title: string;
@@ -84,6 +85,8 @@ export function useSidebarNavItems() {
     useLoaderData<typeof loader>();
   const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
+  // Lists open on their remembered filters, so the loader need not redirect.
+  const withListFilters = useRememberedListHref();
   const isPersonalOrganization = isPersonalOrg(currentOrganization);
 
   /** Each admin area shows with the matrix grant of the page it opens. */
@@ -157,13 +160,13 @@ export function useSidebarNavItems() {
     {
       type: "child",
       title: "Assets",
-      to: "/assets",
+      to: withListFilters("/assets"),
       Icon: PackageOpenIcon,
     },
     {
       type: "child",
       title: "Kits",
-      to: "/kits",
+      to: withListFilters("/kits"),
       Icon: Package,
     },
     {
@@ -202,7 +205,7 @@ export function useSidebarNavItems() {
       children: [
         {
           title: "View Bookings",
-          to: "/bookings",
+          to: withListFilters("/bookings"),
           disabled: bookingDisabled,
         },
         {
