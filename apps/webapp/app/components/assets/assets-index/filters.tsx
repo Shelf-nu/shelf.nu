@@ -1,5 +1,5 @@
 import { AssetStatus } from "@prisma/client";
-import { TriangleAlertIcon } from "lucide-react";
+import { TrendingDownIcon } from "lucide-react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -86,7 +86,13 @@ export function AssetIndexFilters({
                 onClick={() => setSearchParams(toggleLowStockParam)}
               >
                 <span className="flex items-center gap-1.5">
-                  <TriangleAlertIcon className="size-4" aria-hidden="true" />
+                  {/* strokeWidth 1.5 brings lucide's 2px stroke close to the
+                      hairline Radix icons of the view toggle beside it. */}
+                  <TrendingDownIcon
+                    className="size-5"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  />
                   <span className="hidden 2xl:inline">Low stock only</span>
                 </span>
               </Button>
