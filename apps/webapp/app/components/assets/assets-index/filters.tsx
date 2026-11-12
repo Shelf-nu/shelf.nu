@@ -18,6 +18,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
@@ -75,14 +76,18 @@ export function AssetIndexFilters({
                   one row with the search box, which must keep its width on a
                   laptop. The aria-label carries the name while the text is hidden.
                   `self-stretch` takes the row height from the sort and view
-                  controls beside it, so the button always lines up with them. */}
+                  controls beside it, and `font-normal` (plus gray text while
+                  off) matches their type, so the button reads as one of them. */}
               <Button
                 type="button"
                 variant={lowStockActive ? "primary" : "secondary"}
                 aria-pressed={lowStockActive}
                 aria-label="Low stock only"
                 title="Low stock only"
-                className="shrink-0 self-stretch whitespace-nowrap"
+                className={tw(
+                  "shrink-0 self-stretch whitespace-nowrap font-normal",
+                  !lowStockActive && "text-gray-600"
+                )}
                 onClick={() => setSearchParams(toggleLowStockParam)}
               >
                 <span className="flex items-center gap-1.5">
