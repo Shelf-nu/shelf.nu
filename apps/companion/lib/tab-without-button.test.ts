@@ -53,6 +53,6 @@ for (const name of ["audits", "custody"]) {
   });
 }
 
-test("no tab in the layout is hidden with href null", () => {
-  assert.doesNotMatch(tabsLayout, /href\s*:\s*null/);
+test("no tab in the layout is hidden from the router", () => {
+  assert.doesNotMatch(tabsLayout, /\bhref\s*:\s*null|\bhidden\s*:\s*true/);
 });
