@@ -1140,17 +1140,15 @@ export async function createBooking({
   hints,
 }: {
   /**
-   * Booking object that contains all the required fields to create a booking
+   * Booking object that contains all the required fields to create a booking.
+   *
+   * There is no custodian user field: the custodian user is always the user
+   * linked to `custodianTeamMemberId` in the database, so a request cannot
+   * pair one member with another member's user.
    */
   booking: Pick<
     Booking,
-    | "name"
-    | "description"
-    | "creatorId"
-    | "custodianUserId"
-    | "organizationId"
-    | "from"
-    | "to"
+    "name" | "description" | "creatorId" | "organizationId" | "from" | "to"
   > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
@@ -1311,12 +1309,6 @@ export async function createBooking({
       assetId: id,
     }));
 
-    if (booking.custodianUserId) {
-      dataToCreate.custodianUser = {
-        connect: { id: booking.custodianUserId },
-      };
-    }
-
     if (booking.tags.length > 0) {
       dataToCreate.tags = {
         connect: booking.tags,
@@ -1460,7 +1452,7 @@ export async function createBooking({
           );
         }
 
-        await assertTeamMemberBelongsToOrg(
+        const custodian = await assertTeamMemberBelongsToOrg(
           {
             teamMemberId: booking.custodianTeamMemberId,
             organizationId: booking.organizationId,
@@ -1468,16 +1460,21 @@ export async function createBooking({
           tx
         );
 
-        // SECURITY (cross-org IDOR): custodianUserId is also request input and a
-        // valid team member does not prove the paired user belongs to the org.
-        if (booking.custodianUserId) {
+        // The custodian user is the one linked to the team member row, never
+        // a request value. A member without a user (NRM) leaves it unset.
+        // The membership check keeps a member whose user has left the
+        // workspace from linking that user.
+        if (custodian.userId) {
           await assertUserBelongsToOrg(
             {
-              userId: booking.custodianUserId,
+              userId: custodian.userId,
               organizationId: booking.organizationId,
             },
             tx
           );
+          dataToCreate.custodianUser = {
+            connect: { id: custodian.userId },
+          };
         }
 
         const created = await tx.booking.create({
@@ -1648,6 +1645,9 @@ export async function createBooking({
  * Used when the user clicks the save booking to simply update the booking information
  * It only updates dates & custodian if the booking is in DRAFT state
  * In other ongoing states, it just updates name and description
+ *
+ * The custodian user is read from the `custodianTeamMemberId` row in this
+ * organization, never taken from the caller.
  */
 export async function updateBasicBooking({
   id,
@@ -1655,7 +1655,6 @@ export async function updateBasicBooking({
   from,
   to,
   custodianTeamMemberId,
-  custodianUserId,
   description,
   organizationId,
   tags,
@@ -1669,7 +1668,6 @@ export async function updateBasicBooking({
     | "from"
     | "to"
     | "custodianTeamMemberId"
-    | "custodianUserId"
     | "description"
     | "organizationId"
   >
@@ -1798,7 +1796,7 @@ export async function updateBasicBooking({
         // input. Prove the team member belongs to this booking's
         // organization before connecting it, so an attacker cannot assign a
         // foreign-org team member as the custodian.
-        await assertTeamMemberBelongsToOrg({
+        const custodian = await assertTeamMemberBelongsToOrg({
           teamMemberId: custodianTeamMemberId,
           organizationId,
         });
@@ -1808,18 +1806,19 @@ export async function updateBasicBooking({
         };
 
         /**
-         * If a userId is passed, meaning the team member is connected to a user, we connct to it.
-         * This will override the value if there were any previous custodians`
+         * The custodian user is the one linked to the team member row, never
+         * a request value, so a request cannot pair one member with another
+         * member's user. A member linked to a user connects it, replacing any
+         * previous custodian user.
          */
-        if (custodianUserId) {
-          // SECURITY (cross-org IDOR): custodianUserId is request input; a
-          // valid team member does not prove the paired user is in this org.
+        if (custodian.userId) {
+          // A member whose user has left the workspace must not link that user.
           await assertUserBelongsToOrg({
-            userId: custodianUserId,
+            userId: custodian.userId,
             organizationId,
           });
           dataToUpdate.custodianUser = {
-            connect: { id: custodianUserId },
+            connect: { id: custodian.userId },
           };
         } else if (booking.custodianUserId) {
           /**
@@ -2235,6 +2234,9 @@ async function assertKitsNotBookedElsewhere(
 
 /**
  * Changes the status of a booking to RESERVED
+ *
+ * The custodian user is read from the `custodianTeamMemberId` row in this
+ * organization, never taken from the caller.
  */
 export async function reserveBooking({
   id,
@@ -2242,7 +2244,6 @@ export async function reserveBooking({
   from,
   to,
   custodianTeamMemberId,
-  custodianUserId,
   description,
   organizationId,
   hints,
@@ -2258,7 +2259,6 @@ export async function reserveBooking({
     | "from"
     | "to"
     | "custodianTeamMemberId"
-    | "custodianUserId"
     | "description"
     | "organizationId"
   >
@@ -2466,7 +2466,7 @@ export async function reserveBooking({
       // SECURITY (cross-org IDOR): custodianTeamMemberId comes from form input.
       // Prove the team member belongs to this booking's organization before
       // connecting it, mirroring updateBasicBooking / createBooking.
-      await assertTeamMemberBelongsToOrg({
+      const custodian = await assertTeamMemberBelongsToOrg({
         teamMemberId: custodianTeamMemberId,
         organizationId,
       });
@@ -2476,18 +2476,19 @@ export async function reserveBooking({
       };
 
       /**
-       * If a userId is passed, meaning the team member is connected to a user, we connct to it.
-       * This will override the value if there were any previous custodians`
+       * The custodian user is the one linked to the team member row, never a
+       * request value, so a request cannot pair one member with another
+       * member's user. A member linked to a user connects it, replacing any
+       * previous custodian user.
        */
-      if (custodianUserId) {
-        // SECURITY (cross-org IDOR): custodianUserId is request input; a valid
-        // team member does not prove the paired user is in this org.
+      if (custodian.userId) {
+        // A member whose user has left the workspace must not link that user.
         await assertUserBelongsToOrg({
-          userId: custodianUserId,
+          userId: custodian.userId,
           organizationId,
         });
         dataToUpdate.custodianUser = {
-          connect: { id: custodianUserId },
+          connect: { id: custodian.userId },
         };
       } else if (bookingFound.custodianUserId) {
         /**

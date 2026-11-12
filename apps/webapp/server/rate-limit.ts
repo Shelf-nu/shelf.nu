@@ -4,6 +4,7 @@ import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { getClientIp } from "./client-ip";
+import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -215,9 +216,15 @@ function logRateLimitHit({
  */
 const bucketKeys = {
   mobileIp: (c: Context) => `mobile:ip:${getClientIp(c)}`,
+  // Paths are normalised so every spelling that reaches one route (case,
+  // trailing slash) counts against one bucket.
   appLoader: (c: Context) =>
-    `app:${resolveAppLoaderIdentity(c).identity}:${c.req.path}`,
-  calendarFeed: (c: Context) => `calendar:${c.req.path}`,
+    `app:${resolveAppLoaderIdentity(c).identity}:${normalizeRequestPath(
+      c.req.path
+    )}`,
+  // The route path also drops the single-fetch `.data` suffix, so a feed and
+  // its `.data` form share one bucket.
+  calendarFeed: (c: Context) => `calendar:${normalizeRoutePath(c.req.path)}`,
   sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
 };
 
@@ -295,10 +302,10 @@ export const mobileIpRateLimit = () =>
  * The bucket key is `(userId | clientIP, path)`:
  * - Keying by `userId` (falling back to client IP for unauthenticated/edge
  *   cases) isolates one user's loop from everyone else.
- * - Keying by `c.req.path` (which excludes the query string — intentional)
- *   means a loop hammering ONE path is capped, while normal navigation across
- *   many varied paths is never throttled. Same-path/different-query
- *   revalidations deliberately share a bucket.
+ * - Keying by the normalised path (lower-case, no trailing slash, query
+ *   string excluded) means a loop hammering ONE path is capped, while normal
+ *   navigation across many varied paths is never throttled. Same-path and
+ *   different-query revalidations deliberately share a bucket.
  *
  * Backed by an in-memory MemoryStore, so counters are per-machine: with N Fly
  * machines the effective ceiling is ~`limit`×N/min worst-case. That's an

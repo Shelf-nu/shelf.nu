@@ -3,6 +3,9 @@ import {
   getServerVersion,
   subscribeToServerChange,
 } from "../server/active-server";
+import { onAfterSessionEnd } from "../server/session-end";
+import { createAccountGeneration } from "./account-generation";
+import { SESSION_CHANGED_ERROR } from "./account-cache";
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
@@ -58,10 +61,6 @@ const MAX_RETRIES = 1;
 const SESSION_CACHE_TTL_MS = 30_000; // 30 seconds
 let cachedAccessToken: string | null = null;
 let cachedAt = 0;
-
-/** Unsubscribe handle for the current client's auth listener. */
-let authSubscription: { unsubscribe: () => void } | null = null;
-
 /** Clears the in-memory access-token cache. */
 function resetAccessTokenCache(): void {
   cachedAccessToken = null;
@@ -69,34 +68,41 @@ function resetAccessTokenCache(): void {
 }
 
 /**
- * Subscribes the token cache to the CURRENT Supabase client's auth events
- * (login, logout, token refresh).
+ * The app's one account-change counter (`./account-generation.ts`), shared by
+ * the token cache here, the response cache and the audit scan queue.
  *
- * Re-called after every server switch: otherwise the cache keeps listening to
- * the discarded client, silently stops invalidating, and hands the previous
- * server's access token to the new one.
+ * It follows the CURRENT Supabase client's auth events and re-attaches after
+ * every server switch: otherwise it keeps listening to the discarded client.
+ * Every auth event, a token refresh included, also clears the cached token.
+ *
+ * why: this module owns the auth subscription, so it (not active-server.ts)
+ * rearms it after a switch. Wiring it as a subscription keeps the dependency
+ * one-way (api -> server); importing these functions INTO active-server.ts
+ * would create a require cycle, which Metro resolves to `undefined` at
+ * module-eval time and surfaces far from the cause.
  */
-function attachAuthListener(): void {
-  authSubscription?.unsubscribe();
-  const {
-    data: { subscription },
-  } = getSupabase().auth.onAuthStateChange(() => {
-    resetAccessTokenCache();
-  });
-  authSubscription = subscription;
-}
-
-attachAuthListener();
-
-// why: this module owns the token cache and the auth subscription, so it — not
-// active-server.ts — rearms them after a switch. Wiring it as a subscription
-// keeps the dependency one-way (api → server); importing these functions INTO
-// active-server.ts would create a require cycle, which Metro resolves to
-// `undefined` at module-eval time and surfaces far from the cause.
-subscribeToServerChange(() => {
-  resetAccessTokenCache();
-  attachAuthListener();
+export const accountGeneration = createAccountGeneration({
+  subscribeAuth: (listener) => {
+    const {
+      data: { subscription },
+    } = getSupabase().auth.onAuthStateChange((_event, session) => {
+      resetAccessTokenCache();
+      listener(session?.user?.id ?? null);
+    });
+    return () => subscription.unsubscribe();
+  },
+  onSessionEnd: (task) => {
+    onAfterSessionEnd(task);
+  },
+  onServerChange: (task) => {
+    subscribeToServerChange(task);
+  },
+  currentClient: () => getSupabase(),
 });
+
+// A session read that started before the account changed belongs to the
+// session that ended: it may neither fill the cache nor be used.
+accountGeneration.onChange(resetAccessTokenCache);
 
 /**
  * Refuses the request when the live Supabase client belongs to a different
@@ -136,36 +142,59 @@ function guardSessionServerMatch(): { data: null; error: string } | null {
  * Returns a valid access token for the ACTIVE server, using cache when
  * possible.
  *
- * Reading a session is slow — `getSession()` reassembles several chunked
- * SecureStore entries — and a server switch can complete in that window. The
+ * Reading a session is slow (`getSession()` reassembles several chunked
+ * SecureStore entries), and a server switch can complete in that window. The
  * token then belongs to the server that was active when it was requested, so
  * it is discarded rather than returned, and above all is NOT written to the
  * cache: `setActiveServer` clears the cache as it switches, and writing here
  * afterwards would resurrect the previous server's token for the whole TTL.
  *
- * @returns The token, or `null` when there is no session or the active server
- *   changed while it was being read.
+ * @returns The token, or `null` when there is no session, or when the active
+ *   server or the signed-in account changed while it was being read.
  */
 export async function getAccessToken(): Promise<string | null> {
+  const read = await readAccessToken();
+  return "token" in read ? read.token : null;
+}
+
+/**
+ * Reads the access token, telling "no session" apart from "the account
+ * changed while it was being read".
+ *
+ * @returns `{ token }` (null when there is no session), or `{ changed: true }`
+ *   when the server or the account changed during the read
+ */
+async function readAccessToken(): Promise<
+  { token: string | null } | { changed: true }
+> {
   const now = Date.now();
   if (cachedAccessToken && now - cachedAt < SESSION_CACHE_TTL_MS) {
-    return cachedAccessToken;
+    return { token: cachedAccessToken };
   }
   const versionAtStart = getServerVersion();
+  const generationAtStart = accountGeneration.current();
   const {
     data: { session },
+    error,
   } = await getSupabase().auth.getSession();
 
-  if (getServerVersion() !== versionAtStart) return null;
+  if (getServerVersion() !== versionAtStart) return { changed: true };
+  if (accountGeneration.current() !== generationAtStart) {
+    // A read that failed and left no session ended the session itself (a
+    // refresh that fails signs out): an expired session. Any other move is a
+    // sign-out or another account landing during the read.
+    if (!session && error) return { token: null };
+    return { changed: true };
+  }
 
   if (session?.access_token) {
     cachedAccessToken = session.access_token;
     cachedAt = now;
-    return cachedAccessToken;
+    return { token: cachedAccessToken };
   }
   cachedAccessToken = null;
   cachedAt = 0;
-  return null;
+  return { token: null };
 }
 
 /**
@@ -193,7 +222,14 @@ async function resolveRequestTarget(): Promise<
   const server = getActiveServer();
   const versionAtStart = getServerVersion();
 
-  const accessToken = await getAccessToken();
+  const read = await readAccessToken();
+
+  // The account changed during the read (another person signed in, or a
+  // sign-out landed): not an expired session, so no sign-out prompt.
+  if ("changed" in read) {
+    return { ok: false, result: { data: null, error: SESSION_CHANGED_ERROR } };
+  }
+  const accessToken = read.token;
 
   if (!accessToken || getServerVersion() !== versionAtStart) {
     notifyAuthError();
@@ -229,17 +265,27 @@ export type ApiFetchOptions = RequestInit & { retry?: boolean };
  *   "no answer", where `status` is absent.
  * - Detects 401/session-expired and notifies global auth listeners.
  * - Enforces a request timeout to avoid hanging on slow networks.
+ * - Its automatic retry never crosses an account change: a retry after the
+ *   signed-in account moved returns the session-changed error instead of
+ *   resending with the next person's token.
  */
 export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {},
-  _retryCount = 0
+  _retryCount = 0,
+  /** Account generation of the first attempt; set only by the retry. */
+  _generation: number = accountGeneration.current()
 ): Promise<{
   data: T | null;
   error: string | null;
   errorDetails?: ApiErrorDetails | null;
   status?: number;
 }> {
+  // A retry belongs to the account that made the first attempt.
+  if (_retryCount > 0 && accountGeneration.current() !== _generation) {
+    return { data: null, error: SESSION_CHANGED_ERROR };
+  }
+
   // Declared outside try so catch block can read it
   let timedOut = false;
 
@@ -363,7 +409,7 @@ export async function apiFetch<T>(
 
     if (willRetry) {
       if (__DEV__) console.log("[API] Retrying…", path);
-      return apiFetch<T>(path, options, _retryCount + 1);
+      return apiFetch<T>(path, options, _retryCount + 1, _generation);
     }
 
     if (err instanceof Error && err.name === "AbortError") {

@@ -19,6 +19,7 @@ import {
   rethrowIfClientError,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { assertCategoriesBelongToOrg } from "~/utils/org-validation.server";
 import type { OptionRename } from "./option-list";
 import type { CustomFieldDraftPayload } from "./types";
 import { recordEvents } from "../activity-event/service.server";
@@ -42,8 +43,9 @@ const label: ErrorLabel = "Custom fields";
  *
  * @param args - The field's definition, its organization, and its author
  * @returns The created CustomField
- * @throws {ShelfError} 409 if the organization already has a field with this
- *   name, or on any other write failure
+ * @throws {ShelfError} 400 if a category is not in the organization; 409 if
+ *   the organization already has a field with this name, or on any other write
+ *   failure
  */
 export async function createCustomField({
   name,
@@ -57,6 +59,13 @@ export async function createCustomField({
   options = [],
   categories = [],
 }: CustomFieldDraftPayload) {
+  // Outside the try so its 400 reaches the caller unchanged instead of being
+  // rewrapped as a generic write failure.
+  await assertCategoriesBelongToOrg({
+    categoryIds: categories,
+    organizationId,
+  });
+
   try {
     const [customField, assetIndexSettingsEntries] = await Promise.all([
       db.customField.create({
@@ -301,7 +310,8 @@ export async function getCustomField<
  *   to change, and the option rewrites to apply
  * @returns The updated CustomField
  * @throws {ShelfError} 400 when the renames do not describe the saved and new
- *   options (see `assertRenamesMatchOptions`); 404 when the field does not
+ *   options (see `assertRenamesMatchOptions`) or a category is not in the
+ *   organization; 404 when the field does not
  *   exist in the organization
  */
 export async function updateCustomField(payload: {
@@ -383,6 +393,15 @@ export async function updateCustomField(payload: {
             status: 404,
             shouldBeCaptured: false,
           });
+        }
+
+        // Categories are connected by id, so every id must be a category of
+        // this workspace.
+        if (categories) {
+          await assertCategoriesBelongToOrg(
+            { categoryIds: categories, organizationId },
+            tx
+          );
         }
 
         if (

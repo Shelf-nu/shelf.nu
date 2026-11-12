@@ -1,0 +1,188 @@
+/**
+ * Tests for the mobile API path builders: an id is always one path segment
+ * and `orgId` is always the caller's.
+ *
+ * @see ./paths.ts
+ */
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  INVALID_ID_SEGMENT,
+  isUnroutableSegment,
+  mobilePaths,
+  pathSegment,
+} from "./paths";
+
+/** Ids that would reshape a path or query if spliced in raw. */
+const RESHAPING_IDS = [
+  "abc?orgId=other",
+  "abc&orgId=other",
+  "../team-members",
+  "abc/bookings",
+  "abc#frag",
+  "abc%3ForgId%3Dother",
+];
+
+/** Splits a built path the way the server's router does. */
+function parse(path: string) {
+  const url = new URL(path, "https://shelf.test");
+  return {
+    segments: url.pathname.split("/").filter(Boolean),
+    params: url.searchParams,
+    hash: url.hash,
+  };
+}
+
+describe("pathSegment", () => {
+  it("leaves a plain id unchanged", () => {
+    assert.equal(pathSegment("clx1abc_DEF-2"), "clx1abc_DEF-2");
+  });
+
+  it("never lets an empty or dot id leave its segment", () => {
+    for (const id of ["", ".", ".."]) {
+      assert.equal(pathSegment(id), INVALID_ID_SEGMENT, JSON.stringify(id));
+      const { segments } = parse(mobilePaths.audit(id, "org_1"));
+      assert.deepEqual(segments, [
+        "api",
+        "mobile",
+        "audits",
+        INVALID_ID_SEGMENT,
+      ]);
+      const evidence = parse(mobilePaths.auditEvidence(id, "org_1"));
+      assert.deepEqual(evidence.segments, [
+        "api",
+        "mobile",
+        "audits",
+        INVALID_ID_SEGMENT,
+        "evidence",
+      ]);
+    }
+  });
+
+  it("encodes every reserved character", () => {
+    assert.equal(pathSegment("a/b?c#d&e%f"), "a%2Fb%3Fc%23d%26e%25f");
+  });
+});
+
+describe("mobilePaths", () => {
+  const builders: Array<[string, (id: string) => string, string[]]> = [
+    ["asset", (id) => mobilePaths.asset(id, "org_1"), ["assets"]],
+    ["audit", (id) => mobilePaths.audit(id, "org_1"), ["audits"]],
+    [
+      "auditEvidence",
+      (id) => mobilePaths.auditEvidence(id, "org_1"),
+      ["audits"],
+    ],
+    ["booking", (id) => mobilePaths.booking(id, "org_1"), ["bookings"]],
+    [
+      "bookingModelRequests",
+      (id) => mobilePaths.bookingModelRequests(id, "org_1"),
+      ["bookings"],
+    ],
+    ["kit", (id) => mobilePaths.kit(id, "org_1"), ["kits"]],
+    [
+      "assetBookings",
+      (id) => mobilePaths.assetBookings(id, "org_1"),
+      ["assets"],
+    ],
+    ["barcode", (id) => mobilePaths.barcode(id, "org_1"), ["barcode"]],
+    ["qr", (id) => mobilePaths.qr(id, "org_1"), ["qr"]],
+    [
+      "scannedItem",
+      (id) => mobilePaths.scannedItem(id, "org_1"),
+      ["get-scanned-item"],
+    ],
+  ];
+
+  for (const [name, build, prefix] of builders) {
+    for (const id of RESHAPING_IDS) {
+      it(`${name}: ${JSON.stringify(id)} stays one segment`, () => {
+        const { segments, params, hash } = parse(build(id));
+        assert.deepEqual(segments.slice(0, 3), ["api", "mobile", ...prefix]);
+        assert.equal(decodeURIComponent(segments[3]), id);
+        assert.deepEqual(params.getAll("orgId"), ["org_1"]);
+        assert.equal(hash, "");
+      });
+    }
+  }
+
+  it("leaves an omitted evidence filter out of the query", () => {
+    assert.equal(
+      mobilePaths.auditEvidence("au_1", "org_1"),
+      "/api/mobile/audits/au_1/evidence?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.auditEvidence("au_1", "org_1", null),
+      "/api/mobile/audits/au_1/evidence?orgId=org_1"
+    );
+  });
+
+  it("keeps the endpoint suffix after the id", () => {
+    assert.equal(
+      mobilePaths.auditEvidence("au_1", "org_1", "aa_1"),
+      "/api/mobile/audits/au_1/evidence?orgId=org_1&auditAssetId=aa_1"
+    );
+    assert.equal(
+      mobilePaths.bookingModelRequests("bk_1", "org_1"),
+      "/api/mobile/bookings/bk_1/model-requests?orgId=org_1"
+    );
+  });
+
+  it("builds today's paths for plain ids", () => {
+    assert.equal(
+      mobilePaths.asset("as_1", "org_1"),
+      "/api/mobile/assets/as_1?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.audit("au_1", "org_1"),
+      "/api/mobile/audits/au_1?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.booking("bk_1", "org_1"),
+      "/api/mobile/bookings/bk_1?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.kit("kt_1", "org_1"),
+      "/api/mobile/kits/kt_1?orgId=org_1"
+    );
+  });
+
+  it("keeps today's paths for the scan resolves and asset bookings", () => {
+    assert.equal(mobilePaths.qr("qr_1"), "/api/mobile/qr/qr_1");
+    assert.equal(
+      mobilePaths.scannedItem("SAM-0001", "org_1"),
+      "/api/mobile/get-scanned-item/SAM-0001?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.barcode("ABC 123", "org_1"),
+      "/api/mobile/barcode/ABC%20123?orgId=org_1"
+    );
+    assert.equal(
+      mobilePaths.assetBookings("as_1", "org_1", { page: 2, perPage: 20 }),
+      "/api/mobile/assets/as_1/bookings?orgId=org_1&page=2&perPage=20"
+    );
+  });
+
+  it("puts the image upload's asset id in the query, once", () => {
+    const { params } = parse(
+      mobilePaths.assetImage("as_1&orgId=other", "org_1")
+    );
+    assert.deepEqual(params.getAll("orgId"), ["org_1"]);
+    assert.deepEqual(params.getAll("assetId"), ["as_1&orgId=other"]);
+  });
+});
+
+describe("isUnroutableSegment", () => {
+  it("flags the values that cannot stay one path segment", () => {
+    for (const value of ["", ".", ".."]) {
+      assert.equal(isUnroutableSegment(value), true, JSON.stringify(value));
+    }
+  });
+
+  it("passes every other value, dotted ones included", () => {
+    for (const value of ["invalid-id", "...", "a.b", "ABC 123"]) {
+      assert.equal(isUnroutableSegment(value), false, value);
+    }
+  });
+});

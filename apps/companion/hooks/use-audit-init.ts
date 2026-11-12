@@ -6,6 +6,9 @@ import {
   loadAuditScanState,
   clearAuditScanState,
   createDebouncedSaver,
+  pruneStaleAuditDrafts,
+  adoptUnownedDraft,
+  guardRecoveryActions,
 } from "@/lib/audit-scan-persistence";
 import { auditDeletedAssetLabel } from "@shelf/labels";
 import { announce } from "@/lib/a11y";
@@ -88,6 +91,11 @@ export type ScanQueueEntry = {
 type UseAuditInitParams = {
   auditId: string | undefined;
   orgId: string | undefined;
+  /**
+   * The signed-in account. Only its own draft is offered for recovery, and
+   * the audit waits for it before loading.
+   */
+  userId: string | undefined;
   progressAnim: Animated.Value;
   animateProgress: (newFound: number) => void;
   processQueue: () => void;
@@ -112,11 +120,17 @@ export type AuditInitResult = {
   debouncedSaverRef: React.MutableRefObject<ReturnType<
     typeof createDebouncedSaver
   > | null>;
+  /**
+   * True while the "Resume Previous Session?" prompt is unanswered. The
+   * stored draft must then survive the screen closing.
+   */
+  recoveryPendingRef: React.MutableRefObject<boolean>;
 };
 
 export function useAuditInit({
   auditId,
   orgId,
+  userId,
   progressAnim,
   animateProgress,
   processQueue,
@@ -144,15 +158,22 @@ export function useAuditInit({
   const debouncedSaverRef = useRef<ReturnType<
     typeof createDebouncedSaver
   > | null>(null);
+  const recoveryPendingRef = useRef(false);
 
   useEffect(() => {
-    if (!auditId || !orgId) return;
+    if (!auditId || !orgId || !userId) return;
+
+    // A load that finishes after the audit, workspace or account changed
+    // belongs to the old ones: it must not install its saver or state.
+    let cancelled = false;
+    recoveryPendingRef.current = false;
 
     (async () => {
       setIsInitializing(true);
       setInitError(null);
 
       const { data, error } = await api.audit(auditId, orgId);
+      if (cancelled) return;
       if (error || !data) {
         setInitError(error || "Failed to load audit");
         setIsInitializing(false);
@@ -218,11 +239,21 @@ export function useAuditInit({
           : 0;
       progressAnim.setValue(Math.min(progress, 1));
 
-      // Initialize debounced saver
-      debouncedSaverRef.current = createDebouncedSaver(auditId);
-
       // ── Crash recovery ───────────────────────────────
-      const persisted = await loadAuditScanState(auditId);
+      // A draft saved by an older build has no owner; one with unsent scans
+      // for this audit is adopted when this account may scan it, and then
+      // offered with a prompt that says it may be someone else's.
+      const adopted = await adoptUnownedDraft(userId, auditId, {
+        mayScan: data.canScan,
+      });
+      const persisted = await loadAuditScanState(userId, auditId);
+      if (cancelled) return;
+
+      // Installed only once this load is known to be current, so a cancelled
+      // load never leaves a saver bound to the old account or audit.
+      debouncedSaverRef.current = createDebouncedSaver(userId, auditId);
+      // Housekeeping runs after the load, so the resume prompt never waits.
+      void pruneStaleAuditDrafts();
       // why: gate on whether there is ANYTHING to recover (the inner check
       // below decides recover-vs-clear from scanned items OR a non-empty
       // queue), not on scannedItems alone. The eager queue-persist can write a
@@ -273,135 +304,150 @@ export function useAuditInit({
             recoveredItems: recoveredItems.length,
             queuedForSync: queuedForSync.length,
           });
+          // The alert can outlive its load (the audit, workspace or account
+          // changed): both buttons then do nothing, so old scans never reach
+          // a new scanner and one account never discards another's draft.
+          const recovery = guardRecoveryActions(() => cancelled, {
+            discard: () => {
+              recoveryPendingRef.current = false;
+              void clearAuditScanState(userId, auditId);
+            },
+            resume: () => {
+              recoveryPendingRef.current = false;
+              // A queued scan may have no recovered display item: the
+              // eager persist can save a queue entry before the list state
+              // commits. Rebuild display rows for those (name from the
+              // expected-asset map, else a neutral label) so they show as
+              // scanned, count correctly, and don't leave the Complete
+              // button hidden because scannedItems stayed empty.
+              const recoveredIds = new Set(
+                recoveredItems.map((i) => i.assetId)
+              );
+              // A recount of a scan the server already has keeps its
+              // restored row; it needs no second one.
+              const queuedOnlyItems: ScannedItem[] = queuedForSync
+                .filter(
+                  (e) =>
+                    !recoveredIds.has(e.assetId) &&
+                    !serverScannedIds.has(e.assetId)
+                )
+                .map((e) => ({
+                  assetId: e.assetId,
+                  name:
+                    expectedAssetMapRef.current.get(e.assetId)?.name ??
+                    "Scanned asset",
+                  isExpected: e.isExpected,
+                  scannedAt: new Date().toISOString(),
+                  expectedQuantity:
+                    expectedAssetMapRef.current.get(e.assetId)
+                      ?.expectedQuantity ?? null,
+                  foundQuantity: e.foundQuantity ?? null,
+                  unitOfMeasure:
+                    expectedAssetMapRef.current.get(e.assetId)?.unitOfMeasure ??
+                    null,
+                  locationName:
+                    expectedAssetMapRef.current.get(e.assetId)?.locationName ??
+                    null,
+                  thumbnailImage:
+                    expectedAssetMapRef.current.get(e.assetId)
+                      ?.thumbnailImage ??
+                    expectedAssetMapRef.current.get(e.assetId)?.mainImage ??
+                    null,
+                }));
+              const allRecovered = [...recoveredItems, ...queuedOnlyItems];
+
+              // Merge recovered items into state
+              for (const item of allRecovered) {
+                scannedIds.add(item.assetId);
+              }
+              scannedAssetIdsRef.current = scannedIds;
+
+              // A recount still queued shows its count on the restored
+              // row; the server's older one is replaced once it syncs.
+              const queuedCounts = new Map(
+                queuedForSync
+                  .filter((e) => e.foundQuantity !== undefined)
+                  .map((e) => [e.assetId, e.foundQuantity])
+              );
+              const merged = [
+                ...allRecovered,
+                ...restoredItems.map((item) =>
+                  queuedCounts.has(item.assetId)
+                    ? {
+                        ...item,
+                        foundQuantity: queuedCounts.get(item.assetId),
+                      }
+                    : item
+                ),
+              ];
+              setScannedItems(merged);
+              scannedItemsRef.current = merged;
+
+              // Requeue pending + previously-failed items for submission
+              if (queuedForSync.length > 0) {
+                scanQueueRef.current = queuedForSync.map((e) => ({
+                  ...e,
+                  retryCount: 0,
+                }));
+                // processQueue will be called after this callback
+                setTimeout(() => processQueue(), 100);
+              }
+
+              // Recalculate counters
+              let extraFound = 0;
+              let extraUnexpected = 0;
+              for (const item of allRecovered) {
+                if (item.isExpected) extraFound++;
+                else extraUnexpected++;
+              }
+              if (extraFound > 0) {
+                setFoundCount((prev) => prev + extraFound);
+                animateProgress(data.audit.foundAssetCount + extraFound);
+              }
+              if (extraUnexpected > 0) {
+                setUnexpectedCount((prev) => prev + extraUnexpected);
+              }
+
+              announce(
+                `Resumed ${allRecovered.length} scan${
+                  allRecovered.length !== 1 ? "s" : ""
+                } from previous session`
+              );
+            },
+          });
+          recoveryPendingRef.current = true;
           Alert.alert(
             "Resume Previous Session?",
-            `Found ${unsyncedCount} unsynced scan${
-              unsyncedCount !== 1 ? "s" : ""
-            } from a previous session.`,
+            adopted
+              ? `Found ${unsyncedCount} unsynced scan${
+                  unsyncedCount !== 1 ? "s" : ""
+                } saved on this phone by an earlier version of the app, possibly by someone else. Resume sends them as your scans.`
+              : `Found ${unsyncedCount} unsynced scan${
+                  unsyncedCount !== 1 ? "s" : ""
+                } from a previous session.`,
             [
               {
                 text: "Discard",
                 style: "destructive",
-                onPress: () => clearAuditScanState(auditId),
+                onPress: recovery.onDiscard,
               },
-              {
-                text: "Resume",
-                onPress: () => {
-                  // A queued scan may have no recovered display item — the
-                  // eager persist can save a queue entry before the list state
-                  // commits. Rebuild display rows for those (name from the
-                  // expected-asset map, else a neutral label) so they show as
-                  // scanned, count correctly, and don't leave the Complete
-                  // button hidden because scannedItems stayed empty. (Codex
-                  // review, PR #2586.)
-                  const recoveredIds = new Set(
-                    recoveredItems.map((i) => i.assetId)
-                  );
-                  // A recount of a scan the server already has keeps its
-                  // restored row; it needs no second one.
-                  const queuedOnlyItems: ScannedItem[] = queuedForSync
-                    .filter(
-                      (e) =>
-                        !recoveredIds.has(e.assetId) &&
-                        !serverScannedIds.has(e.assetId)
-                    )
-                    .map((e) => ({
-                      assetId: e.assetId,
-                      name:
-                        expectedAssetMapRef.current.get(e.assetId)?.name ??
-                        "Scanned asset",
-                      isExpected: e.isExpected,
-                      scannedAt: new Date().toISOString(),
-                      expectedQuantity:
-                        expectedAssetMapRef.current.get(e.assetId)
-                          ?.expectedQuantity ?? null,
-                      foundQuantity: e.foundQuantity ?? null,
-                      unitOfMeasure:
-                        expectedAssetMapRef.current.get(e.assetId)
-                          ?.unitOfMeasure ?? null,
-                      locationName:
-                        expectedAssetMapRef.current.get(e.assetId)
-                          ?.locationName ?? null,
-                      thumbnailImage:
-                        expectedAssetMapRef.current.get(e.assetId)
-                          ?.thumbnailImage ??
-                        expectedAssetMapRef.current.get(e.assetId)?.mainImage ??
-                        null,
-                    }));
-                  const allRecovered = [...recoveredItems, ...queuedOnlyItems];
-
-                  // Merge recovered items into state
-                  for (const item of allRecovered) {
-                    scannedIds.add(item.assetId);
-                  }
-                  scannedAssetIdsRef.current = scannedIds;
-
-                  // A recount still queued shows its count on the restored
-                  // row; the server's older one is replaced once it syncs.
-                  const queuedCounts = new Map(
-                    queuedForSync
-                      .filter((e) => e.foundQuantity !== undefined)
-                      .map((e) => [e.assetId, e.foundQuantity])
-                  );
-                  const merged = [
-                    ...allRecovered,
-                    ...restoredItems.map((item) =>
-                      queuedCounts.has(item.assetId)
-                        ? {
-                            ...item,
-                            foundQuantity: queuedCounts.get(item.assetId),
-                          }
-                        : item
-                    ),
-                  ];
-                  setScannedItems(merged);
-                  scannedItemsRef.current = merged;
-
-                  // Requeue pending + previously-failed items for submission
-                  if (queuedForSync.length > 0) {
-                    scanQueueRef.current = queuedForSync.map((e) => ({
-                      ...e,
-                      retryCount: 0,
-                    }));
-                    // processQueue will be called after this callback
-                    setTimeout(() => processQueue(), 100);
-                  }
-
-                  // Recalculate counters
-                  let extraFound = 0;
-                  let extraUnexpected = 0;
-                  for (const item of allRecovered) {
-                    if (item.isExpected) extraFound++;
-                    else extraUnexpected++;
-                  }
-                  if (extraFound > 0) {
-                    setFoundCount((prev) => prev + extraFound);
-                    animateProgress(data.audit.foundAssetCount + extraFound);
-                  }
-                  if (extraUnexpected > 0) {
-                    setUnexpectedCount((prev) => prev + extraUnexpected);
-                  }
-
-                  announce(
-                    `Resumed ${allRecovered.length} scan${
-                      allRecovered.length !== 1 ? "s" : ""
-                    } from previous session`
-                  );
-                },
-              },
+              { text: "Resume", onPress: recovery.onResume },
             ]
           );
           return; // Skip the setIsInitializing below
         } else {
           // Server already has everything — clear stale state
-          clearAuditScanState(auditId);
+          clearAuditScanState(userId, auditId);
         }
       }
 
       setIsInitializing(false);
     })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auditId, orgId, progressAnim]);
+  }, [auditId, orgId, userId, progressAnim]);
 
   return {
     auditName,
@@ -419,5 +465,6 @@ export function useAuditInit({
     setScannedItems,
     scannedItemsRef,
     debouncedSaverRef,
+    recoveryPendingRef,
   };
 }

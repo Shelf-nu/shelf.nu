@@ -13,6 +13,7 @@ import type { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   buildAssetSearchUnion,
+  custodySearchScopeFor,
   CUSTOM_FIELD_SEARCH_PATHS,
 } from "./search-union.server";
 
@@ -23,10 +24,12 @@ function sqlText(sql: Prisma.Sql): string {
 
 describe("buildAssetSearchUnion", () => {
   const orgId = "org_123";
+  /** A viewer who may see everyone's custody. */
+  const seeAll = { organizationId: orgId, custodySearchScope: "all" as const };
 
   it("scopes every branch to the organization and covers all 11 sources", () => {
     const text = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["chair"] })
+      buildAssetSearchUnion({ ...seeAll, terms: ["chair"] })
     );
 
     // org-scoped (literal param) in the leading Asset branch
@@ -50,7 +53,7 @@ describe("buildAssetSearchUnion", () => {
 
   it("org-scopes the asset directly in every branch (no cross-org pivot leak)", () => {
     const text = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["chair"] })
+      buildAssetSearchUnion({ ...seeAll, terms: ["chair"] })
     );
     // The 3 pivot-based branches join back to Asset and pin a."organizationId",
     // so the helper is safe to run standalone (not only under an outer org filter).
@@ -60,9 +63,7 @@ describe("buildAssetSearchUnion", () => {
   });
 
   it("matches an asset by its asset model's name, org-scoped on both sides", () => {
-    const text = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["dell"] })
-    );
+    const text = sqlText(buildAssetSearchUnion({ ...seeAll, terms: ["dell"] }));
 
     // Reaches Asset through the direct `assetModelId` FK and reads the model's
     // own name column. Without this branch a model-name term matches nothing,
@@ -88,9 +89,7 @@ describe("buildAssetSearchUnion", () => {
   });
 
   it("uses @map DB column names, not Prisma field names", () => {
-    const text = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["x"] })
-    );
+    const text = sqlText(buildAssetSearchUnion({ ...seeAll, terms: ["x"] }));
     expect(text).toContain('b."value"'); // Barcode.value (not "barcode")
     expect(text).toContain('q."id"'); // Qr.id
     // Custodian names: `User.displayName` carries no @map, so the SQL column is
@@ -107,7 +106,7 @@ describe("buildAssetSearchUnion", () => {
 
   it("prefilters the custom-field branch with the indexed COALESCE concat + keeps the exact OR", () => {
     const text = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["chair"] })
+      buildAssetSearchUnion({ ...seeAll, terms: ["chair"] })
     );
     // Indexed prefilter must match AssetCustomFieldValue_searchable_trgm_idx:
     // COALESCE(acfv."value"#>>'{...}', '') || ' ' || COALESCE(...) || ...
@@ -119,7 +118,7 @@ describe("buildAssetSearchUnion", () => {
 
   it("binds organizationId and every %term% pattern as parameters", () => {
     const sql = buildAssetSearchUnion({
-      organizationId: orgId,
+      ...seeAll,
       terms: ["chair", "desk"],
     });
     expect(sql.values).toContain(orgId);
@@ -128,11 +127,9 @@ describe("buildAssetSearchUnion", () => {
   });
 
   it("repeats the branch group once per term (OR-of-terms via UNION)", () => {
-    const one = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["a"] })
-    );
+    const one = sqlText(buildAssetSearchUnion({ ...seeAll, terms: ["a"] }));
     const two = sqlText(
-      buildAssetSearchUnion({ organizationId: orgId, terms: ["a", "b"] })
+      buildAssetSearchUnion({ ...seeAll, terms: ["a", "b"] })
     );
     // twice as many UNION keywords (roughly) — assert the two-term SQL is longer
     // and contains at least as many source-table mentions as the single-term ×2.
@@ -140,9 +137,62 @@ describe("buildAssetSearchUnion", () => {
     expect(countBarcode(two)).toBe(countBarcode(one) * 2);
   });
 
+  describe("custodian-name branch", () => {
+    /** The custody branch alone: from its FROM up to the next UNION. */
+    function custodyBranch(text: string): string {
+      const fromCustody = text.slice(
+        text.indexOf('SELECT cu."assetId" FROM public."TeamMember" tm')
+      );
+      return fromCustody.slice(0, fromCustody.indexOf("UNION"));
+    }
+
+    it("matches only the viewer's own custody when they may not see all custody", () => {
+      const sql = buildAssetSearchUnion({
+        organizationId: orgId,
+        terms: ["alice"],
+        custodySearchScope: { userId: "viewer-1" },
+      });
+      // The name match stays, AND-ed with the custodian being the viewer.
+      expect(custodyBranch(sqlText(sql))).toContain('u."displayName" ILIKE ?');
+      expect(custodyBranch(sqlText(sql))).toContain('AND tm."userId" = ?');
+      expect(sql.values).toContain("viewer-1");
+    });
+
+    it("scopes the custody branch once per term", () => {
+      const text = sqlText(
+        buildAssetSearchUnion({
+          organizationId: orgId,
+          terms: ["alice", "bob"],
+          custodySearchScope: { userId: "viewer-1" },
+        })
+      );
+      expect(text.split('AND tm."userId" = ?').length - 1).toBe(2);
+    });
+
+    it("leaves the SQL unchanged for a viewer who sees all custody", () => {
+      const sql = buildAssetSearchUnion({ ...seeAll, terms: ["alice"] });
+      expect(sqlText(sql)).not.toContain('tm."userId" = ?');
+      // Same text and the same bound values as before the scope existed: the
+      // org id and the pattern only.
+      expect(new Set(sql.values)).toEqual(new Set([orgId, "%alice%"]));
+    });
+  });
+
+  describe("custodySearchScopeFor", () => {
+    it("is unrestricted for a viewer who sees all custody", () => {
+      expect(
+        custodySearchScopeFor({ canSeeAllCustody: true, userId: "u1" })
+      ).toBe("all");
+    });
+
+    it("is limited to the viewer otherwise", () => {
+      expect(
+        custodySearchScopeFor({ canSeeAllCustody: false, userId: "u1" })
+      ).toEqual({ userId: "u1" });
+    });
+  });
+
   it("throws on empty terms (caller must guard)", () => {
-    expect(() =>
-      buildAssetSearchUnion({ organizationId: orgId, terms: [] })
-    ).toThrow();
+    expect(() => buildAssetSearchUnion({ ...seeAll, terms: [] })).toThrow();
   });
 });
