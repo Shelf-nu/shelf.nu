@@ -1,5 +1,5 @@
 import { AssetStatus } from "@prisma/client";
-import { TrendingDownIcon } from "lucide-react";
+import { TriangleAlertIcon } from "lucide-react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -93,7 +93,7 @@ export function AssetIndexFilters({
                 <span className="flex items-center gap-1.5">
                   {/* strokeWidth 1.5 brings lucide's 2px stroke close to the
                       hairline Radix icons of the view toggle beside it. */}
-                  <TrendingDownIcon
+                  <TriangleAlertIcon
                     className="size-5"
                     strokeWidth={1.5}
                     aria-hidden="true"
