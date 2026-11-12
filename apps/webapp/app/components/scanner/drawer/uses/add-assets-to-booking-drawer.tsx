@@ -379,6 +379,7 @@ export default function AddAssetsToBookingDrawer({
       className={className}
       style={style}
       formName="AddScannedAssetsToBooking"
+      savedCheck={{ to: `/bookings/${booking.id}`, label: "Open the booking" }}
       headerContent={
         <AssignReservationHeader
           progressByModel={progressByModel}

@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   AlreadyIncludedRow,
@@ -28,6 +28,15 @@ import {
 } from "~/atoms/qr-scanner";
 import type { AssignSessionInfo } from "./use-booking-assign-session-initialization";
 import { useBookingAssignSessionInitialization } from "./use-booking-assign-session-initialization";
+
+// why: the hook keeps a draft of the scan list, which reads router state and
+// the signed-in user. Neither exists without a mounted router; the draft has
+// its own suite, so here they are held still.
+vi.mock("react-router", () => ({
+  useNavigation: () => ({ state: "idle" }),
+  useLocation: () => ({ pathname: "/bookings/booking-1/overview/scan-assets" }),
+}));
+vi.mock("~/hooks/use-user-data", () => ({ useUserData: () => undefined }));
 
 function modelRequest(
   overrides: Partial<ExpectedModelRequest> = {}

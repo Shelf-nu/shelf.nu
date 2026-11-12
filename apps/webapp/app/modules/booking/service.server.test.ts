@@ -19359,6 +19359,97 @@ describe("addScannedAssetsToBooking", () => {
     ).mock.calls.map(([note]) => String(note.content));
     expect(noteContents.join("\n")).not.toContain("Existing Kit");
   });
+
+  /**
+   * A save whose response never arrives (a gateway timeout) may still have
+   * committed, and the operator, left holding the same list, can confirm it
+   * again. The second submission has to be a no-op, not a second copy.
+   */
+  it("changes nothing when a save that already landed is submitted again", async () => {
+    expect.assertions(4);
+
+    // why: skips the overlap-conflict guard so the test can focus on the
+    // resubmission, matching the kit-slice rescan test above.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    // why: serves both the org-scope guard (only needs the returned count to
+    // match) and the scanned-asset metadata read (needs title/type).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: null,
+            unitOfMeasure: null,
+          }))
+        )
+    );
+
+    // why: the first submission wrote every row. The standalone read
+    // (`assetKitId: null`) finds the loose asset, the kit-driven read
+    // (`assetKitId: { in }`) finds the kit membership.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockImplementation(
+      (args?: { where?: { assetKitId?: { in?: string[] } | null } }) => {
+        const assetKitId = args?.where?.assetKitId;
+        return Promise.resolve(
+          assetKitId && typeof assetKitId === "object" && "in" in assetKitId
+            ? [{ assetKitId: "ak-saved" }]
+            : [{ assetId: "asset-saved", assetKitId: null, quantity: 1 }]
+        );
+      }
+    );
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.RESERVED,
+    });
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-saved",
+        name: "Saved Kit",
+        assetKits: [{ assetId: "asset-kit-member" }],
+      },
+    ]);
+
+    const result = await addScannedAssetsToBooking({
+      assetIds: ["asset-saved"],
+      kitIds: ["kit-saved"],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      kitSlices: [
+        {
+          assetId: "asset-kit-member",
+          assetKitId: "ak-saved",
+          kitId: "kit-saved",
+        },
+      ],
+    });
+
+    // Nothing is reported as added, so the route answers "Nothing to add".
+    expect(result.addedAssetIds).toEqual([]);
+
+    // No booking row is written a second time.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { bookingAssets: { create: [] } },
+      })
+    );
+
+    // And the activity trail does not narrate an add that did not happen.
+    expect(activityEventService.recordEvents).not.toHaveBeenCalled();
+    expect(noteService.createNotes).not.toHaveBeenCalled();
+  });
 });
 
 describe("getExistingBookingDetails — addable statuses", () => {

@@ -54,6 +54,9 @@ vi.mock("react-router", async () => {
     useLoaderData: vi.fn(),
     useRouteLoaderData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
+    // why: the shared drawer reads the route's action data for its
+    // save-not-confirmed notice, which needs a mounted data router.
+    useActionData: vi.fn(() => undefined),
     // `useLocation` + friends are used transitively by `~/components/table`
     // and other consumers. Returning a plain object avoids the
     // `useLocation() may be used only in the context of a <Router>` error

@@ -55,6 +55,9 @@ vi.mock("react-router", async () => {
     useLoaderData: vi.fn(),
     useRouteLoaderData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
+    // why: the shared drawer reads the route's action data for its
+    // save-not-confirmed notice, which needs a mounted data router.
+    useActionData: vi.fn(() => undefined),
     useLocation: vi.fn(() => ({
       pathname: "/bookings/booking-1/overview/scan-assets",
       search: "",

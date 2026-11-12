@@ -12,6 +12,8 @@ import { tw } from "~/utils/tw";
 import BaseDrawer from "./base-drawer";
 import type { BlockersVariant } from "./blockers-factory";
 import { ScanItemGroup } from "./scan-item-group";
+import type { ScanSavedCheck } from "./scan-submit-failure-alert";
+import { ScanSubmitFailureAlert } from "./scan-submit-failure-alert";
 
 // Props for the configurable drawer
 type ConfigurableDrawerProps<T> = {
@@ -80,6 +82,12 @@ type ConfigurableDrawerProps<T> = {
   renderGroups?: () => ReactNode;
   // Custom height for the collapsed state when items are present (default: 170)
   collapsedHeight?: number;
+  /**
+   * Where the operator can check whether a save went through, linked from the
+   * notice shown when a save gets no answer. Without it the notice still
+   * shows, with no link.
+   */
+  savedCheck?: ScanSavedCheck;
 };
 
 /**
@@ -111,6 +119,7 @@ export default function ConfigurableDrawer<T>({
   customRenderAllItems,
   renderGroups,
   collapsedHeight,
+  savedCheck,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
   const itemsLength = Object.keys(items).length;
@@ -160,6 +169,9 @@ export default function ConfigurableDrawer<T>({
       collapsedHeight={collapsedHeight}
       footer={(expanded) => (
         <>
+          {/* A save that got no answer: the list is intact, check first. */}
+          <ScanSubmitFailureAlert savedCheck={savedCheck} />
+
           {/* Why the action is disabled; the fixes are in the list's card. */}
           {Blockers ? Blockers({ variant: "note" }) : null}
 
