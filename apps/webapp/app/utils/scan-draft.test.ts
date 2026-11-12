@@ -122,6 +122,34 @@ describe("saveScanDraft / readScanDraft", () => {
    * Quick check-in and check-out mint keys that name a booking row, not a code.
    * They mean nothing once the booking has moved on.
    */
+  /**
+   * A lookup that got no answer (no connection, a gateway page) is not a
+   * verdict on the code. Dropping it would empty the draft the moment a
+   * restored list is looked up against a server that is still struggling,
+   * which is exactly when the draft is needed.
+   */
+  it("keeps a code whose lookup got no answer, to try again later", () => {
+    saveScanDraft(KEY, {
+      "qr-1": {
+        error: "Failed to fetch item",
+        lookupFailed: true,
+        codeType: "qr",
+        type: "asset",
+      },
+      // Scanned for the first time while offline: no type is known yet.
+      "barcode-2": {
+        error: "Failed to fetch item",
+        lookupFailed: true,
+        codeType: "barcode",
+      },
+    });
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", type: "asset" },
+      "barcode-2": { codeType: "barcode", type: undefined },
+    });
+  });
+
   it("drops the synthetic booking-row keys", () => {
     saveScanDraft(KEY, {
       "qr-1": scanned(),

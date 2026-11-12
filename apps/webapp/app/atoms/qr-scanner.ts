@@ -15,6 +15,12 @@ export type ScanListItem =
   | {
       data?: KitFromQr | AssetFromQr;
       error?: string;
+      /**
+       * Set with `error` when the lookup itself got no answer (no connection,
+       * a gateway page), as opposed to the server refusing the code. The code
+       * may be perfectly good, so a scan draft keeps it for the next attempt.
+       */
+      lookupFailed?: boolean;
       type?: "asset" | "kit";
       codeType?: "qr" | "barcode" | "samId"; // Track whether this came from QR, barcode, or SAM ID
     }

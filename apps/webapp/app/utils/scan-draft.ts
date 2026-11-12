@@ -88,9 +88,12 @@ function isSyntheticKey(key: string): boolean {
 /**
  * Saves the resolved codes from a scan list, replacing any previous draft.
  *
- * Unresolved and failed entries are dropped: a code that did not resolve has
- * nothing to restore, and one that errored would only fail again. Writing an
- * empty list removes the draft rather than storing an empty one.
+ * Unresolved and refused entries are dropped: a code that did not resolve has
+ * nothing to restore, and one the server refused would only be refused again.
+ * A code whose lookup got no answer (`lookupFailed`) is kept, because nothing
+ * is known to be wrong with it: it is looked up again when the draft is
+ * restored. Writing an empty list removes the draft rather than storing an
+ * empty one.
  *
  * @param key - From {@link scanDraftKey}.
  * @param items - The current scan list.
@@ -103,7 +106,12 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
     // precisely so its row re-resolves, and it keeps that shape until the
     // fetch lands; requiring `data` would drop the whole list back out of the
     // draft in the moments after a restore.
-    if (!item || item.error || !item.type) {
+    if (!item) {
+      continue;
+    }
+    // A lookup that got no answer is not a verdict on the code. It is kept
+    // even without a type: a restored entry resolves from its code alone.
+    if (!item.lookupFailed && (item.error || !item.type)) {
       continue;
     }
     if (isSyntheticKey(code)) {

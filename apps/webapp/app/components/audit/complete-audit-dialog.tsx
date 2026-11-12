@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { Form } from "react-router";
 import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-box";
+import { ScanSubmitFailureAlert } from "~/components/scanner/drawer/scan-submit-failure-alert";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -166,6 +167,11 @@ export default function CompleteAuditDialog({
               <AuditImageUploadSection maxCount={5} disabled={formDisabled} />
             </div>
           </AlertDialogDescription>
+
+          {/* The drawer's own notice sits behind this dialog's overlay, so a
+              completion that got no answer has to say so here, before the
+              operator confirms again. */}
+          <ScanSubmitFailureAlert />
 
           <AlertDialogFooter className="mt-4">
             <AlertDialogCancel asChild>
