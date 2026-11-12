@@ -334,7 +334,16 @@ export async function deleteBarcodes({
 }
 
 /**
- * Get barcode by value within organization
+ * Finds a barcode by value within an organization.
+ *
+ * The barcode must belong to the organization, and so must the asset or kit it
+ * links to: a barcode linked to another workspace's item resolves to `null`,
+ * so no caller can read or record a scan of that item.
+ *
+ * @param args.value - The scanned value; matched as given, then upper-cased
+ * @param args.organizationId - The caller's workspace
+ * @param args.include - Relations to load (asset and kit by default)
+ * @returns The barcode, or null when none matches in this workspace
  */
 export async function getBarcodeByValue<
   T = {
@@ -359,6 +368,10 @@ export async function getBarcodeByValue<
           { value: value.toUpperCase() }, // Try uppercase (other barcode types)
         ],
         organizationId,
+        AND: [
+          { OR: [{ assetId: null }, { asset: { organizationId } }] },
+          { OR: [{ kitId: null }, { kit: { organizationId } }] },
+        ],
       },
       include: include || {
         asset: true,

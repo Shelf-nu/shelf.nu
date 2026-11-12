@@ -68,8 +68,8 @@ vi.mock("./service.server", () => ({
   transferOnRoleChange: vi.fn(),
 }));
 
-// why: resend invalidates prior invites for the same invitee first; a role
-// change reads the workspace owner (the default recipient), writes the
+// why: the resend path must not write invites itself (createInvite owns
+// that); a role change reads the workspace owner (the default recipient), writes the
 // role-change log inside a transaction and reads the member's email for the
 // notice. The transaction runs its callback against the same stub.
 vi.mock("~/database/db.server", () => {
@@ -136,6 +136,23 @@ describe("resolveUserAction — resend invite role", () => {
     >);
   });
 
+  it("leaves the existing invite pending when createInvite refuses", async () => {
+    vi.mocked(createInvite).mockRejectedValueOnce(
+      new Error("Team member not found")
+    );
+
+    await expect(
+      resolveUserAction(
+        resendRequest("Administrator"),
+        "org-1",
+        "admin-user",
+        accessFor([OrganizationRoles.ADMIN])
+      )
+    ).rejects.toBeDefined();
+
+    expect(db.invite.updateMany).not.toHaveBeenCalled();
+  });
+
   it("refuses to resend an invite as Owner", async () => {
     await expect(
       resolveUserAction(
@@ -158,7 +175,8 @@ describe("resolveUserAction — resend invite role", () => {
       accessFor([OrganizationRoles.ADMIN])
     );
 
-    expect(db.invite.updateMany).toHaveBeenCalledTimes(1);
+    // createInvite closes the earlier pending invites itself.
+    expect(db.invite.updateMany).not.toHaveBeenCalled();
     expect(createInvite).toHaveBeenCalledWith(
       expect.objectContaining({
         roles: [OrganizationRoles.ADMIN],
@@ -175,7 +193,8 @@ describe("resolveUserAction — resend invite role", () => {
       accessFor([OrganizationRoles.OWNER])
     );
 
-    expect(db.invite.updateMany).toHaveBeenCalledTimes(1);
+    // createInvite closes the earlier pending invites itself.
+    expect(db.invite.updateMany).not.toHaveBeenCalled();
     expect(createInvite).toHaveBeenCalledWith(
       expect.objectContaining({
         roles: [OrganizationRoles.ADMIN],

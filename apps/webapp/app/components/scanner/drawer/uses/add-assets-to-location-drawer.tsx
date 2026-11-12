@@ -45,9 +45,8 @@ export const addScannedAssetsOrKitsToLocationSchema = z.object({
 });
 
 /**
- * Extend the type so we can use it. This is based on the extra asset
- * includes passed to the row — location is reached through the
- * `AssetLocation` pivot, so the extra include projects `assetLocations`.
+ * A scanned asset with its placement. Location is reached through the
+ * `AssetLocation` pivot, which `ASSET_INCLUDE` always selects (`id`, `name`).
  */
 type AssetFromQrWithLocation = AssetFromQr & {
   assetLocations: {
@@ -146,18 +145,6 @@ export default function AddAssetsKitsToLocationDrawer({
         }
         return null;
       }}
-      assetExtraInclude={{
-        assetLocations: {
-          select: {
-            location: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-      }}
       // Tell the API which destination this drawer is feeding so it
       // can compute the strict-available pool and attach
       // `pickerMeta.maxAllowed` to the asset response — matches the
@@ -175,8 +162,11 @@ export default function AddAssetsKitsToLocationDrawer({
     <ConfigurableDrawer
       schema={addScannedAssetsOrKitsToLocationSchema}
       /**
-       * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
-       * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
+       * Add-only submission: the scanned asset ids, scanned kit ids and
+       * per-asset quantities. Nothing already at the location is sent, and the
+       * scan action passes empty removal lists, so a scan never takes anything
+       * out of the location.
+       */
       formData={{
         assetIds: assetIdsForLocation,
         kitIds: kitIdsForLocation,

@@ -16,6 +16,7 @@ import {
   getAuditSessionDetails,
   getAuditUnitTotals,
 } from "~/modules/audit/service.server";
+import { db } from "~/database/db.server";
 import { loader } from "~/routes/_layout+/audits.$auditId";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -157,4 +158,37 @@ describe("audits.$auditId loader, unit totals", () => {
     expect((await load(["BASE"])).status).toBe(403);
     expect(getAuditUnitTotals).not.toHaveBeenCalled();
   });
+});
+
+describe("audits.$auditId loader, assignment roster", () => {
+  const ROSTER = [{ id: "tm-1", name: "Ann", userId: "user-ann" }];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The caller is the assignee, so every role may open the audit.
+    vi.mocked(getAuditSessionDetails).mockResolvedValue({
+      session: { ...SESSION, assignments: [{ userId: "caller" }] },
+    } as unknown as Awaited<ReturnType<typeof getAuditSessionDetails>>);
+    vi.mocked(db.teamMember.findMany).mockResolvedValue(
+      ROSTER as unknown as Awaited<ReturnType<typeof db.teamMember.findMany>>
+    );
+  });
+
+  it("sends the workspace roster to a caller who manages others' audits", async () => {
+    const r = await load(["ADMIN"]);
+
+    expect(r.status).toBe(200);
+    expect(r.data).toMatchObject({ teamMembers: ROSTER });
+  });
+
+  it.each<[OrganizationRoles[]]>([[["SELF_SERVICE"]], [["BASE"]]])(
+    "sends %j an empty roster and does not read it",
+    async (roles) => {
+      const r = await load(roles);
+
+      expect(r.status).toBe(200);
+      expect(r.data).toMatchObject({ teamMembers: [] });
+      expect(db.teamMember.findMany).not.toHaveBeenCalled();
+    }
+  );
 });

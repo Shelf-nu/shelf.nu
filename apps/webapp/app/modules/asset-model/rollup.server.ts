@@ -35,6 +35,7 @@ import {
   POOL_AGGREGATE_JOIN,
   POOL_COLUMN_NAMES,
 } from "../asset/query.server";
+import type { CustodySearchScope } from "../asset/search-union.server";
 import type { ArchivedFilter } from "../asset/types";
 
 /** Sort keys the model view offers. Deliberately separate from the asset
@@ -270,6 +271,10 @@ export type GetAssetModelRollupArgs = {
   organizationId: string;
   /** Free-text search, already extracted from the request params. */
   search: string | null;
+  /** Whose custody the search may match by custodian name (see
+   * `custodySearchScopeFor`). Required so the counts never include assets
+   * matched through custody the viewer may not see. */
+  custodySearchScope: CustodySearchScope;
   /** Parsed advanced filters — pass the loader's `parsedFilters` so the
    * hierarchy expansion is not redone. */
   filters: Filter[];
@@ -303,6 +308,7 @@ export type GetAssetModelRollupArgs = {
 export async function getAssetModelRollup({
   organizationId,
   search,
+  custodySearchScope,
   filters,
   timeZone = "UTC",
   page,
@@ -324,7 +330,7 @@ export async function getAssetModelRollup({
 
   const whereClause = generateWhereClause(
     organizationId,
-    search,
+    search ? { text: search, custodySearchScope } : null,
     filters,
     undefined,
     bookableScope,
