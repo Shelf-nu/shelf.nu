@@ -122,6 +122,16 @@ export function bookingScanLeaveDecision(state: {
   return state.itemCount > 0 ? "prompt" : "leave";
 }
 
+/**
+ * The leave state of a flow that has sent its scans: nothing pending, nothing
+ * left to lose. A finished flow sets it before it goes back, so leaving never
+ * asks to discard scans that are already on the booking.
+ */
+export const BOOKING_SCAN_SENT = Object.freeze({
+  submitting: false,
+  itemCount: 0,
+});
+
 /** A route param as expo-router hands it over: absent, one value or repeated. */
 type RouteParam = string | string[] | undefined;
 

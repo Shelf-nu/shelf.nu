@@ -16,6 +16,7 @@ import { test } from "node:test";
 import {
   BOOKING_DETAIL_ROUTE_NAME,
   BOOKING_SCAN_PATHNAME,
+  BOOKING_SCAN_SENT,
   bookingScanHref,
   bookingScanLeaveDecision,
   parseBookingScanParams,
@@ -184,5 +185,21 @@ test("leaving the booking scanner waits for a pending request, then asks before 
   assert.equal(
     bookingScanLeaveDecision({ submitting: false, itemCount: 0 }),
     "leave"
+  );
+});
+
+test("a finished flow leaves without asking to discard what it sent", () => {
+  assert.equal(bookingScanLeaveDecision(BOOKING_SCAN_SENT), "leave");
+});
+
+test("every finished booking flow returns through leaveAfterSubmit", () => {
+  // The four success paths (add, fulfil, check-in, check-out) must mark the
+  // scans sent before going back; only the back arrow goes back directly.
+  const source = readFileSync(routeFile("/(tabs)/scanner"), "utf8");
+  assert.equal(source.match(/leaveAfterSubmit\(\)/g)?.length, 4);
+  assert.equal(source.match(/returnToBooking\(navigation\)/g)?.length, 2);
+  assert.match(
+    source,
+    /bookingLeaveRef\.current = BOOKING_SCAN_SENT;\s*returnToBooking\(navigation\);/
   );
 });

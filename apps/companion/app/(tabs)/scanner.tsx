@@ -19,6 +19,7 @@ import { api, getApiBaseUrl } from "@/lib/api";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import {
+  BOOKING_SCAN_SENT,
   bookingScanLeaveDecision,
   type BookingScanContext,
 } from "@/lib/booking-scan-route";
@@ -407,8 +408,8 @@ function ScannerContent({ booking }: ScannerScreenProps) {
   // The booking scanner is a stack screen: back, the back swipe and Android
   // back remove it, and its scan list with it. It stays put while a request
   // is pending and asks first while the list holds anything not yet sent
-  // (see bookingScanLeaveDecision). Every flow clears the list before it
-  // returns to the booking, so a finished flow leaves without asking.
+  // (see bookingScanLeaveDecision). A finished flow leaves through
+  // leaveAfterSubmit below, so it never asks.
   const bookingLeaveRef = useRef({ submitting: false, itemCount: 0 });
   useEffect(() => {
     bookingLeaveRef.current = {
@@ -426,6 +427,16 @@ function ScannerContent({ booking }: ScannerScreenProps) {
     message:
       "Nothing you scanned has been sent to the booking yet. Leaving the scanner discards the list.",
   });
+  /**
+   * Returns to the booking after a flow sent its scans. The guard's ref is
+   * set here, synchronously: the effect above only follows state after a
+   * commit, which can land after the next frame's back, and then the guard
+   * would ask to discard scans that are already on the booking.
+   */
+  const leaveAfterSubmit = () => {
+    bookingLeaveRef.current = BOOKING_SCAN_SENT;
+    returnToBooking(navigation);
+  };
   /**
    * The quantity sheet for a scanned quantity-tracked asset. `editing` means
    * the row is already in the list and the amount is being changed (a
@@ -2376,7 +2387,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                     // 60s freshness gate (router params don't reach an
                     // already-mounted screen, so a ?refresh token can't).
                     markBookingDirty(bookingId);
-                    returnToBooking(navigation);
+                    leaveAfterSubmit();
                   },
                 },
               ]
@@ -2493,7 +2504,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
           setBookingCheckinItems([]);
           lastScanRef.current = "";
           markBookingDirty(bookingId);
-          returnToBooking(navigation);
+          leaveAfterSubmit();
         },
       },
     ]);
@@ -2744,7 +2755,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                   // The check-in mutated the booking — flag the detail to
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
-                  if (result?.isComplete) returnToBooking(navigation);
+                  if (result?.isComplete) leaveAfterSubmit();
                 },
               },
             ]);
@@ -2865,7 +2876,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             markBookingsListDirty();
             if (result?.remainingCount === 0) {
               // Nothing left to scan.
-              returnToBooking(navigation);
+              leaveAfterSubmit();
             }
           },
         },
