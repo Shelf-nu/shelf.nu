@@ -6,6 +6,7 @@ import {
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
+import { postMultipart } from "./multipart-upload";
 import { CLIENT_USER_AGENT } from "./user-agent";
 import { chainAbort } from "../latest-request";
 import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
@@ -391,29 +392,20 @@ export async function apiUpload<T>(
     const url = `${target.baseUrl}${path}`;
     if (__DEV__) console.log("[API] Uploading to:", url);
 
-    // Abort controller for timeout (longer than regular fetch for uploads)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      REQUEST_TIMEOUT_MS * 4
-    );
-
-    const response = await fetch(url, {
-      method: "POST",
-      signal: controller.signal,
+    const response = await postMultipart(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        // Do NOT set Content-Type — fetch auto-sets it with the multipart boundary
         ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
       },
       body: formData,
+      // Longer than a regular request: the body is a photo.
+      timeoutMs: REQUEST_TIMEOUT_MS * 4,
     });
-    clearTimeout(timeoutId);
 
     // Safe JSON parsing — server may return HTML error pages or empty body
     let json: any;
     try {
-      const text = await response.text();
+      const { text } = response;
       json = text ? JSON.parse(text) : null;
     } catch {
       if (!response.ok) {
