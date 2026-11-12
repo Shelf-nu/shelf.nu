@@ -102,9 +102,14 @@ const SidebarProvider = forwardRef<
     isCompactViewportRef.current = isCompactViewport;
 
     // Every time the window becomes compact, start from collapsed again.
-    useEffect(() => {
+    // Adjusted during render (React's "store the previous value" pattern) so
+    // the collapsed state lands in the same render as the viewport change.
+    const [prevIsCompactViewport, setPrevIsCompactViewport] =
+      useState(isCompactViewport);
+    if (isCompactViewport !== prevIsCompactViewport) {
+      setPrevIsCompactViewport(isCompactViewport);
       if (isCompactViewport) setCompactOpen(false);
-    }, [isCompactViewport]);
+    }
 
     const open = openProp ?? (isCompactViewport ? compactOpen : _open);
 
