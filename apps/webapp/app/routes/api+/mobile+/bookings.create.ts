@@ -222,7 +222,6 @@ export async function action({ request }: ActionFunctionArgs) {
         // team member maps to a registered user) is derived from the DB record,
         // never trusted from the client.
         custodianTeamMemberId: custodian.id,
-        custodianUserId: custodian.userId ?? null,
         organizationId,
         creatorId: user.id,
         tags: body.tags.map((id) => ({ id })),

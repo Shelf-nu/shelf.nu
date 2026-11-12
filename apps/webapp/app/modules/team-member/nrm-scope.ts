@@ -47,8 +47,10 @@ export function getNrmIndexWhere({
     deletedAt: null,
     organizationId,
     userId: null,
+    // Only this workspace's own pending invites hide a member: an invite row
+    // from any other workspace says nothing about this index.
     receivedInvites: {
-      none: { status: InviteStatuses.PENDING },
+      none: { status: InviteStatuses.PENDING, organizationId },
     },
   };
 

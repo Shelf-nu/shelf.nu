@@ -12,7 +12,9 @@
  *
  * The post-authentication decision is asked for the session's own user id.
  * `revokeAllSessions`, which ends a refused account's other sessions, is
- * covered at the end.
+ * covered at the end, followed by the two session-cookie queries:
+ * `validateSession` (a refresh token counts only for the user the cookie
+ * names) and `endSessionByRefreshToken` (sign-out ends the server session).
  *
  * @see {@link file://./service.server.ts}
  * @see {@link file://./sso-enforcement.server.ts} the decision itself
@@ -22,10 +24,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   INVALID_CREDENTIALS_MESSAGE,
   INVALID_OTP_MESSAGE,
+  endSessionByRefreshToken,
   revokeAllSessions,
   sendOTP,
   sendResetPasswordLink,
   signInWithEmail,
+  validateSession,
   verifyOtpAndSignin,
 } from "./service.server";
 import type * as SsoEnforcementModule from "./sso-enforcement.server";
@@ -46,9 +50,13 @@ vi.mock("./sso-enforcement.server", async (importOriginal) => {
   };
 });
 
-// why: the service module imports the database client at load; no test here
-// reaches a query.
-vi.mock("~/database/db.server", () => ({ db: {} }));
+// why: the session checks are raw SQL against GoTrue's auth schema; the tests
+// read the SQL text and its bound values rather than run it.
+const dbMocks = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
+  $executeRaw: vi.fn(),
+}));
+vi.mock("~/database/db.server", () => ({ db: dbMocks }));
 
 // why: every guarded path ends in a Supabase Auth network call; the spies let
 // the tests assert whether it was made, and whether a session was revoked.
@@ -320,5 +328,69 @@ describe("revokeAllSessions", () => {
     });
 
     await expect(revokeAllSessions("access")).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * Reads a tagged-template raw query call back as SQL text with `$n`
+ * placeholders (whitespace collapsed), plus its bound values.
+ *
+ * @param call - The arguments the `$queryRaw` / `$executeRaw` spy received
+ */
+function sqlOf(call: unknown[]) {
+  const [strings, ...values] = call as [TemplateStringsArray, ...unknown[]];
+  const text = strings
+    .reduce((sql, part, i) => `${sql}$${i}${part}`)
+    .split(/\s+/)
+    .join(" ");
+  return { text, values };
+}
+
+describe("validateSession", () => {
+  it("matches the refresh token only for the user the cookie names", async () => {
+    dbMocks.$queryRaw.mockResolvedValue([{ id: "1", revoked: false }]);
+
+    await expect(validateSession("refresh-1", "user-1")).resolves.toBe(true);
+
+    const { text, values } = sqlOf(dbMocks.$queryRaw.mock.calls[0]);
+    expect(text).toContain("token = $1");
+    expect(text).toContain("user_id::text = $2");
+    expect(text).toContain("revoked = false");
+    expect(values).toEqual(["refresh-1", "user-1"]);
+  });
+
+  it("is not a session when no refresh token of that user matches", async () => {
+    dbMocks.$queryRaw.mockResolvedValue([]);
+
+    await expect(validateSession("refresh-1", "user-2")).resolves.toBe(false);
+  });
+
+  it("is not a session when the query fails", async () => {
+    dbMocks.$queryRaw.mockRejectedValue(new Error("connection lost"));
+
+    await expect(validateSession("refresh-1", "user-1")).resolves.toBe(false);
+  });
+});
+
+describe("endSessionByRefreshToken", () => {
+  it("deletes the auth session that owns the refresh token", async () => {
+    dbMocks.$executeRaw.mockResolvedValue(1);
+
+    await endSessionByRefreshToken("refresh-1");
+
+    const { text, values } = sqlOf(dbMocks.$executeRaw.mock.calls[0]);
+    expect(text).toContain("DELETE FROM auth.sessions");
+    expect(text).toContain(
+      "SELECT session_id FROM auth.refresh_tokens WHERE token = $1"
+    );
+    expect(values).toEqual(["refresh-1"]);
+  });
+
+  it("does not throw when the delete fails", async () => {
+    dbMocks.$executeRaw.mockRejectedValue(new Error("connection lost"));
+
+    await expect(
+      endSessionByRefreshToken("refresh-1")
+    ).resolves.toBeUndefined();
   });
 });

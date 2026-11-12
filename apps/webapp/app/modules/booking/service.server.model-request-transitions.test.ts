@@ -273,7 +273,6 @@ const reserveParams = {
   id: BOOKING_ID,
   name: "Reserved Booking",
   organizationId: ORG_ID,
-  custodianUserId: "user-1",
   custodianTeamMemberId: "team-1",
   from,
   to,

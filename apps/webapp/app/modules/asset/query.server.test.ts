@@ -460,6 +460,11 @@ function getSqlString(sql: ReturnType<typeof generateWhereClause>): string {
   return sql.strings.join("?");
 }
 
+/** A search by a viewer who may see everyone's custody. */
+function seeAllSearch(text: string) {
+  return { text, custodySearchScope: "all" as const };
+}
+
 describe("generateWhereClause - search fail-closed", () => {
   const orgId = "org-1";
 
@@ -467,7 +472,7 @@ describe("generateWhereClause - search fail-closed", () => {
     // why: `?s=%20` arrives untrimmed as " " — truthy but zero terms. The
     // advanced path must fail closed like getAssets does in simple mode,
     // or the same search box answers differently per index mode.
-    const result = generateWhereClause(orgId, "   ", []);
+    const result = generateWhereClause(orgId, seeAllSearch("   "), []);
     expect(getSqlString(result)).toContain("AND FALSE");
   });
 
@@ -477,7 +482,7 @@ describe("generateWhereClause - search fail-closed", () => {
   });
 
   it("builds search conditions for real terms", () => {
-    const result = generateWhereClause(orgId, "tripod", []);
+    const result = generateWhereClause(orgId, seeAllSearch("tripod"), []);
     const sql = getSqlString(result);
     expect(sql).toContain("ILIKE");
     expect(sql).not.toContain("AND FALSE");
@@ -606,7 +611,9 @@ describe("generateWhereClause - search routes through the org-scoped UNION", () 
   const orgId = "org_1";
 
   it("routes a search term through the org-scoped UNION (a.id IN (...))", () => {
-    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
+    const sql = getSqlString(
+      generateWhereClause(orgId, seeAllSearch("widget"), [])
+    );
     // search now narrows by matching-id set, not an inline multi-table OR
     expect(sql).toContain('a."id" IN (');
     expect(sql).toContain("UNION");
@@ -615,6 +622,22 @@ describe("generateWhereClause - search routes through the org-scoped UNION", () 
     // the old top-level category/location ILIKE against the outer row is gone
     expect(sql).not.toContain("c.name ILIKE");
     expect(sql).not.toContain("l.name ILIKE");
+  });
+
+  it("matches custodian names only on the viewer's own custody when they may not see all custody", () => {
+    const result = generateWhereClause(
+      orgId,
+      { text: "alice", custodySearchScope: { userId: "viewer-1" } },
+      []
+    );
+    expect(getSqlString(result)).toContain('AND tm."userId" = ?');
+    expect(result.values).toContain("viewer-1");
+  });
+
+  it("matches every custodian's name for a viewer who sees all custody", () => {
+    const result = generateWhereClause(orgId, seeAllSearch("alice"), []);
+    expect(getSqlString(result)).not.toContain('tm."userId" = ?');
+    expect(result.values).not.toContain("viewer-1");
   });
 });
 
@@ -1792,7 +1815,11 @@ describe("buildAdvancedAssetsQuery", () => {
     const sortBy = overrides?.sortBy ?? [];
     const parsedFilters = overrides?.parsedFilters ?? [];
     const search = overrides?.search ?? null;
-    const whereClause = generateWhereClause("org-1", search, parsedFilters);
+    const whereClause = generateWhereClause(
+      "org-1",
+      search === null ? null : seeAllSearch(search),
+      parsedFilters
+    );
     const { orderByInner, customFieldSortings } = parseSortingOptions(sortBy);
     return buildAdvancedAssetsQuery({
       whereClause,

@@ -293,7 +293,6 @@ export async function action({ request }: ActionFunctionArgs) {
       from: booking.from,
       to: booking.to,
       custodianTeamMemberId: booking.custodianTeamMemberId,
-      custodianUserId: booking.custodianUserId ?? undefined,
       tags: booking.tags.map((t) => ({ id: t.id })),
       hints,
       alertsOrgOnReservation:

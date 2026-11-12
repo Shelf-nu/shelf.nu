@@ -770,6 +770,11 @@ export type LocationsResponse = {
   perPage?: number;
   totalCount?: number;
   totalPages?: number;
+  /**
+   * Set only on requests sent without `page` and `perPage`: true when the
+   * server's 1000-row cap cut the list, so `locations` is not every location.
+   */
+  truncated?: boolean;
 };
 
 export type CustodyResponse = {
@@ -1510,13 +1515,19 @@ export type AvailableKitsResponse = {
  * A bookable asset model in the book-by-model picker, with how many units are
  * free to reserve in the booking's window. `available` = total − in-custody −
  * reserved (concrete + via other model requests). Server-computed; the app
- * caps the reserve input at `available` + the amount already fulfilled.
+ * caps the reserve input with `modelReservationBounds`.
  */
 export type AvailableModel = {
   id: string;
   name: string;
   total: number;
   available: number;
+  /**
+   * Units of this model the booking already holds by name, outside custody.
+   * They come out of the same pool as the reservation. Optional because a
+   * server older than this field does not send it; treat missing as 0.
+   */
+  namedNotInCustody?: number;
   inCustody: number;
   reservedConcrete: number;
   reservedViaRequest: number;

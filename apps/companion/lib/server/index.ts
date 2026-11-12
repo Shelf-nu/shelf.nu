@@ -19,11 +19,17 @@ export * from "./contract";
 // a bare `setActiveServer(CLOUD_SERVER)` at the call site.
 export {
   getActiveServer,
+  getKnownServerUrls,
   getServerVersion,
   hydrateActiveServer,
   subscribeToServerChange,
 } from "./active-server";
-export { onBeforeSessionEnd, runBeforeSessionEnd } from "./session-end";
+export {
+  onAfterSessionEnd,
+  onBeforeSessionEnd,
+  runBeforeSessionEnd,
+} from "./session-end";
+export { endSessionOnDevice, signOutMayClearState } from "./end-session";
 export {
   disconnectFromServer,
   fetchLatestCompanionVersion,

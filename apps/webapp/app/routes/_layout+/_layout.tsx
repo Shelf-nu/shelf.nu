@@ -43,6 +43,7 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
+import { useRememberListFilters } from "~/hooks/use-remembered-list-href";
 import { getActiveAssetImport } from "~/modules/asset-import/service.server";
 import type {
   AssetImportNoticePayload,
@@ -420,6 +421,7 @@ export const meta: MetaFunction<typeof loader> = ({ error }) => {
 
 export default function App() {
   useCrisp();
+  useRememberListFilters();
   const {
     disabledTeamOrg,
     hasUnpaidInvoice,

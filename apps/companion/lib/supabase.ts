@@ -7,129 +7,70 @@
  * must call `getSupabase()` at use time and never capture the result in a
  * module-scope binding, or they will keep talking to the previous server.
  *
- * Sessions persist through {@link secureStoreAdapter} rather than
- * AsyncStorage, because a refresh token belongs in the keychain. SecureStore
- * rejects values the platform considers oversized, and a Supabase session is
- * long enough to be at risk, so the adapter splits anything past
- * {@link CHUNK_SIZE} characters across numbered chunk keys and reassembles it
- * on read. Deleting a key must clear every chunk, or a stale tail corrupts the
- * next read.
+ * Sessions persist through the session storage of `./session-storage.ts`
+ * rather than AsyncStorage, because a refresh token belongs in the keychain.
+ * SecureStore rejects values the platform considers oversized, and a Supabase
+ * session is long enough to be at risk, so values past 2000 characters are
+ * split across numbered chunk keys and reassembled on read.
  *
  * @see ./server/active-server.ts — owns when the rebuild happens
  */
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import type { ServerConfig } from "./server/contract";
+import { sessionStorageKey } from "./session-storage-keys";
+import { createSessionBlock } from "./session-block";
+import {
+  createSessionStorage,
+  type SecureKeyValueStore,
+} from "./session-storage";
 
 /**
- * Maximum bytes per SecureStore item on iOS.
- * Values exceeding this are chunked into multiple entries.
+ * Sessions a sign-out could not delete. Reads of their keys answer "nothing
+ * stored" and delete them (see `./session-block.ts`).
  */
-const CHUNK_SIZE = 2000;
+const sessionBlock = createSessionBlock(AsyncStorage);
 
 /**
- * Secure storage adapter for Supabase auth tokens.
- *
- * Uses expo-secure-store on native, localStorage on web.
- * Large values (e.g. JWTs with many claims) are automatically
- * chunked into 2000-byte pieces to stay within iOS SecureStore limits,
- * ensuring sessions persist across app restarts and backgrounding.
+ * The key-value store sessions live in: SecureStore on the phone (a refresh
+ * token belongs in the keychain), localStorage on web.
  */
-const secureStoreAdapter = {
-  getItem: async (key: string): Promise<string | null> => {
-    try {
-      if (Platform.OS === "web") {
-        return typeof localStorage !== "undefined"
-          ? localStorage.getItem(key)
-          : null;
+const secureKeyValueStore: SecureKeyValueStore =
+  Platform.OS === "web"
+    ? {
+        getItemAsync: async (key) =>
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem(key)
+            : null,
+        setItemAsync: async (key, value) => {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(key, value);
+          }
+        },
+        deleteItemAsync: async (key) => {
+          if (typeof localStorage !== "undefined") localStorage.removeItem(key);
+        },
       }
+    : SecureStore;
 
-      // Try direct read first (most values fit in one chunk)
-      const direct = await SecureStore.getItemAsync(key);
-      if (direct !== null) return direct;
-
-      // Check for chunked value
-      const countStr = await SecureStore.getItemAsync(`${key}_chunks`);
-      if (!countStr) return null;
-
-      const count = parseInt(countStr, 10);
-      const parts: string[] = [];
-      for (let i = 0; i < count; i++) {
-        const part = await SecureStore.getItemAsync(`${key}_chunk_${i}`);
-        if (part === null) return null; // corrupted — bail
-        parts.push(part);
-      }
-      return parts.join("");
-    } catch (e) {
-      if (__DEV__) console.error(`[SecureStore] getItem(${key}) failed:`, e);
-      return null;
-    }
+/**
+ * Session storage: the adapter supabase-js uses (values past 2000 characters
+ * are chunked, the most iOS SecureStore accepts per item), plus the verified
+ * delete and the sign-in preparation (see `./session-storage.ts`).
+ */
+const sessionStorage = createSessionStorage({
+  store: secureKeyValueStore,
+  block: sessionBlock,
+  chunkSize: Platform.OS === "web" ? Number.POSITIVE_INFINITY : 2000,
+  onError: (operation, key, error) => {
+    if (__DEV__)
+      console.error(`[SecureStore] ${operation}(${key}) failed:`, error);
   },
+});
 
-  setItem: async (key: string, value: string): Promise<void> => {
-    try {
-      if (Platform.OS === "web") {
-        if (typeof localStorage !== "undefined") {
-          localStorage.setItem(key, value);
-        }
-        return;
-      }
-
-      if (value.length <= CHUNK_SIZE) {
-        // Fits in a single entry — clean up any old chunks first
-        await cleanupChunks(key);
-        await SecureStore.setItemAsync(key, value);
-        return;
-      }
-
-      // Large value — chunk it
-      // Remove the direct key to avoid stale reads
-      try {
-        await SecureStore.deleteItemAsync(key);
-      } catch {}
-
-      const chunks = Math.ceil(value.length / CHUNK_SIZE);
-      for (let i = 0; i < chunks; i++) {
-        const chunk = value.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-        await SecureStore.setItemAsync(`${key}_chunk_${i}`, chunk);
-      }
-      await SecureStore.setItemAsync(`${key}_chunks`, String(chunks));
-    } catch (e) {
-      if (__DEV__) console.error(`[SecureStore] setItem(${key}) failed:`, e);
-    }
-  },
-
-  removeItem: async (key: string): Promise<void> => {
-    try {
-      if (Platform.OS === "web") {
-        if (typeof localStorage !== "undefined") {
-          localStorage.removeItem(key);
-        }
-        return;
-      }
-      await SecureStore.deleteItemAsync(key);
-      await cleanupChunks(key);
-    } catch (e) {
-      if (__DEV__) console.error(`[SecureStore] removeItem(${key}) failed:`, e);
-    }
-  },
-};
-
-/** Remove any chunked entries for a key */
-async function cleanupChunks(key: string): Promise<void> {
-  try {
-    const countStr = await SecureStore.getItemAsync(`${key}_chunks`);
-    if (!countStr) return;
-    const count = parseInt(countStr, 10);
-    for (let i = 0; i < count; i++) {
-      try {
-        await SecureStore.deleteItemAsync(`${key}_chunk_${i}`);
-      } catch {}
-    }
-    await SecureStore.deleteItemAsync(`${key}_chunks`);
-  } catch {}
-}
+const secureStoreAdapter = sessionStorage.adapter;
 
 /**
  * The live client. Replaced wholesale on every server switch, which is why
@@ -145,6 +86,12 @@ let client: SupabaseClient | null = null;
 let clientUrl: string | null = null;
 
 /**
+ * SecureStore key the live client keeps its session under. Set together with
+ * {@link clientUrl}.
+ */
+let clientStorageKey: string | null = null;
+
+/**
  * Creates a client for one server, with the shared secure-storage adapter.
  *
  * @param supabaseUrl - The server's Supabase project URL.
@@ -155,9 +102,11 @@ function createForServer(
   supabaseUrl: string,
   supabaseAnonKey: string
 ): SupabaseClient {
+  const storageKey = sessionStorageKey(supabaseUrl);
   const created = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       storage: secureStoreAdapter,
+      storageKey,
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
@@ -170,6 +119,7 @@ function createForServer(
   // `guardSessionServerMatch` — which compares exactly these two values — would
   // then agree with itself and wave the previous server's token through.
   clientUrl = supabaseUrl;
+  clientStorageKey = storageKey;
   return created;
 }
 
@@ -195,6 +145,62 @@ export function getSupabase(): SupabaseClient {
     );
   }
   return client;
+}
+
+/**
+ * Returns a function that deletes the CURRENT client's stored session straight
+ * from SecureStore.
+ *
+ * The key is captured now, so a teardown that finishes after a server switch
+ * removes only the outgoing client's session, never the new server's. Used as
+ * the last step of `endSessionOnDevice` (`./server/end-session.ts`), for when
+ * supabase-js could not sign out even locally. It emits no auth event, so the
+ * caller updates its own signed-in state.
+ *
+ * @returns The remover. It resolves once the session and its companion keys
+ *   are verifiably gone, and rejects when that cannot be verified (a failed
+ *   delete or read-back), so the teardown never mistakes a failure for a
+ *   removed session.
+ */
+export function persistedSessionRemover(): () => Promise<void> {
+  const storageKey = clientStorageKey;
+  return async () => {
+    if (storageKey) await sessionStorage.removeSession(storageKey);
+  };
+}
+
+/**
+ * The session storage key of the live client, or null before one exists.
+ *
+ * @returns The key
+ */
+export function currentSessionStorageKey(): string | null {
+  return clientStorageKey;
+}
+
+/**
+ * Refuses a stored session from now on, across restarts, after a sign-out
+ * that could not delete it. Every later read of it answers "nothing stored"
+ * and retries the delete.
+ *
+ * @param storageKey - The signed-out client's session storage key
+ * @returns True when the block is stored, so it survives a restart
+ */
+export async function blockStoredSession(storageKey: string): Promise<boolean> {
+  return sessionBlock.block(storageKey);
+}
+
+/**
+ * Prepares the live client's session key for a sign-in. When a past sign-out
+ * blocked that key, the old session is removed and the block is lifted only
+ * once the removal is verified, so the previous person's session is never
+ * readable while the sign-in runs. Never rejects; on failure the block stays.
+ *
+ * @returns False when the key is still blocked: the sign-in must not run
+ */
+export async function prepareStoredSessionForSignIn(): Promise<boolean> {
+  if (!clientStorageKey) return true;
+  return sessionStorage.prepareSignIn(clientStorageKey);
 }
 
 /**

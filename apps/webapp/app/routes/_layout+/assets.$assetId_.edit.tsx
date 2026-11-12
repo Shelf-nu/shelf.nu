@@ -147,6 +147,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         page: 1,
         perPage: 100,
         withCustomFieldDefaults: true,
+        includeId: asset.assetModelId,
       }),
     ]);
 

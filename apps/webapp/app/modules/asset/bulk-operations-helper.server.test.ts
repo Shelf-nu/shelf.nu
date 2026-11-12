@@ -102,6 +102,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     const tokyoIds = await resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      custodySearchScope: "all",
       lastAuditDateAccess: "available" as const,
       bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
@@ -114,6 +115,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     const utcIds = await resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      custodySearchScope: "all",
       lastAuditDateAccess: "available" as const,
       bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
@@ -138,6 +140,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     const ids = await resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      custodySearchScope: "all",
       lastAuditDateAccess: "available" as const,
       bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
@@ -168,6 +171,7 @@ describe("resolveAssetIdsForBulkOperation - lastAuditDate gating", () => {
     resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      custodySearchScope: "all",
       lastAuditDateAccess,
       bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
@@ -291,6 +295,7 @@ describe("resolveAssetIdsForBulkOperation - pool join gate", () => {
     resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      custodySearchScope: "all",
       lastAuditDateAccess: "available" as const,
       bookableScope: null,
       assetIds: [ALL_SELECTED_KEY],
@@ -361,6 +366,7 @@ describe("resolveAssetIdsForBulkOperation - list scope", () => {
     resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      custodySearchScope: "all",
       lastAuditDateAccess: "available" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
@@ -439,4 +445,74 @@ describe("resolveAssetIdsForBulkOperation - list scope", () => {
     expect(capturedQueries).toHaveLength(1);
     expect(sentSql()).not.toContain("availableToBook");
   });
+});
+
+describe("resolveAssetIdsForBulkOperation - custodian-name search scope", () => {
+  const simpleSettings = {
+    mode: "SIMPLE",
+    columns: [],
+  } as unknown as AssetIndexSettings;
+
+  const capturedQueries: Prisma.Sql[] = [];
+
+  const resolve = ({
+    settings,
+    custodySearchScope,
+  }: {
+    settings: AssetIndexSettings;
+    custodySearchScope: "all" | { userId: string };
+  }) =>
+    resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
+      custodySearchScope,
+      lastAuditDateAccess: "available" as const,
+      bookableScope: null,
+      assetIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      currentSearchParams: "s=alice",
+      settings,
+    });
+
+  /** The SQL text of the one raw query the resolution sent. */
+  const sentSql = () => capturedQueries[0]?.strings.join("?") ?? "";
+
+  beforeEach(() => {
+    capturedQueries.length = 0;
+    vi.mocked(db.asset.findMany).mockReset();
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      { id: "asset-1" },
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.$queryRaw).mockImplementation(((query: Prisma.Sql) => {
+      capturedQueries.push(query);
+      return Promise.resolve([{ id: "asset-1" }]);
+    }) as unknown as typeof db.$queryRaw);
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([]);
+  });
+
+  it.each([
+    { mode: "advanced", settings: advancedSettings },
+    { mode: "simple", settings: simpleSettings },
+  ])(
+    "matches custodian names only on the caller's own custody in $mode mode",
+    async ({ settings }) => {
+      await resolve({ settings, custodySearchScope: { userId: "viewer-1" } });
+
+      expect(sentSql()).toContain('AND tm."userId" = ?');
+      expect(capturedQueries[0]?.values).toContain("viewer-1");
+    }
+  );
+
+  it.each([
+    { mode: "advanced", settings: advancedSettings },
+    { mode: "simple", settings: simpleSettings },
+  ])(
+    "matches every custodian's name for a member who sees all custody in $mode mode",
+    async ({ settings }) => {
+      await resolve({ settings, custodySearchScope: "all" });
+
+      expect(sentSql()).toContain("ILIKE");
+      expect(sentSql()).not.toContain('AND tm."userId" = ?');
+    }
+  );
 });

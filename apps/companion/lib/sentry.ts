@@ -23,6 +23,7 @@ import * as Sentry from "@sentry/react-native";
 import type { PushFailureStage } from "./push/token-record";
 import {
   getActiveServer,
+  setIncompleteTeardownReporter,
   subscribeToServerChange,
 } from "./server/active-server";
 
@@ -124,7 +125,14 @@ export function trackServerTag(): () => void {
     }
   };
   apply();
-  return subscribeToServerChange(apply);
+  // A server switch tears the outgoing session down and reports an
+  // incomplete teardown the same way a sign-out does.
+  setIncompleteTeardownReporter(reportSignOutIncomplete);
+  const unsubscribe = subscribeToServerChange(apply);
+  return () => {
+    unsubscribe();
+    setIncompleteTeardownReporter(null);
+  };
 }
 
 /**
@@ -165,7 +173,12 @@ export type AuditDurabilityEvent =
   /** "Resume Previous Session?" was shown — a kill left unsynced scans behind. */
   | "session_recovered"
   /** Audit completion was blocked because scans were still unsynced. */
-  | "completion_blocked_unsynced";
+  | "completion_blocked_unsynced"
+  /**
+   * A draft with no owning account still holds unsynced scans. It is kept
+   * but never offered, because nothing says which account made them.
+   */
+  | "unowned_draft_kept";
 
 /**
  * Report a durability event to Sentry. No-ops when Sentry isn't configured.
@@ -182,9 +195,41 @@ export function reportAuditDurabilityEvent(
   if (!dsn || __DEV__) return;
   Sentry.captureMessage(`audit-durability: ${event}`, {
     level,
+    // One issue per event: the stack this is captured from varies, and
+    // grouping by it splits one report across several issues.
+    fingerprint: ["audit-durability", event],
     tags: { feature: "audit-scan-durability", durability_event: event },
     extra: context,
   });
+}
+
+/**
+ * Reports a sign-out that could not confirm the stored session is gone: a
+ * delete failed, the session was still found after every delete, or the check
+ * timed out. The app still shows the login screen; this makes the case
+ * visible. `blockStored: false` marks the worst case, where the block refusing
+ * that session could not be stored either, so a restart could restore it.
+ *
+ * @param server - The Supabase project URL of the client being signed out
+ * @param details - Whether the block on the session was stored
+ */
+export function reportSignOutIncomplete(
+  server: string | null,
+  { blockStored }: { blockStored: boolean }
+): void {
+  if (__DEV__) {
+    console.warn("[Auth] stored session not confirmed gone after sign-out");
+  }
+  if (!dsn || __DEV__) return;
+  try {
+    Sentry.captureMessage("sign-out: stored session not confirmed deleted", {
+      level: "error",
+      tags: { feature: "auth", block_stored: String(blockStored) },
+      extra: { server },
+    });
+  } catch {
+    // Telemetry must never throw into the sign-out path.
+  }
 }
 
 /**
@@ -208,6 +253,8 @@ export function reportPushRegistrationFailure(
   try {
     Sentry.captureMessage(`push-registration: ${stage}`, {
       level: "warning",
+      // One issue per stage, whatever stack it is captured from.
+      fingerprint: ["push-registration", stage],
       tags: { feature: "push", push_stage: stage },
       extra: { message },
     });

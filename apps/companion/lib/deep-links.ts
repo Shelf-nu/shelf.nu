@@ -1,12 +1,19 @@
 import { useEffect } from "react";
+import { Platform } from "react-native";
 import * as Linking from "expo-linking";
-import { api, getApiBaseUrl } from "./api";
-import { openShelfWebUrl, pushIntoTab } from "./navigation";
+import { accountGeneration, api, getApiBaseUrl } from "./api";
+import { isOpenedByRouter, launchAction } from "./link-routing";
+import { openLinkedRoute, openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
   type QrLookups,
   type QrOutcome,
 } from "./link-dispatch";
+import {
+  matchResourcePath,
+  queryIdsArePlain,
+  splitLinkUrl,
+} from "./resource-path";
 import { getScanCoordinates } from "./scan-location";
 
 /**
@@ -37,16 +44,23 @@ import { getScanCoordinates } from "./scan-location";
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
  * are never delivered to the app and keep opening the web.
  *
- * Division of labour with `app/+native-intent.ts`: HTTPS universal links are
- * rewritten there to native routes and handled by expo-router itself (a
- * claimed path that nests deeper than the app renders, e.g.
- * `/assets/:id/overview`, maps to the resource detail). This hook only
- * handles (a) custom-scheme links, which have no native path mapping
- * guarantees, and (b) `/qr/:id` links, which need an async API resolve.
- * Acting on other HTTPS links here would double-navigate.
+ * Division of labour with `app/+native-intent.ts`, decided per link by
+ * `isOpenedByRouter` (`lib/link-routing.ts`). HTTPS universal links are
+ * rewritten there to native routes (a claimed path that nests deeper than the
+ * app renders, e.g. `/assets/:id/overview`, maps to the resource detail).
+ *
+ * - While the app runs, expo-router opens every HTTPS link except `/qr/:id`.
+ *   This hook opens custom-scheme links and resolves `/qr/:id` through the API.
+ * - At launch, the same split applies on Android. On iOS the router does not
+ *   open the launch URL, so this hook opens HTTPS launch links too, through
+ *   the router's own mapping (`webLaunchRoute`), which keeps nested kit ids
+ *   and the query.
+ *
+ * Opening a link the router already opens would navigate twice.
  */
 
-type ParsedLink =
+/** A link the OS delivered, read into the screen it names. */
+export type ParsedLink =
   | { type: "asset"; id: string }
   | { type: "kit"; id: string }
   | { type: "booking"; id: string }
@@ -65,7 +79,17 @@ type ParsedLink =
   | { type: "scanner" }
   | { type: "unknown" };
 
-function parseDeepLink(url: string): ParsedLink {
+/**
+ * Reads a link the OS delivered into the screen it names.
+ *
+ * Matching goes through {@link matchResourcePath}, the same allowlist the
+ * `+native-intent` rewrite uses, so a warm start and a cold start agree on
+ * every link, and an id that is not a plain record id names nothing.
+ *
+ * @param url - The raw URL (custom scheme or http(s))
+ * @returns The parsed link, or `unknown` when it names no screen
+ */
+export function parseDeepLink(url: string): ParsedLink {
   try {
     const parsed = Linking.parse(url);
     const path = parsed.path ?? "";
@@ -79,41 +103,40 @@ function parseDeepLink(url: string): ParsedLink {
       isHttp ? path.split("/") : [parsed.hostname ?? "", ...path.split("/")]
     ).filter(Boolean);
 
-    if (segments.length === 0) return { type: "unknown" };
-
     // A path that nests deeper than `resource/id` (e.g. /assets/:id/overview,
-    // the canonical web asset URL) resolves to the resource detail — that is
-    // what the tapper wants, and it matches the +native-intent rewrite so warm
-    // and cold starts behave identically.
-    const [resource, id] = segments;
+    // the canonical web asset URL) resolves to the resource detail, which is
+    // what the tapper wants.
+    const match = matchResourcePath(segments);
+    if (!match) return { type: "unknown" };
+    // Same rule as the native rewrite: an id-named query value that is not a
+    // plain record id makes the whole link name nothing.
+    if (!queryIdsArePlain(splitLinkUrl(url).query)) return { type: "unknown" };
+    const { resource, id } = match;
+
+    if (resource === "scanner") return { type: "scanner" };
+    if (!id) return { type: "unknown" };
 
     switch (resource) {
       case "assets":
-        return id ? { type: "asset", id } : { type: "unknown" };
+        return { type: "asset", id };
       case "kits":
-        return id ? { type: "kit", id } : { type: "unknown" };
+        return { type: "kit", id };
       case "bookings":
-        return id ? { type: "booking", id } : { type: "unknown" };
+        return { type: "booking", id };
       case "audits":
-        return id ? { type: "audit", id } : { type: "unknown" };
+        return { type: "audit", id };
       case "qr": {
-        if (!id) return { type: "unknown" };
         // Only an http(s) link names a server. `new URL()` reports the string
         // "null" as the origin of a custom-scheme URL, and carrying that
         // forward would mark the app's own `shelf://qr/<id>` links foreign and
         // send them to "null/qr/<id>".
-        const parsed = new URL(url);
+        const parsedUrl = new URL(url);
         const origin =
-          parsed.protocol === "http:" || parsed.protocol === "https:"
-            ? parsed.origin
+          parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+            ? parsedUrl.origin
             : undefined;
         return { type: "qr", id, origin };
       }
-      case "scanner":
-      case "scan":
-        return { type: "scanner" };
-      default:
-        return { type: "unknown" };
     }
   } catch {
     return { type: "unknown" };
@@ -132,8 +155,13 @@ const QR_LOOKUPS: QrLookups = {
 };
 
 /**
- * Resolves a QR code the OS delivered (a camera scan of a label) and opens
- * its asset or kit, recording the scan like the in-app scanner does.
+ * Resolves a QR code link the OS delivered and opens its asset or kit.
+ *
+ * An https link from the connected server records a scan, exactly as opening
+ * the same address on the web does (a label scanned with the system camera
+ * arrives this way). A `shelf://qr/<id>` link records nothing: no label
+ * encodes the custom scheme, so only another app or a web page can open it.
+ * See `qrLinkRecordsScan` in `./link-dispatch.ts`.
  *
  * A code that does not resolve in the app (another workspace, unclaimed,
  * not authorized, or a failed lookup), or one from another Shelf server,
@@ -142,17 +170,21 @@ const QR_LOOKUPS: QrLookups = {
  * {@link openShelfWebUrl}, never `Linking.openURL`: `/qr/*` is a verified
  * App Link, and `Linking.openURL` would re-enter the app and loop back here.
  *
- * @param qrId - The scanned QR code id.
+ * @param qrId - The linked QR code id.
  * @param origin - The origin the link carried, when it had one.
  */
 export async function resolveQrAndNavigate(qrId: string, origin?: string) {
+  const accountAtStart = accountGeneration.current();
   const outcome = await resolveQrOutcome(
     qrId,
     origin,
     getApiBaseUrl(),
-    { recordScan: true },
+    { source: "os-link" },
     QR_LOOKUPS
   );
+  // A sign-out, another account or a server switch during the lookup ends
+  // the session the link was resolved for: open nothing over the login screen.
+  if (accountGeneration.current() !== accountAtStart) return;
   if (outcome.kind === "screen") {
     pushIntoTab(outcome.tabRoot, outcome.href ?? undefined);
     return;
@@ -161,9 +193,9 @@ export async function resolveQrAndNavigate(qrId: string, origin?: string) {
 }
 
 /**
- * Looks up a QR link tapped in text someone wrote. It is not a scan, so it
- * records nothing (no scan, location or note), and a code that does not
- * resolve gets the web-only notice instead of the web login.
+ * Looks up a QR link tapped in text someone wrote. It records nothing (no
+ * scan, location or note), and a code that does not resolve gets the
+ * web-only notice instead of the web login.
  *
  * @param qrId - The linked QR code id.
  * @param origin - The origin of the link.
@@ -179,7 +211,7 @@ export function resolveTappedQr(
     qrId,
     origin,
     getApiBaseUrl(),
-    { recordScan: false, orgId },
+    { source: "tapped", orgId },
     QR_LOOKUPS
   );
 }
@@ -190,22 +222,50 @@ export function resolveTappedQr(
  */
 export function useDeepLinkHandler() {
   useEffect(() => {
-    /**
-     * True for URLs that expo-router already routes natively via the
-     * `app/+native-intent.ts` rewrite. Acting on those here too would
-     * double-navigate; the exception is `/qr/:id`, which needs an async API
-     * resolve that a path rewrite cannot express.
-     */
-    function isNativelyRouted(url: string, link: ParsedLink) {
-      return /^https?:/i.test(url) && link.type !== "qr";
+    // The launch link opens after a short delay. A different link arriving
+    // first, or the hook unmounting, cancels it so it cannot cover the newer
+    // screen. The same URL arriving again as a `url` event does not cancel
+    // it: that is the launch link delivered twice, not a newer one.
+    let disposed = false;
+    let launchUrl: string | undefined;
+    let launchTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastEventUrl: string | undefined;
+
+    /** Stops a scheduled launch-link navigation, if one is pending. */
+    function cancelLaunchLink() {
+      if (launchTimer) clearTimeout(launchTimer);
+      launchTimer = undefined;
     }
 
+    /**
+     * Opens a link that arrives while the app is running, unless the router
+     * opens it itself.
+     *
+     * @param event - the `url` event from expo-linking
+     */
     function handleUrl(event: { url: string }) {
+      lastEventUrl = event.url;
+      if (event.url !== launchUrl) cancelLaunchLink();
       const link = parseDeepLink(event.url);
-      if (isNativelyRouted(event.url, link)) return;
+      if (
+        isOpenedByRouter({
+          url: event.url,
+          linkType: link.type,
+          initial: false,
+          platform: Platform.OS,
+        })
+      ) {
+        return;
+      }
       navigateToLink(link);
     }
 
+    /**
+     * Opens the screen a parsed link names, anchored in its tab so "back"
+     * returns to the list. QR links resolve through the API first.
+     *
+     * @param link - the link parsed by `parseDeepLink`
+     */
     function navigateToLink(link: ParsedLink) {
       switch (link.type) {
         case "asset":
@@ -233,23 +293,36 @@ export function useDeepLinkHandler() {
       }
     }
 
-    // Handle the URL that launched the app (cold start). HTTPS links are
-    // already routed by expo-router via the +native-intent rewrite — only
-    // custom-scheme links and /qr resolution need JS navigation here.
+    // Handle the URL that launched the app (cold start). `launchAction`
+    // decides what to open; links the router opens itself come back `none`.
     Linking.getInitialURL().then((url) => {
-      if (url) {
-        const link = parseDeepLink(url);
-        // Skip natively-routed and unrecognized links.
-        if (link.type !== "unknown" && !isNativelyRouted(url, link)) {
-          // Small delay to let navigation mount
-          setTimeout(() => navigateToLink(link), 500);
-        }
+      if (!url || disposed) return;
+      // A different link already arrived: it is newer than the launch link.
+      if (lastEventUrl && lastEventUrl !== url) return;
+      const link = parseDeepLink(url);
+      const action = launchAction({
+        url,
+        linkType: link.type,
+        platform: Platform.OS,
+      });
+      // The delay lets navigation mount.
+      if (action.kind === "route") {
+        const { route } = action;
+        launchUrl = url;
+        launchTimer = setTimeout(() => openLinkedRoute(route), 500);
+      } else if (action.kind === "link") {
+        launchUrl = url;
+        launchTimer = setTimeout(() => navigateToLink(link), 500);
       }
     });
 
     // Handle URLs received while the app is already open (warm start)
     const subscription = Linking.addEventListener("url", handleUrl);
 
-    return () => subscription.remove();
+    return () => {
+      disposed = true;
+      cancelLaunchLink();
+      subscription.remove();
+    };
   }, []);
 }

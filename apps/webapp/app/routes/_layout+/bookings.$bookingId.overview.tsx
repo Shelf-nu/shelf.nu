@@ -34,6 +34,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { resolveBookingCustodian } from "~/modules/booking/booking-custodian.server";
 import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
   primeBookingOverviewCache,
@@ -1673,7 +1674,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          // creatorId/custodianUserId feed the ownership guard below.
+          // creatorId/custodianUserId feed the ownership guard below;
+          // custodianTeamMemberId tells save/reserve whether the custodian
+          // changes.
           select: {
             id: true,
             status: true,
@@ -1681,6 +1684,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             to: true,
             creatorId: true,
             custodianUserId: true,
+            custodianTeamMemberId: true,
           },
         }),
         getWorkingHoursForOrganization(organizationId),
@@ -1789,6 +1793,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const tags = buildTagsSet(parsedData.tags).set;
 
+        // The custodian is loaded from this workspace and held to the
+        // self-only rule; its user link comes from that row, not the form.
+        const custodian = await resolveBookingCustodian({
+          custodianTeamMemberId: parsedData.custodian.id,
+          organizationId,
+          userId,
+          access,
+          currentCustodianTeamMemberId: basicBookingInfo.custodianTeamMemberId,
+        });
+
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -1796,8 +1810,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianTeamMemberId: custodian.id,
           tags,
           userId,
           hints: getClientHint(request),
@@ -1846,6 +1859,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const formattedFrom = parsedData.startDate;
         const formattedTo = parsedData.endDate;
 
+        // Same custodian rule as the "save" branch.
+        const custodian = await resolveBookingCustodian({
+          custodianTeamMemberId: parsedData.custodian.id,
+          organizationId,
+          userId,
+          access,
+          currentCustodianTeamMemberId: basicBookingInfo.custodianTeamMemberId,
+        });
+
         const booking = await reserveBooking({
           id,
           organizationId,
@@ -1853,8 +1875,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianTeamMemberId: custodian.id,
           hints: getClientHint(request),
           alertsOrgOnReservation:
             access.policy.notifications.reservationAlertsAdmins,
