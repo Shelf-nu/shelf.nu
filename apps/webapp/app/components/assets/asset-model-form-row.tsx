@@ -23,6 +23,8 @@
  * @see {@link file://./form.tsx} consumer
  */
 import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
+import type { FormAssetModel } from "./picked-asset-model";
+import { formModelFromPickerItem } from "./picked-asset-model";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -37,9 +39,10 @@ export type AssetModelFormRowProps = {
   /**
    * Fired when the user picks (or clears) a model. The parent uses
    * this to show the model's `defaultCategoryId` in an empty Category
-   * selector. See `handleAssetModelChange` in `form.tsx`.
+   * selector. See `handleAssetModelChange` in `form.tsx`. `picked` is the
+   * picked model's row with its defaults, also for a model found by search.
    */
-  onChange: (modelId: string | undefined) => void;
+  onChange: (modelId: string | undefined, picked?: FormAssetModel) => void;
   /**
    * Inline error rendered below the selector (red text). Used by the
    * bulk-create client-side guard in `form.tsx` to surface "please
@@ -85,7 +88,9 @@ export function AssetModelFormRow({
           disabled={disabled}
           defaultValue={assetModelId ?? undefined}
           fieldName="assetModelId"
-          model={{ name: "assetModel", queryKey: "name" }}
+          // `withDefaults`: search results carry each model's defaults, so a
+          // model found by search pre-fills like one from the loader's page.
+          model={{ name: "assetModel", queryKey: "name", withDefaults: "true" }}
           triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
           placeholder="Select asset model"
           contentLabel="Asset Models"
@@ -96,7 +101,9 @@ export function AssetModelFormRow({
           closeOnSelect
           selectionMode="set"
           allowClear={true}
-          onChange={onChange}
+          onChange={(modelId, item) =>
+            onChange(modelId, item ? formModelFromPickerItem(item) : undefined)
+          }
           extraContent={({ onItemCreated, closePopover }) => (
             <InlineEntityCreationDialog
               title="Create new asset model"
