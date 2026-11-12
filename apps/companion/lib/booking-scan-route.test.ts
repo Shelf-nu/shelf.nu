@@ -26,6 +26,14 @@ import {
 } from "./booking-scan-route";
 
 const APP_DIR = join(__dirname, "..", "app");
+/** The scanner screen both scanner routes render. */
+const SCANNER_SCREEN = join(
+  __dirname,
+  "..",
+  "components",
+  "scanner",
+  "scanner-screen.tsx"
+);
 
 /** The `app/` route file a route pattern resolves to. */
 function routeFile(pattern: string) {
@@ -102,13 +110,16 @@ test("repeated params take the first value", () => {
 });
 
 test("the Scan tab reads no route params, so it is always the plain scanner", () => {
-  const source = readFileSync(routeFile("/(tabs)/scanner"), "utf8");
-  assert.doesNotMatch(source, /useLocalSearchParams|useGlobalSearchParams/);
+  for (const file of [routeFile("/(tabs)/scanner"), SCANNER_SCREEN]) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /useLocalSearchParams|useGlobalSearchParams/);
+  }
 });
 
 test("no screen opens the Scan tab with a booking", () => {
   const offenders = sourceFiles(APP_DIR)
     .concat(sourceFiles(join(APP_DIR, "..", "lib")))
+    .concat(sourceFiles(join(APP_DIR, "..", "components")))
     .filter((file) => /\/\(tabs\)\/scanner\?/.test(readFileSync(file, "utf8")));
   assert.deepEqual(offenders, []);
 });
@@ -195,7 +206,7 @@ test("a finished flow leaves without asking to discard what it sent", () => {
 test("every finished booking flow returns through leaveAfterSubmit", () => {
   // The four success paths (add, fulfil, check-in, check-out) must mark the
   // scans sent before going back; only the back arrow goes back directly.
-  const source = readFileSync(routeFile("/(tabs)/scanner"), "utf8");
+  const source = readFileSync(SCANNER_SCREEN, "utf8");
   assert.equal(source.match(/leaveAfterSubmit\(\)/g)?.length, 4);
   assert.equal(source.match(/returnToBooking\(navigation\)/g)?.length, 2);
   assert.match(

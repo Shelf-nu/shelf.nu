@@ -4,7 +4,7 @@ import {
   useNavigation,
   useRoute,
 } from "expo-router";
-import { ScannerScreen } from "@/app/(tabs)/scanner";
+import { ScannerScreen } from "@/components/scanner/scanner-screen";
 import {
   parseBookingScanParams,
   sitsOnItsBooking,
