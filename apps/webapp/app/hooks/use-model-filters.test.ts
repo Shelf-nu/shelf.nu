@@ -10,9 +10,12 @@
  * @see {@link file://./use-model-filters.ts}
  */
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelFilterProps } from "./use-model-filters";
-import { useModelFilters } from "./use-model-filters";
+import {
+  MODEL_FILTER_SEARCH_DEBOUNCE_MS,
+  useModelFilters,
+} from "./use-model-filters";
 
 const urlState = vi.hoisted(() => ({
   /** The URL the hook reads. */
@@ -42,15 +45,21 @@ vi.mock("react-router", async (importOriginal) => ({
       { id: "cat-2", name: "Lens", metadata: {} },
     ],
     totalCategories: 2,
+    /** A count above the loaded options, so a search asks the server. */
+    totalCategoriesOnServer: 40,
   }),
 }));
 
-// why: the search fetcher needs a data router; no case here searches.
+/** The search fetcher's submit, shared by every render. */
+const fetcherSubmit = vi.hoisted(() => vi.fn());
+
+// why: the search fetcher needs a data router; the cases record what it is
+// asked to submit.
 vi.mock("./use-fetcher-with-reset", () => ({
   default: () => ({
     data: undefined,
     state: "idle",
-    submit: vi.fn(),
+    submit: fetcherSubmit,
     reset: vi.fn(),
   }),
 }));
@@ -131,5 +140,74 @@ describe("useModelFilters page reset", () => {
     act(() => result.current.handleSelectItemChange("cat-1"));
 
     expect(urlState.applied).toBeNull();
+  });
+});
+
+describe("useModelFilters search", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetcherSubmit.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Types `value` into the picker's search box. */
+  function type(
+    result: { current: ReturnType<typeof useModelFilters> },
+    value: string
+  ) {
+    act(() =>
+      result.current.handleSearchQueryChange({
+        currentTarget: { value },
+      } as Parameters<typeof result.current.handleSearchQueryChange>[0])
+    );
+  }
+
+  it("asks the server once typing pauses, with the last thing typed", () => {
+    const { result } = renderFilters("", {
+      countKey: "totalCategoriesOnServer",
+    });
+
+    type(result, "a");
+    type(result, "au");
+    type(result, "aud");
+    expect(fetcherSubmit).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(MODEL_FILTER_SEARCH_DEBOUNCE_MS);
+    });
+
+    expect(fetcherSubmit).toHaveBeenCalledTimes(1);
+    expect(fetcherSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ queryValue: "aud" }),
+      { method: "GET", action: "/api/model-filters" }
+    );
+  });
+
+  it("drops a waiting search when the box is cleared", () => {
+    const { result } = renderFilters("", {
+      countKey: "totalCategoriesOnServer",
+    });
+
+    type(result, "aud");
+    type(result, "");
+    act(() => {
+      vi.advanceTimersByTime(MODEL_FILTER_SEARCH_DEBOUNCE_MS);
+    });
+
+    expect(fetcherSubmit).not.toHaveBeenCalled();
+  });
+
+  it("never asks the server when every option is already loaded", () => {
+    const { result } = renderFilters("");
+
+    type(result, "aud");
+    act(() => {
+      vi.advanceTimersByTime(MODEL_FILTER_SEARCH_DEBOUNCE_MS);
+    });
+
+    expect(fetcherSubmit).not.toHaveBeenCalled();
   });
 });
