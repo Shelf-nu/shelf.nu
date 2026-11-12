@@ -59,6 +59,13 @@ vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
 }));
 
+// why: the reserve intent loads the custodian's team member row from the
+// database; every case reserves for the caller's own team member.
+vi.mock("~/modules/team-member/service.server", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getTeamMember: vi.fn().mockResolvedValue({ id: "tm-1", userId: "user-1" }),
+}));
+
 // why: the toast is a side effect on the notification emitter; its title is
 // asserted below.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -130,6 +137,7 @@ beforeEach(() => {
     to: new Date("2030-06-03T17:00:00.000Z"),
     creatorId: CALLER,
     custodianUserId: CALLER,
+    custodianTeamMemberId: "tm-1",
   });
   findUserMock.mockResolvedValue(null);
   vi.mocked(getWorkingHoursForOrganization).mockResolvedValue({
