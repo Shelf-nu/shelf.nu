@@ -40,13 +40,14 @@ export type SystemPathInput = {
 };
 
 /**
- * Whether the hook opens this link: it names a screen of the app, or it is a
- * QR link (which names one once the API has resolved it).
+ * Whether the router must leave this link alone: it is on the claimed-path
+ * allowlist. The hook then opens the screen it names (`linkAction`), or
+ * nothing when it names none (an empty path, a refused id).
  *
  * @param url - the raw URL the OS delivered
- * @returns true when the router must leave the link to the hook
+ * @returns true when the link is the hook's, false when it is the router's
  */
-function isOpenedByHook(url: string): boolean {
+function isKeptFromRouter(url: string): boolean {
   return nativeRouteForLink(url) !== url;
 }
 
@@ -54,10 +55,10 @@ function isOpenedByHook(url: string): boolean {
  * What the router opens for a URL the OS delivered. This is the whole body of
  * `redirectSystemPath`.
  *
- * - A link the hook opens: the start screen at launch, so the app boots
+ * - A link on the allowlist: the start screen at launch, so the app boots
  *   normally while the hook opens the link on top of it, and nothing while the
  *   app runs (expo-router ignores a `null` path).
- * - Any other URL: unchanged, for the router to match as before.
+ * - Any other URL: unchanged, for the router to match.
  *
  * @param input - the URL and whether it launched the app
  * @returns the path the router opens, or null for none
@@ -66,7 +67,7 @@ export function systemPathFor({
   path,
   initial,
 }: SystemPathInput): string | null {
-  if (!isOpenedByHook(path)) return path;
+  if (!isKeptFromRouter(path)) return path;
   return initial ? "/" : null;
 }
 
@@ -74,8 +75,11 @@ export function systemPathFor({
  * What the deep-link hook does with a link, warm or cold, on every platform:
  *
  * - `route`: open `route` with `openLinkedRoute` (anchored in its tab). The
- *   route comes from `nativeRouteForLink`, so nested kit ids and the query
- *   (`/assets/new?qrId=...`) are kept, for `https://` and `shelf://` alike.
+ *   route comes from `nativeRouteForLink`, the same mapping `systemPathFor`
+ *   reads, so every link the router leaves alone that names a screen (a
+ *   detail, a list, the scanner, the new-asset form) opens here, with nested
+ *   kit ids and the query (`/assets/new?qrId=...`) kept, for `https://` and
+ *   `shelf://` alike.
  * - `qr`: resolve the QR code through the API, then open what it names.
  * - `none`: the link names nothing the app opens.
  */
@@ -93,7 +97,6 @@ export type LinkAction =
  * @returns the action the hook takes
  */
 export function linkAction(url: string, linkType: LinkKind): LinkAction {
-  if (linkType === "unknown") return { kind: "none" };
   if (linkType === "qr") return { kind: "qr" };
   const route = nativeRouteForLink(url);
   if (route === "/" || route === url) return { kind: "none" };

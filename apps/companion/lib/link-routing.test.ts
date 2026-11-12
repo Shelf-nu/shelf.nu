@@ -88,6 +88,23 @@ const LINKS: Array<{
     kind: "qr",
     hookOpens: { kind: "qr" },
   },
+  // A link to a list names no id, so `parseDeepLink` reads it as unknown; the
+  // hook still opens the list the route names.
+  {
+    url: "shelf://bookings",
+    kind: "unknown",
+    hookOpens: { kind: "route", route: "/bookings" },
+  },
+  {
+    url: "https://app.shelf.nu/assets/",
+    kind: "unknown",
+    hookOpens: { kind: "route", route: "/assets" },
+  },
+  {
+    url: "https://app.shelf.nu/assets/kits",
+    kind: "unknown",
+    hookOpens: { kind: "route", route: "/assets/kits" },
+  },
 ];
 
 for (const { url, kind, hookOpens } of LINKS) {

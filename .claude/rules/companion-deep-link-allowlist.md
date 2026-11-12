@@ -22,7 +22,7 @@ they MUST stay in sync. Touch one → check the other three.
 | 1   | `apps/webapp/app/routes/[.well-known].apple-app-site-association.tsx` | a `{ "/": "/locations/*" }` entry in `DEEP_LINK_COMPONENTS` (iOS)                      |
 | 2   | `apps/companion/app.json` → `android.intentFilters[].data`            | `{ "scheme": "https", "host": "app.shelf.nu", "pathPrefix": "/locations/" }` (Android) |
 | 3   | `apps/companion/lib/resource-path.ts`                                 | `locations` in `matchResourcePath`, then a REAL route in `nativeRouteForLink`          |
-| 4   | `apps/companion/lib/deep-links.ts`                                    | a `case "locations":` in `parseDeepLink` + `navigateToLink` (custom-scheme links)      |
+| 4   | `apps/companion/lib/deep-links.ts`                                    | nothing, unless the link needs an API call first (like `qr`): then a `ParsedLink` case |
 
 **The claimed host** (`app.shelf.nu`) is also written in
 `apps/companion/lib/open-link.ts` (`CLAIMED_WEB_HOST`), which sends a tapped
@@ -43,7 +43,7 @@ split only in `apps/companion/lib/link-routing.ts`, with its tests.
 
 **Prerequisite:** the destination screen must already exist (e.g.
 `apps/companion/app/(tabs)/locations/[id].tsx`) and be reachable via
-`pushIntoTab` — anchored navigation, or the back button strands the user
+`openLinkedRoute` / `pushIntoTab`: anchored navigation, or the back button strands the user
 (App Store Guideline 2.1).
 
 **Rollout:** #1 ships with a normal webapp deploy. #2–#4 live in the native

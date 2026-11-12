@@ -58,7 +58,8 @@ export function redirectSystemPath({
   try {
     return systemPathFor({ path, initial });
   } catch {
-    // Never let a parse error strand the user: fall back to the start screen.
+    // Never let a parse error strand the user: the start screen at launch,
+    // and no change while the app runs.
     return initial ? "/" : null;
   }
 }

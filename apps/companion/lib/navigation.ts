@@ -46,8 +46,9 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
 }
 
 /**
- * Open the in-app route a claimed web link maps to (`nativeRouteForLink`),
- * anchored the same way as `pushIntoTab` so "back" returns to that tab's list.
+ * Open the in-app route a link maps to (`nativeRouteForLink`, for `https://`
+ * and `shelf://` links alike), anchored the same way as `pushIntoTab` so
+ * "back" returns to that tab's list.
  *
  * @param route - an in-app path such as `/assets/as_1` or `/assets/new?qrId=q`
  */

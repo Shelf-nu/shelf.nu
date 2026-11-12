@@ -75,9 +75,10 @@ export type ParsedLink =
 /**
  * Reads a link the OS delivered into the screen it names.
  *
- * Matching goes through {@link matchResourcePath}, the same allowlist the
- * `+native-intent` rewrite uses, so a warm start and a cold start agree on
- * every link, and an id that is not a plain record id names nothing.
+ * Matching goes through {@link matchResourcePath}, the same allowlist
+ * `nativeRouteForLink` uses, and an id that is not a plain record id names
+ * nothing. The hook reads the kind to find QR links and their origin; the
+ * route it opens comes from `nativeRouteForLink` (`linkAction`).
  *
  * @param url - The raw URL (custom scheme or http(s))
  * @returns The parsed link, or `unknown` when it names no screen
@@ -101,8 +102,8 @@ export function parseDeepLink(url: string): ParsedLink {
     // what the tapper wants.
     const match = matchResourcePath(segments);
     if (!match) return { type: "unknown" };
-    // Same rule as the native rewrite: an id-named query value that is not a
-    // plain record id makes the whole link name nothing.
+    // Same rule as `nativeRouteForLink`: an id-named query value that is not
+    // a plain record id makes the whole link name nothing.
     if (!queryIdsArePlain(splitLinkUrl(url).query)) return { type: "unknown" };
     const { resource, id } = match;
 
@@ -224,10 +225,14 @@ export function useDeepLinkHandler() {
     let launchTimer: ReturnType<typeof setTimeout> | undefined;
     let lastEventUrl: string | undefined;
 
-    /** Stops a scheduled launch-link navigation, if one is pending. */
+    /**
+     * Stops a scheduled launch-link navigation, if one is pending, and forgets
+     * the launch link so the same link tapped later opens normally.
+     */
     function cancelLaunchLink() {
       if (launchTimer) clearTimeout(launchTimer);
       launchTimer = undefined;
+      launchUrl = undefined;
     }
 
     /**
@@ -268,9 +273,8 @@ export function useDeepLinkHandler() {
       if (!url || disposed || lastEventUrl) return;
       launchUrl = url;
       launchTimer = setTimeout(() => {
-        launchTimer = undefined;
         // Opened: the same link tapped again later is a new tap.
-        launchUrl = undefined;
+        cancelLaunchLink();
         openLink(url);
       }, 500);
     });
