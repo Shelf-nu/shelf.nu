@@ -62,6 +62,35 @@ describe("classifyScanSubmitFailure", () => {
     expect(classifyScanSubmitFailure(gatewayResponse(status))).toBeNull();
   });
 
+  it.each(["NetworkError when attempting to fetch resource.", "Load failed"])(
+    "reads the browser message %j as a network failure",
+    (message) => {
+      expect(classifyScanSubmitFailure(new TypeError(message))).toEqual({
+        kind: "network",
+        status: null,
+      });
+    }
+  );
+
+  /** A bug must stay loud: it is not a bad connection. */
+  it("leaves a TypeError from a programming mistake for the error boundary", () => {
+    const bug = new TypeError("Cannot read properties of undefined");
+
+    expect(classifyScanSubmitFailure(bug)).toBeNull();
+  });
+
+  /**
+   * The app's own 5xx carries its error payload and message. That is an
+   * answer, so it is not reported as a save that could not be confirmed.
+   */
+  it("leaves a 5xx the app answered itself for the error boundary", () => {
+    const appError = new ErrorResponseImpl(500, "", {
+      error: { message: "Something went wrong while saving." },
+    });
+
+    expect(classifyScanSubmitFailure(appError)).toBeNull();
+  });
+
   it("leaves an interrupted navigation alone", () => {
     const aborted = new DOMException("The operation was aborted", "AbortError");
 

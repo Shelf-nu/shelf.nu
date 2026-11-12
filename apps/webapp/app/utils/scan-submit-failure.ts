@@ -50,6 +50,13 @@ export type ScanSubmitFailureData = {
 const TIMEOUT_STATUSES = new Set([408, 504, 522, 524]);
 
 /**
+ * What browsers say when `fetch` cannot complete a request: "Failed to fetch"
+ * (Chromium), "NetworkError when attempting to fetch resource." (Firefox),
+ * "Load failed" (Safari).
+ */
+const FETCH_FAILURE = /failed to fetch|networkerror|load failed/i;
+
+/**
  * Status reported to the router when no response arrived at all. Any value of
  * 400 or above tells React Router not to revalidate, see
  * {@link keepScanListOnSubmitFailure}.
@@ -61,8 +68,9 @@ const NO_RESPONSE_STATUS = 503;
  * the page should survive.
  *
  * Only failures with no usable answer qualify: a 5xx (or 408) response that
- * did not come from this app's action, a `fetch` that rejected, or a response
- * body that could not be decoded. Everything else is returned as `null` so the
+ * did not come from this app (its body is a gateway's page, not the app's
+ * error payload), a `fetch` that rejected, or a response body that could not
+ * be decoded. Everything else is returned as `null` so the
  * caller rethrows it: redirects, an aborted navigation, and 4xx responses,
  * which mean the session or the route is gone and the error page is the right
  * place to land.
@@ -74,6 +82,12 @@ export function classifyScanSubmitFailure(
   thrown: unknown
 ): ScanSubmitFailure | null {
   if (isRouteErrorResponse(thrown)) {
+    // A response this app produced carries its own structured error. That is
+    // an answer, with a message of its own, and belongs to the error boundary.
+    // A gateway's or proxy's page arrives as plain text.
+    if (typeof thrown.data !== "string") {
+      return null;
+    }
     if (TIMEOUT_STATUSES.has(thrown.status)) {
       return { kind: "timeout", status: thrown.status };
     }
@@ -92,8 +106,10 @@ export function classifyScanSubmitFailure(
     if (thrown.name === "AbortError") {
       return null;
     }
-    // `fetch` rejects with a TypeError when the request cannot complete.
-    if (thrown instanceof TypeError) {
+    // `fetch` rejects with a TypeError when the request cannot complete. The
+    // message is checked as well, so a TypeError from a programming mistake
+    // still reaches the error boundary instead of reading as a bad connection.
+    if (thrown instanceof TypeError && FETCH_FAILURE.test(thrown.message)) {
       return { kind: "network", status: null };
     }
     // React Router's own message for a 2xx body it could not read, which is

@@ -6,6 +6,7 @@ import type {
   MetaFunction,
   LinksFunction,
   ShouldRevalidateFunctionArgs,
+  ClientActionFunctionArgs,
 } from "react-router";
 import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
@@ -65,12 +66,24 @@ export const links: LinksFunction = () => [
 ];
 
 /**
- * Keeps the scanner, and the list on it, on screen when the save request gets
- * no answer (a gateway timeout, an unreachable server, a dropped connection).
- * The drawer then tells the operator to check before confirming again,
- * because a request cut off in transit may still have been saved.
+ * Keeps the scanner on screen when completing the audit gets no answer (a
+ * gateway timeout, an unreachable server, a dropped connection), so the
+ * completion note and photos in the dialog are not lost. The dialog then tells
+ * the operator to check before confirming again, because a request cut off in
+ * transit may still have been saved.
+ *
+ * Only the completion is covered. Removing a scan is submitted in the
+ * background and nothing reads its result, so a failure there has to keep
+ * reaching the error boundary: turning it into action data would hide a
+ * removal the server never made.
  */
-export const clientAction = keepScanListOnSubmitFailure;
+export async function clientAction(args: ClientActionFunctionArgs) {
+  const formData = await args.request.clone().formData();
+  if (formData.get("intent") !== "complete-audit") {
+    return args.serverAction();
+  }
+  return keepScanListOnSubmitFailure(args);
+}
 
 export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
   { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },

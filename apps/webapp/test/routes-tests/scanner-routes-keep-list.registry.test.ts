@@ -47,11 +47,15 @@ describe("scanner routes keep their list when a save gets no answer", () => {
     ]);
   });
 
-  it.each(scannerRoutesWithAction)("%s exports the client action", (file) => {
+  /**
+   * Either the helper is the client action, or the route's own client action
+   * hands over to it (the audit route does, for its completion only).
+   */
+  it.each(scannerRoutesWithAction)("%s keeps its page", (file) => {
     const source = readFileSync(path.join(ROUTES_DIR, file), "utf8");
 
-    expect(source).toContain(
-      "export const clientAction = keepScanListOnSubmitFailure;"
+    expect(source).toMatch(
+      /export const clientAction = keepScanListOnSubmitFailure;|export async function clientAction\b[\s\S]*keepScanListOnSubmitFailure\(/
     );
   });
 });

@@ -11,8 +11,9 @@
  *
  * @see {@link file://./../../../utils/scan-submit-failure.ts}
  */
-import { useActionData, useNavigation } from "react-router";
+import { useActionData } from "react-router";
 import { Button } from "~/components/shared/button";
+import { useDisabled } from "~/hooks/use-disabled";
 import type { ScanSubmitFailureKind } from "~/utils/scan-submit-failure";
 import { getScanSubmitFailure } from "~/utils/scan-submit-failure";
 
@@ -48,9 +49,9 @@ export function ScanSubmitFailureAlert({
   savedCheck?: ScanSavedCheck;
 }) {
   const failure = getScanSubmitFailure(useActionData());
-  const navigation = useNavigation();
+  const submitting = useDisabled();
 
-  if (!failure || navigation.state !== "idle") {
+  if (!failure || submitting) {
     return null;
   }
 
