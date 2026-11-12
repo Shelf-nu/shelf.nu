@@ -216,6 +216,53 @@ describe("ManageModelRequests loading", () => {
   });
 });
 
+describe("ManageModelRequests load errors", () => {
+  it("keeps the last good page on screen beside the error", async () => {
+    const user = userEvent.setup();
+    const initial = page([model("Dell")], [], { matchedAssetModels: 60 });
+    const pageTwo = page([model("Zebra")], [], {
+      matchedAssetModels: 60,
+      modelsPage: 2,
+    });
+    // First load answers page 2; every load after that fails.
+    let calls = 0;
+    const pageLoader = vi.fn(() => {
+      calls += 1;
+      return calls === 1
+        ? { error: null, ...pageTwo }
+        : { error: { message: "Could not load models." } };
+    });
+    const Stub = createRoutesStub([
+      {
+        path: "/bookings/booking-1/overview/manage-assets",
+        Component: () => (
+          <ManageModelRequests bookingId="booking-1" {...initial} />
+        ),
+      },
+      { path: "/api/bookings/:bookingId/model-tab", loader: pageLoader },
+    ]);
+    render(
+      <Stub initialEntries={["/bookings/booking-1/overview/manage-assets"]} />
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Next page of models" })
+    );
+    expect(await screen.findByText("Zebra", { selector: "p" })).toBeVisible();
+
+    await user.type(screen.getByLabelText("Search models"), "x");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not load models."
+    );
+    // Page 2 stays, rather than the dialog loader's first page coming back.
+    expect(screen.getByText("Zebra", { selector: "p" })).toBeVisible();
+    expect(
+      screen.queryByText("Dell", { selector: "p" })
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("buildModelTabUrl", () => {
   it("writes only the keys that differ from the first page", () => {
     expect(

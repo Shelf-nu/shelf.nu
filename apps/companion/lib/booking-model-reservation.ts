@@ -5,9 +5,11 @@
  * which ones. Two limits apply whenever that number is edited, and they are
  * the same limits the server enforces in `upsertBookingModelRequest`:
  *
- *  - it cannot climb past what the pool still has free for the booking's
- *    window, less the units this booking holds by name outside custody, plus
- *    the units already assigned to the reservation;
+ *  - an increase cannot climb past what the pool still has free for the
+ *    booking's window, less the units this booking holds by name outside
+ *    custody, plus the units already assigned to the reservation. A reduction
+ *    is never capped by the pool: it hands units back, and the server accepts
+ *    it even when the pool has shrunk below the current quantity;
  *  - it cannot drop below the units already assigned to the booking. Those
  *    are real assets sitting on it; a smaller reservation would promise fewer
  *    units than the booking is already holding.
@@ -47,6 +49,12 @@ export type ModelReservationInput = {
    * The server charges them against the same pool. Missing counts as 0.
    */
   namedNotInCustody?: number;
+  /**
+   * The reservation's stored quantity, or 0 for a new one. The range always
+   * reaches it, so a reservation the pool can no longer cover can still be
+   * reduced.
+   */
+  currentQuantity?: number;
 };
 
 /**
@@ -59,17 +67,20 @@ export function modelReservationBounds({
   available,
   fulfilledQuantity = 0,
   namedNotInCustody = 0,
+  currentQuantity = 0,
 }: ModelReservationInput): ModelReservationBounds {
   const assigned = Math.max(0, fulfilledQuantity);
+  // The server's ceiling (`getReservationCeiling` on the web): units held by
+  // name take from the free pool, and assigned units are among them, so they
+  // are added back.
+  const ceiling =
+    Math.max(0, available) - Math.max(0, namedNotInCustody) + assigned;
 
   return {
-    // The server's ceiling (`getReservationCeiling` on the web): units held by
-    // name take from the free pool, and assigned units are among them, so
-    // they are added back.
-    max: Math.max(
-      0,
-      Math.max(0, available) - Math.max(0, namedNotInCustody) + assigned
-    ),
+    // The ceiling caps increases only. Anything up to the current quantity is
+    // a reduction, which the server always accepts (as the web's
+    // `getModelRequestQuantityIssue` does).
+    max: Math.max(0, ceiling, Math.max(0, currentQuantity)),
     // A reservation always holds at least one unit; releasing the last one is
     // a cancellation, which is a separate action.
     min: Math.max(1, assigned),

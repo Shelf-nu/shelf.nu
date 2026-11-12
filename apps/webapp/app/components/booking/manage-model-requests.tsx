@@ -229,7 +229,13 @@ export function ManageModelRequests({
     queryChanged && loaded && loaded.error != null
       ? loaded.error.message
       : null;
-  const page = fetchedPage ?? initialPage;
+  // The fetcher only holds its latest response, so a failed load would drop
+  // the page on screen. Keep the last good one (set during render, the
+  // derived-state pattern) and show that beside the error.
+  const [lastGoodPage, setLastGoodPage] = useState<ModelTabPage | null>(null);
+  if (fetchedPage && fetchedPage !== lastGoodPage) setLastGoodPage(fetchedPage);
+  const page =
+    fetchedPage ?? (queryChanged ? lastGoodPage : null) ?? initialPage;
 
   /** This booking's reservation per model, for the row lookup. */
   const requestByModelId = useMemo(

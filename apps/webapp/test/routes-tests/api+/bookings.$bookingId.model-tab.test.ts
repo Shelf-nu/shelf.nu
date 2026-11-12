@@ -64,6 +64,7 @@ const requirePermissionMock = vi.mocked(requirePermission);
 /** The booking row the route reads, owned by `user-current` unless told. */
 const BOOKING = {
   id: "booking-1",
+  status: "DRAFT",
   from: null,
   to: null,
   creatorId: "user-current",
@@ -135,6 +136,18 @@ describe("api/bookings/:bookingId/model-tab", () => {
       })
     );
     expect(response.status).toBe(404);
+    expect(serviceMocks.getBookingModelTabData).not.toHaveBeenCalled();
+  });
+
+  it("refuses a booking whose items can no longer change", async () => {
+    dbMocks.bookingFindFirst.mockResolvedValue({
+      ...BOOKING,
+      status: "COMPLETE",
+    });
+
+    const response = (await loader(buildArgs())) as unknown as Response;
+
+    expect(response.status).toBe(400);
     expect(serviceMocks.getBookingModelTabData).not.toHaveBeenCalled();
   });
 

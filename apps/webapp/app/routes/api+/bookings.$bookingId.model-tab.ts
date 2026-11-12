@@ -29,14 +29,16 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 
 /**
  * Serves one page of the Models tab for a booking.
  *
- * Gated like the reservation writes it feeds (`booking: update`, plus the
- * ownership check for roles that may only write their own bookings), because
- * the page tells the caller what this booking reserves.
+ * Gated like the dialog it serves: `booking: update`, the ownership check for
+ * roles that may only write their own bookings, and the booking-status check
+ * of `canManageBookingItems`, because the page tells the caller what this
+ * booking reserves.
  *
  * @param args.context - Carries the auth session
  * @param args.request - Read for the active organization and the query
@@ -64,6 +66,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       where: { id: bookingId, organizationId },
       select: {
         id: true,
+        status: true,
         from: true,
         to: true,
         creatorId: true,
@@ -97,6 +100,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       access,
       action: "manage model reservations on",
     });
+
+    // The same status gate as the dialog that renders this tab: a booking
+    // whose items can no longer change has no Models tab to page through.
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        status: 400,
+        message: "Model reservations can no longer change on this booking.",
+        shouldBeCaptured: false,
+      });
+    }
 
     const modelTabData = await getBookingModelTabData({
       organizationId,

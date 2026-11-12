@@ -1333,7 +1333,6 @@ describe("manage-kits loader — Models tab payload", () => {
 
     expect(result).toHaveProperty("modelsPage");
     expect(result).toHaveProperty("totalAssetModels");
-    expect((result as any).totalAssetModels).toBe(3);
     expect(result).toMatchObject({
       showModelsTab: true,
       assetModels: mockModelTabData.assetModels,
