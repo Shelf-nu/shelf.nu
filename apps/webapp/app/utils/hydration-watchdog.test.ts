@@ -725,6 +725,44 @@ describe("markHydrated", () => {
     );
   });
 
+  it("raises a separate info issue for a timeout that fired before its clock ran out", () => {
+    // A link scanner opening emailed links runs timers early: the 20-second
+    // visible-time timeout fires with only a few seconds on the page clock.
+    // Both clocks read 6 seconds when it fires, so the device did not sleep.
+    const performance = fakePerformance({ now: () => 6_000 });
+    performance.timeOrigin = Date.now() + HYDRATION_TIMEOUT_MS - 6_000;
+    runWatchdog(performance);
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "Hydration timeout fired before its clock ran out",
+      expect.objectContaining({
+        level: "info",
+        fingerprint: ["hydration-failure", "timeout-early"],
+        tags: expect.objectContaining({ hydration_failure: "timeout" }),
+        extra: expect.objectContaining({ failedAfterMs: 6_000 }),
+      })
+    );
+  });
+
+  it("keeps a timeout that took its full time in the warning issue", () => {
+    runWatchdog(fakePerformance({ now: () => HYDRATION_TIMEOUT_MS + 500 }));
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        level: "warning",
+        fingerprint: ["hydration-failure", "timeout"],
+      })
+    );
+  });
+
   it("sends nothing for a browser under automation", () => {
     // Crawlers and link previewers fast-forward timers; their timeouts say
     // nothing about users.

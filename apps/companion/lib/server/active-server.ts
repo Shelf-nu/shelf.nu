@@ -54,6 +54,15 @@ export const CLOUD_SERVER: ServerConfig = {
 
 let activeServer: ServerConfig = CLOUD_SERVER;
 
+/**
+ * Base URLs of the Shelf servers the app can name without being connected to
+ * them: only the bundled Shelf Cloud default. Read-only, for recognising a
+ * label minted by one of them (see `planScan` in `lib/qr-utils.ts`).
+ */
+export function getKnownServerUrls(): readonly string[] {
+  return [CLOUD_SERVER.baseUrl];
+}
+
 /** Bumped on every switch so hook consumers can re-subscribe. */
 let version = 0;
 

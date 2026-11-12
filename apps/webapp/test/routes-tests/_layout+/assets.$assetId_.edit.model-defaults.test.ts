@@ -15,11 +15,16 @@ import type { CustomField } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
-import { updateAsset } from "~/modules/asset/service.server";
+import {
+  getAllEntriesForCreateAndEdit,
+  getAsset,
+  updateAsset,
+} from "~/modules/asset/service.server";
 import type { AssetModelDefaults } from "~/modules/asset-model/defaults";
 import { getAssetModelDefaults } from "~/modules/asset-model/defaults.server";
+import { getAssetModels } from "~/modules/asset-model/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
-import { action } from "~/routes/_layout+/assets.$assetId_.edit";
+import { action, loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { requirePermission } from "~/utils/roles.server";
 
 // @vitest-environment node
@@ -244,5 +249,67 @@ describe("assets.$assetId_.edit: model defaults", () => {
     expect(payload.categoryId).toBe("uncategorized");
     expect(payload.valuation).toBeNull();
     expect(submittedBrand()?.raw).not.toBe("Westermo");
+  });
+});
+
+describe("assets.$assetId_.edit loader: the asset's own model", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(requirePermission).mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: { currency: "USD" },
+      userOrganizations: [],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    vi.mocked(getAllEntriesForCreateAndEdit).mockResolvedValue({
+      categories: [],
+      totalCategories: 0,
+      tags: [],
+      locations: [],
+      totalLocations: 0,
+    } as unknown as Awaited<ReturnType<typeof getAllEntriesForCreateAndEdit>>);
+    vi.mocked(getAssetModels).mockResolvedValue({
+      assetModels: [],
+      totalAssetModels: 0,
+    } as unknown as Awaited<ReturnType<typeof getAssetModels>>);
+    vi.mocked(getActiveCustomFields).mockResolvedValue([]);
+  });
+
+  /** Runs the loader for an asset on the given model. */
+  async function load(assetModelId: string | null) {
+    vi.mocked(getAsset).mockResolvedValue({
+      id: "asset-1",
+      title: "Switch 33",
+      archivedAt: null,
+      categoryId: null,
+      assetModelId,
+      assetLocations: [],
+    } as unknown as Awaited<ReturnType<typeof getAsset>>);
+
+    return loader({
+      request: new Request("http://localhost/assets/asset-1/edit"),
+      params: { assetId: "asset-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as unknown as Parameters<typeof loader>[0]);
+  }
+
+  it("asks for the asset's model even when it is outside the first page", async () => {
+    await load("model-old");
+
+    // A select shows its value only if the value is among its options, so the
+    // list must carry the asset's model.
+    expect(getAssetModels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        includeId: "model-old",
+      })
+    );
+  });
+
+  it("asks for no extra model when the asset has none", async () => {
+    await load(null);
+
+    expect(getAssetModels).toHaveBeenCalledWith(
+      expect.objectContaining({ includeId: null })
+    );
   });
 });

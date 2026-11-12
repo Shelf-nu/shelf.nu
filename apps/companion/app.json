@@ -15,7 +15,8 @@
         "AppStoreID": "6765639874",
         "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
         "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits.",
-        "NSLocationWhenInUseUsageDescription": "Shelf records where assets were scanned so your team can see each item's last known location."
+        "NSLocationWhenInUseUsageDescription": "Shelf records where assets were scanned so your team can see each item's last known location.",
+        "NSMotionUsageDescription": "Shelf does not use motion data. iOS asks for this text because the location library Shelf uses can also read motion activity."
       }
     },
     "android": {
@@ -82,14 +83,14 @@
         "expo-camera",
         {
           "cameraPermission": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
-          "microphonePermission": false,
+          "microphonePermission": "Shelf does not record audio. iOS asks for this text because the library that plays the scan sound can also record.",
           "recordAudioAndroid": false
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": false,
+          "microphonePermission": "Shelf does not record audio. iOS asks for this text because the library that plays the scan sound can also record.",
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
