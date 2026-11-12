@@ -100,6 +100,52 @@ describe("DropdownMenuItem keyboard activation", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it.each(["Enter", " "])(
+    "does nothing with %j on a disabled row, even with an enabled control inside",
+    (key) => {
+      const onClick = vi.fn();
+      const onSelect = vi.fn();
+      renderMenu(
+        <DropdownMenuItem disabled onSelect={onSelect}>
+          <Button type="button" variant="link" onClick={onClick}>
+            Delete kit
+          </Button>
+        </DropdownMenuItem>
+      );
+
+      pressOnRow("Delete kit", key);
+
+      expect(onClick).not.toHaveBeenCalled();
+      expect(onSelect).not.toHaveBeenCalled();
+    }
+  );
+
+  it("leaves Space to the menu's type-ahead right after a letter", () => {
+    const onClick = vi.fn();
+    renderMenu(
+      <DropdownMenuItem>
+        <Button type="button" variant="link" onClick={onClick}>
+          Quick check-in
+        </Button>
+      </DropdownMenuItem>
+    );
+
+    // why: the type-ahead window is measured with `Date.now()` and kept
+    // module-wide; a clock set in the past keeps this letter from swallowing a
+    // Space in any test that runs within a second after this one.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2000-01-01T00:00:00Z"));
+      // Typing "Quick " jumps through the menu; the Space is part of the word.
+      pressOnRow("Quick check-in", "q");
+      pressOnRow("Quick check-in", " ");
+
+      expect(onClick).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps Radix's own selection for a row with no inner control", () => {
     const onSelect = vi.fn();
     renderMenu(

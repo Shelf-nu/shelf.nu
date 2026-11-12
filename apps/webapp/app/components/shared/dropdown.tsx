@@ -129,6 +129,32 @@ const ITEM_SELECTION_KEYS = ["Enter", " "];
 const ROW_CONTROL_SELECTOR = "a[href], button";
 
 /**
+ * How long a typed letter keeps the menu's type-ahead going. Radix clears its
+ * search buffer one second after the last letter, and treats a Space inside
+ * that window as part of the word, not as "select".
+ */
+const TYPEAHEAD_WINDOW_MS = 1000;
+
+/** When a letter was last typed in any menu, for the type-ahead window. */
+let lastTypeAheadAt = 0;
+
+/**
+ * Whether a key feeds the menu's type-ahead: one printable character other
+ * than Space, with no modifier held.
+ *
+ * @param event - The keydown on the menu item
+ */
+function isTypeAheadKey(event: React.KeyboardEvent<HTMLElement>): boolean {
+  return (
+    event.key.length === 1 &&
+    event.key !== " " &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey
+  );
+}
+
+/**
  * Forwards Enter or Space on a menu row to the link or button inside it.
  *
  * Radix selects an item from the keyboard by clicking the item element itself,
@@ -186,7 +212,25 @@ const DropdownMenuItem = React.forwardRef<
       // `preventDefault()` has been called.
       onKeyDown={(event) => {
         onKeyDown?.(event);
-        if (!event.defaultPrevented) forwardSelectionToRowControl(event);
+        if (event.defaultPrevented) return;
+        if (isTypeAheadKey(event)) {
+          lastTypeAheadAt = Date.now();
+          return;
+        }
+        // A Space while typing ahead continues the search (Radix handles it).
+        if (
+          event.key === " " &&
+          Date.now() - lastTypeAheadAt < TYPEAHEAD_WINDOW_MS
+        ) {
+          return;
+        }
+        // `disabled` is not handed to Radix (it would drop the row from roving
+        // focus), so stop the keyboard here, the way the class stops the mouse.
+        if (disabled && ITEM_SELECTION_KEYS.includes(event.key)) {
+          event.preventDefault();
+          return;
+        }
+        forwardSelectionToRowControl(event);
       }}
       {...props}
     />
