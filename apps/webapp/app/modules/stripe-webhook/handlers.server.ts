@@ -608,18 +608,27 @@ async function linkSubscriptionToTeamWorkspace({
 
 /**
  * The tier a user keeps after one of their plan subscriptions stopped
- * granting a plan (paused or cancelled).
+ * granting a plan (paused, cancelled or overdue).
  *
  * A customer can pay for one plan subscription per workspace, so another live
  * subscription may still grant the user's tier. Read from Stripe as it is
- * now, through `liveTierOf`; the stopped subscription no longer counts.
+ * now, through `liveTierOf`; a paused or cancelled subscription no longer
+ * counts by its status.
  *
  * @param customerId - The Stripe customer of the subscription
- * @returns The highest tier the customer's live subscriptions grant, Free
- *   when none does
+ * @param exceptSubscriptionId - A subscription to leave out although its
+ *   status still grants a plan: one whose invoice is overdue stays `past_due`
+ * @returns The highest tier the customer's other live subscriptions grant,
+ *   Free when none does
  */
-async function remainingTierOf(customerId: string): Promise<TierId> {
-  return liveTierOf(await getCustomerSubscriptionsWithProducts(customerId));
+async function remainingTierOf(
+  customerId: string,
+  exceptSubscriptionId?: string
+): Promise<TierId> {
+  const subscriptions = await getCustomerSubscriptionsWithProducts(customerId);
+  return liveTierOf(
+    subscriptions.filter((sub) => sub.id !== exceptSubscriptionId)
+  );
 }
 
 // ─── Checkout ──────────────────────────────────────────────
@@ -1486,20 +1495,27 @@ export async function handleInvoiceOverdue(
       subscription,
     });
 
-    // Only downgrade for non-addon subscription products with a tier
-    if (tierId && productType !== "addon") {
-      if (isHigherOrEqualTier(tierId as TierId, user.tierId)) {
+    // Only downgrade for non-addon subscription products with a tier, and
+    // only to what the customer's other live subscriptions still grant.
+    const remainingTierId =
+      tierId &&
+      productType !== "addon" &&
+      isHigherOrEqualTier(tierId as TierId, user.tierId)
+        ? await remainingTierOf(customerId, subscription.id)
+        : undefined;
+    if (remainingTierId) {
+      if (isHigherTier(user.tierId, remainingTierId)) {
         await db.user
           .update({
             where: { customerId },
-            data: { tierId: TierId.free },
+            data: { tierId: remainingTierId },
             select: { id: true },
           })
           .catch((cause) => {
             throw new ShelfError({
               cause,
               message: "Failed to downgrade user tier for overdue invoice",
-              additionalData: { customerId, tierId, event },
+              additionalData: { customerId, tierId, remainingTierId, event },
               label: "Stripe webhook",
               status: 500,
             });

@@ -1782,6 +1782,58 @@ describe("handleInvoiceOverdue", () => {
     } as unknown as Awaited<ReturnType<typeof getInvoiceNotificationData>>);
   });
 
+  it("keeps Team while another live Team subscription still pays for it", async () => {
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(
+      withExpandedProducts(buildSubscription({ status: "past_due" }))
+    );
+    // The overdue subscription is still listed as past_due, which grants a
+    // plan; only the other one may keep the tier.
+    stripeHolds(
+      storedSubscription([TEAM_PRODUCT], { status: "past_due" }),
+      storedSubscription([TEAM_PRODUCT], {
+        id: "sub_2",
+        metadata: { organizationId: "org-2" },
+      })
+    );
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    expect(mockUserUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tierId: expect.anything() }),
+      })
+    );
+  });
+
+  it("lowers the user to the plan their other subscription grants", async () => {
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(
+      withExpandedProducts(buildSubscription({ status: "past_due" }))
+    );
+    stripeHolds(
+      storedSubscription([TEAM_PRODUCT], { status: "past_due" }),
+      storedSubscription([PLUS_PRODUCT], { id: "sub_2" })
+    );
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    expect(mockUserUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { tierId: "tier_1" } })
+    );
+  });
+
+  it("lowers the user to Free when the overdue subscription was their only plan", async () => {
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(
+      withExpandedProducts(buildSubscription({ status: "past_due" }))
+    );
+    stripeHolds(storedSubscription([TEAM_PRODUCT], { status: "past_due" }));
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    expect(mockUserUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { tierId: "free" } })
+    );
+  });
+
   it("ends the add-ons bundled on the overdue tier subscription along with the tier", async () => {
     const subscription = withExpandedProducts(
       buildSubscription({
