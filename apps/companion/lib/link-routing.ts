@@ -1,13 +1,23 @@
 /**
  * Who opens an incoming link: expo-router (through the `app/+native-intent.ts`
  * rewrite) or the JS deep-link hook (`useDeepLinkHandler` in
- * `lib/deep-links.ts`). Exactly one of them must act on each link, or the
- * link either opens nothing or opens twice.
+ * `lib/deep-links.ts`). Exactly one of them acts on each link, or the link
+ * either opens nothing or opens twice.
+ *
+ * The rule: every link that names a screen of this app (the claimed resource
+ * paths, on `https://` and on `shelf://`) is opened by the hook, through
+ * `openLinkedRoute`, which roots the target tab at its list first. The router
+ * opens such a link without that root, so the detail screen would have no
+ * back button and the tab's list would be unreachable. The router therefore
+ * opens none of them: at launch it starts on the start screen, and while the
+ * app runs it ignores the link. Links that name no screen of this app (the
+ * sign-in callback, anything outside the allowlist) stay with the router.
  *
  * Pure (no React Native imports) so it runs under Node's test runner.
  *
  * @see ./deep-links.ts
  * @see ../app/+native-intent.ts
+ * @see ./navigation.ts `openLinkedRoute`
  */
 import { nativeRouteForLink } from "./resource-path";
 
@@ -21,116 +31,71 @@ export type LinkKind =
   | "scanner"
   | "unknown";
 
-/**
- * The values of React Native's `Platform.OS`, written out because this module
- * must not import React Native.
- */
-export type AppPlatform = "ios" | "android" | "web" | "windows" | "macos";
-
-/** What the hook needs to know about a link to decide who opens it. */
-export type LinkRoutingInput = {
-  /** The raw URL the OS delivered. */
-  url: string;
-  /** The link kind parsed from the URL. */
-  linkType: LinkKind;
+/** What `redirectSystemPath` in `app/+native-intent.ts` receives. */
+export type SystemPathInput = {
+  /** The raw URL the OS delivered (scheme, host, path and query). */
+  path: string;
   /** True for the URL that launched the app (cold start). */
   initial: boolean;
-  /** `Platform.OS` of the running app. */
-  platform: AppPlatform;
 };
 
 /**
- * Whether a URL is a web link (http or https) rather than a custom-scheme
- * link such as `shelf://`.
+ * Whether the hook opens this link: it names a screen of the app, or it is a
+ * QR link (which names one once the API has resolved it).
  *
  * @param url - the raw URL the OS delivered
- * @returns true for an http(s) URL
+ * @returns true when the router must leave the link to the hook
  */
-export function isWebUrl(url: string): boolean {
-  return /^https?:/i.test(url);
+function isOpenedByHook(url: string): boolean {
+  return nativeRouteForLink(url) !== url;
 }
 
 /**
- * Whether expo-router opens this link on its own, so the JS deep-link hook
- * must leave it alone.
+ * What the router opens for a URL the OS delivered. This is the whole body of
+ * `redirectSystemPath`.
  *
- * - Custom-scheme links (`shelf://...`) are always opened by the hook.
- * - `/qr/:id` is always opened by the hook: it needs an API call to know
- *   whether the code belongs to an asset or a kit.
- * - Any other HTTPS link that arrives while the app is running is opened by
- *   the router on both platforms.
- * - The HTTPS link that launches the app is opened by the router on Android
- *   only. On iOS, under the scene life cycle, the router does not open the
- *   launch URL, so the hook opens it there.
+ * - A link the hook opens: the start screen at launch, so the app boots
+ *   normally while the hook opens the link on top of it, and nothing while the
+ *   app runs (expo-router ignores a `null` path).
+ * - Any other URL: unchanged, for the router to match as before.
  *
- * @param input - the link and the context it arrived in
- * @returns true when the hook must not navigate for this link
+ * @param input - the URL and whether it launched the app
+ * @returns the path the router opens, or null for none
  */
-export function isOpenedByRouter({
-  url,
-  linkType,
+export function systemPathFor({
+  path,
   initial,
-  platform,
-}: LinkRoutingInput): boolean {
-  if (!isWebUrl(url)) return false;
-  if (linkType === "qr") return false;
-  if (initial && platform === "ios") return false;
-  return true;
+}: SystemPathInput): string | null {
+  if (!isOpenedByHook(path)) return path;
+  return initial ? "/" : null;
 }
 
 /**
- * The in-app route for an HTTPS link the hook opens itself (the iOS launch
- * link), taken from the same `nativeRouteForLink` mapping the router uses, so
- * it keeps what the link carries: nested kit ids (`/assets/kits/:id`) and the
- * query (`/assets/new?qrId=...`).
+ * What the deep-link hook does with a link, warm or cold, on every platform:
  *
- * @param url - the raw URL the OS delivered
- * @param linkType - the link kind parsed from the URL
- * @returns the route to open, or null when the hook must not open a route for
- *   this link: not HTTPS, a `/qr/:id` link (resolved through the API instead),
- *   the start screen, or a path outside the allowlist
+ * - `route`: open `route` with `openLinkedRoute` (anchored in its tab). The
+ *   route comes from `nativeRouteForLink`, so nested kit ids and the query
+ *   (`/assets/new?qrId=...`) are kept, for `https://` and `shelf://` alike.
+ * - `qr`: resolve the QR code through the API, then open what it names.
+ * - `none`: the link names nothing the app opens.
  */
-export function webLaunchRoute(url: string, linkType: LinkKind): string | null {
-  if (!isWebUrl(url) || linkType === "qr") return null;
-  const route = nativeRouteForLink(url);
-  if (route === "/" || route === url) return null;
-  return route;
-}
-
-/**
- * What the deep-link hook does with the URL that launched the app:
- *
- * - `route`: open `route`, the in-app path the router's own mapping names (an
- *   HTTPS launch link on iOS).
- * - `link`: open the parsed link with `navigateToLink` (a custom-scheme link,
- *   or a `/qr/:id` link that needs an API resolve).
- * - `none`: do nothing, because the router opens it (an HTTPS launch link on
- *   Android) or it names nothing the app opens.
- */
-export type LaunchAction =
+export type LinkAction =
   | { kind: "route"; route: string }
-  | { kind: "link" }
+  | { kind: "qr" }
   | { kind: "none" };
 
 /**
- * Decides what the deep-link hook does with the URL that launched the app.
- * The hook only carries out the result, so every launch rule lives here,
- * covered by `link-routing.test.ts`.
+ * Decides what the deep-link hook does with a link. The hook only carries out
+ * the result, so every link rule lives here, covered by `link-routing.test.ts`.
  *
- * @param input - the launch URL, its parsed kind and the platform
+ * @param url - the raw URL the OS delivered
+ * @param linkType - the link kind `parseDeepLink` read from the URL
  * @returns the action the hook takes
  */
-export function launchAction({
-  url,
-  linkType,
-  platform,
-}: Omit<LinkRoutingInput, "initial">): LaunchAction {
-  if (isOpenedByRouter({ url, linkType, initial: true, platform })) {
-    return { kind: "none" };
-  }
-  const route = webLaunchRoute(url, linkType);
-  if (route) return { kind: "route", route };
+export function linkAction(url: string, linkType: LinkKind): LinkAction {
   if (linkType === "unknown") return { kind: "none" };
-  if (linkType === "qr" || !isWebUrl(url)) return { kind: "link" };
-  return { kind: "none" };
+  if (linkType === "qr") return { kind: "qr" };
+  const route = nativeRouteForLink(url);
+  if (route === "/" || route === url) return { kind: "none" };
+  return { kind: "route", route };
 }

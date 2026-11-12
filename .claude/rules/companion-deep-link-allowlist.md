@@ -30,15 +30,16 @@ link on a claimed host to the app screen its path names (through
 `matchResourcePath`) or else the in-app browser, never `Linking.openURL`.
 Change it with `app.json`.
 
-**Division of labour:** `isOpenedByRouter` (`apps/companion/lib/link-routing.ts`)
-decides, per link, whether expo-router opens it through the `+native-intent.ts`
-rewrite (#3) or the JS hook (#4) does. The hook opens custom-scheme links,
-resolves `/qr/:id` (async API call), and opens the HTTPS link that launches the
-app on iOS, where the router does not open the launch URL under the scene life
-cycle. It opens that link through `webLaunchRoute`, the router's own mapping, so
-nested kit ids and the query survive. Every other HTTPS link is the router's:
-opening it in the hook as well navigates twice. Change the split only in
-`link-routing.ts`, with its tests.
+**Division of labour:** the JS hook (#4) opens every link that names a screen
+of the app, `https://` and `shelf://`, at launch and while the app runs, through
+`openLinkedRoute`, which roots the target tab at its list. The route comes from
+`nativeRouteForLink` (#3), so nested kit ids and the query survive, and `/qr/:id`
+resolves through the API first. expo-router opens none of them: `+native-intent.ts`
+returns the start screen for such a link at launch and `null` (open nothing)
+while the app runs (`systemPathFor`). A link the router opens itself lands with
+no list under it, so the detail has no back button and the tab is stuck. Links
+that name no screen (the sign-in callback) stay with the router. Change the
+split only in `apps/companion/lib/link-routing.ts`, with its tests.
 
 **Prerequisite:** the destination screen must already exist (e.g.
 `apps/companion/app/(tabs)/locations/[id].tsx`) and be reachable via

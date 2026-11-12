@@ -1,8 +1,7 @@
 import { useEffect } from "react";
-import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import { accountGeneration, api, getApiBaseUrl } from "./api";
-import { isOpenedByRouter, launchAction } from "./link-routing";
+import { linkAction } from "./link-routing";
 import { openLinkedRoute, openShelfWebUrl, pushIntoTab } from "./navigation";
 import {
   resolveQrOutcome,
@@ -44,19 +43,13 @@ import { getScanCoordinates } from "./scan-location";
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
  * are never delivered to the app and keep opening the web.
  *
- * Division of labour with `app/+native-intent.ts`, decided per link by
- * `isOpenedByRouter` (`lib/link-routing.ts`). HTTPS universal links are
- * rewritten there to native routes (a claimed path that nests deeper than the
- * app renders, e.g. `/assets/:id/overview`, maps to the resource detail).
- *
- * - While the app runs, expo-router opens every HTTPS link except `/qr/:id`.
- *   This hook opens custom-scheme links and resolves `/qr/:id` through the API.
- * - At launch, the same split applies on Android. On iOS the router does not
- *   open the launch URL, so this hook opens HTTPS launch links too, through
- *   the router's own mapping (`webLaunchRoute`), which keeps nested kit ids
- *   and the query.
- *
- * Opening a link the router already opens would navigate twice.
+ * Division of labour with `app/+native-intent.ts` (`lib/link-routing.ts`):
+ * this hook opens every link that names a screen of the app, `https://` and
+ * `shelf://`, at launch and while the app runs, on both platforms, through
+ * `openLinkedRoute` so the target tab has its list under the screen. The
+ * router opens none of them (`systemPathFor`). A claimed path that nests
+ * deeper than the app renders (`/assets/:id/overview`) opens the resource
+ * detail (`nativeRouteForLink`), and `/qr/:id` resolves through the API first.
  */
 
 /** A link the OS delivered, read into the screen it names. */
@@ -238,82 +231,48 @@ export function useDeepLinkHandler() {
     }
 
     /**
-     * Opens a link that arrives while the app is running, unless the router
-     * opens it itself.
+     * Opens a link that arrives while the app is running. The launch link
+     * delivered again as a `url` event is left to the launch timer.
      *
      * @param event - the `url` event from expo-linking
      */
     function handleUrl(event: { url: string }) {
       lastEventUrl = event.url;
-      if (event.url !== launchUrl) cancelLaunchLink();
-      const link = parseDeepLink(event.url);
-      if (
-        isOpenedByRouter({
-          url: event.url,
-          linkType: link.type,
-          initial: false,
-          platform: Platform.OS,
-        })
-      ) {
-        return;
-      }
-      navigateToLink(link);
+      if (event.url === launchUrl) return;
+      cancelLaunchLink();
+      openLink(event.url);
     }
 
     /**
-     * Opens the screen a parsed link names, anchored in its tab so "back"
-     * returns to the list. QR links resolve through the API first.
+     * Opens the screen a link names (`linkAction`): a route anchored in its
+     * tab, so "back" returns to the list, or a QR code resolved through the
+     * API first.
      *
-     * @param link - the link parsed by `parseDeepLink`
+     * @param url - the raw URL the OS delivered
      */
-    function navigateToLink(link: ParsedLink) {
-      switch (link.type) {
-        case "asset":
-          pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${link.id}`);
-          break;
-        case "kit":
-          pushIntoTab("/(tabs)/assets", `/(tabs)/assets/kits/${link.id}`);
-          break;
-        case "booking":
-          pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${link.id}`);
-          break;
-        case "audit":
-          pushIntoTab("/(tabs)/audits", `/(tabs)/audits/${link.id}`);
-          break;
-        case "qr":
-          // Resolve the QR code to an asset and navigate directly
-          void resolveQrAndNavigate(link.id, link.origin);
-          break;
-        case "scanner":
-          pushIntoTab("/(tabs)/scanner");
-          break;
-        case "unknown":
-          // Ignore unrecognized links — nothing to navigate to.
-          break;
+    function openLink(url: string) {
+      const link = parseDeepLink(url);
+      const action = linkAction(url, link.type);
+      if (action.kind === "route") {
+        openLinkedRoute(action.route);
+      } else if (action.kind === "qr" && link.type === "qr") {
+        void resolveQrAndNavigate(link.id, link.origin);
       }
     }
 
-    // Handle the URL that launched the app (cold start). `launchAction`
-    // decides what to open; links the router opens itself come back `none`.
+    // Open the URL that launched the app (cold start), after a short delay
+    // that lets navigation mount. A link that already arrived as a `url`
+    // event was opened there: the same URL is the launch link delivered
+    // twice, and a different one is newer than it.
     Linking.getInitialURL().then((url) => {
-      if (!url || disposed) return;
-      // A different link already arrived: it is newer than the launch link.
-      if (lastEventUrl && lastEventUrl !== url) return;
-      const link = parseDeepLink(url);
-      const action = launchAction({
-        url,
-        linkType: link.type,
-        platform: Platform.OS,
-      });
-      // The delay lets navigation mount.
-      if (action.kind === "route") {
-        const { route } = action;
-        launchUrl = url;
-        launchTimer = setTimeout(() => openLinkedRoute(route), 500);
-      } else if (action.kind === "link") {
-        launchUrl = url;
-        launchTimer = setTimeout(() => navigateToLink(link), 500);
-      }
+      if (!url || disposed || lastEventUrl) return;
+      launchUrl = url;
+      launchTimer = setTimeout(() => {
+        launchTimer = undefined;
+        // Opened: the same link tapped again later is a new tap.
+        launchUrl = undefined;
+        openLink(url);
+      }, 500);
     });
 
     // Handle URLs received while the app is already open (warm start)
