@@ -3,6 +3,9 @@
  * session, or a change of account, is never cached or used, while a token
  * refresh for the same account is.
  *
+ * Also covers the upload path: `apiUpload` sends its form through
+ * XMLHttpRequest and never through the global fetch.
+ *
  * @see {@link file://./client.ts}
  */
 import assert from "node:assert/strict";
@@ -218,6 +221,80 @@ describe("apiFetch's automatic retry", () => {
       assert.equal(sends, 1);
     } finally {
       globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("apiUpload", () => {
+  it("sends the form through XMLHttpRequest, not fetch, and returns the server's answer", async () => {
+    const realFetch = globalThis.fetch;
+    const globals = globalThis as { XMLHttpRequest?: unknown };
+    const realXhr = globals.XMLHttpRequest;
+    let fetchCalls = 0;
+    const sent: {
+      method?: string;
+      url?: string;
+      headers: Record<string, string>;
+      body?: unknown;
+      status: number;
+      responseText: string;
+      onload?: () => void;
+    } = { headers: {}, status: 0, responseText: "" };
+    // why: the network is the boundary under test. The global fetch cannot
+    // send a React Native file part, so an upload must never reach it.
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      throw new Error("Unsupported FormDataPart implementation");
+    }) as typeof fetch;
+    // why: Node has no XMLHttpRequest; this one records the request and
+    // answers it once the body has been sent.
+    globals.XMLHttpRequest = class {
+      constructor() {
+        return Object.assign(sent, {
+          open(method: string, url: string) {
+            sent.method = method;
+            sent.url = url;
+          },
+          setRequestHeader(name: string, value: string) {
+            sent.headers[name] = value;
+          },
+          send(body: unknown) {
+            sent.body = body;
+            sent.status = 200;
+            sent.responseText = '{"asset":{"id":"asset_1"}}';
+            queueMicrotask(() => sent.onload?.());
+          },
+          abort() {},
+        });
+      }
+    };
+    try {
+      const form = new FormData();
+      const upload = client.apiUpload<{ asset: { id: string } }>(
+        "/api/mobile/asset/update-image?orgId=o&assetId=asset_1",
+        form
+      );
+      answerRead("token-a");
+      const result = await upload;
+
+      assert.deepEqual(result, {
+        data: { asset: { id: "asset_1" } },
+        error: null,
+      });
+      assert.equal(fetchCalls, 0);
+      assert.equal(sent.method, "POST");
+      assert.equal(
+        sent.url,
+        "https://app.shelf.test/api/mobile/asset/update-image?orgId=o&assetId=asset_1"
+      );
+      assert.equal(sent.body, form);
+      assert.deepEqual(sent.headers, {
+        Authorization: "Bearer token-a",
+        "User-Agent": "shelf-companion-test",
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+      globals.XMLHttpRequest = realXhr;
     }
   });
 });
