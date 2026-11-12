@@ -16,9 +16,10 @@ export type ScanListItem =
       data?: KitFromQr | AssetFromQr;
       error?: string;
       /**
-       * Set with `error` when the lookup itself got no answer (no connection,
+       * Set when the last lookup for this code got no answer (no connection,
        * a gateway page), as opposed to the server refusing the code. The code
-       * may be perfectly good, so a scan draft keeps it for the next attempt.
+       * may be perfectly good, so a scan draft keeps it, and restores it with
+       * the flag still set, until a lookup succeeds or the server refuses it.
        */
       lookupFailed?: boolean;
       type?: "asset" | "kit";

@@ -87,6 +87,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
+import { ScanSubmitFailureAlert } from "../scan-submit-failure-alert";
 import { PendingItemsList } from "./pending-items-list";
 
 /**
@@ -2428,6 +2429,7 @@ const CustomForm = ({
         {/* Submit button - conditional based on early check-in */}
         {isEarlyCheckin ? (
           <CheckinDialog
+            notice={<ScanSubmitFailureAlert />}
             booking={{
               id: booking.id,
               name: booking.name,

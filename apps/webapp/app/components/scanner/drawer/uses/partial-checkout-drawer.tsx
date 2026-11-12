@@ -53,6 +53,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
+import { ScanSubmitFailureAlert } from "../scan-submit-failure-alert";
 import {
   buildPartialCheckoutBlockers,
   isAssetFullyCheckedOut,
@@ -1481,6 +1482,7 @@ const CustomForm = ({
             expired check-out, a plain submit otherwise */}
         {isEarlyCheckout || isExpiredCheckout ? (
           <CheckoutDialog
+            notice={<ScanSubmitFailureAlert />}
             booking={{
               id: booking.id,
               name: booking.name,

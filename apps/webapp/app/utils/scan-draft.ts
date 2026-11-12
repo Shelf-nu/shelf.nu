@@ -42,6 +42,12 @@ const DRAFT_TTL_MS = 12 * 60 * 60 * 1000;
 type DraftEntry = {
   codeType?: "qr" | "barcode" | "samId";
   type?: "asset" | "kit";
+  /**
+   * The code is still waiting for a lookup that answers. Carried through the
+   * draft so an entry with no `type` yet stays eligible across any number of
+   * restores, until it resolves or the server refuses it.
+   */
+  lookupFailed?: true;
 };
 
 type StoredDraft = {
@@ -117,7 +123,11 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
     if (isSyntheticKey(code)) {
       continue;
     }
-    entries[code] = { codeType: item.codeType, type: item.type };
+    entries[code] = {
+      codeType: item.codeType,
+      type: item.type,
+      ...(item.lookupFailed ? { lookupFailed: true as const } : {}),
+    };
   }
 
   if (Object.keys(entries).length === 0) {
@@ -186,7 +196,11 @@ export function readScanDraft(key: string): ScanListItems | null {
     if (isSyntheticKey(code)) {
       continue;
     }
-    restored[code] = { codeType: entry?.codeType, type: entry?.type };
+    restored[code] = {
+      codeType: entry?.codeType,
+      type: entry?.type,
+      ...(entry?.lookupFailed ? { lookupFailed: true } : {}),
+    };
   }
 
   return Object.keys(restored).length > 0 ? restored : null;

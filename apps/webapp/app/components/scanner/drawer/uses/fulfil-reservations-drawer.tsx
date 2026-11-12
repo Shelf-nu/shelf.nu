@@ -108,6 +108,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
+import { ScanSubmitFailureAlert } from "../scan-submit-failure-alert";
 import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 
 /**
@@ -1080,6 +1081,7 @@ function FulfilCheckoutForm({
         </Button>
 
         <CheckoutDialog
+          notice={<ScanSubmitFailureAlert />}
           booking={booking}
           disabled={disableSubmit || isLoading}
           portalContainer={formElement || undefined}

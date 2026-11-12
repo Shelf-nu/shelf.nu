@@ -145,9 +145,53 @@ describe("saveScanDraft / readScanDraft", () => {
     });
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
-      "barcode-2": { codeType: "barcode", type: undefined },
+      "qr-1": { codeType: "qr", type: "asset", lookupFailed: true },
+      "barcode-2": {
+        codeType: "barcode",
+        type: undefined,
+        lookupFailed: true,
+      },
     });
+  });
+
+  /**
+   * A restored list is mirrored again as soon as any row on it changes. An
+   * entry still waiting for its lookup has no type, and must not be dropped
+   * by that write: another reload would lose the scan.
+   */
+  it("keeps a still-unanswered code through a restore and the next save", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      "barcode-2": {
+        error: "Failed to fetch item",
+        lookupFailed: true,
+        codeType: "barcode",
+      },
+    });
+
+    // The restore, then a mirror write while the barcode is still pending.
+    const restored = readScanDraft(KEY)!;
+    saveScanDraft(KEY, { ...restored, "qr-1": scanned() });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {}).sort()).toEqual([
+      "barcode-2",
+      "qr-1",
+    ]);
+  });
+
+  it("lets go of a retried code once the server refuses it", () => {
+    saveScanDraft(KEY, {
+      "barcode-2": {
+        error: "Failed to fetch item",
+        lookupFailed: true,
+        codeType: "barcode",
+      },
+    });
+    readScanDraft(KEY);
+
+    saveScanDraft(KEY, { "barcode-2": { error: "Asset not found" } });
+
+    expect(readScanDraft(KEY)).toBeNull();
   });
 
   it("drops the synthetic booking-row keys", () => {
