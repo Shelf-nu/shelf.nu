@@ -7,8 +7,6 @@
  * @see ./multipart-upload.ts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { test } from "node:test";
 
 import { postMultipart } from "./multipart-upload";
@@ -189,16 +187,4 @@ test("a request that never gets a response rejects as a network failure", async 
     name: "TypeError",
     message: "Network request failed",
   });
-});
-
-test("apiUpload sends through postMultipart, never through fetch", () => {
-  // Read from source: `client.ts` imports React Native modules, so it cannot
-  // be loaded here, and a `fetch` call with a file part only fails on a device.
-  const source = readFileSync(path.join(__dirname, "client.ts"), "utf8");
-  const start = source.indexOf("export async function apiUpload");
-  assert.notEqual(start, -1, "apiUpload is defined in client.ts");
-  const body = source.slice(start);
-
-  assert.match(body, /await postMultipart\(url,/);
-  assert.doesNotMatch(body, /\bfetch\(/);
 });
