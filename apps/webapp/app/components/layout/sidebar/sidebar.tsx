@@ -28,7 +28,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { useAssetIndexView } from "~/hooks/use-asset-index-view";
-import { useIsMobile } from "~/hooks/use-mobile";
+import { useIsCompactViewport, useIsMobile } from "~/hooks/use-mobile";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 
@@ -88,7 +88,25 @@ const SidebarProvider = forwardRef<
     // This is the internal state of the sidebar.
     // We use openProp and setOpenProp for control from outside the component.
     const [_open, _setOpen] = useState(defaultOpen);
-    const open = openProp ?? _open;
+
+    /**
+     * On a compact desktop viewport (768px-1279px) the expanded sidebar leaves
+     * too little room for the page, so it starts collapsed whatever the saved
+     * preference says. Opening it there is a temporary choice: it is kept in
+     * `compactOpen`, never persisted, and dropped when the window widens, so
+     * the saved preference applies again on a wide screen.
+     */
+    const isCompactViewport = useIsCompactViewport();
+    const [compactOpen, setCompactOpen] = useState(false);
+    const isCompactViewportRef = useRef(isCompactViewport);
+    isCompactViewportRef.current = isCompactViewport;
+
+    // Every time the window becomes compact, start from collapsed again.
+    useEffect(() => {
+      if (isCompactViewport) setCompactOpen(false);
+    }, [isCompactViewport]);
+
+    const open = openProp ?? (isCompactViewport ? compactOpen : _open);
 
     // Debounce cookie persistence so rapid CMD+B toggling only fires
     // one request with the final state, instead of a POST per toggle.
@@ -139,6 +157,10 @@ const SidebarProvider = forwardRef<
 
         if (setOpenProp) {
           setOpenProp(openState);
+        } else if (isCompactViewportRef.current) {
+          // Compact viewport: a temporary choice, see `compactOpen`.
+          setCompactOpen(openState);
+          return;
         } else {
           _setOpen(openState);
         }
