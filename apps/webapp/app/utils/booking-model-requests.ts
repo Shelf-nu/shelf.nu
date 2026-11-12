@@ -200,54 +200,62 @@ export function countReservedModelUnits(
   );
 }
 
-/** The counts that decide whether a model's pool is over-committed. */
-export type ModelPoolCounts = {
-  /** INDIVIDUAL assets of this model in the workspace. */
-  total: number;
-  /** Units held in custody, which are out of the bookable pool. */
-  inCustody: number;
-  /** Units reserved on overlapping bookings as concrete `BookingAsset` rows. */
-  reservedConcrete: number;
-  /** Units reserved on overlapping bookings as model-level requests. */
-  reservedViaRequest: number;
+/**
+ * What a booking's reservation of one model is measured against, as the Models
+ * tab receives it.
+ */
+export type ReservationPool = {
+  /**
+   * Units of the model free over the window with this booking left out of the
+   * pool, clamped at zero.
+   */
+  available: number;
+  /**
+   * Units of the model this booking holds by name that no custodian holds.
+   * They take from the same pool as the reservation's unassigned units.
+   */
+  namedNotInCustody: number;
 };
 
 /**
- * Units of a model left over this window — **signed**, so a pool that owes more
- * than it holds reads negative.
+ * The most units this booking's reservation of a model may be, mirroring the
+ * check `upsertBookingModelRequest` runs: the units it holds by name plus the
+ * reservation's unassigned units must fit in `available`. Fulfilled units are
+ * named units already, so they are added back.
  *
- * Computed from the parts rather than read off `available`, and that is the
- * whole point: the service clamps `available` with `Math.max(0, …)`, so an
- * over-committed pool and an exactly-empty one both arrive as zero. Every
- * question that turns on the difference — is this over-reserved, how many units
- * may this booking still claim, what do we tell the operator — needs the
- * unclamped figure, and `available` cannot answer any of them.
+ * May be zero or negative when the booking already holds more by name than
+ * the pool leaves; callers clamp before showing it.
  *
- * @param counts - The model's pool counts, as the loader supplies them.
- * @returns Units free, negative when over-committed.
+ * @param pool - The model's availability for this booking.
+ * @param fulfilled - Units of the reservation already assigned (0 for a new one).
+ * @returns The highest reservation quantity the server accepts as an increase.
  */
-export function getModelPoolRemaining(counts: ModelPoolCounts): number {
-  return (
-    counts.total -
-    counts.inCustody -
-    counts.reservedConcrete -
-    counts.reservedViaRequest
-  );
+export function getReservationCeiling(
+  pool: ReservationPool,
+  fulfilled: number
+): number {
+  return pool.available - pool.namedNotInCustody + fulfilled;
 }
 
 /**
- * Whether more units of a model are promised over this window than exist.
+ * Whether a booking's reservation of a model is more than the pool can give it
+ * over the window: the state the "Over-reserved" badge shows.
  *
  * Reservations are a read-then-decide, so two operators reserving at once can
  * both be told there is room and both commit; the pool then owes more than it
- * holds and somebody arrives to an empty shelf. This is the state the
- * "Over-reserved" badge exists to show.
+ * holds and somebody arrives to an empty shelf.
  *
- * @param counts - The model's pool counts, as the loader supplies them.
- * @returns `true` when the promises exceed the stock.
+ * @param pool - The model's availability for this booking.
+ * @param reservation - The reservation's quantity and assigned units.
+ * @returns `true` when the reservation exceeds its ceiling.
  */
-export function isModelPoolOverCommitted(counts: ModelPoolCounts): boolean {
-  return getModelPoolRemaining(counts) < 0;
+export function isReservationOverCommitted(
+  pool: ReservationPool,
+  reservation: { quantity: number; fulfilled: number }
+): boolean {
+  return (
+    reservation.quantity > getReservationCeiling(pool, reservation.fulfilled)
+  );
 }
 
 /** The bounds a model reservation's quantity is judged against. */
@@ -258,9 +266,9 @@ export type ModelRequestQuantityBounds = {
    */
   floor: number;
   /**
-   * Units this booking may climb to — `null` when the pool is unknown, as it is
-   * for a model fetched via typeahead beyond the seed list. May be zero or
-   * negative when other bookings owe more than the pool holds.
+   * Units this booking may climb to, from {@link getReservationCeiling}.
+   * `null` when the pool is unknown. May be zero or negative when the pool
+   * has nothing left for this booking.
    */
   capacity: number | null;
   /** The reservation's stored quantity, which a change is measured against. */
@@ -354,4 +362,45 @@ export function summarizeUnassignedUnits(
 
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * URL parameter holding the Models tab's search text on the booking
+ * manage-assets / manage-kits dialogs. Separate from the asset list's `s` so
+ * searching one tab never filters the other.
+ */
+export const MODEL_TAB_SEARCH_PARAM = "modelSearch";
+
+/** URL parameter holding the Models tab's 1-based page. See above. */
+export const MODEL_TAB_PAGE_PARAM = "modelPage";
+
+/**
+ * URL parameter that, set to `"true"`, lists models with no bookable asset on
+ * the Models tab. They are hidden by default: nothing can be reserved from
+ * them, and an inventory moving to models carries many empty ones.
+ */
+export const MODEL_TAB_SHOW_EMPTY_PARAM = "showEmptyModels";
+
+/**
+ * Reads the Models tab's search, page and empty-model toggle from the request
+ * URL, in the shape `getBookingModelTabData` takes.
+ *
+ * @param searchParams - The request's search params.
+ * @returns `search` (trimmed, omitted when blank), `page` (omitted unless a
+ *   whole number above 1) and `showModelsWithoutAssets` (false unless the
+ *   toggle is on).
+ */
+export function readModelTabParams(searchParams: URLSearchParams): {
+  search?: string;
+  page?: number;
+  showModelsWithoutAssets: boolean;
+} {
+  const search = searchParams.get(MODEL_TAB_SEARCH_PARAM)?.trim();
+  const page = Number(searchParams.get(MODEL_TAB_PAGE_PARAM));
+  return {
+    ...(search ? { search } : {}),
+    ...(Number.isInteger(page) && page > 1 ? { page } : {}),
+    showModelsWithoutAssets:
+      searchParams.get(MODEL_TAB_SHOW_EMPTY_PARAM) === "true",
+  };
 }

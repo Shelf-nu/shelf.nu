@@ -116,6 +116,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { readModelTabParams } from "~/utils/booking-model-requests";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
@@ -609,6 +610,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const modelTabData = await getBookingModelTabData({
       organizationId,
       booking,
+      ...readModelTabParams(getCurrentSearchParams(request)),
+      // A stale page in the URL lands on the last page, not an empty one.
+      clampPageToResults: true,
+      // This booking's reservations lead the list, as on the tab's own route.
+      pinReservedModels: true,
     });
 
     return payload({
@@ -1348,6 +1354,9 @@ export default function AddAssetsToNewBooking() {
     showModelsTab,
     assetModels,
     modelRequests,
+    matchedAssetModels,
+    modelsPage,
+    modelsPerPage,
     modelHeadroom,
     tickedLocationHasChildren,
   } = useLoaderData<typeof loader>();
@@ -1362,7 +1371,10 @@ export default function AddAssetsToNewBooking() {
    * into the Models tab rather than forcing a manual click.
    */
   const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") === "models" ? "models" : "assets";
+  // Only when the tab exists: a workspace without models never renders it, so
+  // a stale `?tab=models` would otherwise open the dialog with no tab shown.
+  const initialTab =
+    searchParams.get("tab") === "models" && showModelsTab ? "models" : "assets";
   const [activeTab, setActiveTab] = useState<"assets" | "models">(initialTab);
 
   /**
@@ -1806,6 +1818,9 @@ export default function AddAssetsToNewBooking() {
             bookingId={booking.id}
             assetModels={assetModels}
             modelRequests={modelRequests}
+            matchedAssetModels={matchedAssetModels}
+            modelsPage={modelsPage}
+            modelsPerPage={modelsPerPage}
           />
         </TabsContent>
       ) : null}
