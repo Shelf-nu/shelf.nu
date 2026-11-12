@@ -76,17 +76,21 @@ export function AssetIndexFilters({
                   one row with the search box, which must keep its width on a
                   laptop. The aria-label carries the name while the text is hidden.
                   `self-stretch` takes the row height from the sort and view
-                  controls beside it, and `font-normal` (plus gray text while
-                  off) matches their type, so the button reads as one of them. */}
+                  controls beside it, and `font-normal` matches their type, so
+                  the button reads as one of them. On, it keeps the outline
+                  style with an orange border; the text uses primary-800
+                  because primary-500 on white is below 4.5:1 contrast. */}
               <Button
                 type="button"
-                variant={lowStockActive ? "primary" : "secondary"}
+                variant="secondary"
                 aria-pressed={lowStockActive}
                 aria-label="Low stock only"
                 title="Low stock only"
                 className={tw(
                   "shrink-0 self-stretch whitespace-nowrap font-normal",
-                  !lowStockActive && "text-gray-600"
+                  lowStockActive
+                    ? "border-primary-500 text-primary-800"
+                    : "text-gray-600"
                 )}
                 onClick={() => setSearchParams(toggleLowStockParam)}
               >
