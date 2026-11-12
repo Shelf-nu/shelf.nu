@@ -78,8 +78,7 @@ export function AssetIndexFilters({
                   `self-stretch` takes the row height from the sort and view
                   controls beside it, and `font-normal` matches their type, so
                   the button reads as one of them. On, it keeps the outline
-                  style with an orange border; the text uses primary-800
-                  because primary-500 on white is below 4.5:1 contrast. */}
+                  style with an orange border and orange text. */}
               <Button
                 type="button"
                 variant="secondary"
@@ -89,7 +88,7 @@ export function AssetIndexFilters({
                 className={tw(
                   "shrink-0 self-stretch whitespace-nowrap font-normal",
                   lowStockActive
-                    ? "border-primary-500 text-primary-800"
+                    ? "border-primary-500 text-primary-600"
                     : "text-gray-600"
                 )}
                 onClick={() => setSearchParams(toggleLowStockParam)}
