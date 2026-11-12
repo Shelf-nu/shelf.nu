@@ -35,10 +35,14 @@ export const Filters = ({
         className
       )}
     >
-      <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
+      {/* The search row and `children` share one line while they fit. When
+          they do not (narrow window, expanded sidebar) `children` wraps onto
+          its own line instead of squeezing the search field, which keeps a
+          fixed minimum width. */}
+      <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex md:flex-wrap">
         <div
           className={tw(
-            "flex w-full flex-col gap-2 md:flex-row md:items-center",
+            "flex w-full flex-col gap-2 md:w-auto md:flex-auto md:flex-row md:flex-wrap md:items-center",
             innerWrapperClassName
           )}
         >
