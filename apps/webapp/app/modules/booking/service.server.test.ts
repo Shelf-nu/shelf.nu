@@ -469,6 +469,7 @@ vitest.mock("~/modules/qr/service.server", () => ({
 // why: testing booking workflows without creating actual asset notes
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn(),
+  createNotesPerAsset: vitest.fn(),
 }));
 
 // why: avoiding actual booking note creation during service tests
@@ -19358,6 +19359,80 @@ describe("addScannedAssetsToBooking", () => {
       bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
     ).mock.calls.map(([note]) => String(note.content));
     expect(noteContents.join("\n")).not.toContain("Existing Kit");
+  });
+  /**
+   * The asset notes are written after the save has committed, while the
+   * operator is still waiting on the response. One ownership check and one
+   * insert per scanned asset, awaited in sequence, makes that wait grow with
+   * the size of the scan. The whole batch goes out in a single call.
+   */
+  it("writes the asset notes for a whole scan in one call", async () => {
+    expect.assertions(3);
+
+    const looseIds = Array.from({ length: 12 }, (_, i) => `asset-loose-${i}`);
+
+    // why: skips the overlap-conflict guard so the test can focus on the notes.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    // why: serves both the org-scope guard (only needs the returned count to
+    // match) and the scanned-asset metadata read (needs title/type).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: null,
+            unitOfMeasure: null,
+          }))
+        )
+    );
+
+    // why: nothing is on the booking yet, so every scan is an arrival.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([]);
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.RESERVED,
+    });
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-1",
+        name: "Kit One",
+        assetKits: [{ assetId: "asset-kit-member" }],
+      },
+    ]);
+
+    await addScannedAssetsToBooking({
+      assetIds: looseIds,
+      kitIds: ["kit-1"],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      kitSlices: [
+        { assetId: "asset-kit-member", assetKitId: "ak-1", kitId: "kit-1" },
+      ],
+    });
+
+    expect(noteService.createNotesPerAsset).toHaveBeenCalledTimes(1);
+    const [{ notes }] = (
+      noteService.createNotesPerAsset as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    // One note per arrived asset: the twelve loose scans and the kit member.
+    expect(
+      notes.map((note: { assetId: string }) => note.assetId).sort()
+    ).toEqual([...looseIds, "asset-kit-member"].sort());
+    // And no per-asset call beside it.
+    expect(noteService.createNotes).not.toHaveBeenCalled();
   });
 });
 
