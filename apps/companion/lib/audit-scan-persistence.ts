@@ -1,6 +1,21 @@
+/**
+ * Crash-recovery drafts for audit scans that have not reached the server yet.
+ *
+ * A draft belongs to the account that made the scans: its key and its record
+ * both carry that account's user id, so on a shared device one member can
+ * never load, replay or discard another member's unsynced scans. A draft for
+ * another account is left in place, not deleted; its owner gets it back on
+ * their next sign-in. The server-switch teardown still clears every draft by
+ * the shared key prefix.
+ *
+ * @see {@link file://./audit-scan-persistence.test.ts}
+ * @see {@link file://./../hooks/use-audit-init.ts}
+ * @see {@link file://./../hooks/use-scan-queue.ts}
+ */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { reportAuditDurabilityEvent } from "./sentry";
 import { AUDIT_SCAN_KEY_PREFIX } from "./server/contract";
+import { serverScope } from "./server/server-scope";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -30,16 +45,19 @@ type ScanQueueEntry = {
   recount?: boolean;
 };
 
+/** A persisted draft, as stored under {@link storageKey}. */
 export type PersistedScanState = {
-  version: 1;
+  version: 2;
   auditId: string;
+  /** Supabase user id of the account that made these scans. */
+  userId: string;
   savedAt: string;
   scannedItems: ScannedItem[];
   pendingQueue: ScanQueueEntry[];
   /**
    * Scans that exhausted their retries and must NOT be silently dropped.
    * Persisted so they survive app kills and are re-queued on resume.
-   * Optional for backward-compat with sessions saved before this field existed.
+   * Optional: a draft with nothing failed may omit it.
    */
   failedQueue?: ScanQueueEntry[];
 };
@@ -50,15 +68,56 @@ export type PersistedScanState = {
 // server-switch teardown must clear these drafts by prefix and cannot import
 // this module (that would be a require cycle via ./sentry). Importing the
 // single definition keeps the writer and the teardown from ever drifting.
-const storageKey = (auditId: string) => `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
+// The prefix stays first so the teardown's prefix match still finds every
+// draft, whoever owns it.
+const storageKey = (userId: string, auditId: string) =>
+  `${AUDIT_SCAN_KEY_PREFIX}${userId}:${auditId}`;
 
 // ── Public API ───────────────────────────────────────────
 
+/** The last write queued for each draft key; the next write waits for it. */
+const draftWriteTails = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs a write to one draft key after every write queued for that key
+ * before it. AsyncStorage on Android may finish two writes to one key in
+ * either order, and an older snapshot landing last would drop the scans
+ * saved since. Writes to other keys do not wait.
+ *
+ * @param key - The draft's storage key
+ * @param write - The write to run
+ * @returns What the write resolves to
+ */
+function inDraftOrder<T>(key: string, write: () => Promise<T>): Promise<T> {
+  const previous = draftWriteTails.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => {}).then(write);
+  draftWriteTails.set(key, run);
+  run
+    .catch(() => {})
+    .finally(() => {
+      if (draftWriteTails.get(key) === run) draftWriteTails.delete(key);
+    });
+  return run;
+}
+
 /**
  * Persist the current scan session so it survives app kills.
- * Fire-and-forget — errors are logged in dev, never thrown.
+ * Fire-and-forget: errors are logged and reported, never thrown. Writes to
+ * one draft land in call order; the snapshot is taken at call time. A save
+ * still waiting its turn when a full server switch starts is dropped: the
+ * switch sweeps the drafts, and the outgoing server's draft must not come
+ * back after it.
+ *
+ * @param userId - The signed-in account that made the scans
+ * @param auditId - The audit session the scans belong to
+ * @param scannedItems - The scanned rows on screen
+ * @param pendingQueue - Scans still waiting to sync
+ * @param failedQueue - Scans that exhausted their retries
+ * @returns True when the draft was written; false when the write failed or
+ *   a server switch dropped it
  */
 export async function saveAuditScanState(
+  userId: string,
   auditId: string,
   scannedItems: ScannedItem[],
   pendingQueue: ScanQueueEntry[],
@@ -66,15 +125,22 @@ export async function saveAuditScanState(
 ): Promise<boolean> {
   try {
     const state: PersistedScanState = {
-      version: 1,
+      version: 2,
       auditId,
+      userId,
       savedAt: new Date().toISOString(),
       scannedItems,
       pendingQueue,
       failedQueue,
     };
-    await AsyncStorage.setItem(storageKey(auditId), JSON.stringify(state));
-    return true;
+    const key = storageKey(userId, auditId);
+    const json = JSON.stringify(state);
+    const scope = serverScope.current();
+    return await inDraftOrder(key, async () => {
+      if (serverScope.current() !== scope) return false;
+      await AsyncStorage.setItem(key, json);
+      return true;
+    });
   } catch (e) {
     // why: log ALWAYS, not just in __DEV__. A swallowed setItem rejection
     // (e.g. device storage full during a long offline audit) is exactly how a
@@ -92,17 +158,23 @@ export async function saveAuditScanState(
 }
 
 /**
- * Load a previously persisted scan session.
- * Returns null if nothing exists, data is corrupt, or schema version doesn't match.
+ * Load the signed-in account's draft for an audit.
+ *
+ * @param userId - The signed-in account
+ * @param auditId - The audit session to recover
+ * @returns The draft, or null when nothing exists, the data is corrupt, the
+ *   schema version does not match, or the draft names another account or
+ *   audit. A draft that names someone else is left in place.
  */
 export async function loadAuditScanState(
+  userId: string,
   auditId: string
 ): Promise<PersistedScanState | null> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(auditId));
+    const raw = await AsyncStorage.getItem(storageKey(userId, auditId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedScanState;
-    if (parsed.version !== 1) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isDraftOf(parsed, userId, auditId)) return null;
     return parsed;
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] load failed:", e);
@@ -111,14 +183,348 @@ export async function loadAuditScanState(
 }
 
 /**
- * Remove persisted state for an audit (normal exit or completion).
+ * Whether a parsed value is a well-formed draft of this account and audit.
+ *
+ * @param value - The parsed JSON
+ * @param userId - The account it must belong to
+ * @param auditId - The audit it must be for
+ * @returns True when every field recovery reads has the right shape
  */
-export async function clearAuditScanState(auditId: string): Promise<void> {
+function isDraftOf(
+  value: unknown,
+  userId: string,
+  auditId: string
+): value is PersistedScanState {
+  if (typeof value !== "object" || value === null) return false;
+  const draft = value as Partial<PersistedScanState>;
+  return (
+    draft.version === 2 &&
+    draft.userId === userId &&
+    draft.auditId === auditId &&
+    isListOf(draft.scannedItems, isScannedItem) &&
+    isListOf(draft.pendingQueue, isQueueEntry) &&
+    (draft.failedQueue === undefined ||
+      isListOf(draft.failedQueue, isQueueEntry))
+  );
+}
+
+/**
+ * Whether a value is an array whose every element passes `check`.
+ *
+ * @param value - The value to test
+ * @param check - The element test
+ * @returns True for an array of valid elements (an empty array included)
+ */
+function isListOf(value: unknown, check: (item: unknown) => boolean): boolean {
+  return Array.isArray(value) && value.every(check);
+}
+
+/**
+ * Whether a value has the fields recovery reads from a scanned row.
+ *
+ * @param item - A parsed list element
+ * @returns True when it can be shown and counted
+ */
+function isScannedItem(item: unknown): boolean {
+  if (typeof item !== "object" || item === null) return false;
+  const row = item as Partial<ScannedItem>;
+  return (
+    typeof row.assetId === "string" &&
+    typeof row.name === "string" &&
+    typeof row.isExpected === "boolean"
+  );
+}
+
+/**
+ * Whether a value is absent or a finite number.
+ *
+ * @param value - The field value
+ * @returns True for undefined, null or a finite number
+ */
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || value === null || Number.isFinite(value);
+}
+
+/**
+ * Whether a value is absent or a unit count (a finite number, zero or more).
+ * Null is refused: the server takes the count as optional, not nullable.
+ *
+ * @param value - The field value
+ * @returns True for undefined or a count
+ */
+function isOptionalCount(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (typeof value === "number" && Number.isFinite(value) && value >= 0)
+  );
+}
+
+/**
+ * Whether a value has the fields recovery reads from a queued scan.
+ *
+ * @param item - A parsed list element
+ * @returns True when it can be re-sent
+ */
+function isQueueEntry(item: unknown): boolean {
+  if (typeof item !== "object" || item === null) return false;
+  const entry = item as Partial<ScanQueueEntry> & { retryCount?: unknown };
+  return (
+    typeof entry.auditSessionId === "string" &&
+    typeof entry.qrId === "string" &&
+    typeof entry.assetId === "string" &&
+    typeof entry.isExpected === "boolean" &&
+    // Optional fields are replayed as they are, so a wrong type would make the
+    // server refuse the scan on every retry.
+    isOptionalCount(entry.foundQuantity) &&
+    (entry.recount === undefined || typeof entry.recount === "boolean") &&
+    isOptionalNumber(entry.queuedAt) &&
+    isOptionalNumber(entry.retryCount)
+  );
+}
+
+/**
+ * Remove the signed-in account's draft for an audit (normal exit or
+ * completion). Other accounts' drafts are untouched.
+ *
+ * @param userId - The signed-in account
+ * @param auditId - The audit session whose draft is removed
+ */
+export async function clearAuditScanState(
+  userId: string,
+  auditId: string
+): Promise<void> {
   try {
-    await AsyncStorage.removeItem(storageKey(auditId));
+    const key = storageKey(userId, auditId);
+    await inDraftOrder(key, () => AsyncStorage.removeItem(key));
   } catch (e) {
     if (__DEV__) console.warn("[AuditPersistence] clear failed:", e);
   }
+}
+
+/**
+ * How long a draft with nothing left to sync is kept before
+ * {@link pruneStaleAuditDrafts} drops it.
+ */
+export const AUDIT_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * Removes drafts nobody needs.
+ *
+ * - A draft with no owning account (saved under the audit id alone) is never
+ *   offered. With nothing left to sync it is removed; while it still holds
+ *   unsent scans it is kept (reported to Sentry once), because it may be the
+ *   only copy of them.
+ * - A draft of any account with nothing left to sync, saved more than
+ *   {@link AUDIT_DRAFT_MAX_AGE_MS} ago, is removed, so a shared device does
+ *   not keep finished drafts forever. A draft that still holds unsent scans
+ *   is kept however old it is: it stays until its owner resumes or discards
+ *   it (or a server switch clears every draft).
+ *
+ * Best-effort: errors are logged in dev, never thrown.
+ *
+ * @param now - The current time in milliseconds
+ */
+export async function pruneStaleAuditDrafts(now = Date.now()): Promise<void> {
+  // A full server switch sweeps every draft; prune writes nothing back after.
+  const scope = serverScope.current();
+  try {
+    const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
+      key.startsWith(AUDIT_SCAN_KEY_PREFIX)
+    );
+    /** Each stale key with the value it was judged stale on. */
+    const stale: { key: string; raw: string | null }[] = [];
+    for (const key of keys) {
+      const raw = await AsyncStorage.getItem(key);
+      let value: unknown = null;
+      try {
+        value = raw ? JSON.parse(raw) : null;
+      } catch {
+        stale.push({ key, raw });
+        continue;
+      }
+      // JSON `null`, a number or an array is no draft at all.
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        stale.push({ key, raw });
+        continue;
+      }
+      const parsed = value as Partial<PersistedScanState> & {
+        version?: number;
+      };
+      const unsynced =
+        (Array.isArray(parsed.pendingQueue) ? parsed.pendingQueue.length : 0) +
+        (Array.isArray(parsed.failedQueue) ? parsed.failedQueue.length : 0);
+      if (parsed.version !== 2 || !parsed.userId) {
+        if (unsynced === 0) {
+          stale.push({ key, raw });
+          continue;
+        }
+        // Unsent scans with no recorded owner: nothing can say whose they
+        // are, so they are never offered, but they are not deleted either.
+        // Reported once, so the case is visible.
+        const record = parsed as typeof parsed & { unownedReported?: boolean };
+        if (!record.unownedReported && serverScope.current() === scope) {
+          reportAuditDurabilityEvent(
+            "unowned_draft_kept",
+            { auditId: parsed.auditId ?? "unknown", unsynced },
+            "warning"
+          );
+          // Only over the value read above: adoption may have moved the
+          // draft away since, and writing it back would offer it again.
+          await inDraftOrder(key, async () => {
+            if ((await AsyncStorage.getItem(key)) !== raw) return;
+            await AsyncStorage.setItem(
+              key,
+              JSON.stringify({ ...record, unownedReported: true })
+            );
+          });
+        }
+        continue;
+      }
+      if (unsynced > 0) continue;
+      const savedAt = Date.parse(parsed.savedAt ?? "");
+      if (!Number.isFinite(savedAt) || now - savedAt > AUDIT_DRAFT_MAX_AGE_MS) {
+        stale.push({ key, raw });
+      }
+    }
+    // Prune runs alongside an open scanner, so a draft judged stale may have
+    // been saved again since (a new scan): only a value that is still the one
+    // read above is removed.
+    for (const { key, raw } of stale) {
+      await inDraftOrder(key, async () => {
+        if ((await AsyncStorage.getItem(key)) === raw) {
+          await AsyncStorage.removeItem(key);
+        }
+      });
+    }
+  } catch (e) {
+    if (__DEV__) console.warn("[AuditPersistence] prune failed:", e);
+  }
+}
+
+/**
+ * Adopts a draft saved by an older build (no owning account, stored under the
+ * audit id alone) into the signed-in account's draft for that audit, so its
+ * unsent scans go through the normal recovery prompt.
+ *
+ * Only an account that may scan this audit adopts: the scans can only have
+ * come from someone working on it, and the server records them against
+ * whoever replays them (the resume prompt says so). A draft is adopted only
+ * when it still holds unsent scans and the account has no draft of its own
+ * for this audit.
+ *
+ * @param userId - The signed-in account
+ * @param auditId - The audit being opened
+ * @param options.mayScan - Whether the account may scan this audit
+ * @returns True when a draft was adopted
+ */
+export async function adoptUnownedDraft(
+  userId: string,
+  auditId: string,
+  { mayScan }: { mayScan: boolean }
+): Promise<boolean> {
+  if (!mayScan) return false;
+  const legacyKey = `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
+  try {
+    // The whole move holds the legacy draft's write order, so two loads at
+    // once (an account change mid-load) cannot both copy the same draft.
+    return await inDraftOrder(legacyKey, () =>
+      adoptHeld(userId, auditId, legacyKey)
+    );
+  } catch (e) {
+    if (__DEV__) console.warn("[AuditPersistence] adopt failed:", e);
+    return false;
+  }
+}
+
+/**
+ * The body of {@link adoptUnownedDraft}, run while it holds the legacy
+ * draft's write order: removes the legacy key directly.
+ *
+ * @param userId - The account adopting the draft
+ * @param auditId - The audit the draft belongs to
+ * @param legacyKey - The older build's key for that audit
+ * @returns True when the draft was copied to the account and removed
+ */
+async function adoptHeld(
+  userId: string,
+  auditId: string,
+  legacyKey: string
+): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(legacyKey);
+  if (!raw) return false;
+  if (await AsyncStorage.getItem(storageKey(userId, auditId))) return false;
+  const legacy = JSON.parse(raw) as Partial<PersistedScanState> | null;
+  if (!legacy || legacy.auditId !== auditId) return false;
+  const pendingQueue = legacy.pendingQueue ?? [];
+  const failedQueue = legacy.failedQueue ?? [];
+  if (pendingQueue.length + failedQueue.length === 0) return false;
+  const adopted = await saveAuditScanState(
+    userId,
+    auditId,
+    legacy.scannedItems ?? [],
+    pendingQueue,
+    failedQueue
+  );
+  if (!adopted) return false;
+  // The legacy key goes only once the copy is on disk AND reads back as a
+  // valid draft; a malformed one is dropped again and the legacy key kept,
+  // so it is never stranded where nothing offers or prunes it.
+  if (!(await loadAuditScanState(userId, auditId))) {
+    await clearAuditScanState(userId, auditId);
+    return false;
+  }
+  await AsyncStorage.removeItem(legacyKey);
+  return true;
+}
+
+/**
+ * Guards the recovery alert's buttons. A native alert can stay on screen after
+ * the scanner that raised it is gone (the audit, workspace or account
+ * changed); a button pressed then must do nothing, or it would resume old
+ * scans into a new scanner or discard someone else's draft.
+ *
+ * @param isCancelled - True once the load that raised the alert was cancelled
+ * @param actions - What Resume and Discard do while the alert is current
+ * @returns The guarded button handlers
+ */
+export function guardRecoveryActions(
+  isCancelled: () => boolean,
+  actions: { resume: () => void; discard: () => void }
+): { onResume: () => void; onDiscard: () => void } {
+  return {
+    onResume: () => {
+      if (!isCancelled()) actions.resume();
+    },
+    onDiscard: () => {
+      if (!isCancelled()) actions.discard();
+    },
+  };
+}
+
+/** What the scan screen does with the stored draft when it closes. */
+export type DraftOnClose = "flush" | "clear" | "keep";
+
+/**
+ * Decides what happens to the stored draft when the scan screen closes.
+ *
+ * A draft waiting on the "Resume Previous Session?" prompt is kept untouched:
+ * the screen's queues are still empty because Resume has not run, so neither
+ * clearing nor flushing them may replace the draft. It is offered again the
+ * next time the audit opens.
+ *
+ * @param state - Whether an audit is open, whether the screen's queues hold
+ *   unsent scans, and whether a recovery prompt is still unanswered
+ * @returns `keep` while a prompt is pending, `flush` to save unsent scans,
+ *   otherwise `clear` (everything synced)
+ */
+export function draftActionOnClose(state: {
+  hasAudit: boolean;
+  hasUnsyncedScans: boolean;
+  recoveryPending: boolean;
+}): DraftOnClose {
+  if (state.recoveryPending) return "keep";
+  if (state.hasAudit && state.hasUnsyncedScans) return "flush";
+  return "clear";
 }
 
 // ── Debounced saver ──────────────────────────────────────
@@ -127,8 +533,17 @@ export async function clearAuditScanState(auditId: string): Promise<void> {
  * Returns a debounced writer that batches AsyncStorage writes.
  * During rapid scanning (~1 scan every 3-5s), writes are coalesced
  * so at most one AsyncStorage write happens per `delayMs`.
+ *
+ * @param userId - The signed-in account the drafts belong to
+ * @param auditId - The audit session being scanned
+ * @param delayMs - The debounce window
+ * @returns `save`, `flush`, `cancel` and `clear`, all bound to that account
  */
-export function createDebouncedSaver(auditId: string, delayMs = 2000) {
+export function createDebouncedSaver(
+  userId: string,
+  auditId: string,
+  delayMs = 2000
+) {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   return {
@@ -140,7 +555,13 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
     ) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        saveAuditScanState(auditId, scannedItems, pendingQueue, failedQueue);
+        saveAuditScanState(
+          userId,
+          auditId,
+          scannedItems,
+          pendingQueue,
+          failedQueue
+        );
         timer = null;
       }, delayMs);
     },
@@ -154,6 +575,7 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
       if (timer) clearTimeout(timer);
       timer = null;
       return saveAuditScanState(
+        userId,
         auditId,
         scannedItems,
         pendingQueue,
@@ -165,6 +587,17 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
     cancel() {
       if (timer) clearTimeout(timer);
       timer = null;
+    },
+
+    /**
+     * Cancel any pending write and remove this account's draft. Bound to the
+     * account the saver was created for, so it still clears the right draft
+     * after the session has ended.
+     */
+    clear() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      return clearAuditScanState(userId, auditId);
     },
   };
 }
