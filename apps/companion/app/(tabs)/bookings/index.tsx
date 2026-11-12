@@ -538,7 +538,7 @@ function BookingsListContent() {
               />
               <Text style={styles.actionHintText}>
                 {item.status !== "RESERVED"
-                  ? "Tap to check in"
+                  ? "Ready to check in"
                   : item.assetCount > 0
                   ? "Ready to check out"
                   : (item.outstandingModelCount ?? 0) > 0
