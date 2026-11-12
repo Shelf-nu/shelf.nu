@@ -11,9 +11,9 @@
  * button, and the boundary asks the server which build it runs before
  * reporting. That check also raises the app-wide new-version prompt when a
  * newer build is live. The report carries a `build` tag: `superseded` when a
- * newer build is live (an expected 404 after a deploy, sent as a warning),
- * `current` when the tab runs the live build (a real failure), `unknown` when
- * the check cannot tell.
+ * newer build is live or this tab has already seen one (an expected 404 after
+ * a deploy, sent as a warning), `current` when the tab runs the live build (a
+ * real failure), `unknown` when the check cannot tell.
  *
  * @see {@link file://./reload-app-button.tsx}
  * @see {@link file://./../../utils/build-version-checker.ts}
@@ -35,17 +35,23 @@ export const CHUNK_FAILURE_CHECK_TIMEOUT_MS = 3000;
 export type ChunkFailureBuildLabel = "superseded" | "current" | "unknown";
 
 /**
- * Maps how the server's build compares with the tab's to the `build` tag of a
- * chunk load failure report.
+ * Maps the build version check to the `build` tag of a chunk load failure
+ * report.
  *
- * @param comparison - The result of the build version check
- * @returns `superseded` when a newer build is live, `current` when the tab
- * runs the live build, `unknown` otherwise
+ * The checker's latched state wins over the latest answer: during a rolling
+ * deploy a check can reach a machine still on this tab's build after another
+ * one already reported a newer build, and the tab is superseded either way.
+ *
+ * @param comparison - The result of the check made for this failure
+ * @param newerBuildSeen - Whether the checker has latched a newer build
+ * @returns `superseded` when a newer build is live or was seen, `current`
+ * when the tab runs the live build, `unknown` otherwise
  */
 export function chunkFailureBuildLabel(
-  comparison: BuildComparison
+  comparison: BuildComparison,
+  newerBuildSeen: boolean
 ): ChunkFailureBuildLabel {
-  if (comparison === "newer") return "superseded";
+  if (newerBuildSeen || comparison === "newer") return "superseded";
   if (comparison === "same") return "current";
   return "unknown";
 }
@@ -114,7 +120,10 @@ class LazyErrorBoundary extends Component<
     // The report goes out even if the boundary unmounts meanwhile: nothing
     // here touches component state.
     void checkBuildWithTimeout().then((comparison) => {
-      const build = chunkFailureBuildLabel(comparison);
+      const build = chunkFailureBuildLabel(
+        comparison,
+        getBuildVersionChecker().getSnapshot().status === "newer"
+      );
       Sentry.captureException(error, {
         tags: { source: "lazy-load-boundary", chunk_load_error: true, build },
         ...(build === "superseded" ? { level: "warning" as const } : {}),

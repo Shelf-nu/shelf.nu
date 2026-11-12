@@ -12,14 +12,16 @@ import * as Sentry from "@sentry/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BuildComparison } from "~/utils/build-version";
+import type { BuildVersionState } from "~/utils/build-version-checker";
 import {
   CHUNK_FAILURE_CHECK_TIMEOUT_MS,
   chunkFailureBuildLabel,
   LazyLoadBoundary,
 } from "./lazy-load-boundary";
 
-const { mockCheck } = vi.hoisted(() => ({
+const { mockCheck, mockGetSnapshot } = vi.hoisted(() => ({
   mockCheck: vi.fn<() => Promise<BuildComparison>>(),
+  mockGetSnapshot: vi.fn<() => BuildVersionState>(),
 }));
 
 // why: Sentry is a network side effect; the test asserts what would be sent.
@@ -28,7 +30,10 @@ vi.mock("@sentry/react-router", () => ({ captureException: vi.fn() }));
 // why: the real checker fetches the server's build id; the test controls the
 // comparison it answers with.
 vi.mock("~/utils/build-version-checker", () => ({
-  getBuildVersionChecker: () => ({ check: mockCheck }),
+  getBuildVersionChecker: () => ({
+    check: mockCheck,
+    getSnapshot: mockGetSnapshot,
+  }),
 }));
 
 // why: the real button reads app-wide jotai state and reloads the window; this
@@ -61,6 +66,8 @@ describe("LazyLoadBoundary", () => {
     vi.mocked(Sentry.captureException).mockReset();
     mockCheck.mockReset();
     mockCheck.mockResolvedValue("unknown");
+    mockGetSnapshot.mockReset();
+    mockGetSnapshot.mockReturnValue({ status: "current" });
     // why: React logs every error a boundary catches; the failures are expected.
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -149,6 +156,28 @@ describe("LazyLoadBoundary", () => {
     );
   });
 
+  it("keeps a chunk failure superseded when the tab already saw a newer build", async () => {
+    // A rolling deploy: an earlier check latched a newer build, this one
+    // reached a machine still on the tab's build.
+    mockGetSnapshot.mockReturnValue({ status: "newer", serverBuildId: "2" });
+    mockCheck.mockResolvedValue("same");
+    renderChunkFailure();
+
+    await waitFor(() =>
+      expect(Sentry.captureException).toHaveBeenCalledWith(
+        expect.objectContaining({ message: CHUNK_ERROR_MESSAGE }),
+        {
+          tags: {
+            source: "lazy-load-boundary",
+            chunk_load_error: true,
+            build: "superseded",
+          },
+          level: "warning",
+        }
+      )
+    );
+  });
+
   it("reports a chunk failure on the live build as an error", async () => {
     mockCheck.mockResolvedValue("same");
     renderChunkFailure();
@@ -198,7 +227,14 @@ describe("chunkFailureBuildLabel", () => {
     ["same", "current"],
     ["older", "unknown"],
     ["unknown", "unknown"],
-  ])("labels %s as %s", (comparison, label) => {
-    expect(chunkFailureBuildLabel(comparison)).toBe(label);
+  ])("labels %s as %s when no newer build was seen", (comparison, label) => {
+    expect(chunkFailureBuildLabel(comparison, false)).toBe(label);
   });
+
+  it.each<BuildComparison>(["newer", "same", "older", "unknown"])(
+    "labels %s as superseded once a newer build was seen",
+    (comparison) => {
+      expect(chunkFailureBuildLabel(comparison, true)).toBe("superseded");
+    }
+  );
 });

@@ -6,8 +6,10 @@
  * chunks can disappear from the server; reloading moves it onto the new
  * build. The prompt only asks: reloading is always the user's click.
  *
- * Mounted once, in the authenticated layout. It sits bottom-left so it never
- * covers the toasts and the asset import card, which live bottom-right.
+ * Mounted once, in the authenticated layout. From `md` up it sits bottom-left,
+ * clear of the toasts and the asset import card in the bottom-right corner.
+ * On narrow screens it spans the width and stacks above the import card
+ * through `--asset-import-card-offset`, the variable the toasts use too.
  *
  * Dismissing hides it for the rest of the browser session for that build
  * only; a later deploy shows it again.
@@ -45,7 +47,7 @@ function writeDismissedBuildId(buildId: string) {
 }
 
 /**
- * Bottom-left card announcing a newer build, with a Reload button and a
+ * Card announcing a newer build, with a Reload button and a
  * Dismiss control. Renders nothing while the tab runs the current build,
  * which includes the server render.
  */
@@ -79,7 +81,7 @@ export function NewVersionPrompt() {
       aria-live="polite"
       // why: z-40 matches the asset import card: above page content and the
       // sidebar (z-10), below dialogs and the toast viewport
-      className="fixed inset-x-[25px] bottom-[calc(25px+env(safe-area-inset-bottom))] z-40 flex items-start gap-3 rounded border border-gray-100 bg-white p-3 shadow-xl md:inset-x-auto md:left-[25px] md:w-[340px]"
+      className="fixed inset-x-[25px] bottom-[calc(25px+env(safe-area-inset-bottom)+var(--asset-import-card-offset,0px))] z-40 flex items-start gap-3 rounded border border-gray-100 bg-white p-3 shadow-xl md:inset-x-auto md:bottom-[calc(25px+env(safe-area-inset-bottom))] md:left-[25px] md:w-[340px]"
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-gray-900">

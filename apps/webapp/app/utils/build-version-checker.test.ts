@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CHECK_THROTTLE_MS,
+  CHECK_TIMEOUT_MS,
   createBuildVersionChecker,
   fetchServerBuildId,
 } from "./build-version-checker";
@@ -143,6 +144,50 @@ describe("createBuildVersionChecker", () => {
     });
   });
 
+  it("settles a stalled check at the deadline so later checks run again", async () => {
+    vi.useFakeTimers();
+    try {
+      const { checker, fetchServerBuildId } = setup();
+      fetchServerBuildId.mockReturnValueOnce(new Promise(() => {}));
+      fetchServerBuildId.mockResolvedValueOnce(NEWER_ID);
+
+      const stalled = checker.check();
+      await vi.advanceTimersByTimeAsync(CHECK_TIMEOUT_MS);
+      await expect(stalled).resolves.toBe("unknown");
+
+      await expect(checker.check()).resolves.toBe("newer");
+      expect(fetchServerBuildId).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still latches a newer build that answers after the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const { checker, fetchServerBuildId } = setup();
+      let answer: (id: string) => void = () => {};
+      fetchServerBuildId.mockReturnValueOnce(
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+      );
+
+      const late = checker.check();
+      await vi.advanceTimersByTimeAsync(CHECK_TIMEOUT_MS);
+      await expect(late).resolves.toBe("unknown");
+
+      answer(NEWER_ID);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checker.getSnapshot()).toEqual({
+        status: "newer",
+        serverBuildId: NEWER_ID,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never fetches from a dev build", async () => {
     const { checker, fetchServerBuildId } = setup([NEWER_ID], "dev");
 
@@ -218,6 +263,29 @@ describe("fetchServerBuildId", () => {
     );
 
     await expect(fetchServerBuildId()).resolves.toBeNull();
+  });
+
+  it("aborts a request that stalls past the deadline and returns null", async () => {
+    vi.useFakeTimers();
+    try {
+      // why: fetch is the network boundary; this one only settles on abort
+      const fetchMock = vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError"))
+            );
+          })
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = fetchServerBuildId();
+      await vi.advanceTimersByTimeAsync(CHECK_TIMEOUT_MS);
+
+      await expect(result).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns null when the request throws", async () => {

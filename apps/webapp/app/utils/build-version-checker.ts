@@ -33,6 +33,12 @@ export type BuildVersionState =
 /** Minimum gap between two throttled checks, in milliseconds. */
 export const CHECK_THROTTLE_MS = 60_000;
 
+/**
+ * Longest a single check waits for the server, in milliseconds. The request
+ * is aborted and the check answers `unknown` once it passes.
+ */
+export const CHECK_TIMEOUT_MS = 10_000;
+
 /** Options for `createBuildVersionChecker`. */
 export type BuildVersionCheckerOptions = {
   /** Build id of the running bundle. A non-digit id (such as "dev") disables checks. */
@@ -125,7 +131,15 @@ export function createBuildVersionChecker({
     if (inFlight) return inFlight;
 
     lastCheckStartedAt = now();
-    inFlight = runCheck().finally(() => {
+    // The deadline settles a check whose request stalls, so `inFlight` always
+    // clears and later checks can run. A late answer still latches a newer
+    // build through `runCheck`; only its return value is dropped.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<BuildComparison>((resolve) => {
+      timer = setTimeout(() => resolve("unknown"), CHECK_TIMEOUT_MS);
+    });
+    inFlight = Promise.race([runCheck(), deadline]).finally(() => {
+      clearTimeout(timer);
       inFlight = null;
     });
     return inFlight;
@@ -156,21 +170,30 @@ export function createBuildVersionChecker({
  * Fetches the server's build id from `BUILD_VERSION_PATH`.
  *
  * `no-store` keeps the browser and any proxy from answering with a cached id.
+ * The request and the body read are aborted after `CHECK_TIMEOUT_MS`, so a
+ * stalled connection is released. `AbortController` with `setTimeout`
+ * rather than `AbortSignal.timeout()`, which is newer than the supported
+ * browser floor.
  *
- * @returns The server's build id, or `null` on a network error, a non-2xx
- * status or an unexpected body. Never rejects.
+ * @returns The server's build id, or `null` on a network error, a timeout, a
+ * non-2xx status or an unexpected body. Never rejects.
  */
 export async function fetchServerBuildId(): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   try {
     const response = await fetch(BUILD_VERSION_PATH, {
       cache: "no-store",
       credentials: "same-origin",
       headers: { accept: "application/json" },
+      signal: controller.signal,
     });
     if (!response.ok) return null;
     return parseBuildVersionResponse(await response.json());
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
