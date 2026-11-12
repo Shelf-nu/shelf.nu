@@ -59,6 +59,7 @@ export const loader = async ({
       bookingsIds: bookingsIds.split(","),
       userId,
       canSeeAllBookings: access.bookings.seeAll,
+      canSeeAllCustody: access.custody.seeAll,
       organizationId,
       // The list a "Select all" stands for. It only narrows: the export ANDs
       // it with the workspace and the caller's custody scope.

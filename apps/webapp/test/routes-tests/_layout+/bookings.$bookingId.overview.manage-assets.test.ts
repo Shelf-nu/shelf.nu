@@ -2265,6 +2265,8 @@ describe("manage-assets: include assets from child locations", () => {
       locationIdsOverride: undefined,
       // The picker list refuses every custodian filter.
       allowedTeamMemberIds: [],
+      // An ADMIN sees all custody, so the search matches every custodian.
+      custodySearchScope: "all",
       bookableScope: null,
       honorArchivedView: false,
       honorLowStockFilter: false,

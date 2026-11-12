@@ -569,7 +569,7 @@ describe("getBarcodeByValue", () => {
     vitest.clearAllMocks();
   });
 
-  it("should find barcode by value", async () => {
+  it("should find barcode by value, only when its linked item is in the workspace", async () => {
     expect.assertions(2);
     //@ts-expect-error missing vitest type
     db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
@@ -583,6 +583,10 @@ describe("getBarcodeByValue", () => {
       where: {
         OR: [{ value: "test123" }, { value: "TEST123" }],
         organizationId: "org-1",
+        AND: [
+          { OR: [{ assetId: null }, { asset: { organizationId: "org-1" } }] },
+          { OR: [{ kitId: null }, { kit: { organizationId: "org-1" } }] },
+        ],
       },
       include: {
         asset: true,
@@ -633,6 +637,10 @@ describe("getBarcodeByValue", () => {
       where: {
         OR: [{ value: "test123" }, { value: "TEST123" }],
         organizationId: "org-1",
+        AND: [
+          { OR: [{ assetId: null }, { asset: { organizationId: "org-1" } }] },
+          { OR: [{ kitId: null }, { kit: { organizationId: "org-1" } }] },
+        ],
       },
       include: customInclude,
     });

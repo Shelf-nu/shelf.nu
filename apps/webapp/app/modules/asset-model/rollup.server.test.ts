@@ -47,6 +47,7 @@ function lastQueryText(): string {
 const baseArgs = {
   organizationId: "org-1",
   search: null,
+  custodySearchScope: "all" as const,
   filters: [],
   page: 1,
   perPage: 20,

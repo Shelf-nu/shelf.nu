@@ -85,6 +85,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
@@ -354,6 +355,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // Ignores the custodian-filter seed: scope it rather than fetch a
             // roster nobody renders.
             canSeeAllCustody: false,
+            // The search matches custodian names only on custody the caller may see.
+            custodySearchScope: custodySearchScopeFor({
+              canSeeAllCustody: access.custody.seeAll,
+              userId,
+            }),
             locationIdsOverride,
           })
       ),
@@ -794,6 +800,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // A custodian filter can therefore never reveal what a colleague
         // holds, whatever the caller's role.
         allowedTeamMemberIds: [],
+        // The same custodian-name search scope as the loader.
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         // The loader passes no list scope: the picker lists every asset.
         bookableScope: null,
         honorArchivedView: false,
