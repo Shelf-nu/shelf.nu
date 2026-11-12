@@ -174,13 +174,7 @@ function ConditionalActionsDropdown() {
         defaultOpen={defaultOpen}
         onOpenChange={onOpenChange}
       >
-        <DropdownMenuTrigger
-          className="hidden md:flex"
-          onClick={() => {
-            setOpen(!open);
-          }}
-          asChild
-        >
+        <DropdownMenuTrigger className="hidden md:flex" asChild>
           <Button type="button" disabled={disabledReason}>
             <span className="flex items-center gap-2">
               {buttonTitle} <ChevronRightIcon className="chev size-4" />

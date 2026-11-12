@@ -675,3 +675,34 @@ describe("drainScanQueue", () => {
     assert.equal(swapped[0].auditAssetId, "row-pool");
   });
 });
+
+describe("drainScanQueue with mayContinue", () => {
+  it("stops before the next send and leaves the rest queued", async () => {
+    const queue = [
+      { auditSessionId: "audit-1", assetId: "a-1", qrId: "qr-1" },
+      { auditSessionId: "audit-1", assetId: "a-2", qrId: "qr-2" },
+    ];
+    const sent: string[] = [];
+    let allowed = 1;
+
+    const result = await drainScanQueue({
+      queue: { current: queue },
+      failed: { current: [] },
+      items: { current: [] },
+      maxRetries: 3,
+      recordScan: async (entry) => {
+        sent.push(entry.assetId);
+        return { data: { auditAssetId: `row-${entry.assetId}` }, error: null };
+      },
+      persist: () => {},
+      mayContinue: () => allowed-- > 0,
+    });
+
+    assert.deepEqual(sent, ["a-1"]);
+    assert.deepEqual(
+      queue.map((e) => e.assetId),
+      ["a-2"]
+    );
+    assert.deepEqual(result, { backoffAttempt: null });
+  });
+});

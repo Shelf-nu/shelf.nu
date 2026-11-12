@@ -36,7 +36,9 @@ import { getParams } from "~/utils/http.server";
  *   Invalid or partial coordinates are silently ignored — provenance must
  *   never break a resolve.
  *
- * Used by the companion scanner tab and deep-link handler.
+ * Used by the companion scanner tab and by https QR links the OS delivers
+ * to the companion (the same address the web QR page records). `shelf://`
+ * QR links use the non-recording `get-scanned-item` route instead.
  *
  * @see {@link file://./get-scanned-item.$qrId.ts} (the non-recording sibling)
  * @see {@link file://./../../qr+/_public+/$qrId.tsx} (the web recording resolve)

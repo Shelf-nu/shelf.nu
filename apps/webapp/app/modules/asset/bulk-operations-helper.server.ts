@@ -16,6 +16,7 @@ import {
   parseFiltersWithHierarchy,
   POOL_AGGREGATE_JOIN,
 } from "./query.server";
+import type { CustodySearchScope } from "./search-union.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import { getArchivedFilterFromParams } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
@@ -108,6 +109,7 @@ async function getAdvancedFilteredAssetIds({
   timeZone = "UTC",
   honorArchivedView = false,
   lastAuditDateAccess,
+  custodySearchScope,
 }: {
   organizationId: string;
   filters: string;
@@ -116,6 +118,7 @@ async function getAdvancedFilteredAssetIds({
   timeZone?: string;
   honorArchivedView?: boolean;
   lastAuditDateAccess: LastAuditDateAccess;
+  custodySearchScope: CustodySearchScope;
 }): Promise<string[]> {
   try {
     const searchParams = new URLSearchParams(filters);
@@ -157,7 +160,7 @@ async function getAdvancedFilteredAssetIds({
     // Generate WHERE clause (reuses existing logic)
     const whereClause = generateWhereClause(
       organizationId,
-      search,
+      search ? { text: search, custodySearchScope } : null,
       parsedFilters,
       undefined, // no specific assetIds filter
       bookableScope,
@@ -211,6 +214,8 @@ async function getAdvancedFilteredAssetIds({
  * @param lastAuditDateAccess - How the caller may use the last audit date
  * @param bookableScope - The caller's list scope, `null` for a member who sees
  *   every asset
+ * @param custodySearchScope - Whose custody the search matches by custodian
+ *   name (see `custodySearchScopeFor`)
  * @returns Promise resolving to array of asset IDs to operate on
  *
  * @example
@@ -242,6 +247,7 @@ export async function resolveAssetIdsForBulkOperation({
   allowedTeamMemberIds,
   lastAuditDateAccess,
   bookableScope,
+  custodySearchScope,
   honorArchivedView = false,
 }: {
   assetIds: Asset["id"][];
@@ -279,6 +285,13 @@ export async function resolveAssetIdsForBulkOperation({
    * assets outside their scope, and "select all" must not reach them either.
    */
   bookableScope: BookableListScope | null;
+  /**
+   * Whose custody the list's search matched by custodian name, from
+   * `custodySearchScopeFor`. Required, with no default, for the same reason as
+   * `allowedTeamMemberIds`: "select all" re-runs the search, and a search by a
+   * colleague's name would otherwise select exactly the assets they hold.
+   */
+  custodySearchScope: CustodySearchScope;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -320,6 +333,7 @@ export async function resolveAssetIdsForBulkOperation({
       timeZone,
       honorArchivedView,
       lastAuditDateAccess,
+      custodySearchScope,
     });
   } else {
     // SIMPLE MODE: the simple index's own where, built from the same URL and
@@ -335,6 +349,7 @@ export async function resolveAssetIdsForBulkOperation({
       organizationId,
       currentSearchParams,
       allowedTeamMemberIds,
+      custodySearchScope,
       bookableScope,
       locationIdsOverride: undefined,
       honorArchivedView,

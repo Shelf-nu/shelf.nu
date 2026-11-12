@@ -13,6 +13,7 @@ import {
 } from "~/modules/api/mobile-bulk-ids.server";
 import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
@@ -178,6 +179,10 @@ export async function action({ request }: ActionFunctionArgs) {
             auditsUsable: canUseAudits,
           }),
           bookableScope: resolveBookableListScope({ access, userId: user.id }),
+          custodySearchScope: custodySearchScopeFor({
+            canSeeAllCustody: access.custody.seeAll,
+            userId: user.id,
+          }),
           /**
            * Mobile sends no list filters (`currentSearchParams` is empty above), so
            * this never narrows anything today — the where-builder returns before it

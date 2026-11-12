@@ -496,6 +496,44 @@ describe("resolveMobileScannedCode owning workspace on the QR path", () => {
       },
     });
   });
+
+  it("refuses a code whose linked asset is outside the code's workspace", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-mixed",
+      assetId: "asset-foreign",
+      kitId: null,
+      organizationId: "org-1",
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-1" });
+    // The org-scoped read finds nothing: the asset is in another workspace.
+    assetFindFirst.mockResolvedValue(null);
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-mixed"));
+
+    expect(result).toEqual({
+      ok: false,
+      status: 404,
+      message:
+        "This code doesn't exist or it doesn't belong to your current organization.",
+    });
+    expect(resignAndShape).not.toHaveBeenCalled();
+  });
+
+  it("refuses a code whose linked kit is outside the code's workspace", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-mixed-kit",
+      assetId: null,
+      kitId: "kit-foreign",
+      organizationId: "org-1",
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-1" });
+    // The org-scoped read finds nothing: the kit is in another workspace.
+    vi.mocked(db.kit.findFirst).mockResolvedValue(null);
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-mixed-kit"));
+
+    expect(result).toMatchObject({ ok: false, status: 404 });
+  });
 });
 
 /**

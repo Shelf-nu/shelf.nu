@@ -15,4 +15,4 @@ export {
   invalidateResponseCache,
 } from "./api/index";
 export * from "./api/types";
-export { getApiBaseUrl } from "./api/client";
+export { accountGeneration, getApiBaseUrl } from "./api/client";

@@ -36,6 +36,7 @@ import { ChevronRightIcon, ScanLine, Zap } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
+import { firstDisplayedElement } from "~/utils/sheet-viewport";
 import { tw } from "~/utils/tw";
 import CheckoutDialog, { type CheckoutDialogBooking } from "./checkout-dialog";
 import type { ButtonProps } from "../shared/button";
@@ -160,9 +161,10 @@ export default function CheckoutDropdown({
    * the row that opened the dialog is gone with the menu.
    */
   function visibleMenuTrigger(): HTMLElement | null {
-    const desktop = desktopTriggerRef.current;
-    if (desktop && getComputedStyle(desktop).display !== "none") return desktop;
-    return mobileTriggerRef.current;
+    return firstDisplayedElement(
+      desktopTriggerRef.current,
+      mobileTriggerRef.current
+    );
   }
 
   // Check-out is the primary action while RESERVED, but a secondary one while
@@ -270,13 +272,7 @@ export default function CheckoutDropdown({
         defaultOpen={defaultOpen}
         onOpenChange={onOpenChange}
       >
-        <DropdownMenuTrigger
-          className="hidden md:flex"
-          onClick={() => {
-            setOpen(!open);
-          }}
-          asChild
-        >
+        <DropdownMenuTrigger className="hidden md:flex" asChild>
           <Button
             ref={desktopTriggerRef}
             type="button"
@@ -317,14 +313,14 @@ export default function CheckoutDropdown({
           portalContainer={portalContainer}
         >
           <div className="fixed bottom-0 left-0">
-            {/* The item opens the dialog, not the button inside it: arrow-key
-                focus lands on the item, and Enter or Space clicks the item
-                only. A mouse click on the button bubbles up to it. The guard
-                lives here because the shared item does not hand `disabled` to
-                Radix, and the button keeps its disabled-reason tooltip. Focus
-                sits on the item, so the item carries `aria-disabled`; the
-                reason is read from the button's own hidden description,
-                which sits inside the item. */}
+            {/* The row only opens the dialog; the dialog lives beside the
+                menu. A click on the button, or Enter or Space on the row
+                (forwarded to the button by `DropdownMenuItem`), reaches this
+                `onSelect`. The guard lives here because the shared item does
+                not hand `disabled` to Radix, and the button keeps its
+                disabled-reason tooltip. Focus sits on the item, so the item
+                carries `aria-disabled`; the reason is read from the button's
+                own hidden description, which sits inside the item. */}
             <DropdownMenuItem
               className="py-1 lg:p-0"
               aria-disabled={quickCheckoutBlocked || undefined}

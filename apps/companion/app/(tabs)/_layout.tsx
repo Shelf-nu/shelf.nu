@@ -6,6 +6,7 @@ import NoWorkspaceScreen from "@/components/no-workspace-screen";
 import InactiveWorkspaceScreen from "@/components/inactive-workspace-screen";
 import { contentColumnLayout } from "@/components/content-column";
 import { useAuth } from "@/lib/auth-context";
+import { TAB_WITHOUT_BUTTON } from "@/lib/tab-without-button";
 import { useTheme } from "@/lib/theme-context";
 import { useOrg } from "@/lib/org-context";
 import { fontSize } from "@/lib/constants";
@@ -183,14 +184,14 @@ export default function TabLayout() {
       <Tabs.Screen
         name="audits"
         options={{
-          href: null,
+          ...TAB_WITHOUT_BUTTON,
           headerShown: false,
         }}
       />
       <Tabs.Screen
         name="custody"
         options={{
-          href: null,
+          ...TAB_WITHOUT_BUTTON,
           title: "Custody",
         }}
       />

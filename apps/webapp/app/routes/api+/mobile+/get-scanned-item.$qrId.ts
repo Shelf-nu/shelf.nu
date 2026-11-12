@@ -15,10 +15,11 @@ import { makeShelfError } from "~/utils/error";
  *
  * Used by the companion **audit scanner**: an audit only needs to identify the
  * code (it records its own `AuditScan` separately), so it must not add an
- * ad-hoc scan to the asset's "last scanned" history. Because recording is an
- * endpoint-level property, there is no client flag here to record or suppress,
- * which is exactly what keeps the recording decision off attacker-controlled
- * input.
+ * ad-hoc scan to the asset's "last scanned" history. Also used for
+ * `shelf://` QR links and QR links tapped inside the companion: no label
+ * encodes those, so they record nothing. Because recording is an endpoint-level
+ * property, there is no client flag here to record or suppress, which keeps
+ * the recording decision off client-controlled input.
  *
  * @see {@link file://./qr.$qrId.ts} (the recording sibling)
  * @see {@link file://./../../get-scanned-item.$qrId} (the web non-recording resolve)

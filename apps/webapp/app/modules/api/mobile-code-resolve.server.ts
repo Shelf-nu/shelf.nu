@@ -405,6 +405,19 @@ export async function resolveMobileScannedCode({
         })
       : null;
 
+  // The code and the item it is linked to must both be in the code's
+  // workspace. Both reads above are scoped to it, so a linked id that comes
+  // back empty points at another workspace's asset or kit: refuse it rather
+  // than resolve (and record a scan against) an item the caller cannot reach.
+  if ((qr.assetId && !asset) || (!qr.assetId && qr.kitId && !kit)) {
+    return {
+      ok: false,
+      status: 404,
+      message:
+        "This code doesn't exist or it doesn't belong to your current organization.",
+    };
+  }
+
   return {
     ok: true,
     scanToRecord: {

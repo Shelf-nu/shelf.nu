@@ -144,6 +144,8 @@ describe("command-palette search", () => {
       await search([role]);
       expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
         bookableScope: { holderUserId: "caller" },
+        // A custodian's name matches only the caller's own custody.
+        custodySearchScope: { userId: "caller" },
       });
     }
   );
@@ -152,6 +154,7 @@ describe("command-palette search", () => {
     await search(["ADMIN"]);
     expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
       bookableScope: null,
+      custodySearchScope: "all",
     });
   });
 

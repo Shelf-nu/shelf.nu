@@ -4,7 +4,7 @@ A living document tracking observations, failures, and improvement opportunities
 
 ## Known Limitations
 
-- **Camera**: iOS Simulator has no physical camera. QR scanning is tested via deep links (`shelf://qr/{id}`) which exercise the same code path as real scans.
+- **Camera**: iOS Simulator has no physical camera. A QR deep link (`shelf://qr/{id}`) opens the asset but records no scan (a link is not a camera scan); test scan recording through the scanner's manual code entry.
 - **Haptics**: `expo-haptics` triggers are invisible to Maestro. Haptic feedback cannot be verified in E2E tests.
 - **Network Toggle**: Simulator cannot easily toggle airplane mode. Offline-mode testing requires manual setup.
 - **Biometrics**: Face ID / Touch ID enrollment on simulator requires separate `xcrun simctl` commands.
