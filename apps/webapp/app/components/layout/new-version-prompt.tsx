@@ -16,7 +16,7 @@
  * @see {@link file://./../shared/reload-app-button.tsx} - the reload control
  * @see {@link file://./../../routes/_layout+/_layout.tsx} - where it is mounted
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useBuildVersionChecks, useNewVersion } from "~/hooks/use-new-version";
 import { tw } from "~/utils/tw";
 import { iconsMap } from "../shared/icons-map";
@@ -52,17 +52,17 @@ function writeDismissedBuildId(buildId: string) {
 export function NewVersionPrompt() {
   useBuildVersionChecks();
   const version = useNewVersion();
+  /** Set by Dismiss in this mount; covers storage that throws. */
   const [dismissedBuildId, setDismissedBuildId] = useState<string | null>(null);
 
-  // why: sessionStorage exists only in the browser, so it is read after
-  // hydration rather than during the first render
-  useEffect(() => {
-    setDismissedBuildId(readDismissedBuildId());
-  }, []);
+  if (version.status !== "newer") return null;
 
+  // Reading storage during render is safe here: the state is `newer` only
+  // after a client-side check, so the server render and hydration never
+  // reach this line.
   if (
-    version.status !== "newer" ||
-    version.serverBuildId === dismissedBuildId
+    version.serverBuildId === dismissedBuildId ||
+    version.serverBuildId === readDismissedBuildId()
   ) {
     return null;
   }
