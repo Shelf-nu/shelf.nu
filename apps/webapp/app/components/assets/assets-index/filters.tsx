@@ -73,14 +73,16 @@ export function AssetIndexFilters({
               />
               {/* Icon with the label only on wide screens: the toolbar shares
                   one row with the search box, which must keep its width on a
-                  laptop. The aria-label carries the name while the text is hidden. */}
+                  laptop. The aria-label carries the name while the text is hidden.
+                  `self-stretch` takes the row height from the sort and view
+                  controls beside it, so the button always lines up with them. */}
               <Button
                 type="button"
                 variant={lowStockActive ? "primary" : "secondary"}
                 aria-pressed={lowStockActive}
                 aria-label="Low stock only"
                 title="Low stock only"
-                className="shrink-0 whitespace-nowrap"
+                className="shrink-0 self-stretch whitespace-nowrap"
                 onClick={() => setSearchParams(toggleLowStockParam)}
               >
                 <span className="flex items-center gap-1.5">
