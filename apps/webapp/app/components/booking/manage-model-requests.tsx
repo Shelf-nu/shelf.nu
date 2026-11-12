@@ -15,12 +15,12 @@
  *     while nothing has been assigned to it;
  *   - fully fulfilled: read-only, kept as the record of what was reserved.
  *
- * Search, page and the "Models with assets / All models" choice live in the URL
- * under their own keys ({@link MODEL_TAB_SEARCH_PARAM},
- * {@link MODEL_TAB_PAGE_PARAM}, {@link MODEL_TAB_SHOW_EMPTY_PARAM}) so they
- * never filter the Assets or Kits list, and the loader reads them through
- * `readModelTabParams`. Models with no assets are hidden unless "All models"
- * is chosen, and this booking's reserved models lead the list.
+ * The first page comes from the dialog's loader. Searching, paging and the
+ * "Models with assets / All models" choice load other pages through
+ * {@link file://../../routes/api+/bookings.$bookingId.model-tab.ts} with a
+ * fetcher, so they never touch the dialog's URL or re-run its loader. Models
+ * with no assets are hidden unless "All models" is chosen, and this booking's
+ * reserved models lead the list.
  *
  * Every control submits to
  * {@link file://../../routes/api+/bookings.$bookingId.model-requests.ts}.
@@ -30,8 +30,8 @@
  */
 
 import type { ChangeEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFetcher, useNavigation } from "react-router";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import Input from "~/components/forms/input";
@@ -47,9 +47,9 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th, Tr } from "~/components/table";
-import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
+import type { loader as modelTabLoader } from "~/routes/api+/bookings.$bookingId.model-tab";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   canCancelModelReservation,
@@ -60,7 +60,6 @@ import {
   MODEL_TAB_SEARCH_PARAM,
   MODEL_TAB_SHOW_EMPTY_PARAM,
 } from "~/utils/booking-model-requests";
-import { isSearching } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
@@ -115,66 +114,157 @@ export type ManageModelRequestsRequest = {
   fulfilledAt: string | null;
 };
 
-/** Props for {@link ManageModelRequests}. */
-export interface ManageModelRequestsProps {
-  /** The booking being edited, used to build the API endpoint URL. */
-  bookingId: string;
-  /** The current page of models, already filtered by the URL search. */
+/** One page of the Models tab, as the dialog loader and the tab route send it. */
+export type ModelTabPage = {
+  /** The page of models, already searched and filtered. */
   assetModels: ManageModelRequestsModel[];
   /** Every model-level reservation on this booking, outstanding + fulfilled. */
   modelRequests: ManageModelRequestsRequest[];
-  /** How many models match the current search, across all pages. */
+  /** How many models the search and filter leave, across all pages. */
   matchedAssetModels: number;
   /** 1-based page `assetModels` was read from. */
   modelsPage: number;
   /** Page size `assetModels` was read with. */
   modelsPerPage: number;
+};
+
+/** Props for {@link ManageModelRequests}. */
+export interface ManageModelRequestsProps extends ModelTabPage {
+  /** The booking being edited, used to build the API endpoint URLs. */
+  bookingId: string;
+}
+
+/** What the operator has asked the Models tab to show. */
+type ModelTabQuery = {
+  /** Trimmed search term; empty for none. */
+  search: string;
+  /** 1-based page. */
+  page: number;
+  /** List models with no bookable asset too. */
+  showEmpty: boolean;
+};
+
+type ModelTabQueryAction =
+  | { type: "search"; search: string }
+  | { type: "page"; page: number }
+  | { type: "showEmpty"; showEmpty: boolean };
+
+/** A new search or filter starts again from the first page. */
+function modelTabQueryReducer(
+  state: ModelTabQuery,
+  action: ModelTabQueryAction
+): ModelTabQuery {
+  switch (action.type) {
+    case "search":
+      return { ...state, search: action.search, page: 1 };
+    case "page":
+      return { ...state, page: action.page };
+    case "showEmpty":
+      return { ...state, showEmpty: action.showEmpty, page: 1 };
+  }
+}
+
+/** The query the dialog loader's first page answers. */
+const INITIAL_QUERY: ModelTabQuery = { search: "", page: 1, showEmpty: false };
+
+/**
+ * The tab route URL for a query, using the same keys `readModelTabParams`
+ * reads.
+ *
+ * @param bookingId - The booking whose Models tab is shown.
+ * @param query - What to load.
+ * @returns A relative URL for `fetcher.load`.
+ */
+export function buildModelTabUrl(
+  bookingId: string,
+  query: ModelTabQuery
+): string {
+  const params = new URLSearchParams();
+  if (query.search) params.set(MODEL_TAB_SEARCH_PARAM, query.search);
+  if (query.page > 1) params.set(MODEL_TAB_PAGE_PARAM, String(query.page));
+  if (query.showEmpty) params.set(MODEL_TAB_SHOW_EMPTY_PARAM, "true");
+  const qs = params.toString();
+  return `/api/bookings/${bookingId}/model-tab${qs ? `?${qs}` : ""}`;
 }
 
 /**
- * How long to wait after the last keystroke before pushing the search term
- * into the URL. Each URL change re-runs the dialog's loader, so typing must
- * collapse into one request per word; see `SEARCH_DEBOUNCE_MS` in the shared
- * list search form for the rate-limit reasoning, which applies here as well.
+ * How long to wait after the last keystroke before loading the search. Each
+ * load is a server round trip, so typing collapses into one per word.
  */
 const MODEL_SEARCH_DEBOUNCE_MS = 400;
 
 /**
  * The Models tab of the booking manage-assets / manage-kits dialogs.
  *
+ * Shows the loader's first page until the operator changes the query, then
+ * the page the tab route returned for it. A route page that comes back with an
+ * error keeps the last good page on screen and says why.
+ *
  * @param props - See {@link ManageModelRequestsProps}.
  * @returns The search bar, the models table and its pagination.
  */
 export function ManageModelRequests({
   bookingId,
-  assetModels,
-  modelRequests,
-  matchedAssetModels,
-  modelsPage,
-  modelsPerPage,
+  ...initialPage
 }: ManageModelRequestsProps) {
+  const [query, dispatch] = useReducer(modelTabQueryReducer, INITIAL_QUERY);
+  const pageFetcher = useFetcher<typeof modelTabLoader>({
+    key: `booking-model-tab-${bookingId}`,
+  });
+  const { load } = pageFetcher;
+
+  // The loader's page answers the initial query, so nothing loads until the
+  // operator changes it. After that the fetcher's page is revalidated along
+  // with the loaders whenever a reservation changes.
+  const queryChanged = query !== INITIAL_QUERY;
+  useEffect(() => {
+    if (!queryChanged) return;
+    void load(buildModelTabUrl(bookingId, query));
+  }, [bookingId, query, queryChanged, load]);
+
+  const loaded = pageFetcher.data;
+  const fetchedPage: ModelTabPage | null =
+    queryChanged && loaded && loaded.error == null ? loaded : null;
+  const loadError =
+    queryChanged && loaded && loaded.error != null
+      ? loaded.error.message
+      : null;
+  const page = fetchedPage ?? initialPage;
+
   /** This booking's reservation per model, for the row lookup. */
   const requestByModelId = useMemo(
-    () => new Map(modelRequests.map((r) => [r.assetModelId, r])),
-    [modelRequests]
+    () => new Map(page.modelRequests.map((r) => [r.assetModelId, r])),
+    [page.modelRequests]
   );
-  const [searchParams] = useSearchParams();
-  const search = searchParams.get(MODEL_TAB_SEARCH_PARAM)?.trim() ?? "";
-  const showingEmpty = searchParams.get(MODEL_TAB_SHOW_EMPTY_PARAM) === "true";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ModelSearchBar />
+      <div className="flex flex-col gap-3 border-b px-6 py-3 sm:flex-row sm:items-center">
+        <ModelSearchField
+          onSearch={(search) => dispatch({ type: "search", search })}
+          isLoading={pageFetcher.state !== "idle"}
+        />
+        <ModelsWithAssetsSelect
+          showEmpty={query.showEmpty}
+          onChange={(showEmpty) => dispatch({ type: "showEmpty", showEmpty })}
+        />
+      </div>
+
+      {loadError ? (
+        <p className="border-b px-6 py-2 text-sm text-error-600" role="alert">
+          {loadError}
+        </p>
+      ) : null}
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {assetModels.length === 0 ? (
+        {page.assetModels.length === 0 ? (
           <div className="px-6 py-10 text-center">
             <p className="font-medium text-gray-900">No models found</p>
             <p className="text-sm text-gray-500">
-              {search
-                ? `No models match "${search}". Try a different search.`
+              {query.search
+                ? `No models match "${query.search}". Try a different search.`
                 : "There are no models on this page."}
-              {showingEmpty
+              {query.showEmpty
                 ? null
                 : ' Models without assets are hidden; choose "All models" to list them.'}
             </p>
@@ -189,7 +279,7 @@ export function ManageModelRequests({
               </tr>
             </thead>
             <tbody>
-              {assetModels.map((model) => (
+              {page.assetModels.map((model) => (
                 <ModelRow
                   key={model.id}
                   bookingId={bookingId}
@@ -203,36 +293,32 @@ export function ManageModelRequests({
       </div>
 
       <ModelPagination
-        matchedAssetModels={matchedAssetModels}
-        modelsPage={modelsPage}
-        modelsPerPage={modelsPerPage}
+        matchedAssetModels={page.matchedAssetModels}
+        modelsPage={page.modelsPage}
+        modelsPerPage={page.modelsPerPage}
+        onPage={(next) => dispatch({ type: "page", page: next })}
       />
     </div>
   );
 }
 
 /**
- * Search field for the Models tab. Writes the debounced term to
- * {@link MODEL_TAB_SEARCH_PARAM}, resets the page, and pins `tab=models` so a
- * reload lands back on this tab.
+ * Search field for the Models tab. Reports the trimmed term after the
+ * debounce; the clear button reports an empty one at once.
  */
-function ModelSearchBar() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigation = useNavigation();
-  const current = searchParams.get(MODEL_TAB_SEARCH_PARAM) ?? "";
-  const inputRef = useRef<HTMLInputElement>(null);
+function ModelSearchField({
+  onSearch,
+  isLoading,
+}: {
+  /** Called with the trimmed term once typing pauses. */
+  onSearch: (search: string) => void;
+  /** True while a page is loading, so the field shows it is busy. */
+  isLoading: boolean;
+}) {
+  const [text, setText] = useState("");
   /** Pending debounce timer, or `null` when nothing is scheduled. */
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isDebouncePending, setIsDebouncePending] = useState(false);
-
-  // The field is uncontrolled, so a URL change it did not make (Back/Forward)
-  // would leave it showing an older term. Sync it while nobody is typing, and
-  // compare trimmed values because the URL holds the trimmed term.
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el || debounceRef.current) return;
-    if (el.value.trim() !== current) el.value = current;
-  }, [current]);
 
   // The dialog can close while a debounce is still scheduled.
   useEffect(
@@ -242,110 +328,85 @@ function ModelSearchBar() {
     []
   );
 
-  /** Writes the term (or clears it) and returns to the first page. */
-  const applySearch = useCallback(
-    (term: string) => {
-      setSearchParams(
-        (prev) => {
-          if (term) prev.set(MODEL_TAB_SEARCH_PARAM, term);
-          else prev.delete(MODEL_TAB_SEARCH_PARAM);
-          prev.delete(MODEL_TAB_PAGE_PARAM);
-          prev.set("tab", "models");
-          return prev;
-        },
-        { replace: true, preventScrollReset: true }
-      );
-    },
-    [setSearchParams]
-  );
-
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const term = e.target.value.trim();
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    setIsDebouncePending(true);
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-      setIsDebouncePending(false);
-      applySearch(term);
-    }, MODEL_SEARCH_DEBOUNCE_MS);
-  };
-
-  const clearSearch = () => {
+  const cancelPending = () => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
     setIsDebouncePending(false);
-    if (inputRef.current) inputRef.current.value = "";
-    applySearch("");
   };
 
-  // Busy from the first keystroke until the loader settles, so the debounce
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value;
+    setText(next);
+    cancelPending();
+    setIsDebouncePending(true);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      setIsDebouncePending(false);
+      onSearch(next.trim());
+    }, MODEL_SEARCH_DEBOUNCE_MS);
+  };
+
+  const clearSearch = () => {
+    cancelPending();
+    setText("");
+    onSearch("");
+  };
+
+  // Busy from the first keystroke until the page arrives, so the debounce
   // window never looks like an unresponsive field.
-  const isBusy = isDebouncePending || isSearching(navigation);
+  const isBusy = isDebouncePending || isLoading;
 
   return (
-    <div className="flex flex-col gap-3 border-b px-6 py-3 sm:flex-row sm:items-center">
-      <div className="relative flex-1">
-        <Input
-          type="text"
-          name={MODEL_TAB_SEARCH_PARAM}
-          label="Search models"
-          aria-label="Search models"
-          placeholder="Search models"
-          defaultValue={current}
-          hideLabel
-          className="w-full"
-          inputClassName="pr-9"
-          ref={inputRef}
-          onChange={handleChange}
+    <div className="relative flex-1">
+      <Input
+        type="text"
+        name={MODEL_TAB_SEARCH_PARAM}
+        label="Search models"
+        aria-label="Search models"
+        placeholder="Search models"
+        value={text}
+        hideLabel
+        className="w-full"
+        inputClassName="pr-9"
+        onChange={handleChange}
+      />
+      {text || isBusy ? (
+        <Button
+          type="button"
+          icon={isBusy ? "spinner" : "x"}
+          variant="tertiary"
+          disabled={isBusy}
+          aria-label="Clear model search"
+          title="Clear search"
+          className="absolute right-3.5 top-1/2 !w-auto -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
+          onClick={clearSearch}
         />
-        {current || isBusy ? (
-          <Button
-            type="button"
-            icon={isBusy ? "spinner" : "x"}
-            variant="tertiary"
-            disabled={isBusy}
-            aria-label="Clear model search"
-            title="Clear search"
-            className="absolute right-3.5 top-1/2 !w-auto -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
-            onClick={clearSearch}
-          />
-        ) : null}
-      </div>
-      <ModelsWithAssetsSelect />
+      ) : null}
     </div>
   );
 }
 
 /**
- * Chooses whether the Models tab lists models with no bookable asset, through
- * {@link MODEL_TAB_SHOW_EMPTY_PARAM}. Styled like the Assets tab's
- * availability select: two options, models with assets by default.
+ * Chooses whether the Models tab lists models with no bookable asset. Styled
+ * like the Assets tab's availability select: two options, models with assets
+ * by default.
  */
-function ModelsWithAssetsSelect() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const value =
-    searchParams.get(MODEL_TAB_SHOW_EMPTY_PARAM) === "true" ? "all" : "with";
-
-  const handleChange = (next: string) => {
-    setSearchParams(
-      (prev) => {
-        if (next === "all") prev.set(MODEL_TAB_SHOW_EMPTY_PARAM, "true");
-        else prev.delete(MODEL_TAB_SHOW_EMPTY_PARAM);
-        prev.delete(MODEL_TAB_PAGE_PARAM);
-        prev.set("tab", "models");
-        return prev;
-      },
-      { replace: true, preventScrollReset: true }
-    );
-  };
-
+function ModelsWithAssetsSelect({
+  showEmpty,
+  onChange,
+}: {
+  /** Whether models with no bookable asset are listed. */
+  showEmpty: boolean;
+  /** Called with the new choice. */
+  onChange: (showEmpty: boolean) => void;
+}) {
   return (
     <Select
       name={MODEL_TAB_SHOW_EMPTY_PARAM}
-      value={value}
-      onValueChange={handleChange}
+      value={showEmpty ? "all" : "with"}
+      onValueChange={(next) => onChange(next === "all")}
     >
       <SelectTrigger
         className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit"
@@ -387,25 +448,15 @@ function ModelPagination({
   matchedAssetModels,
   modelsPage,
   modelsPerPage,
+  onPage,
 }: {
   matchedAssetModels: number;
   modelsPage: number;
   modelsPerPage: number;
+  /** Called with the page to load. */
+  onPage: (page: number) => void;
 }) {
-  const [, setSearchParams] = useSearchParams();
   const totalPages = Math.max(1, Math.ceil(matchedAssetModels / modelsPerPage));
-
-  const goToPage = (page: number) => {
-    setSearchParams(
-      (prev) => {
-        if (page > 1) prev.set(MODEL_TAB_PAGE_PARAM, String(page));
-        else prev.delete(MODEL_TAB_PAGE_PARAM);
-        prev.set("tab", "models");
-        return prev;
-      },
-      { preventScrollReset: true }
-    );
-  };
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-3">
@@ -418,7 +469,7 @@ function ModelPagination({
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => goToPage(modelsPage - 1)}
+            onClick={() => onPage(modelsPage - 1)}
             disabled={modelsPage <= 1}
             className="h-8 w-10 rotate-180 rounded-none border-0 bg-transparent px-3 py-[4px] hover:bg-transparent"
             aria-label="Previous page of models"
@@ -434,7 +485,7 @@ function ModelPagination({
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => goToPage(modelsPage + 1)}
+            onClick={() => onPage(modelsPage + 1)}
             disabled={modelsPage >= totalPages}
             className="h-8 w-10 rounded-none border-0 bg-transparent px-3 py-[4px] hover:bg-transparent"
             aria-label="Next page of models"
@@ -657,6 +708,11 @@ function AddControls({
   });
   const disabled = useDisabled(fetcher);
   const [quantityInput, setQuantityInput] = useState("1");
+  // The quantity last sent. A refusal is about that number, so it stops
+  // showing once the operator edits the field.
+  const [submittedQuantity, setSubmittedQuantity] = useState<string | null>(
+    null
+  );
   const { total } = model;
   // Nothing is assigned to a reservation that does not exist yet.
   const available = Math.max(0, getReservationCeiling(model, 0));
@@ -684,8 +740,13 @@ function AddControls({
     assetModelId: model.id,
     quantity: quantityInput,
   });
-  const serverErrors = getFetcherValidationErrors(fetcher.data);
-  const genericError = getFetcherErrorMessage(fetcher.data);
+  const responseIsCurrent = submittedQuantity === quantityInput;
+  const serverErrors = responseIsCurrent
+    ? getFetcherValidationErrors(fetcher.data)
+    : undefined;
+  const genericError = responseIsCurrent
+    ? getFetcherErrorMessage(fetcher.data)
+    : null;
   // With nothing free the controls are disabled and the availability badge
   // already says so; the live "Only 0 of N" error would only repeat it, in red,
   // before the operator has done anything.
@@ -703,6 +764,7 @@ function AddControls({
     <div className="flex flex-col gap-1">
       <fetcher.Form
         ref={zo.ref}
+        onSubmit={() => setSubmittedQuantity(quantityInput)}
         method="POST"
         action={`/api/bookings/${bookingId}/model-requests`}
         className="flex items-center gap-2"
@@ -785,6 +847,11 @@ function ReservationControls({
   // Inline-edit state, re-synced whenever the loader refreshes the
   // server-authoritative quantity (our own update or a concurrent change).
   const [quantityInput, setQuantityInput] = useState(String(request.quantity));
+  // The quantity last sent. A refusal is about that number, so it stops
+  // showing once the operator edits the field.
+  const [submittedQuantity, setSubmittedQuantity] = useState<string | null>(
+    null
+  );
   useEffect(() => {
     setQuantityInput(String(request.quantity));
   }, [request.quantity]);
@@ -820,7 +887,10 @@ function ReservationControls({
   });
   const isDirty = quantityInput.trim() !== String(request.quantity);
 
-  const updateServerErrors = getFetcherValidationErrors(updateFetcher.data);
+  const updateIsCurrent = submittedQuantity === quantityInput;
+  const updateServerErrors = updateIsCurrent
+    ? getFetcherValidationErrors(updateFetcher.data)
+    : undefined;
   const quantityError =
     updateServerErrors?.quantity?.message ||
     zo.errors.quantity()?.message ||
@@ -829,7 +899,7 @@ function ReservationControls({
       : undefined);
   const message =
     quantityError ||
-    getFetcherErrorMessage(updateFetcher.data) ||
+    (updateIsCurrent ? getFetcherErrorMessage(updateFetcher.data) : null) ||
     getFetcherErrorMessage(removeFetcher.data);
 
   return (
@@ -837,6 +907,7 @@ function ReservationControls({
       <div className="flex items-center gap-2">
         <updateFetcher.Form
           ref={zo.ref}
+          onSubmit={() => setSubmittedQuantity(quantityInput)}
           method="POST"
           action={`/api/bookings/${bookingId}/model-requests`}
           className="flex items-center gap-2"

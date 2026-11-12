@@ -244,6 +244,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ...readModelTabParams(getCurrentSearchParams(request)),
       // A stale page in the URL lands on the last page, not an empty one.
       clampPageToResults: true,
+      // This booking's reservations lead the list, as on the tab's own route.
+      pinReservedModels: true,
     });
 
     const { page, perPage, kits, search, totalKits, totalPages } =

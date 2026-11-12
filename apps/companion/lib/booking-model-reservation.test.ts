@@ -50,6 +50,23 @@ test("the floor never drops below one unit", () => {
   );
 });
 
+test("units held by name take from the pool, assigned ones come back", () => {
+  // 4 free, 2 held by name: room for 2 on a new reservation.
+  assert.equal(
+    modelReservationBounds({ available: 4, namedNotInCustody: 2 }).max,
+    2
+  );
+  // The same 2 named units fulfil this reservation: it may still total 4.
+  assert.equal(
+    modelReservationBounds({
+      available: 4,
+      namedNotInCustody: 2,
+      fulfilledQuantity: 2,
+    }).max,
+    4
+  );
+});
+
 test("a pool reported as negative counts as empty", () => {
   assert.deepEqual(
     modelReservationBounds({ available: -2, fulfilledQuantity: 1 }),

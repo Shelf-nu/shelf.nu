@@ -1309,7 +1309,7 @@ describe("manage-kits loader — Models tab payload", () => {
           inCustody: 0,
         },
       ],
-      totalAssetModels: 1,
+      totalAssetModels: 3,
       matchedAssetModels: 1,
       modelsPage: 1,
       modelsPerPage: 50,
@@ -1333,14 +1333,14 @@ describe("manage-kits loader — Models tab payload", () => {
 
     expect(result).toHaveProperty("modelsPage");
     expect(result).toHaveProperty("totalAssetModels");
-    expect((result as any).totalAssetModels).toBe(1);
+    expect((result as any).totalAssetModels).toBe(3);
     expect(result).toMatchObject({
       showModelsTab: true,
       assetModels: mockModelTabData.assetModels,
       modelsPage: mockModelTabData.modelsPage,
       modelsPerPage: mockModelTabData.modelsPerPage,
       totalAssetModels: mockModelTabData.totalAssetModels,
-      matchedAssetModels: mockModelTabData.totalAssetModels,
+      matchedAssetModels: mockModelTabData.matchedAssetModels,
       modelRequests: mockModelTabData.modelRequests,
     });
   });
@@ -1371,6 +1371,7 @@ describe("manage-kits loader — Models tab payload", () => {
       // Models without assets are hidden unless the URL turns them on.
       showModelsWithoutAssets: false,
       clampPageToResults: true,
+      pinReservedModels: true,
     });
   });
 
@@ -1402,6 +1403,7 @@ describe("manage-kits loader — Models tab payload", () => {
       page: 2,
       showModelsWithoutAssets: true,
       clampPageToResults: true,
+      pinReservedModels: true,
     });
   });
 

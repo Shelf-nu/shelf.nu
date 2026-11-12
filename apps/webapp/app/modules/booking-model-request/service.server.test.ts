@@ -3734,14 +3734,11 @@ describe("getBookingModelTabData", () => {
         { id: { in: ["model-reserved"] } },
       ],
     };
-    // Reserved models are read first, then the rest; both under the filter.
+    // Without pinning the list is one read under the filter.
     const findManyCalls = (
       db.assetModel.findMany as ReturnType<typeof vitest.fn>
     ).mock.calls.map((call) => call[0]?.where);
-    expect(findManyCalls).toEqual([
-      { AND: [expectedWhere, { id: { in: ["model-reserved"] } }] },
-      { AND: [expectedWhere, { id: { notIn: ["model-reserved"] } }] },
-    ]);
+    expect(findManyCalls).toEqual([expectedWhere]);
     // The page count follows the filtered list, not the full-org count.
     expect(db.assetModel.count).toHaveBeenLastCalledWith({
       where: expectedWhere,
@@ -3774,14 +3771,14 @@ describe("getBookingModelTabData", () => {
     expect.assertions(3);
     // @ts-expect-error mocked
     db.assetModel.count.mockResolvedValue(5);
-    // @ts-expect-error mocked
-    db.assetModel.findMany
+    (db.assetModel.findMany as unknown as Mock)
       .mockResolvedValueOnce([modelRow("zebra-camera")])
       .mockResolvedValueOnce([modelRow("alpha"), modelRow("beta")]);
 
     const result = await getBookingModelTabData({
       organizationId: ORG_ID,
       booking: bookingReserving("zebra-camera"),
+      pinReservedModels: true,
     });
 
     expect(result.assetModels.map((m) => m.id)).toEqual([
@@ -3807,6 +3804,7 @@ describe("getBookingModelTabData", () => {
       organizationId: ORG_ID,
       booking: bookingReserving("zebra-camera"),
       page: 2,
+      pinReservedModels: true,
     });
 
     // Page 1 showed the reserved model and 49 others, so page 2 starts at the
@@ -3815,6 +3813,99 @@ describe("getBookingModelTabData", () => {
       .mock.calls[1]?.[0];
     expect(restCall?.skip).toBe(49);
     expect(restCall?.take).toBe(50);
+  });
+
+  it("orders purely by name unless pinning is asked for", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(5);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+    });
+
+    // One read, not split around the reservation: a client appending pages
+    // (the mobile picker) needs an order reservations cannot shift.
+    const calls = (db.assetModel.findMany as ReturnType<typeof vitest.fn>).mock
+      .calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]?.where).toEqual({ organizationId: ORG_ID });
+  });
+
+  it("fills a page with reserved models alone when they cover it", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(80);
+    const reservedIds = Array.from({ length: 60 }, (_, i) => `r${i}`);
+    (db.assetModel.findMany as unknown as Mock).mockResolvedValueOnce(
+      reservedIds.map(modelRow)
+    );
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving(...reservedIds),
+      pinReservedModels: true,
+    });
+
+    expect(result.assetModels.map((m) => m.id)).toEqual(
+      reservedIds.slice(0, 50)
+    );
+    // No room left, so the rest are not read at all.
+    expect(db.assetModel.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("pages through the reserved block before the rest", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(80);
+    const reservedIds = Array.from({ length: 60 }, (_, i) => `r${i}`);
+    (db.assetModel.findMany as unknown as Mock)
+      .mockResolvedValueOnce(reservedIds.map(modelRow))
+      .mockResolvedValueOnce([modelRow("alpha")]);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving(...reservedIds),
+      page: 2,
+      pinReservedModels: true,
+    });
+
+    // Page 2 shows the last 10 reserved models, then 40 of the rest from
+    // the first of them.
+    expect(result.assetModels.slice(0, 10).map((m) => m.id)).toEqual(
+      reservedIds.slice(50)
+    );
+    const restCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[1]?.[0];
+    expect(restCall?.skip).toBe(0);
+    expect(restCall?.take).toBe(40);
+  });
+
+  it("narrows the pinned models by the search too", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(5);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+      search: "dell",
+      pinReservedModels: true,
+    });
+
+    const reservedCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(reservedCall?.where).toEqual({
+      AND: [
+        {
+          organizationId: ORG_ID,
+          name: { contains: "dell", mode: "insensitive" },
+        },
+        { id: { in: ["zebra-camera"] } },
+      ],
+    });
   });
 
   it("clamps a page past the end only when asked to", async () => {

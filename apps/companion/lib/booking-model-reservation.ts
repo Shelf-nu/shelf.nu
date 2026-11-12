@@ -6,7 +6,8 @@
  * the same limits the server enforces in `upsertBookingModelRequest`:
  *
  *  - it cannot climb past what the pool still has free for the booking's
- *    window, plus the units this booking already holds by name;
+ *    window, less the units this booking holds by name outside custody, plus
+ *    the units already assigned to the reservation;
  *  - it cannot drop below the units already assigned to the booking. Those
  *    are real assets sitting on it; a smaller reservation would promise fewer
  *    units than the booking is already holding.
@@ -41,6 +42,11 @@ export type ModelReservationInput = {
   available: number;
   /** Units of this reservation already matched to a concrete asset. */
   fulfilledQuantity?: number;
+  /**
+   * Units of this model the booking holds by name that no custodian holds.
+   * The server charges them against the same pool. Missing counts as 0.
+   */
+  namedNotInCustody?: number;
 };
 
 /**
@@ -52,13 +58,18 @@ export type ModelReservationInput = {
 export function modelReservationBounds({
   available,
   fulfilledQuantity = 0,
+  namedNotInCustody = 0,
 }: ModelReservationInput): ModelReservationBounds {
   const assigned = Math.max(0, fulfilledQuantity);
 
   return {
-    // Assigned units are already this booking's, so they are headroom the
-    // free pool does not have to supply.
-    max: Math.max(0, available) + assigned,
+    // The server's ceiling (`getReservationCeiling` on the web): units held by
+    // name take from the free pool, and assigned units are among them, so
+    // they are added back.
+    max: Math.max(
+      0,
+      Math.max(0, available) - Math.max(0, namedNotInCustody) + assigned
+    ),
     // A reservation always holds at least one unit; releasing the last one is
     // a cancellation, which is a separate action.
     min: Math.max(1, assigned),

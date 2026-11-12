@@ -151,6 +151,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         name: m.name,
         total: m.total,
         available: m.available,
+        // Units held by name come out of the same pool, so the app needs them
+        // to cap a reservation where the server does.
+        namedNotInCustody: m.namedNotInCustody,
         inCustody: m.inCustody,
         reservedConcrete: m.reservedConcrete,
         reservedViaRequest: m.reservedViaRequest,

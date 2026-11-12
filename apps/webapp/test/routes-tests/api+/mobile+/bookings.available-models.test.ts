@@ -206,7 +206,7 @@ describe("GET /api/mobile/bookings/available-models", () => {
     expect(getTabDataMock).not.toHaveBeenCalled();
   });
 
-  it("trims each model to the mobile shape (drops the web-only display fields)", async () => {
+  it("trims each model to the mobile shape (availability fields only)", async () => {
     withRole(OrganizationRoles.ADMIN);
     getTabDataMock.mockResolvedValue({
       showModelsTab: true,
@@ -217,6 +217,7 @@ describe("GET /api/mobile/bookings/available-models", () => {
           image: "https://cdn.example/dell.jpg",
           thumbnailImage: "https://cdn.example/dell-thumb.jpg",
           defaultCategory: { id: "c-1", name: "Laptops", color: "#123456" },
+          namedNotInCustody: 1,
           total: 10,
           available: 6,
           inCustody: 1,
@@ -252,16 +253,19 @@ describe("GET /api/mobile/bookings/available-models", () => {
     expect(body.assetModels[0]).toMatchObject({ id: "m-1", available: 6 });
     expect(body.totalAssetModels).toBe(1);
     expect(body.modelRequests[0]).toMatchObject({ assetModelId: "m-1" });
-    // The app's contract is the availability fields only; the web table's
-    // image and category stay out of the mobile payload.
+    // The app's contract is the availability fields, including the named
+    // units its reservation cap needs; the web table's image and category
+    // stay out of the mobile payload.
     expect(Object.keys(body.assetModels[0]).sort()).toEqual([
       "available",
       "id",
       "inCustody",
       "name",
+      "namedNotInCustody",
       "reservedConcrete",
       "reservedViaRequest",
       "total",
     ]);
+    expect(body.assetModels[0]?.namedNotInCustody).toBe(1);
   });
 });

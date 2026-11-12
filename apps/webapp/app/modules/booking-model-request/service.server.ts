@@ -47,7 +47,10 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
-import { canEditModelReservations } from "~/utils/booking-model-requests";
+import {
+  canEditModelReservations,
+  getReservationCeiling,
+} from "~/utils/booking-model-requests";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
@@ -2233,9 +2236,10 @@ export type BookingModelTabData = {
   /** Full-org model count, regardless of search or page. */
   totalAssetModels: number;
   /**
-   * How many models match the current `search` (equals `totalAssetModels`
-   * when no search is applied). This is the pagination denominator: a client
-   * that pages through the list needs the count of MATCHING rows, not the
+   * How many models the list can show: those matching the `search` and, when
+   * `showModelsWithoutAssets` is off, the asset filter. Equals
+   * `totalAssetModels` only with neither. This is the pagination denominator:
+   * a client paging the list needs the count of LISTABLE rows, not the
    * full-org count, to know when it has reached the end.
    */
   matchedAssetModels: number;
@@ -2289,6 +2293,7 @@ export async function getBookingModelTabData({
   perPage,
   showModelsWithoutAssets = true,
   clampPageToResults = false,
+  pinReservedModels = false,
 }: {
   organizationId: string;
   booking: BookingForModelTab;
@@ -2311,13 +2316,16 @@ export async function getBookingModelTabData({
    * leave it off, because clamping would hand them the last page again.
    */
   clampPageToResults?: boolean;
+  /**
+   * List the models this booking reserves first, so a reservation is never
+   * stranded on a later page. The web tab sets it. Off by default: the order
+   * then depends on the booking's reservations, which can change between two
+   * page fetches, and a client that appends pages (the mobile picker) would
+   * repeat or skip a model.
+   */
+  pinReservedModels?: boolean;
 }): Promise<BookingModelTabData> {
   try {
-    const assetModelsCount = await db.assetModel.count({
-      where: { organizationId },
-    });
-    const showModelsTab = assetModelsCount > 0;
-
     // Case-insensitive name filter (trimmed; blank = no filter). It narrows
     // the listed page and `matchedAssetModels`; `totalAssetModels` and
     // `showModelsTab` stay full-org counts.
@@ -2360,14 +2368,19 @@ export async function getBookingModelTabData({
     let assetModels: BookingModelTabAssetModel[] = [];
 
     /**
-     * Count of models the list can show. Paginating callers need this to know
-     * when they've reached the end; with no search and no filter it's the same
-     * query as the full-org count, so reuse that rather than issuing a second.
+     * The full-org count (whether the tab shows at all) and the count of
+     * models the list can show, read together. With no search and no filter
+     * the two are the same query, so the second is not issued.
      */
-    const matchedAssetModels =
-      trimmedSearch || !showModelsWithoutAssets
-        ? await db.assetModel.count({ where: listWhere })
-        : assetModelsCount;
+    const needsListCount = Boolean(trimmedSearch) || !showModelsWithoutAssets;
+    const [assetModelsCount, listCount] = await Promise.all([
+      db.assetModel.count({ where: { organizationId } }),
+      needsListCount
+        ? db.assetModel.count({ where: listWhere })
+        : Promise.resolve(null),
+    ]);
+    const showModelsTab = assetModelsCount > 0;
+    const matchedAssetModels = listCount ?? assetModelsCount;
 
     // perPage is capped at 100 and defaults to MODEL_PICKER_LIMIT; page is
     // 1-based. With `clampPageToResults`, a page past the end reads the last.
@@ -2401,15 +2414,16 @@ export async function getBookingModelTabData({
       ];
 
       /**
-       * The models this booking reserves lead the list, so a reservation is
-       * never stranded on a later page. The list reads as one sequence:
-       * reserved models matching the filters (by name), then the rest (by
-       * name), and a page is a window onto that sequence. A booking reserves
-       * few models, so the reserved half is read whole and sliced here.
+       * With `pinReservedModels`, the models this booking reserves lead the
+       * list. It reads as one sequence: reserved models matching the filters
+       * (by name), then the rest (by name), and a page is a window onto that
+       * sequence. A booking reserves few models, so the reserved half is read
+       * whole and sliced here. Without it the reserved half is empty and the
+       * list is purely by name.
        */
-      const reservedIds = [
-        ...new Set(booking.modelRequests.map((r) => r.assetModelId)),
-      ];
+      const reservedIds = pinReservedModels
+        ? [...new Set(booking.modelRequests.map((r) => r.assetModelId))]
+        : [];
       const windowStart = (effectivePage - 1) * effectivePerPage;
       const reserved =
         reservedIds.length > 0
@@ -2704,9 +2718,13 @@ export async function writeBookingModelRequestInTx(
     );
 
     if (!fits) {
+      // The same ceiling the Models tab shows, so the two cannot disagree.
       const headroom = Math.max(
         0,
-        availability.available - namedNotInCustody + existingFulfilled
+        getReservationCeiling(
+          { available: availability.available, namedNotInCustody },
+          existingFulfilled
+        )
       );
       const heldNote =
         namedNotInCustody > 0
@@ -3279,7 +3297,10 @@ export async function reserveModelsUpToAvailability({
             // holds by name are counted, the headroom the write core checks.
             const headroom = Math.max(
               0,
-              availability.available - namedNotInCustody
+              getReservationCeiling(
+                { available: availability.available, namedNotInCustody },
+                0
+              )
             );
             const reserved = Math.min(outstanding, headroom);
             if (reserved > 0) {

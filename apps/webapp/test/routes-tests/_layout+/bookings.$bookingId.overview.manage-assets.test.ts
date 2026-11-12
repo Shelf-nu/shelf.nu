@@ -1359,7 +1359,7 @@ describe("manage-assets loader — Models tab payload", () => {
         inCustody: 0,
       },
     ],
-    totalAssetModels: 1,
+    totalAssetModels: 3,
     matchedAssetModels: 1,
     modelsPage: 1,
     modelsPerPage: 50,
@@ -1418,6 +1418,7 @@ describe("manage-assets loader — Models tab payload", () => {
       // Models without assets are hidden unless the URL turns them on.
       showModelsWithoutAssets: false,
       clampPageToResults: true,
+      pinReservedModels: true,
     });
 
     // Parity check: same keys, same values, nothing
@@ -1428,7 +1429,7 @@ describe("manage-assets loader — Models tab payload", () => {
       modelsPage: mockModelTabData.modelsPage,
       modelsPerPage: mockModelTabData.modelsPerPage,
       totalAssetModels: mockModelTabData.totalAssetModels,
-      matchedAssetModels: mockModelTabData.totalAssetModels,
+      matchedAssetModels: mockModelTabData.matchedAssetModels,
       modelRequests: mockModelTabData.modelRequests,
     });
   });
@@ -1461,6 +1462,7 @@ describe("manage-assets loader — Models tab payload", () => {
       page: 2,
       showModelsWithoutAssets: true,
       clampPageToResults: true,
+      pinReservedModels: true,
     });
   });
 
