@@ -7,6 +7,8 @@
  * @see ./multipart-upload.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import { postMultipart } from "./multipart-upload";
@@ -17,23 +19,33 @@ type SentRequest = {
   url?: string;
   headers: Record<string, string>;
   body?: unknown;
-  timeout?: number;
+  opened: boolean;
+  aborted: boolean;
   status: number;
   responseText: string;
   onload?: () => void;
-  ontimeout?: () => void;
   onerror?: () => void;
 };
 
 /**
  * Builds a stand-in for the XMLHttpRequest class that records what it was
  * asked to send. The test then settles the request by firing one of its hooks.
+ * Like the real one, it refuses headers and a body before `open`.
  *
  * why: Node has no XMLHttpRequest, and the real one needs a device and a
  * server.
  */
 function fakeXhr() {
-  const sent: SentRequest = { headers: {}, status: 0, responseText: "" };
+  const sent: SentRequest = {
+    headers: {},
+    opened: false,
+    aborted: false,
+    status: 0,
+    responseText: "",
+  };
+  const requireOpened = () => {
+    if (!sent.opened) throw new Error("Request has not been opened");
+  };
   class FakeXhr {
     constructor() {
       return sent as unknown as FakeXhr;
@@ -43,12 +55,18 @@ function fakeXhr() {
     open(method: string, url: string) {
       sent.method = method;
       sent.url = url;
+      sent.opened = true;
     },
     setRequestHeader(name: string, value: string) {
+      requireOpened();
       sent.headers[name] = value;
     },
     send(body: unknown) {
+      requireOpened();
       sent.body = body;
+    },
+    abort() {
+      sent.aborted = true;
     },
   });
   return { Xhr: FakeXhr as unknown as typeof XMLHttpRequest, sent };
@@ -95,7 +113,6 @@ test("posts the form itself, so a file part reaches the platform as given", asyn
     "https://shelf.test/api/mobile/asset/update-image?assetId=a1"
   );
   assert.equal(sent.body, form);
-  assert.equal(sent.timeout, 80_000);
   // No Content-Type: the platform writes it, with the multipart boundary.
   assert.deepEqual(sent.headers, {
     Authorization: "Bearer token-1",
@@ -122,17 +139,40 @@ test("an error status resolves with its body, for the caller to read", async () 
   });
 });
 
-test("a request that runs out of time rejects as an AbortError", async () => {
+test("a request still running at the time limit is aborted as an AbortError", async (t) => {
+  // why: the limit is 80 seconds on a device; the test must not wait for it.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { Xhr, sent } = fakeXhr();
 
   const pending = postMultipart(
     "https://shelf.test/upload",
-    { headers: {}, body: photoForm(), timeoutMs: 1000 },
+    { headers: {}, body: photoForm(), timeoutMs: 80_000 },
     Xhr
   );
-  sent.ontimeout?.();
+  t.mock.timers.tick(79_999);
+  assert.equal(sent.aborted, false);
+  t.mock.timers.tick(1);
 
   await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(sent.aborted, true);
+});
+
+test("a finished request is not aborted when the time limit passes", async (t) => {
+  // why: the limit is 80 seconds on a device; the test must not wait for it.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { Xhr, sent } = fakeXhr();
+
+  const pending = postMultipart(
+    "https://shelf.test/upload",
+    { headers: {}, body: photoForm(), timeoutMs: 80_000 },
+    Xhr
+  );
+  sent.status = 200;
+  sent.onload?.();
+  await pending;
+  t.mock.timers.tick(80_000);
+
+  assert.equal(sent.aborted, false);
 });
 
 test("a request that never gets a response rejects as a network failure", async () => {
@@ -149,4 +189,16 @@ test("a request that never gets a response rejects as a network failure", async 
     name: "TypeError",
     message: "Network request failed",
   });
+});
+
+test("apiUpload sends through postMultipart, never through fetch", () => {
+  // Read from source: `client.ts` imports React Native modules, so it cannot
+  // be loaded here, and a `fetch` call with a file part only fails on a device.
+  const source = readFileSync(path.join(__dirname, "client.ts"), "utf8");
+  const start = source.indexOf("export async function apiUpload");
+  assert.notEqual(start, -1, "apiUpload is defined in client.ts");
+  const body = source.slice(start);
+
+  assert.match(body, /await postMultipart\(url,/);
+  assert.doesNotMatch(body, /\bfetch\(/);
 });

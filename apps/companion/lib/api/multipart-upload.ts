@@ -48,23 +48,28 @@ export function postMultipart(
     for (const [name, value] of Object.entries(headers)) {
       xhr.setRequestHeader(name, value);
     }
-    xhr.timeout = timeoutMs;
+    // The time limit is a JS timer rather than `xhr.timeout`: the native
+    // timeout counts idle time only on iOS, and on Android it surfaces as a
+    // plain network error, so neither bounds the whole upload reliably.
+    const timer = setTimeout(() => {
+      xhr.abort();
+      reject(
+        Object.assign(new Error("The upload timed out."), {
+          name: "AbortError",
+        })
+      );
+    }, timeoutMs);
 
     xhr.onload = () => {
+      clearTimeout(timer);
       resolve({
         status: xhr.status,
         ok: xhr.status >= 200 && xhr.status < 300,
         text: xhr.responseText ?? "",
       });
     };
-    xhr.ontimeout = () => {
-      reject(
-        Object.assign(new Error("The upload timed out."), {
-          name: "AbortError",
-        })
-      );
-    };
     xhr.onerror = () => {
+      clearTimeout(timer);
       reject(new TypeError("Network request failed"));
     };
 
