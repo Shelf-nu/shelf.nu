@@ -328,7 +328,8 @@ export function linkedMetadata(
  * Asks the admin to pick a workspace for these subscriptions, once: the
  * subscriptions already asked about (`WORKSPACE_PICK_REQUESTED_KEY`) are
  * left out, and the rest are marked before the email goes out, so a retried
- * event that fails after the email does not send it again.
+ * event that fails after the email does not send it again. Does nothing
+ * when `ADMIN_EMAIL` is not configured.
  *
  * @param args.user - The user the customer belongs to
  * @param args.subscriptions - The subscriptions waiting for a workspace
@@ -350,6 +351,9 @@ export async function askAdminToPickWorkspaceOnce({
   ownedCount: number;
   candidates: LinkableWorkspace[];
 }) {
+  // The mark means "the admin was told": without a recipient, leave it off
+  // so a later event can still ask once one is configured.
+  if (!ADMIN_EMAIL) return;
   const unasked = subscriptions.filter(
     (sub) => !sub.metadata?.[WORKSPACE_PICK_REQUESTED_KEY]
   );

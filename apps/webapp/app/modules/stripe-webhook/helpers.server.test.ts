@@ -757,6 +757,20 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     expect(adminEmailSubjects()).toEqual([]);
   });
 
+  it("does not mark a subscription as asked when no admin email is configured", async () => {
+    mockAdminEmail.value = undefined;
+    stripeHolds(subscription([TEAM, AUDITS]));
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   it("does not ask the admin again about subscriptions already asked about", async () => {
     stripeHolds(
       subscription([TEAM, AUDITS], {
