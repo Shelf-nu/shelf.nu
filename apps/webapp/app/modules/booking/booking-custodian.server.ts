@@ -71,7 +71,7 @@ export async function resolveBookingCustodian({
       : isNotFoundError(cause);
     throw new ShelfError({
       cause,
-      title: notFound ? "Team member not found" : undefined,
+      title: notFound ? "Team member not found" : "Unable to load team member",
       message: notFound
         ? "The selected team member could not be found."
         : "Something went wrong while loading the selected team member.",

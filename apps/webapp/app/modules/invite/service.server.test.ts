@@ -361,6 +361,22 @@ describe("updateInviteStatus: claiming the invite", () => {
     expect(createUserOrAttachOrg).not.toHaveBeenCalled();
   });
 
+  it("locks the person's invites before deciding how to release the claim", async () => {
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.BASE]))
+      .mockResolvedValueOnce(null);
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    const [strings] = dbMock.$queryRaw.mock.calls[0];
+    expect(String(strings)).toMatch(/pg_advisory_xact_lock/);
+    // The lock comes before the newer-invite lookup (the second findFirst).
+    expect(dbMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.invite.findFirst.mock.invocationCallOrder[1]
+    );
+  });
+
   it("closes a claimed invite instead of reopening it when a newer invite replaced it", async () => {
     dbMock.invite.findFirst
       .mockResolvedValueOnce(pendingInvite([OrganizationRoles.ADMIN]))

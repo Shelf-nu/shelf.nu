@@ -435,13 +435,7 @@ export async function createInvite(
      */
     const invite = await db
       .$transaction(async (tx) => {
-        /**
-         * Two invites to the same person created at the same moment would
-         * each close the older ones before the other is saved, leaving both
-         * pending. A transaction-scoped lock on workspace + address makes
-         * them run one after the other; it is released at commit or rollback.
-         */
-        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${organizationId} || ':' || lower(${inviteeEmail})))`;
+        await lockInviteAddress(tx, organizationId, inviteeEmail);
 
         await tx.invite.updateMany({
           where: {
@@ -563,6 +557,27 @@ async function claimPendingInvite(
 }
 
 /**
+ * Takes a transaction-scoped lock on one person's invites in one workspace.
+ *
+ * Creating an invite and handing back a failed acceptance both decide which
+ * invite to that person stays live. Two of them at the same moment could each
+ * miss the other's uncommitted row, leaving two live invites. Taking this lock
+ * first makes them run one after the other. It is released at commit or
+ * rollback.
+ *
+ * @param tx - The active transaction
+ * @param organizationId - The invite's workspace
+ * @param inviteeEmail - The invitee's address, in any letter case
+ */
+async function lockInviteAddress(
+  tx: Pick<typeof db, "$queryRaw">,
+  organizationId: Organization["id"],
+  inviteeEmail: string
+) {
+  await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${organizationId} || ':' || lower(${inviteeEmail})))`;
+}
+
+/**
  * Hands a claimed invite back after its acceptance failed.
  *
  * The invite goes back to PENDING so the invitee can retry, unless a newer
@@ -579,6 +594,8 @@ async function releaseInviteClaim(
   status: Invite["status"]
 ) {
   await db.$transaction(async (tx) => {
+    await lockInviteAddress(tx, invite.organizationId, invite.inviteeEmail);
+
     const newerInvite = await tx.invite.findFirst({
       where: {
         organizationId: invite.organizationId,

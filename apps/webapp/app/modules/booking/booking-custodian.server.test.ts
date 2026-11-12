@@ -69,6 +69,7 @@ describe("resolveBookingCustodian", () => {
     await expect(resolveBookingCustodian(args)).rejects.toMatchObject({
       status: 500,
       shouldBeCaptured: true,
+      title: "Unable to load team member",
     });
   });
 });
