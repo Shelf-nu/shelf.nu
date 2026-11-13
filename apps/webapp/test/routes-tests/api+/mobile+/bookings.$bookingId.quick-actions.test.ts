@@ -65,6 +65,13 @@ vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn(),
 }));
 
+// why: a DRAFT asks the overlapping-booking query for its Reserve flag; that
+// query reads the database and does not decide the approval flags under test.
+vi.mock("~/modules/booking/service.server", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getBookingFlags: vi.fn().mockResolvedValue({ hasAlreadyBookedAssets: false }),
+}));
+
 // why: the per-booking action availability is a separate contract from the
 // quick-action flags; a fixed `false` keeps it off the permission tables.
 vi.mock("~/utils/permissions/permission.validator.server", () => ({
@@ -138,6 +145,181 @@ async function quickFlagsFor(
     canQuickCheckout: body.canQuickCheckout,
   };
 }
+
+/**
+ * The approval flags of the detail payload for `roles` viewing `row` under
+ * `settings`. `approver` makes `hasPermission` answer true for booking:approve,
+ * standing in for a role whose matrix row (or short-circuit) holds it.
+ */
+async function approvalFlagsFor({
+  roles,
+  settings,
+  row,
+  approver = false,
+  mayCheckout = false,
+}: {
+  roles: OrganizationRoles[];
+  settings: ReturnType<typeof switches>;
+  row: typeof BOOKING_ROW;
+  approver?: boolean;
+  /** Makes `hasPermission` answer true for booking:checkout as well. */
+  mayCheckout?: boolean;
+}) {
+  const { db } = await import("~/database/db.server");
+  vi.mocked(db.booking.findFirst).mockResolvedValue(row);
+  const { hasPermission } = await import(
+    "~/utils/permissions/permission.validator.server"
+  );
+  vi.mocked(hasPermission).mockImplementation(
+    async ({ action }: { action: string }) =>
+      (approver && action === "approve") ||
+      (mayCheckout && action === "checkout")
+  );
+  vi.mocked(getMobileUserContext).mockResolvedValue(
+    mobileUserContext({ roles })
+  );
+  vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(settings);
+  const response = await loader(
+    createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/bookings/booking-1"
+      ),
+      params: { bookingId: "booking-1" },
+    })
+  );
+  assertIsDataWithResponseInit(response);
+  if (!(response.data as { booking?: unknown }).booking) {
+    throw new Error(
+      `loader answered without a booking: ${JSON.stringify(response.data).slice(
+        0,
+        300
+      )}`
+    );
+  }
+  const body = response.data as {
+    canCheckout: boolean;
+    booking: {
+      isPendingApproval: boolean;
+      canApprove: boolean;
+      reservationNeedsApproval: boolean;
+    };
+  };
+  return {
+    canCheckout: body.canCheckout,
+    isPendingApproval: body.booking.isPendingApproval,
+    canApprove: body.booking.canApprove,
+    reservationNeedsApproval: body.booking.reservationNeedsApproval,
+  };
+}
+
+describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
+  const requiresApproval = createBookingSettings({
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: true,
+  });
+  // One individual asset on the row: check-out needs at least one item.
+  const pendingRow = {
+    ...(BOOKING_ROW as Record<string, unknown>),
+    // Still ahead: an ended request is not offered for approval.
+    to: new Date("2099-01-02T00:00:00.000Z"),
+    approvedAt: null,
+    bookingAssets: [
+      {
+        id: "ba-1",
+        quantity: 1,
+        assetKitId: null,
+        sourceKitId: null,
+        sourceLocationId: null,
+        asset: {
+          id: "asset-1",
+          title: "Camera",
+          status: "AVAILABLE",
+          type: "INDIVIDUAL",
+          availableToBook: true,
+          archivedAt: null,
+          unitOfMeasure: null,
+          consumptionType: null,
+          mainImage: null,
+          category: null,
+          assetKits: [],
+        },
+      },
+    ],
+    _count: { bookingAssets: 1 },
+  } as never;
+  const draftRow = {
+    ...(BOOKING_ROW as Record<string, unknown>),
+    status: "DRAFT",
+    approvedAt: null,
+  } as never;
+
+  it("marks a never-approved reservation pending and keeps check-out for an approver", async () => {
+    // why: an approver's check-out approves the request in the same step, so
+    // the phone keeps drawing the button for them.
+    const flags = await approvalFlagsFor({
+      roles: [OrganizationRoles.MANAGER],
+      settings: requiresApproval,
+      row: pendingRow,
+      approver: true,
+      mayCheckout: true,
+    });
+    expect(flags.isPendingApproval).toBe(true);
+    expect(flags.canCheckout).toBe(true);
+    expect(flags.canApprove).toBe(true);
+  });
+
+  it("withholds check-out from a custodian who may not approve while the request is pending", async () => {
+    const flags = await approvalFlagsFor({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      settings: requiresApproval,
+      row: pendingRow,
+      mayCheckout: true,
+    });
+    expect(flags.isPendingApproval).toBe(true);
+    expect(flags.canCheckout).toBe(false);
+    expect(flags.canApprove).toBe(false);
+  });
+
+  it("offers no approve action to a caller without booking:approve", async () => {
+    const flags = await approvalFlagsFor({
+      roles: [OrganizationRoles.BASE],
+      settings: requiresApproval,
+      row: pendingRow,
+    });
+    expect(flags.isPendingApproval).toBe(true);
+    expect(flags.canApprove).toBe(false);
+  });
+
+  it("reads nothing as pending while the workspace does not require approval", async () => {
+    const flags = await approvalFlagsFor({
+      roles: [OrganizationRoles.MANAGER],
+      settings: createBookingSettings({
+        requireApprovalForBase: false,
+        requireApprovalForSelfService: false,
+      }),
+      row: pendingRow,
+      approver: true,
+    });
+    expect(flags.isPendingApproval).toBe(false);
+    expect(flags.canApprove).toBe(false);
+  });
+
+  it("tells a Base caller their draft will reserve as a request, and an admin that theirs will not", async () => {
+    const base = await approvalFlagsFor({
+      roles: [OrganizationRoles.BASE],
+      settings: requiresApproval,
+      row: draftRow,
+    });
+    const admin = await approvalFlagsFor({
+      roles: [OrganizationRoles.ADMIN],
+      settings: requiresApproval,
+      row: draftRow,
+      approver: true,
+    });
+    expect(base.reservationNeedsApproval).toBe(true);
+    expect(admin.reservationNeedsApproval).toBe(false);
+  });
+});
 
 beforeEach(async () => {
   vi.clearAllMocks();

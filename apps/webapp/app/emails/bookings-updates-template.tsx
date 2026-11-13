@@ -52,6 +52,8 @@ interface Props {
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
   cancellationReason?: string;
+  /** Why a reservation was sent back to draft, when the actor gave a reason. */
+  revertReason?: string;
   changes?: string[];
   /** Only provided for reservation emails */
   assets?: ReservationEmailAsset[];
@@ -97,6 +99,7 @@ export function BookingUpdatesEmailTemplate({
   hideViewButton = false,
   isAdminEmail = false,
   cancellationReason,
+  revertReason,
   changes,
   assets,
   modelRequests,
@@ -317,6 +320,30 @@ export function BookingUpdatesEmailTemplate({
               Cancellation reason
             </p>
             <p style={{ ...styles.p, margin: "0" }}>{cancellationReason}</p>
+          </div>
+        )}
+
+        {revertReason && (
+          <div
+            style={{
+              margin: "0 0 24px",
+              padding: "16px",
+              borderBottom: "3px solid #F79009",
+              backgroundColor: "#FFFAEB",
+              textAlign: "left",
+              borderRadius: "4px",
+            }}
+          >
+            <p
+              style={{
+                ...styles.p,
+                margin: "0 0 4px",
+                fontWeight: "600",
+              }}
+            >
+              What to change
+            </p>
+            <p style={{ ...styles.p, margin: "0" }}>{revertReason}</p>
           </div>
         )}
 

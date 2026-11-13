@@ -98,6 +98,7 @@ model User {
   userOrganizations  UserOrganization[]
   bookings           Booking[]          @relation("creator")
   custodies          Booking[]          @relation("custodian")
+  approvedBookings   Booking[]          @relation("bookingApprover")
   createdKits        Kit[]
   tierId             TierId             @default(free)
   tier               Tier               @relation(fields: [tierId], references: [id])
@@ -2039,6 +2040,17 @@ model Booking {
 
   cancellationReason String?
 
+  // Approval of the reservation request. Stamped at reserve time when the
+  // org does not require approval for the reserving role (self-approved),
+  // or by an explicit Approve action when it does. NULL on a RESERVED
+  // booking whose org requires approval = pending approval (derived, there
+  // is no PENDING status). Cleared when the booking is reverted to draft.
+  // Bookings that predate the feature were stamped once by migration
+  // 20261110120100_backfill_booking_approval; `approvedById` is empty there.
+  approvedAt   DateTime? @db.Timestamptz(3)
+  approvedBy   User?     @relation("bookingApprover", fields: [approvedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  approvedById String?
+
   // Per-booking notification recipients (team members who receive all email updates for this booking)
   notificationRecipients TeamMember[] @relation("BookingNotificationRecipients")
 
@@ -2046,6 +2058,7 @@ model Booking {
   @@index([creatorId])
   @@index([custodianTeamMemberId])
   @@index([custodianUserId])
+  @@index([approvedById])
   @@index([organizationId])
   // Speeds up status filtering when joining from Asset → Booking
   // (e.g. fetching ONGOING/OVERDUE bookings for asset custodian display)
@@ -2075,6 +2088,17 @@ model BookingSettings {
   // without ever being checked out (for teams that use bookings as a reservation
   // calendar and don't check out/in). Reuses autoArchiveDays for the delay.
   autoArchiveExpiredReservations Boolean @default(false)
+
+  // Booking approval, per requesting role. When on for a role, a reservation
+  // made by a member of that role lands as a request (approvedAt null) that an
+  // owner, administrator or manager approves before the gear goes out.
+  // Approval is data on the booking (approvedAt/approvedById), NOT a status:
+  // RESERVED stays the only held state and conflict semantics are unchanged.
+  // Base is on by default: a Base member never checks out themself, so the
+  // hand-over was always the approval and this only makes it visible.
+  // Self service is off by default: that role is trusted to serve itself.
+  requireApprovalForBase        Boolean @default(true)
+  requireApprovalForSelfService Boolean @default(false)
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
@@ -3126,6 +3150,9 @@ enum ActivityAction {
   BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
+  // A reservation request approved for check-out; the booking stays RESERVED,
+  // so this is the only structured trace of the decision.
+  BOOKING_APPROVED
 
   // Booking — model-level reservations (Book-by-Model). The reserved
   // `AssetModel` travels in `meta.assetModelId` because ActivityEvent has no

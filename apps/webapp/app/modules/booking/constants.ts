@@ -12,27 +12,48 @@ import { USER_NAME_SELECT } from "../user/fields";
  */
 export const EXPIRED_BOOKINGS_FILTER = "EXPIRED" as const;
 
+/**
+ * The bookings list's "Pending approval" status option: RESERVED bookings
+ * nobody has approved yet, in a workspace that requires approval. Pending is
+ * derived (see `isBookingPendingApproval`), not a stored status, so like
+ * Expired it lives beside the enum. `getParamsValues` accepts it as a status,
+ * and `buildBookingsWhere` turns it into `status = RESERVED AND approvedAt IS
+ * NULL AND the workspace requires approval`. A request whose end passed stays
+ * listed (drawn Expired) so the decision is not lost; the sidebar count alone
+ * leaves it out.
+ */
+export const PENDING_APPROVAL_BOOKINGS_FILTER = "PENDING_APPROVAL" as const;
+
 /** What the bookings list's status picker can hold. */
 export type BookingStatusFilter =
   | BookingStatus
-  | typeof EXPIRED_BOOKINGS_FILTER;
+  | typeof EXPIRED_BOOKINGS_FILTER
+  | typeof PENDING_APPROVAL_BOOKINGS_FILTER;
 
 /**
  * The where-params a picked status stands for, for every bookings list.
  *
- * "Expired" is RESERVED narrowed by date, so it sets `expiredOnly` beside
- * `statuses`; a stored status is itself; nothing picked adds nothing, and the
- * list's default applies.
+ * "Expired" is RESERVED narrowed by date and "Pending approval" is RESERVED
+ * narrowed by approval, so each sets its flag beside `statuses`; a stored
+ * status is itself; nothing picked adds nothing, and the list's default
+ * applies.
  *
  * @param status - The picked status, as `getParamsValues` returns it
  * @returns The params to spread into the list's where-params
  */
 export function bookingStatusFilterWhereParams(
   status: BookingStatusFilter | null | undefined
-): { statuses?: BookingStatus[]; expiredOnly?: boolean } {
+): {
+  statuses?: BookingStatus[];
+  expiredOnly?: boolean;
+  pendingApprovalOnly?: boolean;
+} {
   if (!status) return {};
   if (status === EXPIRED_BOOKINGS_FILTER) {
     return { statuses: [BookingStatus.RESERVED], expiredOnly: true };
+  }
+  if (status === PENDING_APPROVAL_BOOKINGS_FILTER) {
+    return { statuses: [BookingStatus.RESERVED], pendingApprovalOnly: true };
   }
   return { statuses: [status] };
 }

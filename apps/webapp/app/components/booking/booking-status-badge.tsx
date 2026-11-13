@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
+import { BOOKING_PSEUDO_STATUS_LABELS } from "@shelf/labels";
 import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useUserData } from "~/hooks/use-user-data";
@@ -17,11 +18,15 @@ import {
 /**
  * A booking's status badge. On a reserved booking the member holds, it adds a
  * "subject to review" tooltip when that member's reservations are requests.
+ * A reservation request still waiting for a decision gets a second,
+ * "Pending approval" badge beside the status, so the state is visible
+ * wherever the status is.
  */
 export function BookingStatusBadge({
   status,
   custodianUserId,
   to,
+  isPendingApproval = false,
 }: {
   status: BookingStatus;
   /** Id of the custodian if it's a user */
@@ -34,6 +39,11 @@ export function BookingStatusBadge({
    * verbatim, such as activity notes, leave it out.
    */
   to?: Date | string | null;
+  /**
+   * Derived by the caller with `isBookingPendingApproval`: the workspace
+   * requires approval and this RESERVED booking has not been approved yet.
+   */
+  isPendingApproval?: boolean;
 }) {
   const reservationIsRequest = useReservationIsRequest();
   const user = useUserData();
@@ -45,6 +55,7 @@ export function BookingStatusBadge({
    * This is used to show the extra info tooltip when the booking is
    * reserved and the user is the custodian of the booking.
    * Shown to members whose reservations are requests (they cannot check out).
+   * A pending request carries its own badge and tooltip instead.
    */
   const isExpired = isReservationExpired(status, to);
   const shouldShowExtraInfo =
@@ -52,12 +63,13 @@ export function BookingStatusBadge({
     status === BookingStatus.RESERVED &&
     // A dead request is not under review any more.
     !isExpired &&
+    !isPendingApproval &&
     custodianUserId &&
     custodianUserId === user?.id;
 
   const colors = isExpired ? BADGE_COLORS.gray : bookingStatusColorMap[status];
   const label = isExpired ? "EXPIRED" : status;
-  return (
+  const statusBadge = (
     <Badge color={colors.bg} textColor={colors.text} withDot={false}>
       {shouldShowExtraInfo ? (
         <ExtraInfoTooltip>
@@ -71,6 +83,36 @@ export function BookingStatusBadge({
         </span>
       )}
     </Badge>
+  );
+
+  if (!isPendingApproval) return statusBadge;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {statusBadge}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge
+              color={BADGE_COLORS.orange.bg}
+              textColor={BADGE_COLORS.orange.text}
+              withDot={false}
+            >
+              <span className="block whitespace-nowrap">
+                {BOOKING_PSEUDO_STATUS_LABELS.PENDING_APPROVAL}
+              </span>
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-72">
+            <p>
+              This booking request is waiting for approval by an administrator
+              or manager. The items are held for the booking period, but they
+              cannot be checked out until the request is approved.
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
   );
 }
 

@@ -297,6 +297,7 @@ export async function action({ request }: ActionFunctionArgs) {
       hints,
       alertsOrgOnReservation:
         access.policy.notifications.reservationAlertsAdmins,
+      actorApprovalSetting: access.policy.bookings.approvalSetting,
       userId: user.id,
       seesAllBookings: access.bookings.seeAll,
     });

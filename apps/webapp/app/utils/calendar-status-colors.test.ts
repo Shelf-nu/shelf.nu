@@ -102,3 +102,21 @@ describe("calendar event colours match the rest of the product", () => {
     }
   });
 });
+
+describe("pending approval bars", () => {
+  it("draws a pending request apart from its status palette", () => {
+    const pending = getStatusClasses(BookingStatus.RESERVED, false, undefined, {
+      pendingApproval: true,
+    });
+    const reserved = getStatusClasses(BookingStatus.RESERVED);
+    expect(pending.join(" ")).toContain("border-dashed");
+    expect(pending.join(" ")).not.toEqual(reserved.join(" "));
+  });
+
+  it("keeps the one-day variant's transparent background", () => {
+    const pending = getStatusClasses(BookingStatus.RESERVED, true, undefined, {
+      pendingApproval: true,
+    });
+    expect(pending.join(" ")).toContain("!bg-transparent");
+  });
+});

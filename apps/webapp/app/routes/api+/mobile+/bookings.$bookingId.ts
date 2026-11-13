@@ -69,6 +69,11 @@ import {
   canWriteBooking,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
+import {
+  isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+} from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -137,6 +142,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        // Feeds the derived pending-approval flag exposed in the response.
+        approvedAt: true,
         archivedWithoutCheckin: true,
         from: true,
         to: true,
@@ -726,6 +733,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckoutPerm,
       canCheckinPerm,
       canExtendPerm,
+      canApprovePerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
@@ -783,11 +791,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         entity: PermissionEntity.booking,
         action: PermissionAction.extend,
       }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        workspace: access.workspaceGrants,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.approve,
+      }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
+    // Approval gate: while a reservation request is pending, only a caller
+    // who may approve can check out (their check-out approves it); the
+    // server-side service guard refuses everyone else regardless of app
+    // version. This flag keeps the app from drawing a button the server
+    // would refuse. Derived with the same shared helper the web + service use.
+    const isPendingApproval = isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
+    });
     // Seeing a booking (the workspace see-toggles) never grants writing it:
     // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
     // this caller may only read offers no actions.
@@ -799,7 +825,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: user.id,
       access,
     });
-    const canCheckout = writesBooking && canCheckoutByState && canCheckoutPerm;
+    const canCheckout =
+      writesBooking &&
+      canCheckoutByState &&
+      canCheckoutPerm &&
+      (!isPendingApproval || canApprovePerm);
+    // Who may decide the request: the same `booking:approve` answer the web
+    // Approve button and the `approve-booking` intent resolve, so the phone
+    // never draws (or withholds) a decision the server would answer otherwise.
+    const canApprove = isPendingApproval && canApprovePerm;
+    // Told BEFORE the reservation: whether this caller's Reserve would land as
+    // a request waiting for a decision. The same rule `reserveBooking` applies
+    // (workspace requires approval, and the caller's role is one whose
+    // reservations alert the workspace), so the app can word its prompt and
+    // its success message as a request instead of a done reservation.
+    const reservationNeedsApproval =
+      booking.status === BookingStatus.DRAFT &&
+      roleReservesAsRequest({
+        approvalSetting: access.policy.bookings.approvalSetting,
+        settings: bookingSettings,
+      });
     const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
@@ -1066,6 +1111,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
+        // True while this reservation request awaits a decision: the app
+        // renders a "Pending approval" badge and hides checkout.
+        isPendingApproval,
+        canApprove,
+        reservationNeedsApproval,
       },
       checkedInAssetIds,
       // Which assets this booking actually sent out, from the slice markers.

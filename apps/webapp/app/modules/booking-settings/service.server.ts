@@ -22,6 +22,8 @@ export const BOOKING_SETTINGS_SELECT = {
   autoArchiveBookings: true,
   autoArchiveDays: true,
   autoArchiveExpiredReservations: true,
+  requireApprovalForBase: true,
+  requireApprovalForSelfService: true,
   requireExplicitCheckinForAdmin: true,
   requireExplicitCheckinForSelfService: true,
   requireExplicitCheckoutForAdmin: true,
@@ -188,6 +190,8 @@ export async function updateBookingSettings({
   autoArchiveBookings,
   autoArchiveDays,
   autoArchiveExpiredReservations,
+  requireApprovalForBase,
+  requireApprovalForSelfService,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
   requireExplicitCheckoutForAdmin,
@@ -204,6 +208,8 @@ export async function updateBookingSettings({
   autoArchiveBookings?: boolean;
   autoArchiveDays?: number;
   autoArchiveExpiredReservations?: boolean;
+  requireApprovalForBase?: boolean;
+  requireApprovalForSelfService?: boolean;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
   requireExplicitCheckoutForAdmin?: boolean;
@@ -229,6 +235,10 @@ export async function updateBookingSettings({
     if (autoArchiveExpiredReservations !== undefined)
       updateData.autoArchiveExpiredReservations =
         autoArchiveExpiredReservations;
+    if (requireApprovalForBase !== undefined)
+      updateData.requireApprovalForBase = requireApprovalForBase;
+    if (requireApprovalForSelfService !== undefined)
+      updateData.requireApprovalForSelfService = requireApprovalForSelfService;
     if (requireExplicitCheckinForAdmin !== undefined)
       updateData.requireExplicitCheckinForAdmin =
         requireExplicitCheckinForAdmin;

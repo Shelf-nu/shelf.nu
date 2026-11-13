@@ -235,7 +235,7 @@ function getCookieNames(cookieHeader: string | null) {
  * @param cookieHeader - The request's Cookie header
  * @returns The value to send, or null when there is nothing to write
  */
-async function serializeFilterCookieForUrl(
+export async function serializeFilterCookieForUrl(
   filterCookie: Cookie,
   cleanedFilters: string,
   cookieHeader: string | null

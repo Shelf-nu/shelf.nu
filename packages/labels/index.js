@@ -107,6 +107,12 @@ export const BOOKING_STATUS_LABELS = Object.freeze({
   CANCELLED: "Cancelled",
 });
 
+// Booking states derived from data rather than a BookingStatus value.
+export const BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
+  // A RESERVED booking whose approval is still outstanding.
+  PENDING_APPROVAL: "Pending approval",
+});
+
 // Audit session status enum (AuditStatus in the Prisma schema).
 export const AUDIT_STATUS_LABELS = Object.freeze({
   PENDING: "Pending",

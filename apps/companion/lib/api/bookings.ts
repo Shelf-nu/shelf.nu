@@ -362,6 +362,19 @@ export const bookingsApi = {
     ),
 
   /**
+   * Approve a pending reservation request. The booking stays RESERVED and
+   * becomes checkout-able; who may approve is enforced server-side.
+   */
+  approveBooking: (orgId: string, bookingId: string) =>
+    apiFetch<BookingMutationResponse>(
+      `/api/mobile/bookings/approve?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId }),
+      }
+    ),
+
+  /**
    * Cancel a booking (RESERVED/ONGOING/OVERDUE -> CANCELLED). Frees the
    * assets/kits; status guard + ownership enforced server-side.
    */

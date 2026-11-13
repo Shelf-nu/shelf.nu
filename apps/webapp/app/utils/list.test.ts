@@ -5,7 +5,10 @@
  */
 import { BookingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { EXPIRED_BOOKINGS_FILTER } from "~/modules/booking/constants";
+import {
+  EXPIRED_BOOKINGS_FILTER,
+  PENDING_APPROVAL_BOOKINGS_FILTER,
+} from "~/modules/booking/constants";
 import { getParamsValues } from "./list";
 
 describe("getParamsValues status", () => {
@@ -22,6 +25,15 @@ describe("getParamsValues status", () => {
     expect(getParamsValues(new URLSearchParams("status=expired")).status).toBe(
       EXPIRED_BOOKINGS_FILTER
     );
+  });
+
+  it("reads the bookings list's Pending approval option", () => {
+    expect(
+      getParamsValues(new URLSearchParams("status=PENDING_APPROVAL")).status
+    ).toBe(PENDING_APPROVAL_BOOKINGS_FILTER);
+    expect(
+      getParamsValues(new URLSearchParams("status=pending_approval")).status
+    ).toBe(PENDING_APPROVAL_BOOKINGS_FILTER);
   });
 
   it("reads nothing for ALL or an unknown value", () => {

@@ -66,6 +66,14 @@ vi.mock("~/hooks/use-user-data", () => ({
 vi.mock("~/hooks/use-reservation-is-request", () => ({
   useReservationIsRequest: () => false,
 }));
+// why: the row derives the "Pending approval" badge from the workspace
+// setting; stub it off so these pill/badge tests render outside a router.
+vi.mock("~/hooks/use-booking-settings", () => ({
+  useBookingSettings: () => ({
+    requireApprovalForBase: false,
+    requireApprovalForSelfService: false,
+  }),
+}));
 
 import ListBookingsContent from "./list-bookings-content";
 

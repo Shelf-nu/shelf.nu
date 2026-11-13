@@ -1,10 +1,15 @@
 import { BookingStatus } from "@prisma/client";
 import { ChevronRight } from "lucide-react";
 import { useMatches } from "react-router";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
-import { EXPIRED_BOOKINGS_FILTER } from "~/modules/booking/constants";
+import {
+  EXPIRED_BOOKINGS_FILTER,
+  PENDING_APPROVAL_BOOKINGS_FILTER,
+} from "~/modules/booking/constants";
 import type { RouteHandleWithName } from "~/modules/types";
+import { isBookingApprovalEnabled } from "~/utils/bookings";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -13,6 +18,31 @@ import DynamicDropdown from "../dynamic-dropdown/dynamic-dropdown";
 import { Filters } from "../list/filters";
 import { SortBy } from "../list/filters/sort-by";
 import When from "../when/when";
+
+/**
+ * The status picker's options: every BookingStatus plus the derived views the
+ * list resolves server-side. "Expired" (RESERVED, end date passed, never
+ * checked out) is always offered; "Pending approval" (RESERVED, not yet
+ * approved) only when the workspace requires approval, placed right after
+ * RESERVED, the status it narrows. See `bookingStatusFilterWhereParams`.
+ *
+ * @param requireBookingApproval - Approval is on for at least one role
+ * @returns The picker's items, in display order
+ */
+function statusItemsFor(
+  requireBookingApproval: boolean
+): Record<string, string> {
+  const items: Record<string, string> = {};
+  for (const status of Object.values(BookingStatus)) {
+    items[status] = status;
+    if (status === BookingStatus.RESERVED && requireBookingApproval) {
+      items[PENDING_APPROVAL_BOOKINGS_FILTER] =
+        PENDING_APPROVAL_BOOKINGS_FILTER;
+    }
+  }
+  items[EXPIRED_BOOKINGS_FILTER] = EXPIRED_BOOKINGS_FILTER;
+  return items;
+}
 
 const BOOKING_SORTING_OPTIONS = {
   from: "From Date",
@@ -31,6 +61,7 @@ export default function BookingFilters({
 }: BookingFiltersProps) {
   const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
   const matches = useMatches();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
@@ -52,15 +83,7 @@ export default function BookingFilters({
       className={className}
       slots={{
         "left-of-search": (
-          <StatusFilter
-            // "Expired" is a view over RESERVED (end date passed, never
-            // checked out), not a stored status; the list's where-clause
-            // translates it. See `EXPIRED_BOOKINGS_FILTER`.
-            statusItems={{
-              ...BookingStatus,
-              [EXPIRED_BOOKINGS_FILTER]: EXPIRED_BOOKINGS_FILTER,
-            }}
-          />
+          <StatusFilter statusItems={statusItemsFor(requireBookingApproval)} />
         ),
         "right-of-search": hideSortBy ? null : (
           <SortBy

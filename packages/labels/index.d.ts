@@ -65,6 +65,11 @@ export declare const BOOKING_STATUS_LABELS: {
   readonly CANCELLED: "Cancelled";
 };
 
+/** Booking states derived from data rather than a BookingStatus value. */
+export declare const BOOKING_PSEUDO_STATUS_LABELS: {
+  readonly PENDING_APPROVAL: "Pending approval";
+};
+
 /** Audit session lifecycle (AuditStatus in the Prisma schema). */
 export declare const AUDIT_STATUS_LABELS: {
   readonly PENDING: "Pending";

@@ -24,6 +24,7 @@ import type {
   BookingActionKey,
   BookingActions,
   BookingActionsBooking,
+  BookingActionsViewer,
 } from "./booking-actions";
 
 /** The signed-in viewer. */
@@ -84,7 +85,7 @@ function resolveFor(
   }: {
     roles?: OrganizationRoles[];
     userId?: string;
-    settings?: ExplicitScanSettings;
+    settings?: BookingActionsViewer["bookingSettings"];
   } = {}
 ): BookingActions {
   return resolveBookingActions({
@@ -423,6 +424,66 @@ describe("resolveBookingActions: who may act", () => {
       expect(actions.checkinReceipt.visible).toBe(false);
     }
   );
+});
+
+describe("resolveBookingActions: a request waiting for approval", () => {
+  /** Approval on for Base; the request itself carries no approval yet. */
+  const APPROVAL_ON = {
+    ...NO_EXPLICIT_SCAN,
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: false,
+  };
+  const pending = buildBooking({ approvedAt: null, custodianUserId: ME });
+
+  it("keeps Check out for a viewer who may approve: their check-out approves", () => {
+    const actions = resolveFor(pending, {
+      roles: [OrganizationRoles.MANAGER],
+      settings: APPROVAL_ON,
+    });
+    expect(actions.checkOut.visible).toBe(true);
+  });
+
+  it("hides Check out from a Self Service custodian while their request waits", () => {
+    const actions = resolveFor(pending, {
+      roles: [OrganizationRoles.SELF_SERVICE],
+      settings: APPROVAL_ON,
+    });
+    expect(actions.checkOut.visible).toBe(false);
+    // The rest of their own-booking actions stay.
+    expect(actions.cancel.visible).toBe(true);
+  });
+
+  it("offers Check out again once the request is approved", () => {
+    const actions = resolveFor(
+      buildBooking({
+        approvedAt: new Date("2026-08-01T08:00:00Z"),
+        custodianUserId: ME,
+      }),
+      { roles: [OrganizationRoles.SELF_SERVICE], settings: APPROVAL_ON }
+    );
+    expect(actions.checkOut.visible).toBe(true);
+  });
+
+  it("reads a booking loaded without approvedAt as settled", () => {
+    // `buildBooking` sets no `approvedAt`, as a surface that never loads it.
+    const actions = resolveFor(buildBooking({ custodianUserId: ME }), {
+      roles: [OrganizationRoles.SELF_SERVICE],
+      settings: APPROVAL_ON,
+    });
+    expect(actions.checkOut.visible).toBe(true);
+  });
+
+  it("reads nothing as pending while both approval switches are off", () => {
+    const actions = resolveFor(pending, {
+      roles: [OrganizationRoles.SELF_SERVICE],
+      settings: {
+        ...NO_EXPLICIT_SCAN,
+        requireApprovalForBase: false,
+        requireApprovalForSelfService: false,
+      },
+    });
+    expect(actions.checkOut.visible).toBe(true);
+  });
 });
 
 describe("resolveBookingActions: explicit scan mode", () => {

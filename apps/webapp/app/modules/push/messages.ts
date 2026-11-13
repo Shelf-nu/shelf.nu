@@ -110,6 +110,8 @@ const BOOKING_TITLES: Record<
   (bookingName: string) => string
 > = {
   RESERVATION: (name) => `✅ Booking reserved (${name})`,
+  REQUEST_RECEIVED: (name) => `🕐 Booking request received (${name})`,
+  APPROVED: (name) => `✅ Booking approved (${name})`,
   CHECKOUT_REMINDER: (name) => `🔔 Checkout reminder (${name})`,
   CHECKIN_REMINDER: (name) => `🔔 Checkin reminder (${name})`,
   CHECKIN: (name) => `🎉 Booking complete (${name})`,
@@ -216,6 +218,14 @@ export const PUSH_MESSAGES: {
   [E in PushEvent]: (context: PushContexts[E]) => PushMessageDraft;
 } = {
   BOOKING_RESERVATION: (c) => bookingPush(c, "RESERVATION", bookingPeriod(c)),
+  BOOKING_REQUEST_RECEIVED: (c) =>
+    bookingPush(
+      c,
+      "REQUEST_RECEIVED",
+      `Waiting for approval. ${bookingPeriod(c)}`
+    ),
+  BOOKING_APPROVED: (c) =>
+    bookingPush(c, "APPROVED", `Ready for check-out. ${bookingPeriod(c)}`),
   BOOKING_CHECKOUT_REMINDER: (c) =>
     bookingPush(c, "CHECKOUT_REMINDER", `Checkout on ${c.from}`),
   BOOKING_CHECKIN_REMINDER: (c) =>

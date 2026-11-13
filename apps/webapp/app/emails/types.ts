@@ -12,6 +12,7 @@ export type BookingEmailActorLabel =
   | "Extended by"
   | "Shortened by"
   | "Reverted by"
+  | "Approved by"
   | "Cancelled by"
   | "Deleted by"
   | "Updated by";

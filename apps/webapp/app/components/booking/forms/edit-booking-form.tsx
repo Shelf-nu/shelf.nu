@@ -21,13 +21,19 @@ import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { useWorkingHours } from "~/hooks/use-working-hours";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import type { UnavailableAssetRow } from "~/modules/booking/unavailable-assets";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
-import { bookingCustodianIsSelf } from "~/utils/bookings";
+import {
+  bookingCustodianIsSelf,
+  isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+} from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -50,6 +56,7 @@ import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-po
 import { Button } from "../../shared/button";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
+import ApproveBookingDialog from "../approval/approve-booking-dialog";
 import { canActOnBooking } from "../booking-actions";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
@@ -237,6 +244,21 @@ function EditBookingFormInner({
   // checked out, hide the "Scan to check out" entry point.
   const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
 
+  /**
+   * Approval: while a reservation request is pending, the checkout controls
+   * are replaced: approvers get an Approve button (approving is the next
+   * logical step, and the server refuses checkout anyway), and Base /
+   * Self-service custodians see only the "Pending approval" badge in the
+   * header. Derived client-side from the same helper the server guard uses.
+   */
+  const bookingSettings = useBookingSettings();
+  const isPendingApprovalRequired = isBookingApprovalEnabled(bookingSettings);
+  const isPendingApproval = isBookingPendingApproval({
+    status,
+    approvedAt: loaderBooking.approvedAt ?? null,
+    requireBookingApproval: isPendingApprovalRequired,
+  });
+
   const isProcessing = isFormProcessing(navigation.state);
   // TIMEZONE FIX: seed the datetime-local inputs with the wall-clock in the
   // user's RESOLVED timezone preference (the same one date DISPLAY uses), so
@@ -287,7 +309,6 @@ function EditBookingFormInner({
         bookingStatus?.isOverdue ||
         bookingStatus?.isCancelled
     );
-  const bookingSettings = useBookingSettings();
 
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
@@ -361,6 +382,14 @@ function EditBookingFormInner({
     roles,
     entity: PermissionEntity.booking,
     action: PermissionAction.checkin,
+  });
+  // Who may approve a pending reservation request. Resolved through the same
+  // shared permissions package the server uses, so the button and the
+  // `approve-booking` intent can never disagree about who gets to decide.
+  const canApproveBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.approve,
   });
   const canCheckOutBooking = userHasPermission({
     roles,
@@ -550,7 +579,16 @@ function EditBookingFormInner({
                 className="grow whitespace-nowrap"
                 size="sm"
               >
-                {reservationIsRequest ? "Request reservation" : "Reserve"}
+                {/* When the workspace requires approval, a Self-service
+                    user's Reserve is a REQUEST too, so the button must say so,
+                    or the pending state that follows reads as a failure. */}
+                {reservationIsRequest ||
+                roleReservesAsRequest({
+                  approvalSetting: roleAccess.policy.bookings.approvalSetting,
+                  settings: bookingSettings,
+                })
+                  ? "Request reservation"
+                  : "Reserve"}
               </Button>
             ) : null}
 
@@ -569,12 +607,24 @@ function EditBookingFormInner({
               through the dropdown's "Scan to check out", like any other
               booking; unassigned units stay open for "Scan to assign".
             */}
+            {/* An ended request is refused by the server, so it gets no Approve. */}
+            <When
+              truthy={
+                isPendingApproval &&
+                canApproveBooking &&
+                !isReservationExpired(status, loaderBooking.to)
+              }
+            >
+              <ApproveBookingDialog booking={{ name: name ?? "", status }} />
+            </When>
+
             <When
               truthy={
                 (bookingStatus?.isReserved ||
                   ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
                     hasItemsToCheckOut)) &&
-                canCheckOutBooking
+                canCheckOutBooking &&
+                (!isPendingApproval || canApproveBooking)
               }
             >
               {(() => {
