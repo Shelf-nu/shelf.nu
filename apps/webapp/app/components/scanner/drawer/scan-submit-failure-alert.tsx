@@ -48,6 +48,16 @@ const ADVICE: Record<ScanSubmitFailureKind, string> = {
     "Your scanned list is still here and nothing was saved. Wait a moment, then confirm again.",
 };
 
+/** HTTP 413: the request was larger than the gateway accepts. */
+const TOO_LARGE_STATUS = 413;
+
+/**
+ * Advice for a submission the gateway found too large. Waiting does not help:
+ * the same submission is refused again until it is made smaller.
+ */
+const TOO_LARGE_ADVICE =
+  "Your scanned list is still here and nothing was saved, because the submission was too large. Remove some photos or items, then confirm again.";
+
 /**
  * Tells the operator their scanned list is intact after a save that could not
  * be confirmed, and where to check whether it went through.
@@ -78,7 +88,9 @@ export function ScanSubmitFailureAlert({
     >
       <p className="font-semibold">{HEADLINES[failure.kind]}</p>
       <p>
-        {ADVICE[failure.kind]}
+        {failure.status === TOO_LARGE_STATUS
+          ? TOO_LARGE_ADVICE
+          : ADVICE[failure.kind]}
         {savedCheck && failure.kind !== "rejected" ? (
           <>
             {" "}

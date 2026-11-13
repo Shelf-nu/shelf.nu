@@ -19,6 +19,7 @@ import {
   useAvailableScannerActions,
 } from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useHapticFeedback } from "~/hooks/use-haptic-feedback";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -166,7 +167,8 @@ const MIN_SCANNER_HEIGHT = 400;
 
 /**
  * The bulk-action scanner has no booking, kit or location to key its scan
- * draft by, so the draft is keyed by this fixed name (and the signed-in user).
+ * draft by, so the draft is keyed by this fixed name, the workspace and the
+ * signed-in user.
  */
 const BULK_SCAN_DRAFT_TARGET = "scanner";
 
@@ -204,9 +206,13 @@ const QRScanner = () => {
   // The page opens on "View asset", which shows no list. So the action the
   // list was parked under is remembered with the draft, and a restored list
   // returns the page to it: a list put back out of sight would look lost.
+  //
+  // The draft is kept per workspace as well: a code scanned in one workspace
+  // means nothing, or something else, in another.
+  const organizationId = useCurrentOrganization()?.id ?? "";
   useScanDraftOnEntry({
     scope: "bulk",
-    targetId: BULK_SCAN_DRAFT_TARGET,
+    targetId: `${BULK_SCAN_DRAFT_TARGET}:${organizationId}`,
     context: action === VIEW_ASSET_ACTION ? null : action,
     onRestore: (parkedAction) => {
       const stillAllowed = availableActions.find(

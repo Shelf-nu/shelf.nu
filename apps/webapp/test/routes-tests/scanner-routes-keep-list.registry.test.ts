@@ -98,6 +98,16 @@ describe("scanner routes keep a draft of their list", () => {
     expect(read(file)).toMatch(wiring);
   });
 
+  /**
+   * The bulk scanner has no record to key its draft by. Without the workspace
+   * in the key, a list parked in one workspace would be offered in another.
+   */
+  it("keys the bulk scanner's draft by workspace", () => {
+    expect(read("scanner.tsx")).toMatch(
+      /targetId: `\$\{BULK_SCAN_DRAFT_TARGET\}:\$\{organizationId\}`/
+    );
+  });
+
   it.each([
     ["../../hooks/use-booking-assign-session-initialization.ts", '"assign"'],
     ["../../hooks/use-booking-fulfil-session-initialization.ts", '"fulfil"'],

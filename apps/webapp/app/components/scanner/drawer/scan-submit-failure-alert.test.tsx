@@ -86,7 +86,7 @@ describe("ScanSubmitFailureAlert", () => {
    */
   it("says nothing was saved when a gateway turned the request away", () => {
     mockActionData.mockReturnValue({
-      scanSubmitFailure: { kind: "rejected", status: 413 },
+      scanSubmitFailure: { kind: "rejected", status: 429 },
     });
 
     render(
@@ -100,6 +100,20 @@ describe("ScanSubmitFailureAlert", () => {
     expect(alert.textContent).toContain("nothing was saved");
     expect(alert.textContent).not.toContain("may have gone through");
     expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  /** Waiting does not make an oversized submission smaller. */
+  it("tells the operator to make a too-large submission smaller", () => {
+    mockActionData.mockReturnValue({
+      scanSubmitFailure: { kind: "rejected", status: 413 },
+    });
+
+    render(<ScanSubmitFailureAlert />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("the submission was too large");
+    expect(alert.textContent).toContain("Remove some photos or items");
+    expect(alert.textContent).not.toContain("Wait a moment");
   });
 
   it("links to where the save can be checked, in a new tab", () => {
