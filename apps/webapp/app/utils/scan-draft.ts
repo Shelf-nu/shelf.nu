@@ -10,8 +10,12 @@
  *
  * **Only the codes are stored.** A `ScanListItem` carries the asset's entire
  * server payload, which is both far too large for this and stale the moment it
- * is written. A restored entry has no `data`, so `GenericItemRow` resolves it
- * again on mount and a resumed list is as current as a freshly scanned one.
+ * is written. A restored entry comes back in the shape of a code that has just
+ * been scanned and is still being looked up: no `data` and no `type`, so
+ * `GenericItemRow` resolves it again on mount and a resumed list is as current
+ * as a freshly scanned one. The `type` is left out on purpose. Scanner drawers
+ * read `data` from any entry that has a `type`, which holds for every entry a
+ * scan produces, and a restored entry must not be the one exception.
  *
  * This is a stopgap for one browser on one device. The real fix is a persisted
  * server-side session, tracked in GitHub issue #3160.
@@ -41,13 +45,6 @@ const DRAFT_TTL_MS = 12 * 60 * 60 * 1000;
 /** One scanned code, reduced to what is worth keeping. */
 type DraftEntry = {
   codeType?: "qr" | "barcode" | "samId";
-  type?: "asset" | "kit";
-  /**
-   * The code is still waiting for a lookup that answers. Carried through the
-   * draft so an entry with no `type` yet stays eligible across any number of
-   * restores, until it resolves or the server refuses it.
-   */
-  lookupFailed?: true;
 };
 
 type StoredDraft = {
@@ -94,12 +91,13 @@ function isSyntheticKey(key: string): boolean {
 /**
  * Saves the resolved codes from a scan list, replacing any previous draft.
  *
- * Unresolved and refused entries are dropped: a code that did not resolve has
- * nothing to restore, and one the server refused would only be refused again.
- * A code whose lookup got no answer (`lookupFailed`) is kept, because nothing
- * is known to be wrong with it: it is looked up again when the draft is
- * restored. Writing an empty list removes the draft rather than storing an
- * empty one.
+ * Kept: every code that resolved, and every code still owed a lookup
+ * (`pendingLookup`: restored from a draft, or its last lookup got no answer).
+ * Nothing is known to be wrong with those, and they are looked up again when
+ * the draft is restored. Dropped: a code the server refused, which would only
+ * be refused again, and a code scanned a moment ago that has not resolved
+ * either way yet. Writing an empty list removes the draft rather than storing
+ * an empty one.
  *
  * @param key - From {@link scanDraftKey}.
  * @param items - The current scan list.
@@ -108,26 +106,20 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
   const entries: Record<string, DraftEntry> = {};
 
   for (const [code, item] of Object.entries(items)) {
-    // `type` is the test, not `data`. A restored entry has a type and no data
-    // precisely so its row re-resolves, and it keeps that shape until the
-    // fetch lands; requiring `data` would drop the whole list back out of the
-    // draft in the moments after a restore.
     if (!item) {
       continue;
     }
-    // A lookup that got no answer is not a verdict on the code. It is kept
-    // even without a type: a restored entry resolves from its code alone.
-    if (!item.lookupFailed && (item.error || !item.type)) {
+    // A code still owed a lookup is kept whatever else it carries: a restored
+    // entry has no type until its fetch lands, and dropping it then would
+    // empty the draft in the moments after a restore. Otherwise only a
+    // resolved code is worth keeping.
+    if (!item.pendingLookup && (item.error || !item.type)) {
       continue;
     }
     if (isSyntheticKey(code)) {
       continue;
     }
-    entries[code] = {
-      codeType: item.codeType,
-      type: item.type,
-      ...(item.lookupFailed ? { lookupFailed: true as const } : {}),
-    };
+    entries[code] = { codeType: item.codeType };
   }
 
   if (Object.keys(entries).length === 0) {
@@ -196,11 +188,7 @@ export function readScanDraft(key: string): ScanListItems | null {
     if (isSyntheticKey(code)) {
       continue;
     }
-    restored[code] = {
-      codeType: entry?.codeType,
-      type: entry?.type,
-      ...(entry?.lookupFailed ? { lookupFailed: true } : {}),
-    };
+    restored[code] = { codeType: entry?.codeType, pendingLookup: true };
   }
 
   return Object.keys(restored).length > 0 ? restored : null;
@@ -215,13 +203,12 @@ export function readScanDraft(key: string): ScanListItems | null {
 export function clearScanDraft(key: string): void {
   try {
     localStorage.removeItem(key);
-    localStorage.removeItem(contextKey(key));
   } catch {
     // See `saveScanDraft`.
   }
 }
 
-/** Where a draft's context is kept: beside the draft, and removed with it. */
+/** Where a draft's context is kept: beside the draft, under its own key. */
 function contextKey(key: string): string {
   return `${key}:context`;
 }
@@ -230,9 +217,13 @@ function contextKey(key: string): string {
  * Remembers one piece of context for a draft: what the operator was doing
  * with the list when it was parked (on the bulk scanner, which action).
  *
- * It lives and dies with the draft: {@link clearScanDraft} removes it, and
- * {@link readScanDraftContext} is only worth calling for a draft that
- * {@link readScanDraft} has just returned, which is what enforces the expiry.
+ * It is kept on its own, not removed with the draft. A draft is emptied and
+ * refilled many times while one list is being scanned (it holds nothing
+ * until the first code resolves), and losing the context each time would
+ * leave a list with no way back to where it belongs. On its own it means
+ * nothing: {@link readScanDraftContext} is only worth calling for a draft
+ * that {@link readScanDraft} has just returned, which is what enforces the
+ * expiry.
  *
  * @param key - From {@link scanDraftKey}.
  * @param context - The value to put back with the list.

@@ -63,12 +63,23 @@ describe("scanDraftKey", () => {
 });
 
 describe("saveScanDraft / readScanDraft", () => {
-  it("round-trips a scanned code", () => {
+  /**
+   * A restored code comes back like one that has just been scanned and is
+   * still being looked up: its code type, and nothing a drawer would read
+   * `data` off. Scanner drawers treat a `type` as a promise of `data`.
+   */
+  it("round-trips a scanned code as one still owed its lookup", () => {
     saveScanDraft(KEY, { "qr-1": scanned() });
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
+      "qr-1": { codeType: "qr", pendingLookup: true },
     });
+  });
+
+  it("restores no type, so no drawer reads data that is not there yet", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraft(KEY)?.["qr-1"]).not.toHaveProperty("type");
   });
 
   /**
@@ -85,16 +96,19 @@ describe("saveScanDraft / readScanDraft", () => {
   });
 
   /**
-   * The regression that first broke this: a restored entry carries a type and
-   * no data, so re-saving the list it was restored into must keep it. Testing
-   * for `data` instead emptied the draft in the moment between restoring a
-   * list and its rows resolving again.
+   * A restored entry has neither type nor data until its fetch lands, so
+   * re-saving the list it was restored into must keep it. Dropping it there
+   * would empty the draft in the moment between restoring a list and its rows
+   * resolving again.
    */
   it("keeps a restored entry that has not re-resolved yet", () => {
-    saveScanDraft(KEY, { "qr-1": { codeType: "qr", type: "asset" } });
+    saveScanDraft(KEY, { "qr-1": scanned() });
+    const restored = readScanDraft(KEY)!;
+
+    saveScanDraft(KEY, restored);
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
+      "qr-1": { codeType: "qr", pendingLookup: true },
     });
   });
 
@@ -132,25 +146,20 @@ describe("saveScanDraft / readScanDraft", () => {
     saveScanDraft(KEY, {
       "qr-1": {
         error: "Failed to fetch item",
-        lookupFailed: true,
+        pendingLookup: true,
         codeType: "qr",
-        type: "asset",
       },
       // Scanned for the first time while offline: no type is known yet.
       "barcode-2": {
         error: "Failed to fetch item",
-        lookupFailed: true,
+        pendingLookup: true,
         codeType: "barcode",
       },
     });
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset", lookupFailed: true },
-      "barcode-2": {
-        codeType: "barcode",
-        type: undefined,
-        lookupFailed: true,
-      },
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "barcode-2": { codeType: "barcode", pendingLookup: true },
     });
   });
 
@@ -164,7 +173,7 @@ describe("saveScanDraft / readScanDraft", () => {
       "qr-1": scanned(),
       "barcode-2": {
         error: "Failed to fetch item",
-        lookupFailed: true,
+        pendingLookup: true,
         codeType: "barcode",
       },
     });
@@ -183,7 +192,7 @@ describe("saveScanDraft / readScanDraft", () => {
     saveScanDraft(KEY, {
       "barcode-2": {
         error: "Failed to fetch item",
-        lookupFailed: true,
+        pendingLookup: true,
         codeType: "barcode",
       },
     });

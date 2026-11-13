@@ -211,20 +211,12 @@ export function useScanDraftOnEntry({
     }
   }, [targetId, restoreDraft, draftKey]);
 
-  // Remember the mode the list is being worked in, for as long as there is a
-  // list to come back to. A `null` context (a mode with no list) leaves the
-  // last one in place: that is the one to go back to. An emptied list takes
-  // its context with it, so this runs again when the first new scan lands.
-  const hasItems = Object.keys(useAtomValue(scannedItemsAtom)).length > 0;
+  // Remember the mode the operator last chose. A `null` context (a mode with
+  // no list) leaves the last one in place: that is the one to go back to.
   useEffect(() => {
-    if (
-      restoredTargetIdRef.current !== targetId ||
-      !draftKey ||
-      !context ||
-      !hasItems
-    ) {
+    if (restoredTargetIdRef.current !== targetId || !draftKey || !context) {
       return;
     }
     saveScanDraftContext(draftKey, context);
-  }, [context, draftKey, targetId, hasItems]);
+  }, [context, draftKey, targetId]);
 }

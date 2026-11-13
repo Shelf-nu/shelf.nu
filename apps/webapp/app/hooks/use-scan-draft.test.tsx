@@ -296,22 +296,25 @@ describe("bulk scanner: one list across its actions", () => {
   });
 
   /**
-   * An emptied list takes its remembered action with it. The next scan under
-   * the same action has to remember it again, or a reload would restore the
-   * list out of sight.
+   * A draft holds nothing until the first scanned code resolves, and is
+   * emptied again by every save. The remembered action must outlive both, or
+   * the next list scanned under the same action would be restored out of
+   * sight.
    */
-  it("remembers the action again once a new list starts", () => {
+  it("still remembers the action after the list was emptied and refilled", () => {
     const store = createStore();
     const { rerender } = renderBulk(store, "Assign custody");
-    store.set(scannedItemsAtom, { "qr-1": scanned() });
+    // The first scan, not resolved yet: nothing worth drafting.
+    store.set(scannedItemsAtom, { "qr-1": { codeType: "qr" } });
     rerender({ context: "Assign custody" });
+    // A save empties the list.
     store.set(scannedItemsAtom, {});
     rerender({ context: "Assign custody" });
-    expect(readScanDraftContext(draftKey)).toBeNull();
 
     store.set(scannedItemsAtom, { "qr-2": scanned() });
     rerender({ context: "Assign custody" });
 
+    expect(Object.keys(readScanDraft(draftKey) ?? {})).toEqual(["qr-2"]);
     expect(readScanDraftContext(draftKey)).toBe("Assign custody");
   });
 });

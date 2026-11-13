@@ -184,17 +184,16 @@ export function GenericItemRow<T>({
   const handleApiError = useCallback(() => {
     setItem({
       qrId,
-      // The request got no answer, which says nothing about the code. Keeping
-      // what is known about it lets a scan draft hold on to it and look it up
+      // The request got no answer, which says nothing about the code. Marking
+      // it as still owed a lookup lets a scan draft hold on to it and try
       // again on the next visit, instead of dropping a good scan.
       item: {
         error: "Failed to fetch item",
-        lookupFailed: true,
+        pendingLookup: true,
         codeType: item?.codeType,
-        type: item?.type,
       },
     });
-  }, [qrId, setItem, item?.codeType, item?.type]);
+  }, [qrId, setItem, item?.codeType]);
 
   // Use the API hook to fetch item data
   const { error: fetchError } = useApiQuery<ApiResponse>({
