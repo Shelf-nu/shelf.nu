@@ -690,9 +690,9 @@ export interface AssetUtilizationRow {
   location: string | null;
   /** Total days in the period */
   totalDays: number;
-  /** Days the asset was booked/in use */
+  /** Booked time in the period, rounded up to whole days */
   daysInUse: number;
-  /** Utilization percentage (0-100) */
+  /** Utilization percentage (0-100); weighted by booked unit-days over historical pool capacity for quantity-tracked assets */
   utilizationRate: number;
   /** Number of bookings in the period */
   bookingCount: number;
