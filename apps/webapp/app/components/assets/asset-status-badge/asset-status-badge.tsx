@@ -316,13 +316,19 @@ export function AssetStatusBadge({
 
       <When truthy={!!bookingToShow}>
         <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
-          <Button
-            variant="link-gray"
-            to={`/bookings/${bookingToShow?.id}`}
-            target="_blank"
-          >
-            {bookingToShow?.name}
-          </Button>
+          {/* A viewer who may see who holds the asset but not open the
+              booking gets its name without a link that would dead-end. */}
+          {bookingToShow?.canOpen ? (
+            <Button
+              variant="link-gray"
+              to={`/bookings/${bookingToShow.id}`}
+              target="_blank"
+            >
+              {bookingToShow.name}
+            </Button>
+          ) : (
+            <span className="text-sm text-gray-600">{bookingToShow?.name}</span>
+          )}
         </HoverCardContent>
       </When>
     </HoverCard>

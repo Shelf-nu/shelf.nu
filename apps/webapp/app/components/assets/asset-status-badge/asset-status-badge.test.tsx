@@ -29,7 +29,8 @@
  *    lists join the card; the server's figures stay. With detail-page props
  *    (lists inline) the badge never fetches.
  *  - A checked-out INDIVIDUAL asset links the booking that `ongoing-booking`
- *    names, and shows no booking when that route answers `booking: null`.
+ *    names when it opens for the viewer, names it without a link when it
+ *    does not, and shows no booking when that route answers `booking: null`.
  *
  * @see {@link file://./asset-status-badge.tsx}
  */
@@ -478,7 +479,7 @@ describe("AssetStatusBadge", () => {
 
     it("links the booking the route names", () => {
       ongoingBookingResponse = {
-        booking: { id: "booking-1", name: "Field shoot" },
+        booking: { id: "booking-1", name: "Field shoot", canOpen: true },
       };
 
       renderCheckedOut();
@@ -487,6 +488,17 @@ describe("AssetStatusBadge", () => {
         "href",
         "/bookings/booking-1"
       );
+    });
+
+    it("names the booking without a link when it does not open for the viewer", () => {
+      ongoingBookingResponse = {
+        booking: { id: "booking-1", name: "Field shoot", canOpen: false },
+      };
+
+      renderCheckedOut();
+
+      expect(screen.getByText("Field shoot")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
     });
 
     it("shows no booking when the route withholds it", () => {

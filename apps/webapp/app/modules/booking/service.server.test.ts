@@ -14186,8 +14186,8 @@ describe("getOngoingBookingForAsset", () => {
     const mockBooking = {
       id: "booking-1",
       name: "Test Booking",
-      status: BookingStatus.ONGOING,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14216,8 +14216,8 @@ describe("getOngoingBookingForAsset", () => {
     const mockBooking = {
       id: "booking-2",
       name: "Overdue Booking",
-      status: BookingStatus.OVERDUE,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14356,8 +14356,8 @@ describe("getOngoingBookingForAsset", () => {
     const checkedOutBooking = {
       id: "booking-checked-out",
       name: "Checked Out Booking",
-      status: BookingStatus.ONGOING,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type

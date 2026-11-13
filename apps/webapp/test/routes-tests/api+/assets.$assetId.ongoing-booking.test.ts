@@ -1,6 +1,6 @@
 /**
- * Ongoing booking route: which viewers learn which booking holds an asset, and
- * which booking fields leave the server.
+ * Ongoing booking route: which viewers learn which booking holds an asset,
+ * whether it opens for them, and which booking fields leave the server.
  *
  * @see {@link file://./../../../app/routes/api+/assets.$assetId.ongoing-booking.ts}
  */
@@ -48,6 +48,16 @@ async function call() {
   return response.data;
 }
 
+/** The answer when the booking is named, with the fields old tabs read. */
+function named(canOpen: boolean) {
+  return {
+    error: null,
+    booking: { id: "booking-1", name: "Field shoot", canOpen },
+    id: "booking-1",
+    name: "Field shoot",
+  };
+}
+
 describe("ongoing booking route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,15 +66,12 @@ describe("ongoing booking route", () => {
     );
   });
 
-  it("names the booking to an admin, and only its id and name", async () => {
+  it("names the booking to an admin, with only its id and name", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue(
       permissionContext({ roles: ["ADMIN"] }) as never
     );
 
-    expect(await call()).toEqual({
-      error: null,
-      booking: { id: "booking-1", name: "Field shoot" },
-    });
+    expect(await call()).toEqual(named(true));
     expect(getOngoingBookingForAsset).toHaveBeenCalledWith({
       assetId: "asset-1",
       organizationId: "org-1",
@@ -72,7 +79,7 @@ describe("ongoing booking route", () => {
   });
 
   it.each(["BASE", "SELF_SERVICE"] as const)(
-    "withholds another person's booking from %s while the workspace hides bookings",
+    "withholds another person's booking from %s while the workspace hides custody and bookings",
     async (role) => {
       vi.mocked(rolesServer.requirePermission).mockResolvedValue(
         permissionContext({ roles: [role] }) as never
@@ -82,7 +89,7 @@ describe("ongoing booking route", () => {
     }
   );
 
-  it("names another person's booking to a Base user once the workspace shows bookings", async () => {
+  it("withholds the booking while only bookings are shown, as the mobile asset detail does", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue(
       permissionContext({
         roles: ["BASE"],
@@ -90,27 +97,54 @@ describe("ongoing booking route", () => {
       }) as never
     );
 
-    expect(await call()).toEqual({
-      error: null,
-      booking: { id: "booking-1", name: "Field shoot" },
-    });
+    expect(await call()).toEqual({ error: null, booking: null });
   });
 
-  it("names a booking to a Base user who holds it through the team member link", async () => {
+  it("names the booking without opening it while only custody is shown", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue(
-      permissionContext({ roles: ["BASE"] }) as never
+      permissionContext({
+        roles: ["BASE"],
+        workspace: { baseUserCanSeeCustody: true },
+      }) as never
     );
-    vi.mocked(getOngoingBookingForAsset).mockResolvedValueOnce({
-      ...heldByAnother,
-      custodianUserId: null,
-      custodianTeamMember: { userId: "user-1" },
-    } as never);
 
-    expect(await call()).toEqual({
-      error: null,
-      booking: { id: "booking-1", name: "Field shoot" },
-    });
+    expect(await call()).toEqual(named(false));
   });
+
+  it("names and opens the booking while the workspace shows custody and bookings", async () => {
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({
+        roles: ["SELF_SERVICE"],
+        workspace: {
+          selfServiceCanSeeCustody: true,
+          selfServiceCanSeeBookings: true,
+        },
+      }) as never
+    );
+
+    expect(await call()).toEqual(named(true));
+  });
+
+  it.each([
+    [
+      "the team member link",
+      { custodianUserId: null, custodianTeamMember: { userId: "user-1" } },
+    ],
+    ["the user link", { custodianUserId: "user-1", custodianTeamMember: null }],
+  ])(
+    "names and opens a booking a Base user holds through %s",
+    async (_link, links) => {
+      vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+        permissionContext({ roles: ["BASE"] }) as never
+      );
+      vi.mocked(getOngoingBookingForAsset).mockResolvedValueOnce({
+        ...heldByAnother,
+        ...links,
+      } as never);
+
+      expect(await call()).toEqual(named(true));
+    }
+  );
 
   it("answers booking: null when no active booking holds the asset", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue(
