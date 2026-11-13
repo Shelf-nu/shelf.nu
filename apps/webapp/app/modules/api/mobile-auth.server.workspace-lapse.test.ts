@@ -296,7 +296,7 @@ describe("getMobileWorkspaceAccess", () => {
 });
 
 describe("requireOrganizationAccess with premium features off (self-hosted)", () => {
-  it("lets a TEAM workspace through whatever the owner's tier", async () => {
+  it("lets a TEAM workspace through whatever the owner's tier, and still refuses an admin-disabled one", async () => {
     // why: `premiumIsEnabled` is read from the config when `stripe.server`
     // loads, so the module graph is reloaded with premium switched off. The
     // reset runs in `finally` so a failed assertion cannot leave premium off
@@ -319,6 +319,14 @@ describe("requireOrganizationAccess with premium features off (self-hosted)", ()
       );
 
       await expect(gate(mobileRequest(), CALLER_ID)).resolves.toBe(ORG_ID);
+
+      // The admin switch is not a billing rule, so it still refuses.
+      vi.mocked(freshDb.userOrganization.findUnique).mockResolvedValue(
+        membershipRow({ workspaceDisabled: true }) as never
+      );
+      await expect(gate(mobileRequest(), CALLER_ID)).rejects.toMatchObject({
+        status: 403,
+      });
     } finally {
       vi.doUnmock("~/config/shelf.config");
       vi.resetModules();
