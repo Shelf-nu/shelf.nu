@@ -49,6 +49,16 @@ type BulkListHeaderProps = ThHTMLAttributes<HTMLTableCellElement> & {
   items?: ListItemData[];
 };
 
+/**
+ * The select-page checkbox in a list's header row.
+ *
+ * Ticked when every row on screen is selected or "Select all" is on (outside
+ * form-state screens), partial when some are, empty otherwise. Clicking it
+ * clears a full selection and otherwise selects the rows on screen.
+ *
+ * @param props - The rows on screen (or a getter over the loader data)
+ * @returns The `<th>` holding the checkbox
+ */
 export default function BulkListHeader({
   itemsGetter,
   items: itemsProp,
@@ -82,6 +92,7 @@ export default function BulkListHeader({
 
   const clearSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
 
+  /** Clears a full selection, otherwise selects every row on screen. */
   function handleSelectAllIncomingItems() {
     if (allItemsSelected) {
       clearSelectedItems();

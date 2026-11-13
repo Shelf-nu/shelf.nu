@@ -47,6 +47,16 @@ function describeFallbackSelection(count: number): string {
   return `Only the ${count} ticked rows on this page are selected now.`;
 }
 
+/**
+ * The checkbox cell of one list row.
+ *
+ * A row is ticked when the selection lists it, or, on a list that passes
+ * `pageItems` and whose selection is not form state, when "Select all" is on
+ * and the row is not disabled.
+ *
+ * @param props - The row, its kit members (booking kit rows), the page's rows
+ * @returns The `<td>` holding the checkbox
+ */
 export default function BulkListItemCheckbox({
   item,
   bulkItems,
@@ -85,6 +95,10 @@ export default function BulkListItemCheckbox({
   const listed = selectedBulkItems.some((i) => bulkSelectionKey(i) === itemKey);
   const checked = listed || (selectingAll && !disabled);
 
+  /**
+   * Toggles this row. Under "Select all" it falls back to the visible page
+   * minus this row and announces that; a kit row toggles with its members.
+   */
   function handleBulkItemSelection(e: MouseEvent<HTMLTableCellElement>) {
     e.preventDefault();
     e.stopPropagation();
