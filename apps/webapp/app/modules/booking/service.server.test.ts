@@ -14168,6 +14168,14 @@ describe("getSystemActionText", () => {
 // archiveBooking, revertBookingToDraft, and bulkCancelBookings/bulkArchiveBookings
 
 describe("getOngoingBookingForAsset", () => {
+  /** Only the fields the route needs to name the booking and gate it. */
+  const ONGOING_BOOKING_SELECT = {
+    id: true,
+    name: true,
+    custodianUserId: true,
+    custodianTeamMember: { select: { userId: true } },
+  };
+
   beforeEach(() => {
     vitest.clearAllMocks();
   });
@@ -14178,8 +14186,8 @@ describe("getOngoingBookingForAsset", () => {
     const mockBooking = {
       id: "booking-1",
       name: "Test Booking",
-      status: BookingStatus.ONGOING,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14197,6 +14205,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-1" } },
         partialCheckins: { none: { assetIds: { has: "asset-1" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toEqual(mockBooking);
   });
@@ -14207,8 +14216,8 @@ describe("getOngoingBookingForAsset", () => {
     const mockBooking = {
       id: "booking-2",
       name: "Overdue Booking",
-      status: BookingStatus.OVERDUE,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14226,6 +14235,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-2" } },
         partialCheckins: { none: { assetIds: { has: "asset-2" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toEqual(mockBooking);
   });
@@ -14250,6 +14260,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-3" } },
         partialCheckins: { none: { assetIds: { has: "asset-3" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toBeNull();
   });
@@ -14272,6 +14283,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-4" } },
         partialCheckins: { none: { assetIds: { has: "asset-4" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toBeNull();
   });
@@ -14295,6 +14307,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-5" } },
         partialCheckins: { none: { assetIds: { has: "asset-5" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
   });
 
@@ -14316,6 +14329,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-6" } },
         partialCheckins: { none: { assetIds: { has: "asset-6" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
   });
 
@@ -14342,8 +14356,8 @@ describe("getOngoingBookingForAsset", () => {
     const checkedOutBooking = {
       id: "booking-checked-out",
       name: "Checked Out Booking",
-      status: BookingStatus.ONGOING,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14363,6 +14377,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-8" } },
         partialCheckins: { none: { assetIds: { has: "asset-8" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toEqual(checkedOutBooking);
   });
