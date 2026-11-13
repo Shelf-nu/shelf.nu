@@ -43,8 +43,7 @@ import { Progress } from "../shared/progress";
 
 /**
  * CSS variable on `<html>` holding the card's height plus the toast gap, read
- * by the toast viewport in `components/shared/toast.tsx` and, on narrow
- * screens, by the new-version prompt in `new-version-prompt.tsx`.
+ * by the toast viewport in `components/shared/toast.tsx`.
  */
 const IMPORT_CARD_OFFSET_VAR = "--asset-import-card-offset";
 

@@ -93,8 +93,10 @@ describe("NewVersionPrompt", () => {
   it("shows the message and a Reload button once a newer build is live", () => {
     render(<NewVersionPrompt />);
     announce("200");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "A new version of Shelf is available."
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent("New version available");
+    expect(banner).toHaveTextContent(
+      "Reload to get the latest version of Shelf."
     );
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });

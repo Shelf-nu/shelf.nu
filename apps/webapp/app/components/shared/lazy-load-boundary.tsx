@@ -28,7 +28,7 @@ import * as Sentry from "@sentry/react-router";
 import type { BuildComparison } from "~/utils/build-version";
 import { isChunkLoadError } from "~/utils/build-version";
 import { getBuildVersionChecker } from "~/utils/build-version-checker";
-import { ReloadAppButton } from "./reload-app-button";
+import { ReloadAppButton, UnsavedChangesReloadHint } from "./reload-app-button";
 
 /** The `build` tag on a chunk load failure report. */
 export type ChunkFailureBuildLabel = "superseded" | "current" | "unknown";
@@ -143,7 +143,8 @@ class LazyErrorBoundary extends Component<
     return (
       <div className="flex flex-col items-center gap-2">
         {this.props.failed}
-        <ReloadAppButton className="items-center text-center" />
+        <ReloadAppButton />
+        <UnsavedChangesReloadHint className="text-center" />
       </div>
     );
   }

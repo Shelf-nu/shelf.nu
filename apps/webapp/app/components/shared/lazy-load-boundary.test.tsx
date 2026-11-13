@@ -36,6 +36,7 @@ vi.mock("~/utils/build-version-checker", () => ({
 // test covers when the boundary offers it, not what it does.
 vi.mock("./reload-app-button", () => ({
   ReloadAppButton: () => <button type="button">Reload</button>,
+  UnsavedChangesReloadHint: () => null,
 }));
 
 const CHUNK_ERROR_MESSAGE =

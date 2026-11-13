@@ -444,6 +444,7 @@ export default function App() {
         <AtomsResetHandler />
         <AppSidebar id="navigation" />
         <SidebarInset id="main-content" tabIndex={-1}>
+          <NewVersionPrompt />
           {warnForNoPaymentMethod ? <MissingPaymentMethodBanner /> : null}
           {hasUnpaidInvoice ? <UnpaidInvoiceBanner /> : null}
           {disabledTeamOrg ? (
@@ -481,7 +482,6 @@ export default function App() {
             </>
           )}
           <Toaster />
-          <NewVersionPrompt />
           {isFullImportPayload(activeAssetImport) ? (
             <AssetImportCard
               key={activeAssetImport.id}
