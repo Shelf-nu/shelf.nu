@@ -29,6 +29,39 @@ export const MIN_VISIBLE_DROPDOWN_ROWS = 4;
 export const DROPDOWN_PART_HEIGHTS = { search: 44, row: 44, clear: 42 };
 
 /**
+ * Filters rows by a search on their name and puts the closest matches first:
+ * the row named exactly like the search, then names that start with it, then
+ * names that only contain it. Each group keeps the list's own order.
+ *
+ * The dropdown draws only the first {@link MAX_DROPDOWN_ROWS} matches, so
+ * without this a row could stay out of reach: "Store" after fifty rows named
+ * "Annex Store 0xx" matches every search those rows match. Ranked, typing a
+ * row's full name always brings it to the top.
+ *
+ * @param items - Every row the field holds, in list order.
+ * @param search - What the user typed; matched case-insensitively.
+ * @returns The matching rows, closest first, or `items` for an empty search.
+ */
+export function searchRows<T extends { name: string }>(
+  items: T[],
+  search: string
+): T[] {
+  const query = search.toLowerCase();
+  if (!query) return items;
+
+  const exact: T[] = [];
+  const startsWith: T[] = [];
+  const contains: T[] = [];
+  for (const item of items) {
+    const name = item.name.toLowerCase();
+    if (name === query) exact.push(item);
+    else if (name.startsWith(query)) startsWith.push(item);
+    else if (name.includes(query)) contains.push(item);
+  }
+  return [...exact, ...startsWith, ...contains];
+}
+
+/**
  * Picks the rows an inline dropdown draws: the first
  * {@link MAX_DROPDOWN_ROWS}, led by the selected row when it sorts after
  * them.

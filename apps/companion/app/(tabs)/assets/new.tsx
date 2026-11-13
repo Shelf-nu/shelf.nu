@@ -46,6 +46,7 @@ import {
   DROPDOWN_MAX_HEIGHT,
   incompleteListNotice,
   moreRowsHint,
+  searchRows,
   visibleRows,
 } from "@/lib/visible-rows";
 import { IncompleteListNotice } from "@/components/asset-edit/incomplete-list-notice";
@@ -329,11 +330,8 @@ export default function CreateAssetScreen() {
       )
     : categories;
 
-  const filteredLocations = locationSearch
-    ? locations.filter((l) =>
-        l.name.toLowerCase().includes(locationSearch.toLowerCase())
-      )
-    : locations;
+  // Closest matches first, so the cap below never hides the row being typed.
+  const filteredLocations = searchRows(locations, locationSearch);
   // Draw at most a page of rows, led by the selected one when it sorts after
   // them; the search box reaches the rest.
   const shownLocations = visibleRows(filteredLocations, selectedLocation?.id);

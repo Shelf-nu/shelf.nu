@@ -14,6 +14,7 @@ import { createStyles } from "@/lib/create-styles";
 import {
   DROPDOWN_MAX_HEIGHT,
   moreRowsHint,
+  searchRows,
   visibleRows,
   type IncompleteListNotice as Notice,
 } from "@/lib/visible-rows";
@@ -82,11 +83,8 @@ export function PickerField<T extends PickerItem>({
     items.find((item) => item.id === selectedId) ??
     (selectedFallback?.id === selectedId ? selectedFallback : null);
 
-  const filteredItems = search
-    ? items.filter((item) =>
-        item.name.toLowerCase().includes(search.toLowerCase())
-      )
-    : items;
+  // Closest matches first, so the cap below never hides the row being typed.
+  const filteredItems = searchRows(items, search);
   // Draw at most a page of rows, led by the selected one when it sorts after
   // them; the search box reaches the rest.
   const shownItems = visibleRows(filteredItems, selectedId);

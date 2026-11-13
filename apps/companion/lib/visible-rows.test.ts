@@ -16,12 +16,67 @@ import {
   MIN_VISIBLE_DROPDOWN_ROWS,
   incompleteListNotice,
   moreRowsHint,
+  searchRows,
   visibleRows,
 } from "./visible-rows";
 
 /** `count` rows with ids "row-0", "row-1", ... in list order. */
 const rowsOf = (count: number) =>
   Array.from({ length: count }, (_, i) => ({ id: `row-${i}` }));
+
+/** Sixty rows "Annex Store 001".."060", then "Store", then "Storeroom". */
+const storeRows = () => [
+  ...Array.from({ length: 60 }, (_, i) => ({
+    id: `annex-${i + 1}`,
+    name: `Annex Store ${String(i + 1).padStart(3, "0")}`,
+  })),
+  { id: "store", name: "Store" },
+  { id: "storeroom", name: "Storeroom" },
+];
+
+test("returns every row, in order, for an empty search", () => {
+  const items = storeRows();
+
+  assert.equal(searchRows(items, ""), items);
+});
+
+test("keeps only the rows whose name contains the search, whatever the case", () => {
+  const matches = searchRows(storeRows(), "ANNEX STORE 00");
+
+  assert.deepEqual(
+    matches.map((row) => row.id),
+    [
+      "annex-1",
+      "annex-2",
+      "annex-3",
+      "annex-4",
+      "annex-5",
+      "annex-6",
+      "annex-7",
+      "annex-8",
+      "annex-9",
+    ]
+  );
+});
+
+test("ranks the exact name first, then names that start with the search", () => {
+  const matches = searchRows(storeRows(), "store");
+
+  assert.equal(matches.length, 62);
+  assert.deepEqual(
+    matches.slice(0, 3).map((row) => row.id),
+    ["store", "storeroom", "annex-1"]
+  );
+});
+
+test("a row behind more matches than the cap is drawn when its name is typed", () => {
+  // Unranked, "Store" is match 61 of 62 and the cap of 50 hides it.
+  const { rows, hiddenCount } = visibleRows(searchRows(storeRows(), "Store"));
+
+  assert.equal(rows[0].id, "store");
+  assert.equal(rows.length, MAX_DROPDOWN_ROWS);
+  assert.equal(hiddenCount, 62 - MAX_DROPDOWN_ROWS);
+});
 
 test("draws every row when they fit", () => {
   const items = rowsOf(12);
