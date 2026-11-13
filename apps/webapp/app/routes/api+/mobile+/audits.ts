@@ -31,9 +31,12 @@ import {
  *     service layer; passing the flag is a no-op for them.
  *
  * Mobile-only sort: results are always ordered by `dueDate asc nulls last,
- * createdAt desc` so the companion list surfaces overdue + soon-due work
- * first. The webapp uses its own column-sort UI and does not hit this
- * endpoint.
+ * createdAt desc, id asc` so the companion list surfaces overdue and soon-due
+ * work first, and pages never overlap. The webapp uses its own column-sort UI
+ * and does not hit this endpoint.
+ *
+ * Every page is a database slice and `totalCount` counts the same filtered
+ * rows, for any number of statuses.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -78,44 +81,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
       Math.max(1, parseInt(url.searchParams.get("perPage") || "20", 10) || 20)
     );
 
-    // Parse and validate status filters
+    // Parse and validate status filters (unknown values dropped, repeats
+    // removed).
     const validStatuses = Object.values(AuditStatus);
     const statusFilters: AuditStatus[] = statusParam
-      ? statusParam
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s): s is AuditStatus =>
-            validStatuses.includes(s as AuditStatus)
-          )
+      ? [
+          ...new Set(
+            statusParam
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s): s is AuditStatus =>
+                validStatuses.includes(s as AuditStatus)
+              )
+          ),
+        ]
       : [];
 
-    // Single status → pass directly to service (uses DB-level filter)
-    // No status or all statuses → pass null (get everything)
-    // Multiple statuses → fetch all, filter in JS (service only accepts single)
-    const isSingleStatus = statusFilters.length === 1;
-    const isAllOrNone =
-      statusFilters.length === 0 ||
-      statusFilters.length >= validStatuses.length;
-
-    const { audits: rawAudits, totalAudits: rawTotal } =
-      await getAuditsForOrganization({
-        organizationId,
-        userId: user.id,
-        assignedOnly: !access.audits.seeAll,
-        page: isSingleStatus || isAllOrNone ? page : 1,
-        perPage: isSingleStatus || isAllOrNone ? perPage : 200,
-        search: searchParam || null,
-        status: isSingleStatus ? statusFilters[0] : null,
-        assignedToUserId: assignedToMe ? user.id : null,
-        prioritizeDeadlines: true,
-      });
-
-    // Post-filter for multi-status queries (e.g. "PENDING,ACTIVE")
-    const needsPostFilter = !isSingleStatus && !isAllOrNone;
-    const audits = needsPostFilter
-      ? rawAudits.filter((a) => statusFilters.includes(a.status as AuditStatus))
-      : rawAudits;
-    const totalAudits = needsPostFilter ? audits.length : rawTotal;
+    // why: every status filter runs in the database, so each page is a true
+    // slice and `totalCount`/`totalPages` count the same rows. The companion
+    // keeps asking for the next page until it passes `totalPages`, so a
+    // count that disagrees with the slice makes it load rows twice.
+    // No status means the service default: everything except ARCHIVED. A
+    // listed status is always honoured, ARCHIVED included.
+    const { audits, totalAudits } = await getAuditsForOrganization({
+      organizationId,
+      userId: user.id,
+      assignedOnly: !access.audits.seeAll,
+      page,
+      perPage,
+      search: searchParam || null,
+      status: statusFilters,
+      assignedToUserId: assignedToMe ? user.id : null,
+      prioritizeDeadlines: true,
+    });
 
     return data({
       audits: audits.map((a) => ({
