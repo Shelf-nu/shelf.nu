@@ -18,7 +18,7 @@ import { BookingStatus } from "@prisma/client";
 import { renderHook } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   type BookingCheckinSessionInfo,
@@ -34,6 +34,15 @@ import { useBookingCheckinSessionInitialization } from "./use-booking-checkin-se
  * customize `bookingId` / `status` / `expectedCount` without repeating
  * the full shape.
  */
+// why: the hook keeps a draft of the scan list, which reads router state and
+// the signed-in user. Neither exists without a mounted router; the draft has
+// its own suite, so here they are held still.
+vi.mock("react-router", () => ({
+  useNavigation: () => ({ state: "idle" }),
+  useLocation: () => ({ pathname: "/bookings/booking-1/overview/checkin" }),
+}));
+vi.mock("~/hooks/use-user-data", () => ({ useUserData: () => undefined }));
+
 function makeSession(
   overrides: Partial<Exclude<BookingCheckinSessionInfo, null>> = {}
 ): Exclude<BookingCheckinSessionInfo, null> {
@@ -102,7 +111,12 @@ describe("useBookingCheckinSessionInitialization", () => {
     );
 
     renderHook(
-      () => useBookingCheckinSessionInitialization({ session, expectedAssets }),
+      () =>
+        useBookingCheckinSessionInitialization({
+          session,
+          expectedAssets,
+          draftScope: "checkin",
+        }),
       { wrapper }
     );
 
@@ -120,7 +134,12 @@ describe("useBookingCheckinSessionInitialization", () => {
     );
 
     const { unmount } = renderHook(
-      () => useBookingCheckinSessionInitialization({ session, expectedAssets }),
+      () =>
+        useBookingCheckinSessionInitialization({
+          session,
+          expectedAssets,
+          draftScope: "checkin",
+        }),
       { wrapper }
     );
 
@@ -146,7 +165,11 @@ describe("useBookingCheckinSessionInitialization", () => {
 
     const { rerender } = renderHook(
       ({ expectedAssets }: { expectedAssets: BookingExpectedAsset[] }) =>
-        useBookingCheckinSessionInitialization({ session, expectedAssets }),
+        useBookingCheckinSessionInitialization({
+          session,
+          expectedAssets,
+          draftScope: "checkin",
+        }),
       { wrapper, initialProps: { expectedAssets: initial } }
     );
 

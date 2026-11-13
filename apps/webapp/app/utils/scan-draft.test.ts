@@ -63,12 +63,23 @@ describe("scanDraftKey", () => {
 });
 
 describe("saveScanDraft / readScanDraft", () => {
-  it("round-trips a scanned code", () => {
+  /**
+   * A restored code comes back like one that has just been scanned and is
+   * still being looked up: its code type, and nothing a drawer would read
+   * `data` off. Scanner drawers treat a `type` as a promise of `data`.
+   */
+  it("round-trips a scanned code as one still owed its lookup", () => {
     saveScanDraft(KEY, { "qr-1": scanned() });
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
+      "qr-1": { codeType: "qr", pendingLookup: true },
     });
+  });
+
+  it("restores no type, so no drawer reads data that is not there yet", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraft(KEY)?.["qr-1"]).not.toHaveProperty("type");
   });
 
   /**
@@ -85,16 +96,19 @@ describe("saveScanDraft / readScanDraft", () => {
   });
 
   /**
-   * The regression that first broke this: a restored entry carries a type and
-   * no data, so re-saving the list it was restored into must keep it. Testing
-   * for `data` instead emptied the draft in the moment between restoring a
-   * list and its rows resolving again.
+   * A restored entry has neither type nor data until its fetch lands, so
+   * re-saving the list it was restored into must keep it. Dropping it there
+   * would empty the draft in the moment between restoring a list and its rows
+   * resolving again.
    */
   it("keeps a restored entry that has not re-resolved yet", () => {
-    saveScanDraft(KEY, { "qr-1": { codeType: "qr", type: "asset" } });
+    saveScanDraft(KEY, { "qr-1": scanned() });
+    const restored = readScanDraft(KEY)!;
+
+    saveScanDraft(KEY, restored);
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
+      "qr-1": { codeType: "qr", pendingLookup: true },
     });
   });
 
@@ -122,6 +136,73 @@ describe("saveScanDraft / readScanDraft", () => {
    * Quick check-in and check-out mint keys that name a booking row, not a code.
    * They mean nothing once the booking has moved on.
    */
+  /**
+   * A lookup that got no answer (no connection, a gateway page) is not a
+   * verdict on the code. Dropping it would empty the draft the moment a
+   * restored list is looked up against a server that is still struggling,
+   * which is exactly when the draft is needed.
+   */
+  it("keeps a code whose lookup got no answer, to try again later", () => {
+    saveScanDraft(KEY, {
+      "qr-1": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "qr",
+      },
+      // Scanned for the first time while offline: no type is known yet.
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "barcode-2": { codeType: "barcode", pendingLookup: true },
+    });
+  });
+
+  /**
+   * A restored list is mirrored again as soon as any row on it changes. An
+   * entry still waiting for its lookup has no type, and must not be dropped
+   * by that write: another reload would lose the scan.
+   */
+  it("keeps a still-unanswered code through a restore and the next save", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+
+    // The restore, then a mirror write while the barcode is still pending.
+    const restored = readScanDraft(KEY)!;
+    saveScanDraft(KEY, { ...restored, "qr-1": scanned() });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {}).sort()).toEqual([
+      "barcode-2",
+      "qr-1",
+    ]);
+  });
+
+  it("lets go of a retried code once the server refuses it", () => {
+    saveScanDraft(KEY, {
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+    readScanDraft(KEY);
+
+    saveScanDraft(KEY, { "barcode-2": { error: "Asset not found" } });
+
+    expect(readScanDraft(KEY)).toBeNull();
+  });
+
   it("drops the synthetic booking-row keys", () => {
     saveScanDraft(KEY, {
       "qr-1": scanned(),

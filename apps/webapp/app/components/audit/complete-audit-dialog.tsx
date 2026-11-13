@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { Form } from "react-router";
 import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-box";
+import { ScanSubmitFailureAlert } from "~/components/scanner/drawer/scan-submit-failure-alert";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -24,6 +25,16 @@ type CompleteAuditDialogProps = {
   auditName: string;
   /** Container for portal rendering */
   portalContainer?: HTMLElement;
+  /**
+   * Also put the intent in the form's action URL. Only the audit scanner sets
+   * this: its client action reads the intent from the URL, so it can tell a
+   * completion from a background save without parsing the photos in the
+   * multipart body. A search-only action resolves against the page the form is
+   * on, which on the scanner is the scan route itself. Other pages that show
+   * this dialog must leave it off and keep the default action, which posts to
+   * the route that renders the form whatever tab is open.
+   */
+  intentInActionUrl?: boolean;
   /** Stats for display in confirmation */
   stats: {
     expectedCount: number;
@@ -48,6 +59,7 @@ export default function CompleteAuditDialog({
   disabled,
   auditName,
   portalContainer,
+  intentInActionUrl = false,
   stats,
   units = null,
 }: CompleteAuditDialogProps) {
@@ -73,7 +85,11 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        <Form method="post" encType="multipart/form-data">
+        <Form
+          method="post"
+          encType="multipart/form-data"
+          action={intentInActionUrl ? "?intent=complete-audit" : undefined}
+        >
           <input type="hidden" name="intent" value="complete-audit" />
 
           <AlertDialogHeader>
@@ -166,6 +182,11 @@ export default function CompleteAuditDialog({
               <AuditImageUploadSection maxCount={5} disabled={formDisabled} />
             </div>
           </AlertDialogDescription>
+
+          {/* The drawer's own notice sits behind this dialog's overlay, so a
+              completion that got no answer has to say so here, before the
+              operator confirms again. */}
+          <ScanSubmitFailureAlert />
 
           <AlertDialogFooter className="mt-4">
             <AlertDialogCancel asChild>

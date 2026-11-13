@@ -32,6 +32,13 @@ export enum CheckinIntentEnum {
 }
 
 type CheckinDialogProps = {
+  /**
+   * Shown above the dialog's buttons. A scanner passes its save-not-confirmed
+   * notice here, because the scanner's own copy sits behind this dialog's
+   * overlay and the operator would otherwise confirm again without seeing it.
+   */
+  notice?: ReactNode;
+
   disabled?: ButtonProps["disabled"];
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   /** A container to render the AlertContent inside */
@@ -104,6 +111,7 @@ export default function CheckinDialog({
   open: controlledOpen,
   onOpenChange: onControlledOpenChange,
   returnFocusTo,
+  notice,
 }: CheckinDialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   /** A caller passing `open` drives the dialog and supplies its own trigger. */
@@ -209,6 +217,8 @@ export default function CheckinDialog({
             </>
           ) : null}
         </AlertDialogDescription>
+
+        {notice}
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>

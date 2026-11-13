@@ -13,11 +13,17 @@ import type { HeaderData } from "~/components/layout/header/types";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
-import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
+import type { ActionType } from "~/components/scanner/drawer/action-switcher";
+import {
+  ActionSwitcher,
+  useAvailableScannerActions,
+} from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useHapticFeedback } from "~/hooks/use-haptic-feedback";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useScanDraftOnEntry } from "~/hooks/use-scan-draft";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import {
   getTeamMemberForCustodianFilter,
@@ -159,6 +165,16 @@ export const meta: MetaFunction<typeof loader> = () => [
  */
 const MIN_SCANNER_HEIGHT = 400;
 
+/**
+ * The bulk-action scanner has no booking, kit or location to key its scan
+ * draft by, so the draft is keyed by this fixed name, the workspace and the
+ * signed-in user.
+ */
+const BULK_SCAN_DRAFT_TARGET = "scanner";
+
+/** The one scanner action that opens each scan instead of collecting a list. */
+const VIEW_ASSET_ACTION: ActionType = "View asset";
+
 const QRScanner = () => {
   const navigate = useNavigate();
   const [paused, setPaused] = useState<boolean>(false);
@@ -179,7 +195,34 @@ const QRScanner = () => {
   const savedCameraId = useScannerCameraId();
 
   // Get action directly from the atom
-  const [action] = useAtom(scannerActionAtom);
+  const [action, setAction] = useAtom(scannerActionAtom);
+  const availableActions = useAvailableScannerActions();
+
+  // The bulk actions (custody, location) share one list on this page:
+  // switching action keeps it. So they share one draft too, kept per person.
+  // A draft per action would bring back, under one action, a list already
+  // saved under another.
+  //
+  // The page opens on "View asset", which shows no list. So the action the
+  // list was parked under is remembered with the draft, and a restored list
+  // returns the page to it: a list put back out of sight would look lost.
+  //
+  // The draft is kept per workspace as well: a code scanned in one workspace
+  // means nothing, or something else, in another.
+  const organizationId = useCurrentOrganization()?.id ?? "";
+  useScanDraftOnEntry({
+    scope: "bulk",
+    targetId: `${BULK_SCAN_DRAFT_TARGET}:${organizationId}`,
+    context: action === VIEW_ASSET_ACTION ? null : action,
+    onRestore: (parkedAction) => {
+      const stillAllowed = availableActions.find(
+        (available) => available === parkedAction
+      );
+      if (stillAllowed && stillAllowed !== VIEW_ASSET_ACTION) {
+        setAction(stillAllowed);
+      }
+    },
+  });
 
   const { canUseBarcodes } = useBarcodePermissions();
 

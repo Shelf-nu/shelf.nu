@@ -17,11 +17,11 @@
  */
 
 import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
-import { useLoaderData, useRouteLoaderData } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useActionData, useLoaderData, useRouteLoaderData } from "react-router";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import {
   type AlreadyIncludedRow,
@@ -55,6 +55,9 @@ vi.mock("react-router", async () => {
     useLoaderData: vi.fn(),
     useRouteLoaderData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
+    // why: the shared drawer reads the route's action data for its
+    // save-not-confirmed notice, which needs a mounted data router.
+    useActionData: vi.fn(() => undefined),
     useLocation: vi.fn(() => ({
       pathname: "/bookings/booking-1/overview/scan-assets",
       search: "",
@@ -223,6 +226,58 @@ function renderDrawer(
     </Provider>
   );
 }
+
+describe("AddAssetsToBookingDrawer after a save that got no answer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * The shared drawer owns the notice, and this drawer tells it where the
+   * operator can check: the booking, in a new tab so the list stays put.
+   */
+  it("shows the notice in the drawer with a link to the booking", () => {
+    // why: a transport failure reaches the drawer as the route's action data.
+    // Set for this test only, and put back so it cannot answer the others.
+    const actionData = vi.mocked(useActionData);
+    actionData.mockReturnValue({
+      scanSubmitFailure: { kind: "timeout", status: 524 },
+    });
+    onTestFinished(() => {
+      actionData.mockReturnValue(undefined);
+    });
+
+    renderDrawer({ scannedAssets: { "qr-1": { id: "asset-1" } } });
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("The save took too long to answer.");
+    const link = within(alert).getByRole("link", { name: "Open the booking" });
+    expect(link.getAttribute("href")).toBe("/bookings/booking-1");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  /** The notice is about the list, so it goes with the list. */
+  it("drops the notice once the list is emptied", () => {
+    // why: as above, the failure arrives as the route's action data.
+    const actionData = vi.mocked(useActionData);
+    actionData.mockReturnValue({
+      scanSubmitFailure: { kind: "timeout", status: 524 },
+    });
+    onTestFinished(() => {
+      actionData.mockReturnValue(undefined);
+    });
+
+    renderDrawer();
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows no notice when the last save had an answer", () => {
+    renderDrawer({ scannedAssets: { "qr-1": { id: "asset-1" } } });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
 
 describe("AddAssetsToBookingDrawer reservation progress", () => {
   beforeEach(() => {

@@ -6,6 +6,7 @@ import type {
   MetaFunction,
   LinksFunction,
   ShouldRevalidateFunctionArgs,
+  ClientActionFunctionArgs,
 } from "react-router";
 import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
@@ -58,10 +59,34 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
+
+/**
+ * Keeps the scanner on screen when completing the audit gets no answer (a
+ * gateway timeout, an unreachable server, a dropped connection), so the
+ * completion note and photos in the dialog are not lost. The dialog then tells
+ * the operator to check before confirming again, because a request cut off in
+ * transit may still have been saved.
+ *
+ * Only the completion is covered. Removing a scan is submitted in the
+ * background and nothing reads its result, so a failure there has to keep
+ * reaching the error boundary: turning it into action data would hide a
+ * removal the server never made.
+ */
+export async function clientAction(args: ClientActionFunctionArgs) {
+  // Read from the URL, not the body: the completion form is multipart and
+  // carries photos, which would be parsed in full just to read one field.
+  // `CompleteAuditDialog` puts the intent in its form's action URL.
+  const intent = new URL(args.request.url).searchParams.get("intent");
+  if (intent !== "complete-audit") {
+    return args.serverAction();
+  }
+  return keepScanListOnSubmitFailure(args);
+}
 
 export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
   { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },

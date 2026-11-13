@@ -133,6 +133,21 @@ function renderInForm(
 }
 
 describe("CheckoutDialog confirmation", () => {
+  /**
+   * A scanner passes its save-not-confirmed notice in. The scanner's own copy
+   * sits behind this dialog's overlay, so the dialog is where it must show.
+   */
+  it("shows a notice it is handed inside the open dialog", () => {
+    renderInForm({ notice: <p role="alert">The save took too long</p> });
+
+    fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Check out booking",
+    });
+    expect(dialog).toContainElement(screen.getByRole("alert"));
+  });
+
   it("opens a confirmation instead of submitting for a booking that is not early", () => {
     const { submissions } = renderInForm();
 
