@@ -41,10 +41,6 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     requireOrganizationAccess: vitest.fn(),
     // why: reads the caller's membership; the tests set custody visibility
     getMobileUserContext: vitest.fn(),
-    // why: the workspace lapse gate has its own tests
-    // (mobile-auth.server.workspace-lapse.test.ts); sibling workspaces here
-    // are active.
-    getMobileWorkspaceAccess: vitest.fn(async () => ({ access: "active" })),
   };
 });
 
@@ -107,6 +103,28 @@ import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { makeShelfError } from "~/utils/error";
+
+/**
+ * A sibling membership row as the barcode route selects it: the barcode
+ * capability plus the workspace gate's columns, for an active TEAM workspace
+ * the caller belongs to but does not own.
+ */
+function siblingMembership(
+  organizationId: string,
+  { barcodesEnabled }: { barcodesEnabled: boolean }
+) {
+  return {
+    organizationId,
+    organization: {
+      barcodesEnabled,
+      type: "TEAM",
+      userId: `owner-of-${organizationId}`,
+      workspaceDisabled: false,
+      owner: { tier: { tierLimitId: "tier_2" } },
+    },
+    user: { roles: [] },
+  };
+}
 
 const mockUser = {
   id: "user-1",
@@ -324,7 +342,7 @@ describe("GET /api/mobile/barcode/:value", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      siblingMembership("org-2", { barcodesEnabled: true }),
     ]);
     (db.barcode.findMany as any).mockResolvedValue([
       { organizationId: "org-2" },
@@ -346,7 +364,7 @@ describe("GET /api/mobile/barcode/:value", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      siblingMembership("org-2", { barcodesEnabled: true }),
     ]);
     (db.barcode.findMany as any).mockResolvedValue([
       { organizationId: "org-2" },
@@ -366,7 +384,7 @@ describe("GET /api/mobile/barcode/:value", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      siblingMembership("org-2", { barcodesEnabled: true }),
     ]);
     // Phase 1 answers "which of my workspaces hold this value" in one query.
     (db.barcode.findMany as any).mockResolvedValue([
@@ -393,8 +411,8 @@ describe("GET /api/mobile/barcode/:value", () => {
   it("refuses an ambiguous barcode that exists in several sibling workspaces", async () => {
     (getBarcodeByValue as any).mockResolvedValueOnce(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
-      { organizationId: "org-3", organization: { barcodesEnabled: true } },
+      siblingMembership("org-2", { barcodesEnabled: true }),
+      siblingMembership("org-3", { barcodesEnabled: true }),
     ]);
     (db.barcode.findMany as any).mockResolvedValue([
       { organizationId: "org-2" },
@@ -421,7 +439,7 @@ describe("GET /api/mobile/barcode/:value", () => {
     // barcode that does not exist — no name, no workspace, no 4xx that differs.
     (getBarcodeByValue as any).mockResolvedValue(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      siblingMembership("org-2", { barcodesEnabled: true }),
     ]);
     // Phase 1 is scoped to the membership list, so a stranger workspace holding
     // this value can never match.
@@ -456,7 +474,7 @@ describe("GET /api/mobile/barcode/:value", () => {
   it("never resolves through a sibling workspace without the barcode capability", async () => {
     (getBarcodeByValue as any).mockResolvedValue(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: false } },
+      siblingMembership("org-2", { barcodesEnabled: false }),
     ]);
 
     const request = createBarcodeRequest("BC001234");
@@ -677,7 +695,7 @@ describe("GET /api/mobile/barcode/:value", () => {
           asset: sharedAsset,
         });
       (db.userOrganization.findMany as any).mockResolvedValue([
-        { organizationId: "org-2", organization: { barcodesEnabled: true } },
+        siblingMembership("org-2", { barcodesEnabled: true }),
       ]);
       (db.barcode.findMany as any).mockResolvedValue([
         { organizationId: "org-2" },

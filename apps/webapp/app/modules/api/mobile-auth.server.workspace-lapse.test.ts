@@ -4,8 +4,9 @@
  * The companion app must refuse the same workspaces the web app shows as
  * "Workspace disabled" (`disabledTeamOrg` in `routes/_layout+/_layout.tsx`):
  * a TEAM workspace whose owner's tier is no longer a Team tier, and any
- * workspace a Shelf admin switched off. The real `disabledTeamOrg` and tier
- * lookup run here; only the database rows are stubbed.
+ * workspace a Shelf admin switched off. The gate and the shared
+ * `teamTierLimitHasLapsed` rule run for real; only the membership row, which
+ * carries the owner's tier, is stubbed.
  *
  * @see {@link file://./mobile-auth.server.ts}
  * @see {@link file://./../../utils/stripe.server.ts}
@@ -21,8 +22,9 @@ import {
 } from "~/modules/api/mobile-auth.server";
 
 // why: importing the module loads `~/database/db.server`, which connects a
-// real Prisma client at module load. The gate reads the membership row and the
-// owner's tier; those two reads are the stubs the tests drive.
+// real Prisma client at module load. The gate reads one membership row; the
+// owner and tier-limit reads are stubbed only so a test can prove they are
+// never made.
 vi.mock("~/database/db.server", () => ({
   db: {
     userOrganization: { findUnique: vi.fn() },
@@ -49,10 +51,14 @@ type ShelfConfig = typeof shelfConfig;
 
 const membershipFindUnique = vi.mocked(db.userOrganization.findUnique);
 const ownerFindUniqueOrThrow = vi.mocked(db.user.findUniqueOrThrow);
+const customTierLimitFind = vi.mocked(db.customTierLimit.findUniqueOrThrow);
 
 const CALLER_ID = "user-member";
 const OWNER_ID = "user-owner";
 const ORG_ID = "org-1";
+
+const CONTACT_OWNER = "Contact the workspace owner for more information.";
+const CONTACT_SUPPORT = "Contact Shelf support for more information.";
 
 /** A request from the companion acting in `ORG_ID`. */
 function mobileRequest() {
@@ -64,33 +70,24 @@ function membershipRow({
   type = "TEAM",
   workspaceDisabled = false,
   ownerId = OWNER_ID,
+  ownerTierLimitId = "tier_2",
   callerSystemRoles = ["USER"],
 }: {
   type?: "TEAM" | "PERSONAL";
   workspaceDisabled?: boolean;
   ownerId?: string;
+  ownerTierLimitId?: "free" | "tier_1" | "tier_2" | null;
   callerSystemRoles?: string[];
 } = {}) {
   return {
-    id: "membership-1",
     organization: {
-      id: ORG_ID,
       type,
-      name: "Workspace",
-      imageId: null,
       userId: ownerId,
       workspaceDisabled,
+      owner: { tier: { tierLimitId: ownerTierLimitId } },
     },
     user: { roles: callerSystemRoles.map((name) => ({ name })) },
   };
-}
-
-/** Sets the workspace owner's tier, as `getUserTierLimit` reads it. */
-function ownerTier(tierId: "free" | "tier_1" | "tier_2") {
-  // why: cast, the tier lookup selects a narrow shape, not the full User row.
-  ownerFindUniqueOrThrow.mockResolvedValue({
-    tier: { id: tierId, tierLimit: { id: tierId } },
-  } as never);
 }
 
 /** Sets the membership row the gate reads. */
@@ -104,36 +101,43 @@ beforeEach(() => {
 });
 
 describe("requireOrganizationAccess workspace lapse gate", () => {
-  it("allows a TEAM workspace whose owner is on the Team tier", async () => {
-    givenMembership(membershipRow());
-    ownerTier("tier_2");
+  it("allows an active TEAM workspace with one query: the membership read", async () => {
+    givenMembership(membershipRow({ ownerTierLimitId: "tier_2" }));
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
     ).resolves.toBe(ORG_ID);
-    expect(ownerFindUniqueOrThrow).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: OWNER_ID } })
-    );
+    // The owner's tier rides on the membership row, so the gate makes no
+    // query of its own on the hot path.
+    expect(membershipFindUnique).toHaveBeenCalledTimes(1);
+    expect(ownerFindUniqueOrThrow).not.toHaveBeenCalled();
+    expect(customTierLimitFind).not.toHaveBeenCalled();
   });
 
   it.each(["free", "tier_1"] as const)(
     "refuses a TEAM workspace whose owner's tier lapsed to %s, telling a member to contact the owner",
-    async (tierId) => {
-      givenMembership(membershipRow());
-      ownerTier(tierId);
+    async (tierLimitId) => {
+      givenMembership(membershipRow({ ownerTierLimitId: tierLimitId }));
 
       await expect(
         requireOrganizationAccess(mobileRequest(), CALLER_ID)
       ).rejects.toMatchObject({
         status: 403,
-        message: `${MOBILE_INACTIVE_MESSAGES.lapsed.workspace} Contact the workspace owner for more information.`,
+        message: `${MOBILE_INACTIVE_MESSAGES.lapsed.workspace} ${CONTACT_OWNER}`,
       });
     }
   );
 
+  it("allows a TEAM workspace whose owner has no tier limit (custom tier)", async () => {
+    givenMembership(membershipRow({ ownerTierLimitId: null }));
+
+    await expect(
+      requireOrganizationAccess(mobileRequest(), CALLER_ID)
+    ).resolves.toBe(ORG_ID);
+  });
+
   it("refuses a lapsed TEAM workspace even when the request URL names account-details", async () => {
-    givenMembership(membershipRow());
-    ownerTier("free");
+    givenMembership(membershipRow({ ownerTierLimitId: "free" }));
 
     // The web exempts its account-details pages by URL; a mobile request URL
     // is caller-controlled and must not reach that exemption.
@@ -147,8 +151,9 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
   });
 
   it("refuses the owner of a lapsed TEAM workspace without pointing them to themselves", async () => {
-    givenMembership(membershipRow({ ownerId: CALLER_ID }));
-    ownerTier("free");
+    givenMembership(
+      membershipRow({ ownerId: CALLER_ID, ownerTierLimitId: "free" })
+    );
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
@@ -158,32 +163,82 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
     });
   });
 
-  it("refuses a workspace a Shelf admin disabled, whatever the owner's tier, without blaming the subscription", async () => {
-    givenMembership(membershipRow({ workspaceDisabled: true }));
-    ownerTier("tier_2");
+  it.each([
+    ["a member", OWNER_ID],
+    ["the owner", CALLER_ID],
+  ])(
+    "refuses a workspace a Shelf admin disabled, sending %s to Shelf support",
+    async (_who, ownerId) => {
+      givenMembership(
+        membershipRow({
+          workspaceDisabled: true,
+          ownerId,
+          ownerTierLimitId: "tier_2",
+        })
+      );
+
+      // Only Shelf staff can lift the switch, so nobody is sent to the owner
+      // and the subscription is not blamed.
+      await expect(
+        requireOrganizationAccess(mobileRequest(), CALLER_ID)
+      ).rejects.toMatchObject({
+        status: 403,
+        message: `${MOBILE_INACTIVE_MESSAGES.disabled.workspace} ${CONTACT_SUPPORT}`,
+      });
+    }
+  );
+
+  it("refuses a PERSONAL workspace a Shelf admin disabled", async () => {
+    givenMembership(
+      membershipRow({
+        type: "PERSONAL",
+        workspaceDisabled: true,
+        ownerId: CALLER_ID,
+      })
+    );
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
     ).rejects.toMatchObject({
       status: 403,
-      message: `${MOBILE_INACTIVE_MESSAGES.disabled.workspace} Contact the workspace owner for more information.`,
+      message: `${MOBILE_INACTIVE_MESSAGES.disabled.workspace} ${CONTACT_SUPPORT}`,
     });
   });
 
   it("never refuses a personal workspace for its owner's free tier", async () => {
-    givenMembership(membershipRow({ type: "PERSONAL", ownerId: CALLER_ID }));
-    ownerTier("free");
+    givenMembership(
+      membershipRow({
+        type: "PERSONAL",
+        ownerId: CALLER_ID,
+        ownerTierLimitId: "free",
+      })
+    );
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
     ).resolves.toBe(ORG_ID);
-    // The tier only decides TEAM workspaces, so it is not read at all.
-    expect(ownerFindUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it("lets a Shelf admin into a lapsed TEAM workspace, as the web does", async () => {
-    givenMembership(membershipRow({ callerSystemRoles: ["USER", "ADMIN"] }));
-    ownerTier("free");
+    givenMembership(
+      membershipRow({
+        callerSystemRoles: ["USER", "ADMIN"],
+        ownerTierLimitId: "free",
+      })
+    );
+
+    await expect(
+      requireOrganizationAccess(mobileRequest(), CALLER_ID)
+    ).resolves.toBe(ORG_ID);
+  });
+
+  it("lets a Shelf admin into a workspace a Shelf admin disabled, as the web does", async () => {
+    givenMembership(
+      membershipRow({
+        callerSystemRoles: ["USER", "ADMIN"],
+        workspaceDisabled: true,
+      })
+    );
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
@@ -204,8 +259,7 @@ describe("requireOrganizationAccess workspace lapse gate", () => {
 
 describe("getMobileWorkspaceAccess", () => {
   it("answers active, not-member, and inactive with the 403 for a scanned code's workspace", async () => {
-    givenMembership(membershipRow());
-    ownerTier("tier_2");
+    givenMembership(membershipRow({ ownerTierLimitId: "tier_2" }));
     await expect(
       getMobileWorkspaceAccess({
         userId: CALLER_ID,
@@ -223,8 +277,7 @@ describe("getMobileWorkspaceAccess", () => {
       })
     ).resolves.toEqual({ access: "not-member" });
 
-    givenMembership(membershipRow());
-    ownerTier("free");
+    givenMembership(membershipRow({ ownerTierLimitId: "free" }));
     const answer = await getMobileWorkspaceAccess({
       userId: CALLER_ID,
       organizationId: ORG_ID,
@@ -236,16 +289,18 @@ describe("getMobileWorkspaceAccess", () => {
     expect(answer).toMatchObject({
       error: {
         status: 403,
-        message: `${MOBILE_INACTIVE_MESSAGES.lapsed.code} Contact the workspace owner for more information.`,
+        message: `${MOBILE_INACTIVE_MESSAGES.lapsed.code} ${CONTACT_OWNER}`,
       },
     });
   });
 });
 
 describe("requireOrganizationAccess with premium features off (self-hosted)", () => {
-  it("lets a TEAM workspace through whatever the owner's tier, without reading it", async () => {
+  it("lets a TEAM workspace through whatever the owner's tier", async () => {
     // why: `premiumIsEnabled` is read from the config when `stripe.server`
-    // loads, so the module graph is reloaded with premium switched off.
+    // loads, so the module graph is reloaded with premium switched off. The
+    // reset runs in `finally` so a failed assertion cannot leave premium off
+    // for the tests after this one.
     vi.resetModules();
     vi.doMock("~/config/shelf.config", async (importOriginal) => {
       const actual = await importOriginal<{ config: ShelfConfig }>();
@@ -254,21 +309,19 @@ describe("requireOrganizationAccess with premium features off (self-hosted)", ()
         config: { ...actual.config, enablePremiumFeatures: false },
       };
     });
-    const { db: freshDb } = await import("~/database/db.server");
-    const { requireOrganizationAccess: gate } = await import(
-      "~/modules/api/mobile-auth.server"
-    );
-    vi.mocked(freshDb.userOrganization.findUnique).mockResolvedValue(
-      membershipRow() as never
-    );
-    vi.mocked(freshDb.user.findUniqueOrThrow).mockResolvedValue({
-      tier: { id: "free", tierLimit: { id: "free" } },
-    } as never);
+    try {
+      const { db: freshDb } = await import("~/database/db.server");
+      const { requireOrganizationAccess: gate } = await import(
+        "~/modules/api/mobile-auth.server"
+      );
+      vi.mocked(freshDb.userOrganization.findUnique).mockResolvedValue(
+        membershipRow({ ownerTierLimitId: "free" }) as never
+      );
 
-    await expect(gate(mobileRequest(), CALLER_ID)).resolves.toBe(ORG_ID);
-    expect(freshDb.user.findUniqueOrThrow).not.toHaveBeenCalled();
-
-    vi.doUnmock("~/config/shelf.config");
-    vi.resetModules();
+      await expect(gate(mobileRequest(), CALLER_ID)).resolves.toBe(ORG_ID);
+    } finally {
+      vi.doUnmock("~/config/shelf.config");
+      vi.resetModules();
+    }
   });
 });

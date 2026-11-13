@@ -75,14 +75,7 @@ vi.mock("~/database/db.server", () => {
   const read = (pick: () => unknown) => () => Promise.resolve(pick());
   return {
     db: {
-      // The caller owns a TEAM workspace on the Team tier, so the mobile
-      // workspace gate lets every case through to its own guards.
-      user: {
-        findUniqueOrThrow: read(() => ({
-          ...(h.state.user as object),
-          tier: { id: "tier_2", tierLimit: { id: "tier_2" } },
-        })),
-      },
+      user: { findUniqueOrThrow: read(() => h.state.user) },
       userOrganization: {
         findUnique: read(() => h.state.membership),
         findFirst: read(() => h.state.membership),

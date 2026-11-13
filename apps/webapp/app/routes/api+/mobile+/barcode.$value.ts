@@ -19,7 +19,8 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
-  getMobileWorkspaceAccess,
+  MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+  mobileWorkspaceAccessFromMembership,
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
@@ -116,14 +117,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!foundBarcode) {
       const memberships = await db.userOrganization.findMany({
         where: { userId: user.id, organizationId: { not: organizationId } },
-        // The owning workspace must hold the barcode capability itself —
+        // The owning workspace must hold the barcode capability itself:
         // resolving through a sibling whose add-on lapsed would bypass its
-        // gate. Same canonical rule the /me serializer applies.
+        // gate. Same canonical rule the /me serializer applies. The workspace
+        // gate's columns ride along, so each owner is decided from this row.
         select: {
           organizationId: true,
-          organization: { select: { barcodesEnabled: true } },
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+          organization: {
+            select: {
+              barcodesEnabled: true,
+              ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.organization.select,
+            },
+          },
         },
       });
+      const membershipByOrgId = new Map(
+        memberships.map((membership) => [membership.organizationId, membership])
+      );
       const eligibleOrgIds = memberships
         .filter((membership) => canUseBarcodes(membership.organization))
         .map((membership) => membership.organizationId);
@@ -148,20 +159,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           distinct: ["organizationId"],
         });
 
-        // The code opens in the workspace that owns it, so each owner must
-        // still have the caller as a member and be active. Inactive and
-        // no-longer-member workspaces drop out before the ambiguity check:
+        // The code opens in the workspace that owns it, so each owner must be
+        // active, decided from the membership rows loaded above (no query per
+        // owner). Inactive workspaces drop out before the ambiguity check:
         // they can never open the code, so they must not block one that can.
-        const owners = await Promise.all(
-          owningOrgIds.map(async ({ organizationId: ownerId }) => ({
+        const owners = owningOrgIds.map(({ organizationId: ownerId }) => ({
+          organizationId: ownerId,
+          workspace: mobileWorkspaceAccessFromMembership({
+            userId: user.id,
             organizationId: ownerId,
-            workspace: await getMobileWorkspaceAccess({
-              userId: user.id,
-              organizationId: ownerId,
-              reason: "code",
-            }),
-          }))
-        );
+            membership: membershipByOrgId.get(ownerId) ?? null,
+            reason: "code",
+          }),
+        }));
         const activeOwnerIds = owners
           .filter((owner) => owner.workspace.access === "active")
           .map((owner) => owner.organizationId);
@@ -202,8 +212,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           }
         } else {
           // No active owner. A code held only by inactive workspaces says so,
-          // like a QR scan of one; a membership gone since the list above
-          // falls through to the 404 below.
+          // like a QR scan of one.
           const inactiveOwner = owners.find(
             (owner) => owner.workspace.access === "inactive"
           );

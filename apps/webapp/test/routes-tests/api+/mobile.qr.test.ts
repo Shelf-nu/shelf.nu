@@ -69,19 +69,10 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     // (mobile-auth.server.workspace-lapse.test.ts); here it answers membership
     // from the mocked membership row, as the gate does for an active workspace.
     getMobileWorkspaceAccess: vitest.fn(
-      async ({
-        userId,
-        organizationId,
-      }: {
-        userId: string;
-        organizationId: string;
-      }) => {
-        const { db: mockedDb } = await import("~/database/db.server");
-        const row = await mockedDb.userOrganization.findUnique({
-          where: { userId_organizationId: { userId, organizationId } },
-        });
-        return { access: row ? "active" : "not-member" };
-      }
+      async (args: { userId: string; organizationId: string }) =>
+        (
+          await import("@mocks/mobile-workspace-access")
+        ).fakeMobileWorkspaceAccess(args)
     ),
   };
 });
@@ -147,7 +138,7 @@ import {
 import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 
 const mockUser = {
   id: "user-1",
@@ -483,12 +474,19 @@ describe("GET /api/mobile/qr/:qrId", () => {
   it("refuses a code whose workspace is inactive with a 403 and its message, recording nothing", async () => {
     const message =
       "The workspace this code belongs to is inactive because its subscription has expired.";
-    const inactiveError = Object.assign(new Error(message), { status: 403 });
-    (getMobileWorkspaceAccess as any).mockResolvedValueOnce({
+    // The `~/utils/error` mock above replaces ShelfError with a plain class
+    // that keeps `message` and `status`.
+    const inactiveError = new ShelfError({
+      cause: null,
+      message,
+      label: "Auth",
+      status: 403,
+    });
+    vitest.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
       access: "inactive",
       error: inactiveError,
     });
-    (makeShelfError as any).mockReturnValue({ message, status: 403 });
+    vitest.mocked(makeShelfError).mockReturnValue(inactiveError);
 
     const result = await run(createQrRequest());
 
