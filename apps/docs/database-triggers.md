@@ -62,7 +62,7 @@ We have multiple user creation flows throughout the application (registration, i
 
 | Trigger                                 | Table                     | Kind                                        | Events                                              |
 | --------------------------------------- | ------------------------- | ------------------------------------------- | --------------------------------------------------- |
-| `booking_asset_source_first_mode`       | `BookingAsset`            | immediate, `AFTER ... FOR EACH ROW`         | INSERT, UPDATE, DELETE                              |
+| `booking_asset_source_first_mode`       | `BookingAsset`            | immediate, `AFTER ... FOR EACH ROW`         | UPDATE, only when the old or new mode is not LEGACY |
 | `booking_source_contract_booking_asset` | `BookingAsset`            | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, UPDATE, DELETE                              |
 | `booking_source_contract_source`        | `BookingAssetSource`      | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, UPDATE, DELETE                              |
 | `booking_source_contract_share`         | `BookingDispositionShare` | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, UPDATE, DELETE                              |
@@ -72,7 +72,8 @@ We have multiple user creation flows throughout the application (registration, i
 
 **What it does**:
 
-- The immediate trigger records each slice's `sourceAllocation` the first time the transaction touches it, in a per-transaction temp table (`pg_temp.booking_source_first_mode`, `ON COMMIT DROP`).
+- The immediate trigger records a slice's `sourceAllocation` at its first update that involves a non-LEGACY mode, in a per-transaction temp table (`pg_temp.booking_source_first_mode`, `ON COMMIT DROP`). Inserts and LEGACY to LEGACY updates record nothing: a LEGACY first mode can never fail the no-downgrade check.
+- **LEGACY fast path**: a `BookingAsset` write that is LEGACY before and after, or a booking `ConsumptionLog` write, whose `(bookingId, assetId)` group is unconverted at commit (no non-LEGACY slice and no share row) returns after one indexed lookup (`booking_source_group_is_converted`) and creates no temp table. Today's check-in, check-out and scan-add writes take this path. The triggers on `BookingAssetSource` and `BookingDispositionShare` always enqueue, so a source row on a LEGACY slice is still caught.
 - At COMMIT the deferred triggers derive the affected slice ids and `(bookingId, assetId)` group keys from each row's old and new values, and add each key once to `pg_temp.booking_source_checked`. The call that adds a key runs `check_booking_source_slice(sliceId)` or `check_booking_source_group(bookingId, assetId)` against the final state, so each slice and group is checked once per transaction.
 - A slice that no longer exists is skipped. A group whose booking no longer exists is skipped. A group with no slices left is still checked, because its orphaned shares remain.
 - A violation raises `booking_source_check_<n>: <detail>` with SQLSTATE `check_violation` (23514), `n` being the contract check number (1 to 10). The migration file lists every check.

@@ -889,4 +889,101 @@ describe("booking source contract", () => {
       await cleanup([seeded]);
     }
   });
+
+  it("legacy writes on an unconverted group create no temp table", async () => {
+    const created: SeededOrgWithPool[] = [];
+    const tempTables: Array<{
+      checked: string | null;
+      firstMode: string | null;
+    }> = [];
+    try {
+      const result = await commitAndExpect(async (tx) => {
+        const pool = await seedPool(tx);
+        created.push(pool);
+        const booking = await seedBooking(tx, {
+          organizationId: pool.organizationId,
+          userId: pool.userId,
+          status: "ONGOING",
+          from: FROM,
+          to: TO,
+          slices: [],
+        });
+        const sliceId = randomUUID();
+        await tx.$executeRaw`
+          INSERT INTO "BookingAsset" ("id", "bookingId", "assetId", "quantity")
+          VALUES (${sliceId}, ${booking.bookingId}, ${pool.assetId}, 5)
+        `;
+        await tx.$executeRaw`
+          UPDATE "BookingAsset" SET "checkedOutQuantity" = 5
+          WHERE "id" = ${sliceId}
+        `;
+        await insertReturnLog(tx, {
+          assetId: pool.assetId,
+          userId: pool.userId,
+          bookingId: booking.bookingId,
+          quantity: 2,
+        });
+        // Fire the deferred triggers now, so the temp tables they would
+        // create are visible to the query below, inside the transaction.
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        const rows = await tx.$queryRaw<
+          Array<{ checked: string | null; firstMode: string | null }>
+        >`
+          SELECT
+            to_regclass('pg_temp.booking_source_checked')::text AS "checked",
+            to_regclass('pg_temp.booking_source_first_mode')::text AS "firstMode"
+        `;
+        tempTables.push(...rows);
+      });
+      expect(result).toEqual({ ok: true });
+      expect(tempTables).toEqual([{ checked: null, firstMode: null }]);
+    } finally {
+      await cleanup(created);
+    }
+  });
+
+  it("a LEGACY slice inserted into a group that already has shares fails check 2", async () => {
+    // Committed first, so the slice insert alone must bring the group check:
+    // the booking has no slice, only a RETURN log fully covered by an
+    // orphaned share, which makes the group converted.
+    const seeded = await commitSeed(async (tx) => {
+      const pool = await seedPool(tx);
+      const booking = await seedBooking(tx, {
+        organizationId: pool.organizationId,
+        userId: pool.userId,
+        status: "ONGOING",
+        from: FROM,
+        to: TO,
+        slices: [],
+      });
+      const logId = await insertReturnLog(tx, {
+        assetId: pool.assetId,
+        userId: pool.userId,
+        bookingId: booking.bookingId,
+        quantity: 2,
+      });
+      await insertShare(tx, {
+        organizationId: pool.organizationId,
+        logId,
+        bookingId: booking.bookingId,
+        assetId: pool.assetId,
+        sliceId: null,
+        sourceId: null,
+        quantity: 2,
+      });
+      return { ...pool, bookingId: booking.bookingId };
+    });
+
+    try {
+      const result = await commitAndExpect(async (tx) => {
+        await tx.$executeRaw`
+          INSERT INTO "BookingAsset" ("id", "bookingId", "assetId", "quantity")
+          VALUES (${randomUUID()}, ${seeded.bookingId}, ${seeded.assetId}, 2)
+        `;
+      });
+      expectCheckFailure(result, 2);
+    } finally {
+      await cleanup([seeded]);
+    }
+  });
 });

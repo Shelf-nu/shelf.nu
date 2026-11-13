@@ -4,16 +4,22 @@
 --
 -- How it works:
 --
---   * An immediate row trigger on "BookingAsset" records each slice's
---     "sourceAllocation" the first time the transaction touches it, in the
---     per-transaction temp table pg_temp.booking_source_first_mode. An
---     inserted slice records NULL (it had no earlier mode).
+--   * An immediate row trigger on "BookingAsset" records a slice's
+--     "sourceAllocation" at its first update that involves a non-LEGACY mode,
+--     in the per-transaction temp table pg_temp.booking_source_first_mode.
+--     No record means "no earlier non-LEGACY mode".
 --   * Deferred constraint triggers on "BookingAssetSource", "BookingAsset",
 --     "BookingDispositionShare" and "ConsumptionLog" fire at COMMIT, derive
 --     the affected slice ids and group keys from OLD and NEW, ignore NULL
 --     keys, and add each key to pg_temp.booking_source_checked. Only the call
 --     that adds a key runs its check, so each slice and each group is checked
 --     once per transaction, on the final state.
+--   * LEGACY fast path: a "BookingAsset" write that is LEGACY before and
+--     after, or a booking "ConsumptionLog" write, whose group is unconverted
+--     at commit (no non-LEGACY slice, no share row) returns after one indexed
+--     lookup, creating no temp table. Writers that know nothing about source
+--     rows therefore pay almost nothing. The triggers on the two source tables
+--     always enqueue.
 --   * check_booking_source_slice runs checks 1, 3 to 8 and 10 for one slice;
 --     check_booking_source_group runs checks 2, 9 and 10 for one group.
 --     A slice that no longer exists is skipped. A group whose booking no
@@ -70,24 +76,52 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Immediate row trigger on "BookingAsset": remembers the slice's mode before
--- the transaction's first write to it. Later writes keep the first value.
+-- Immediate row trigger on "BookingAsset" (UPDATE only, and only when the old
+-- or new mode is not LEGACY, see the trigger's WHEN): remembers the slice's
+-- mode before the first such update. Later updates keep the first value.
+-- A LEGACY to non-LEGACY update records 'LEGACY', so a slice converted and
+-- reverted inside one transaction is not mistaken for a downgrade.
 CREATE OR REPLACE FUNCTION booking_source_record_first_mode()
 RETURNS TRIGGER AS $$
 BEGIN
   PERFORM booking_source_ensure_temp_tables();
-  IF TG_OP = 'INSERT' THEN
-    INSERT INTO pg_temp.booking_source_first_mode (slice_id, mode)
-      VALUES (NEW.id, NULL)
-      ON CONFLICT (slice_id) DO NOTHING;
-  ELSE
-    INSERT INTO pg_temp.booking_source_first_mode (slice_id, mode)
-      VALUES (OLD.id, OLD."sourceAllocation"::text)
-      ON CONFLICT (slice_id) DO NOTHING;
-  END IF;
+  INSERT INTO pg_temp.booking_source_first_mode (slice_id, mode)
+    VALUES (OLD.id, OLD."sourceAllocation"::text)
+    ON CONFLICT (slice_id) DO NOTHING;
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Whether a (booking, asset) group is converted: it has a non-LEGACY slice or
+-- any share row. Reads only existing indexes: the slice lookup is split on
+-- "assetKitId" so each half matches a partial unique index,
+-- "BookingAsset_manual_unique" ("bookingId", "assetId") WHERE "assetKitId" IS
+-- NULL and "BookingAsset_kit_unique" ("bookingId", "assetKitId") WHERE
+-- "assetKitId" IS NOT NULL; the share lookup uses
+-- "BookingDispositionShare_bookingId_assetId_idx".
+CREATE OR REPLACE FUNCTION booking_source_group_is_converted(
+  p_booking_id text, p_asset_id text
+)
+RETURNS boolean AS $$
+  SELECT p_booking_id IS NOT NULL AND p_asset_id IS NOT NULL AND (
+    EXISTS (
+      SELECT 1 FROM "BookingAsset"
+      WHERE "bookingId" = p_booking_id AND "assetId" = p_asset_id
+        AND "assetKitId" IS NULL
+        AND "sourceAllocation" <> 'LEGACY'
+    )
+    OR EXISTS (
+      SELECT 1 FROM "BookingAsset"
+      WHERE "bookingId" = p_booking_id AND "assetId" = p_asset_id
+        AND "assetKitId" IS NOT NULL
+        AND "sourceAllocation" <> 'LEGACY'
+    )
+    OR EXISTS (
+      SELECT 1 FROM "BookingDispositionShare"
+      WHERE "bookingId" = p_booking_id AND "assetId" = p_asset_id
+    )
+  );
+$$ LANGUAGE sql STABLE;
 
 -- Check 10 and the share half of check 6 for a set of shares.
 CREATE OR REPLACE FUNCTION check_booking_source_shares(p_share_ids text[])
@@ -332,18 +366,8 @@ BEGIN
     RETURN;
   END IF;
 
-  -- A group is converted when it has a non-LEGACY slice or any share row.
   -- An unconverted (LEGACY) group has nothing more to check.
-  IF NOT EXISTS (
-      SELECT 1 FROM "BookingAsset"
-      WHERE "bookingId" = p_booking_id AND "assetId" = p_asset_id
-        AND "sourceAllocation" <> 'LEGACY'
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM "BookingDispositionShare"
-      WHERE "bookingId" = p_booking_id AND "assetId" = p_asset_id
-    )
-  THEN
+  IF NOT booking_source_group_is_converted(p_booking_id, p_asset_id) THEN
     RETURN;
   END IF;
 
@@ -477,9 +501,30 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Deferred trigger on "BookingAsset": the slice itself and its group.
+--
+-- LEGACY fast path: a write whose old and new modes are both LEGACY, in a
+-- group that is unconverted at commit, cannot break the contract, so it
+-- returns before touching any temp table. Such a slice can only fail check 1
+-- (impossible: it was LEGACY when written) or check 3 (a source row insert
+-- enqueues its slice through the source trigger); checks 2 and 9 pass for an
+-- unconverted group, and the other checks apply to converted slices only.
 CREATE OR REPLACE FUNCTION booking_source_contract_on_booking_asset()
 RETURNS TRIGGER AS $$
 BEGIN
+  IF (TG_OP = 'INSERT' OR OLD."sourceAllocation" = 'LEGACY')
+    AND (TG_OP = 'DELETE' OR NEW."sourceAllocation" = 'LEGACY')
+    AND NOT (
+      TG_OP IN ('UPDATE', 'DELETE')
+      AND booking_source_group_is_converted(OLD."bookingId", OLD."assetId")
+    )
+    AND NOT (
+      TG_OP IN ('INSERT', 'UPDATE')
+      AND booking_source_group_is_converted(NEW."bookingId", NEW."assetId")
+    )
+  THEN
+    RETURN NULL;
+  END IF;
+
   IF TG_OP IN ('UPDATE', 'DELETE') THEN
     PERFORM booking_source_enqueue_slice(OLD.id);
     PERFORM booking_source_enqueue_group(OLD."bookingId", OLD."assetId");
@@ -544,9 +589,26 @@ $$ LANGUAGE plpgsql;
 -- Deferred trigger on "ConsumptionLog". The triggers below fire only for
 -- logs with a booking (WHEN on the row values), so the many logs written
 -- outside bookings queue no event at all.
+--
+-- LEGACY fast path: a log whose old and new groups are both unconverted at
+-- commit returns before touching any temp table. Checks 9 and 10 apply to
+-- converted groups only, and the log can have no valid shares: a share
+-- carries its log's group, which would make that group converted.
 CREATE OR REPLACE FUNCTION booking_source_contract_on_log()
 RETURNS TRIGGER AS $$
 BEGIN
+  IF NOT (
+      TG_OP IN ('UPDATE', 'DELETE')
+      AND booking_source_group_is_converted(OLD."bookingId", OLD."assetId")
+    )
+    AND NOT (
+      TG_OP IN ('INSERT', 'UPDATE')
+      AND booking_source_group_is_converted(NEW."bookingId", NEW."assetId")
+    )
+  THEN
+    RETURN NULL;
+  END IF;
+
   IF TG_OP IN ('UPDATE', 'DELETE') THEN
     PERFORM booking_source_enqueue_log(OLD.id, OLD."bookingId", OLD."assetId");
   END IF;
@@ -557,10 +619,16 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Immediate: records each slice's mode at the transaction's first touch.
+-- Immediate: records a slice's mode at its first update that involves a
+-- non-LEGACY mode. LEGACY to LEGACY updates and inserts record nothing; check 1
+-- treats a missing record as "no earlier mode", which is exact for them (a
+-- LEGACY first mode can never fail check 1). Deletes record nothing: a
+-- deleted slice is skipped by its check.
 CREATE TRIGGER booking_asset_source_first_mode
-  AFTER INSERT OR UPDATE OR DELETE ON "BookingAsset"
-  FOR EACH ROW EXECUTE FUNCTION booking_source_record_first_mode();
+  AFTER UPDATE ON "BookingAsset"
+  FOR EACH ROW
+  WHEN (OLD."sourceAllocation" <> 'LEGACY' OR NEW."sourceAllocation" <> 'LEGACY')
+  EXECUTE FUNCTION booking_source_record_first_mode();
 
 -- Deferred: the contract checks, on final state at COMMIT.
 CREATE CONSTRAINT TRIGGER booking_source_contract_source
