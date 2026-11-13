@@ -22,11 +22,11 @@
  */
 
 import { useMemo, useState } from "react";
-import type { Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
 import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import type { OngoingBookingPayload } from "~/routes/api+/assets.$assetId.ongoing-booking";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 import {
   getQuantityBadgeLabelAndColor,
@@ -192,7 +192,9 @@ export function AssetStatusBadge({
   // checking it out), and triggering an `ongoing-booking` fan-out for
   // every QT row would be wasted work — the booking row already shows
   // the relevant context inline.
-  const { data } = useApiQuery<Booking>({
+  // `booking` is null when no active booking holds the asset or when the
+  // viewer may not see the one that does.
+  const { data } = useApiQuery<OngoingBookingPayload>({
     api: `/api/assets/${id}/ongoing-booking`,
     enabled: status === AssetStatus.CHECKED_OUT && !isQtyTracked,
   });
@@ -202,7 +204,7 @@ export function AssetStatusBadge({
       return null;
     }
 
-    return data;
+    return data?.booking ?? null;
   }, [data, status]);
 
   /**
@@ -314,13 +316,19 @@ export function AssetStatusBadge({
 
       <When truthy={!!bookingToShow}>
         <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
-          <Button
-            variant="link-gray"
-            to={`/bookings/${bookingToShow?.id}`}
-            target="_blank"
-          >
-            {bookingToShow?.name}
-          </Button>
+          {/* A viewer who may see who holds the asset but not open the
+              booking gets its name without a link that would dead-end. */}
+          {bookingToShow?.canOpen ? (
+            <Button
+              variant="link-gray"
+              to={`/bookings/${bookingToShow.id}`}
+              target="_blank"
+            >
+              {bookingToShow.name}
+            </Button>
+          ) : (
+            <span className="text-sm text-gray-600">{bookingToShow?.name}</span>
+          )}
         </HoverCardContent>
       </When>
     </HoverCard>

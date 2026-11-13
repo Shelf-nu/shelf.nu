@@ -21098,6 +21098,18 @@ export async function checkoutRemainingAssets({
   });
 }
 
+/**
+ * Finds the ONGOING or OVERDUE booking that currently holds an asset.
+ *
+ * Selects only the booking's id and name plus the two custody links a caller
+ * needs to decide whether the viewer may see the booking (`canSeeBooking`).
+ * Descriptions, dates and creator ids stay in the database.
+ *
+ * @param args.assetId - The checked-out asset.
+ * @param args.organizationId - The workspace the booking must belong to.
+ * @returns The booking, or `null` when no active booking holds the asset.
+ * @throws {ShelfError} If the query fails.
+ */
 export async function getOngoingBookingForAsset({
   assetId,
   organizationId,
@@ -21112,6 +21124,12 @@ export async function getOngoingBookingForAsset({
         organizationId,
         bookingAssets: { some: { assetId } },
         partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
+      },
+      select: {
+        id: true,
+        name: true,
+        custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
       },
     });
 
