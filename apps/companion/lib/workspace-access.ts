@@ -217,3 +217,46 @@ export function workspaceInactiveScanResult(
     announcement: `Workspace inactive. ${text}`,
   };
 }
+
+/** What Bookings offers in a personal workspace, by the person's team workspaces. */
+export type PersonalBookingsHint =
+  /** Active team workspaces exist: offer the switch (to the only one, if one). */
+  | { kind: "switch"; text: string; onlyTeam: Organization | null }
+  /** Team workspaces exist but all are inactive: point at Settings for why. */
+  | { kind: "inactive-team"; text: string }
+  /** No team workspace at all: suggest creating one on the web. */
+  | { kind: "create-team"; text: string };
+
+/**
+ * The Bookings text and action for a person in their personal workspace.
+ * Bookings live in team workspaces, so the screen explains that and offers
+ * the shortest way to one. An inactive team workspace refuses every request,
+ * so it is never offered as a switch; when it is the only kind the person
+ * has, the text sends them to the workspace list in Settings, which shows
+ * why it is inactive.
+ *
+ * @param orgs - The workspaces from `/api/mobile/me`.
+ * @returns Which case applies and its text.
+ */
+export function personalBookingsHint(
+  orgs: readonly Organization[]
+): PersonalBookingsHint {
+  const teams = activeTeamWorkspaces(orgs);
+  if (teams.length > 0) {
+    return {
+      kind: "switch",
+      text: "Your personal workspace tracks your own gear. Switch to a team workspace to plan and reserve equipment.",
+      onlyTeam: teams.length === 1 ? teams[0] : null,
+    };
+  }
+  if (orgs.some((org) => org.type === "TEAM")) {
+    return {
+      kind: "inactive-team",
+      text: "Your personal workspace tracks your own gear. Your team workspace is inactive; the workspace list in Settings shows why.",
+    };
+  }
+  return {
+    kind: "create-team",
+    text: "Your personal workspace tracks your own gear. Create a team workspace on the web to plan and reserve equipment.",
+  };
+}

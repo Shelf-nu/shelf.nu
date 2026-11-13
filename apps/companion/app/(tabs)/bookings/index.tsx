@@ -31,7 +31,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import { activeTeamWorkspaces } from "@/lib/workspace-access";
+import { personalBookingsHint } from "@/lib/workspace-access";
 import {
   fontSize,
   spacing,
@@ -595,25 +595,16 @@ function BookingsListContent() {
   // Bookings belong to team workspaces. In a personal workspace, explain that
   // and hand the user the shortest path to one instead of an empty list.
   if (currentOrg?.type === "PERSONAL") {
-    // An inactive team workspace refuses every request, so it is not offered.
-    const teamOrgs = activeTeamWorkspaces(organizations);
-    const onlyTeam = teamOrgs.length === 1 ? teamOrgs[0] : null;
-    // A team workspace exists but every one is inactive: point at Settings,
-    // which names the reason, rather than suggesting a new team.
-    const hasInactiveTeam =
-      teamOrgs.length === 0 && organizations.some((org) => org.type === "TEAM");
+    // Which text and action apply; an inactive team workspace is never
+    // offered (see `personalBookingsHint`).
+    const hint = personalBookingsHint(organizations);
+    const onlyTeam = hint.kind === "switch" ? hint.onlyTeam : null;
     return (
       <View style={styles.centered}>
         <Ionicons name="calendar-outline" size={48} color={colors.border} />
         <Text style={styles.emptyTitle}>Bookings live in team workspaces</Text>
-        <Text style={styles.emptyText}>
-          {teamOrgs.length > 0
-            ? "Your personal workspace tracks your own gear. Switch to a team workspace to plan and reserve equipment."
-            : hasInactiveTeam
-            ? "Your personal workspace tracks your own gear. Your team workspace is inactive; the workspace list in Settings shows why."
-            : "Your personal workspace tracks your own gear. Create a team workspace on the web to plan and reserve equipment."}
-        </Text>
-        {hasInactiveTeam ? (
+        <Text style={styles.emptyText}>{hint.text}</Text>
+        {hint.kind === "inactive-team" ? (
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => pushIntoTab("/(tabs)/settings")}
@@ -628,7 +619,7 @@ function BookingsListContent() {
             />
             <Text style={styles.retryText}>Open Settings</Text>
           </TouchableOpacity>
-        ) : teamOrgs.length > 0 ? (
+        ) : hint.kind === "switch" ? (
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => {

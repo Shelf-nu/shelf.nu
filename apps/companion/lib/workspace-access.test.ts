@@ -9,6 +9,7 @@ import { describe, test } from "node:test";
 import type { Organization } from "./api/types";
 import {
   activeTeamWorkspaces,
+  personalBookingsHint,
   inactiveWorkspaceMessage,
   tabShowsInactiveScreen,
   workspaceInactiveScanResult,
@@ -207,5 +208,34 @@ describe("workspaceInactiveScanResult", () => {
       workspaceInactiveScanResult(null).message,
       "The workspace this code belongs to is inactive."
     );
+  });
+});
+
+describe("personalBookingsHint", () => {
+  const personal = { ...org("personal", false), type: "PERSONAL" };
+
+  test("sends a person whose only team workspace is inactive to the workspace list in Settings", () => {
+    const hint = personalBookingsHint([personal, org("lapsed-team", true)]);
+
+    assert.equal(hint.kind, "inactive-team");
+    assert.equal(
+      hint.text,
+      "Your personal workspace tracks your own gear. Your team workspace is inactive; the workspace list in Settings shows why."
+    );
+  });
+
+  test("offers the switch when an active team workspace exists, never to an inactive one", () => {
+    const hint = personalBookingsHint([
+      personal,
+      org("lapsed-team", true),
+      org("team", false),
+    ]);
+
+    assert.equal(hint.kind, "switch");
+    assert.equal(hint.kind === "switch" && hint.onlyTeam?.id, "team");
+  });
+
+  test("suggests a new team workspace only when there is none at all", () => {
+    assert.equal(personalBookingsHint([personal]).kind, "create-team");
   });
 });
