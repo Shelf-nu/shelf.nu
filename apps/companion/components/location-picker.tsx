@@ -289,11 +289,14 @@ export function LocationPicker({
       (page, perPage) =>
         api.locations(orgId, debouncedSearch || undefined, { page, perPage }),
       (data) => data.locations,
-      // Stop walking pages as soon as a newer search or workspace takes over.
-      () => generation === requestGenerationRef.current
+      {
+        // Stop walking pages as soon as a newer search or workspace takes over.
+        isCurrent: () => generation === requestGenerationRef.current,
+        fallbackError: "Failed to load locations",
+      }
     );
 
-    // Superseded by a newer fetch — drop this result entirely.
+    // Superseded by a newer fetch: drop this result entirely.
     if (generation !== requestGenerationRef.current) return;
 
     if (fetchErr) {

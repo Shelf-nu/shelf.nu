@@ -100,6 +100,36 @@ test("treats a page with neither data nor an error as a failure", async () => {
   assert.deepEqual(rows, [{ id: "a" }]);
 });
 
+test("reports the caller's own message for a page with neither data nor an error", async () => {
+  const { error } = await fetchAllPages<{ locations: Loc[] }, Loc>(
+    async () => ({ data: null, error: null }),
+    (d) => d.locations,
+    { fallbackError: "Failed to load locations" }
+  );
+
+  assert.equal(error, "Failed to load locations");
+});
+
+test("keeps a row once when two pages both return it", async () => {
+  // The list shifted between the two page requests, so "b" closes page 1 and
+  // opens page 2.
+  const fetchPage = async (page: number) =>
+    page === 1
+      ? {
+          data: { locations: [{ id: "a" }, { id: "b" }], totalPages: 2 },
+          error: null,
+        }
+      : {
+          data: { locations: [{ id: "b" }, { id: "c" }], totalPages: 2 },
+          error: null,
+        };
+
+  const { rows, error } = await fetchAllPages(fetchPage, (d) => d.locations);
+
+  assert.equal(error, null);
+  assert.deepEqual(rows, [{ id: "a" }, { id: "b" }, { id: "c" }]);
+});
+
 test("returns the error and the rows loaded so far when a page fails", async () => {
   const fetchPage = async (page: number) =>
     page === 1
@@ -125,7 +155,7 @@ test("stops after the page during which the walk became obsolete", async () => {
       return fetchPage(page, perPage);
     },
     (d) => d.locations,
-    () => current
+    { isCurrent: () => current }
   );
 
   assert.deepEqual(

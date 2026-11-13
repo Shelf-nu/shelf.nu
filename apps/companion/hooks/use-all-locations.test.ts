@@ -114,6 +114,67 @@ describe("useAllLocations", () => {
     );
   });
 
+  it("ignores a superseded load that fails after a newer one finished", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    const slowA = pending.shift()!;
+    loader.setOrg("B");
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("B", 0, 3, 1));
+    await flush();
+
+    slowA.resolve({ error: "Network error" });
+    await flush();
+
+    assert.deepEqual(
+      loader.result().locations.map((l) => l.id),
+      ["B-0", "B-1", "B-2"]
+    );
+    assert.equal(loader.result().isLocationsLoading, false);
+    assert.equal(loader.result().error, null);
+  });
+
+  it("reports the error when a later page fails and the list is partial", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("A", 0, 100, 2));
+    await flush();
+    pending.shift()!.resolve({ error: "Network error" });
+    await flush();
+
+    assert.equal(loader.result().locations.length, 100);
+    assert.equal(loader.result().error, "Network error");
+    assert.equal(loader.result().truncated, false);
+
+    // The retry that loads every page clears it.
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("A", 0, 100, 2));
+    await flush();
+    pending.shift()!.resolve(page("A", 100, 20, 2));
+    await flush();
+
+    assert.equal(loader.result().locations.length, 120);
+    assert.equal(loader.result().error, null);
+  });
+
+  it("reports a list cut off at the hard stop as truncated", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    for (let p = 0; p < 50; p += 1) {
+      pending.shift()!.resolve(page("A", p, 1, 60));
+      await flush();
+    }
+
+    assert.equal(loader.result().truncated, true);
+    assert.equal(loader.result().error, null);
+  });
+
   it("keeps the workspace's complete list when a reload fails on a later page", async () => {
     const { fetchPage, pending } = fakeEndpoint();
     const loader = renderLoader("A", fetchPage);
@@ -131,6 +192,8 @@ describe("useAllLocations", () => {
     await flush();
 
     assert.equal(loader.result().locations.length, 120);
+    // The list shown is whole, so there is nothing to warn about.
+    assert.equal(loader.result().error, null);
   });
 
   it("does not keep a list cut off at the hard stop as complete", async () => {
