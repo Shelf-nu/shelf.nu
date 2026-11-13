@@ -554,6 +554,9 @@ export default function AuditOverview() {
           ItemComponent={AuditAssetListItem}
           customEmptyStateContent={filterMetadata.emptyState}
           bulkActions={canRemoveAssets ? <BulkActionsDropdown /> : undefined}
+          // The bulk remove acts on the listed asset ids only; it does not
+          // resolve "Select all" across pages, so the list must not offer it.
+          disableSelectAllItems
           headerChildren={
             <>
               {showAuditStatusColumn && (

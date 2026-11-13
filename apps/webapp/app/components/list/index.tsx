@@ -230,7 +230,9 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
             <tbody>
               {items.map((item) => (
                 <ListItem item={item} key={item.id} navigate={navigate}>
-                  {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
+                  {bulkActions ? (
+                    <BulkListItemCheckbox item={item} pageItems={items} />
+                  ) : null}
                   <ItemComponent
                     item={item}
                     extraProps={extraItemComponentProps}
