@@ -134,6 +134,9 @@ export async function createNote(
 /**
  * Creates multiple notes with the same content.
  *
+ * A thin wrapper over {@link createNotesPerAsset}, which owns the ownership
+ * check, the insert and the error wrapping. An empty `assetIds` writes nothing.
+ *
  * `organizationId` is required and validated: every target asset must belong
  * to that organization before the notes are written (cross-org IDOR guard).
  *
@@ -159,29 +162,17 @@ export async function createNotes(
   },
   tx?: NotesTxClient
 ) {
-  try {
-    const client = tx ?? db;
-
-    await assertAssetsBelongToOrg({ assetIds, organizationId }, tx);
-
-    const data = assetIds.map((id) => ({
-      content,
-      type: type || "COMMENT",
+  // One implementation for both shapes: the ownership check, the insert and
+  // the error wrapping live in `createNotesPerAsset`.
+  return createNotesPerAsset(
+    {
+      notes: assetIds.map((assetId) => ({ assetId, content })),
+      type,
       userId,
-      assetId: id,
-    }));
-
-    return await client.note.createMany({
-      data,
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating notes",
-      additionalData: { type, userId, assetIds },
-      label,
-    });
-  }
+      organizationId,
+    },
+    tx
+  );
 }
 
 /**

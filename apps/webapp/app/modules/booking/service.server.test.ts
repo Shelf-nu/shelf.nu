@@ -19414,7 +19414,7 @@ describe("addScannedAssetsToBooking asset notes", () => {
    * the size of the scan. The whole batch goes out in a single call.
    */
   it("writes the asset notes for a whole scan in one call", async () => {
-    expect.assertions(3);
+    expect.assertions(6);
 
     const looseIds = Array.from({ length: 12 }, (_, i) => `asset-loose-${i}`);
 
@@ -19471,9 +19471,30 @@ describe("addScannedAssetsToBooking asset notes", () => {
     });
 
     expect(noteService.createNotesPerAsset).toHaveBeenCalledTimes(1);
-    const [{ notes }] = (
+    const [{ notes, ...attribution }] = (
       noteService.createNotesPerAsset as ReturnType<typeof vitest.fn>
     ).mock.calls[0];
+
+    // Who wrote the notes, as what, and in which workspace.
+    expect(attribution).toEqual({
+      type: "UPDATE",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // What the notes say. A loose scan names the asset and the booking; a kit
+    // member also names the kit it arrived through.
+    const contentFor = (assetId: string) =>
+      notes.find(
+        (note: { assetId: string; content: string }) => note.assetId === assetId
+      )?.content;
+    expect(contentFor("asset-loose-0")).toContain(
+      'added {% link to="/assets/asset-loose-0" text="asset-loose-0" /%} to {% link to="/bookings/booking-scan" text="Scan Booking" /%}.'
+    );
+    expect(contentFor("asset-kit-member")).toContain(
+      'added {% link to="/assets/asset-kit-member" text="asset-kit-member" /%} via {% link to="/kits/kit-1" text="Kit One" /%} to {% link to="/bookings/booking-scan" text="Scan Booking" /%}.'
+    );
+
     // One note per arrived asset: the twelve loose scans and the kit member.
     expect(
       notes.map((note: { assetId: string }) => note.assetId).sort()

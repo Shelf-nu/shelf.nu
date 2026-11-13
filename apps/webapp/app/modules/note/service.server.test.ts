@@ -331,9 +331,7 @@ describe("note service", () => {
       });
     });
 
-    it("handles empty asset IDs array", async () => {
-      vi.mocked(db.note.createMany).mockResolvedValue({ count: 0 });
-
+    it("writes nothing for an empty asset IDs array", async () => {
       const result = await createNotes({
         content: "Test note",
         userId: "user-1",
@@ -341,10 +339,9 @@ describe("note service", () => {
         organizationId: "org-1",
       });
 
-      expect(db.note.createMany).toHaveBeenCalledWith({
-        data: [],
-      });
-
+      // Nothing to check and nothing to insert, so no round trip at all.
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+      expect(db.note.createMany).not.toHaveBeenCalled();
       expect(result.count).toBe(0);
     });
 
