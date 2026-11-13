@@ -31,6 +31,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { personalBookingsHint } from "@/lib/workspace-access";
 import {
   fontSize,
   spacing,
@@ -90,10 +91,9 @@ const STATUS_FILTERS: StatusFilter[] = [
     emptyTitle: "No active bookings",
     emptyHint: "Active bookings will appear here when created",
   },
-  // why: the four single-status chips below read from @shelf/labels rather
-  // than being hand-typed. The COMPLETE one is where that drifted visibly — it
-  // said "Completed" while the badge on the very same row said "Complete",
-  // because badges go through formatStatus and these did not.
+  // why: the four single-status chips below read from @shelf/labels, the
+  // same source the status badges use (through formatStatus), so a chip and
+  // the badge on its rows always name a status the same way.
   {
     label: BOOKING_STATUS_LABELS.RESERVED,
     value: "RESERVED",
@@ -195,10 +195,9 @@ function BookingsListContent() {
   /**
    * The lens switch lives in the header, not in the body.
    *
-   * why: it used to sit under the search box as a third stacked control row,
-   * which pushed the actual bookings down and read as clutter. It also changes
-   * the WHOLE screen, so it belongs with the title rather than among the
-   * filters it replaces. Both options stay visible, since a segmented control
+   * why: a third control row under the search box would push the bookings
+   * down and read as clutter, and the switch changes the WHOLE screen, so it
+   * belongs with the title rather than among the filters it replaces. Both options stay visible, since a segmented control
    * is discoverable in a way a single toggling icon is not, and this is a
    * feature nobody knows exists yet.
    */
@@ -301,11 +300,10 @@ function BookingsListContent() {
    * Re-fetch immediately when the filter, search, or sort changes.
    *
    * Skipped entirely while the calendar is the visible lens: it runs its own
-   * query against the same filters, so every pill tap and every debounced
-   * keystroke was firing BOTH - a findMany and a count for a list that is not
-   * on screen, alongside the calendar's own. `view` is a dependency so
-   * switching back to the list refetches it with whatever the filters became
-   * in the meantime.
+   * query against the same filters, so fetching here as well would send a
+   * findMany and a count for a list that is not on screen on every pill tap
+   * and debounced keystroke. `view` is a dependency so switching back to the
+   * list refetches it with whatever the filters became in the meantime.
    */
   useEffect(() => {
     if (!currentOrg || !hasFetchedBookings.current || view !== "list") return;
@@ -594,18 +592,31 @@ function BookingsListContent() {
   // Bookings belong to team workspaces. In a personal workspace, explain that
   // and hand the user the shortest path to one instead of an empty list.
   if (currentOrg?.type === "PERSONAL") {
-    const teamOrgs = organizations.filter((org) => org.type === "TEAM");
-    const onlyTeam = teamOrgs.length === 1 ? teamOrgs[0] : null;
+    // Which text and action apply; an inactive team workspace is never
+    // offered (see `personalBookingsHint`).
+    const hint = personalBookingsHint(organizations);
+    const onlyTeam = hint.kind === "switch" ? hint.onlyTeam : null;
     return (
       <View style={styles.centered}>
         <Ionicons name="calendar-outline" size={48} color={colors.border} />
         <Text style={styles.emptyTitle}>Bookings live in team workspaces</Text>
-        <Text style={styles.emptyText}>
-          {teamOrgs.length > 0
-            ? "Your personal workspace tracks your own gear. Switch to a team workspace to plan and reserve equipment."
-            : "Your personal workspace tracks your own gear. Create a team workspace on the web to plan and reserve equipment."}
-        </Text>
-        {teamOrgs.length > 0 ? (
+        <Text style={styles.emptyText}>{hint.text}</Text>
+        {hint.kind === "inactive-team" ? (
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => pushIntoTab("/(tabs)/settings")}
+            activeOpacity={0.7}
+            accessibilityLabel="Open Settings"
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="settings-outline"
+              size={16}
+              color={colors.primaryForeground}
+            />
+            <Text style={styles.retryText}>Open Settings</Text>
+          </TouchableOpacity>
+        ) : hint.kind === "switch" ? (
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => {
@@ -642,11 +653,9 @@ function BookingsListContent() {
       {/* Keyword search + sort.
           why here rather than inside the list branch: search and the status
           pills say WHAT you are looking at, and the header switch says HOW.
-          They compose. Hiding them in calendar mode meant a filter you had
-          set was silently ignored the moment you switched lens, and the two
-          views disagreed by default — the list opens on Active (four
-          statuses) while the calendar was drawing five. Web applies the same
-          filter set to its calendar; this now matches. */}
+          They compose: a filter applies to both lenses, so switching lens
+          never silently drops one, and both open on the same Active set.
+          Web applies the same filter set to its calendar. */}
       <View style={styles.searchRow}>
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={18} color={colors.mutedLight} />
@@ -847,11 +856,11 @@ const useStyles = createStyles((colors, shadows) => ({
   /**
    * Two-state lens switch in the native header.
    *
-   * why: no track. A grey track on a white header is nearly invisible, and the
-   * active chip inside it was white on near-white, so the selected state did
-   * not read at all. Colour carries the state instead, using exactly the
-   * active/inactive language of the tab bar directly below, which users already
-   * understand without being taught.
+   * why: no track. A grey track on a white header is nearly invisible, and a
+   * white chip inside it would make the selected state unreadable. Colour
+   * carries the state instead, using exactly the active/inactive language of
+   * the tab bar directly below, which users already understand without being
+   * taught.
    */
   lens: {
     flexDirection: "row",

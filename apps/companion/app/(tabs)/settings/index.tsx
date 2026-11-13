@@ -45,8 +45,13 @@ import {
   subscribeToServerChange,
 } from "@/lib/server";
 import ConnectServerSheet from "@/components/connect-server-sheet";
+import WorkspacePickerSheet from "@/components/workspace-picker-sheet";
 import { getApiBaseUrl } from "@/lib/api";
 import { openShelfWebUrl } from "@/lib/navigation";
+import {
+  inactiveWorkspaceMessage,
+  isWorkspaceInactive,
+} from "@/lib/workspace-access";
 import { usePushSettings } from "@/hooks/use-push-settings";
 import { notificationsRowValue } from "@/lib/push/preferences";
 
@@ -74,6 +79,7 @@ export default function SettingsScreen() {
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
   const [isConnectVisible, setIsConnectVisible] = useState(false);
+  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [isSwitchingServer, setIsSwitchingServer] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const notificationsValue = notificationsRowValue(usePushSettings().state);
@@ -187,17 +193,7 @@ export default function SettingsScreen() {
 
   const handleSwitchOrg = () => {
     if (organizations.length <= 1) return;
-
-    Alert.alert("Switch Workspace", "Select a workspace:", [
-      ...organizations.map((org) => ({
-        text: `${org.name}${org.id === currentOrg?.id ? " (current)" : ""}`,
-        onPress: () => {
-          Haptics.selectionAsync();
-          setCurrentOrg(org);
-        },
-      })),
-      { text: "Cancel", style: "cancel" as const },
-    ]);
+    setShowWorkspacePicker(true);
   };
 
   return (
@@ -242,6 +238,10 @@ export default function SettingsScreen() {
           activeOpacity={0.7}
           accessibilityLabel={`Current workspace: ${
             currentOrg?.name ?? "None"
+          }${
+            currentOrg && isWorkspaceInactive(currentOrg)
+              ? `. ${inactiveWorkspaceMessage(currentOrg)}`
+              : ""
           }${organizations.length > 1 ? ". Tap to switch" : ""}`}
           accessibilityRole="button"
         >
@@ -256,10 +256,16 @@ export default function SettingsScreen() {
                 <Text style={styles.settingLabel}>
                   {currentOrg?.name ?? "No workspace"}
                 </Text>
-                {organizations.length > 1 && (
+                {currentOrg && isWorkspaceInactive(currentOrg) ? (
                   <Text style={styles.settingHint}>
-                    {organizations.length} workspaces available
+                    {inactiveWorkspaceMessage(currentOrg)}
                   </Text>
+                ) : (
+                  organizations.length > 1 && (
+                    <Text style={styles.settingHint}>
+                      {organizations.length} workspaces available
+                    </Text>
+                  )
                 )}
               </View>
             </View>
@@ -586,6 +592,17 @@ export default function SettingsScreen() {
           {isSigningOut ? "Signing out..." : "Sign Out"}
         </Text>
       </TouchableOpacity>
+
+      <WorkspacePickerSheet
+        visible={showWorkspacePicker}
+        organizations={organizations}
+        currentOrgId={currentOrg?.id}
+        onSelect={(org) => {
+          setShowWorkspacePicker(false);
+          setCurrentOrg(org);
+        }}
+        onClose={() => setShowWorkspacePicker(false)}
+      />
 
       <ConnectServerSheet
         visible={isConnectVisible}

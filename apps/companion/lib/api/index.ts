@@ -8,6 +8,7 @@ import { kitsApi } from "./kits";
 import { notificationsApi } from "./notifications";
 
 export { onAuthError } from "./client";
+export { onForbidden } from "./forbidden";
 export { invalidateResponseCache } from "./cache";
 
 // ── API Functions ──────────────────────────────────────

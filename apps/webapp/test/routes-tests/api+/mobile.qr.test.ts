@@ -474,25 +474,30 @@ describe("GET /api/mobile/qr/:qrId", () => {
   it("refuses a code whose workspace is inactive with a 403 and its message, recording nothing", async () => {
     const message =
       "The workspace this code belongs to is inactive because its subscription has expired.";
-    // The `~/utils/error` mock above replaces ShelfError with a plain class
-    // that keeps `message` and `status`.
-    const inactiveError = new ShelfError({
-      cause: null,
-      message,
-      label: "Auth",
-      status: 403,
-    });
+    // The gate's refusal; the `ShelfError` mock keeps message and status, so
+    // the title the route reads is set on it here.
+    const inactiveError = Object.assign(
+      new ShelfError({
+        cause: null,
+        title: "Workspace inactive",
+        message,
+        label: "Auth",
+        status: 403,
+      }),
+      { title: "Workspace inactive" }
+    );
     vitest.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
       access: "inactive",
       error: inactiveError,
     });
-    vitest.mocked(makeShelfError).mockReturnValue(inactiveError);
+    vitest.mocked(makeShelfError).mockReturnValueOnce(inactiveError);
 
     const result = await run(createQrRequest());
 
     expect((result as unknown as Response).status).toBe(403);
+    // The reason lets the scanner title the answer "Workspace inactive".
     expect(await (result as unknown as Response).json()).toEqual({
-      error: { message },
+      error: { message, reason: "workspace_inactive" },
     });
     expect(makeShelfError).toHaveBeenCalledWith(inactiveError);
     expect(db.asset.findFirst).not.toHaveBeenCalled();

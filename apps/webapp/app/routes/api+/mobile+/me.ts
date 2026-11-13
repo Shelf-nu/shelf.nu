@@ -2,8 +2,11 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import {
   requireMobileAuth,
   getUserOrganizations,
+  getMobileWorkspaceStates,
+  type MobileWorkspaceState,
 } from "~/modules/api/mobile-auth.server";
-import { makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 /**
  * GET /api/mobile/me
@@ -16,16 +19,45 @@ import { makeShelfError } from "~/utils/error";
  * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
  * switch `managersCanEditAssets`, so the companion can resolve the same access
  * and the same matrix answers the server resolves for that workspace.
+ *
+ * Each organization also carries `inactive`, `inactiveReason` and
+ * `inactiveMessage`: whether every other mobile route refuses requests in it
+ * (a lapsed Team plan, or switched off by a Shelf admin). This route itself
+ * stays open, so the app can list an inactive workspace and offer the others.
+ * The state is extra information: when reading it fails, every workspace is
+ * reported active (the other routes still refuse an inactive one) and the
+ * profile and workspaces are answered as usual.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const { organizations, lastSelectedOrganizationId } =
       await getUserOrganizations(user.id);
+    const states = await getMobileWorkspaceStates({
+      userId: user.id,
+      organizationIds: organizations.map((org) => org.id),
+    }).catch((cause: unknown) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to read the workspace states for /api/mobile/me",
+          additionalData: { userId: user.id },
+          label: "Auth",
+        })
+      );
+      return new Map<string, MobileWorkspaceState>();
+    });
 
     return data({
       user,
-      organizations,
+      organizations: organizations.map((org) => ({
+        ...org,
+        ...(states.get(org.id) ?? {
+          inactive: false,
+          inactiveReason: null,
+          inactiveMessage: null,
+        }),
+      })),
       lastSelectedOrganizationId,
     });
   } catch (cause) {

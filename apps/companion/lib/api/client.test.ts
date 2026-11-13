@@ -93,10 +93,12 @@ mock.module(pathToFileURL(join(__dirname, "user-agent.ts")).href, {
 
 let client: typeof import("./client");
 let sessionEnd: typeof import("../server/session-end");
+let forbidden: typeof import("./forbidden");
 
 before(async () => {
   client = await import("./client");
   sessionEnd = await import("../server/session-end");
+  forbidden = await import("./forbidden");
 });
 
 beforeEach(() => {
@@ -222,6 +224,45 @@ describe("apiFetch's automatic retry", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+describe("apiFetch and a refused request", () => {
+  /** Answers every fetch with `status` and a JSON error body. */
+  async function fetchAnswering(status: number) {
+    const realFetch = globalThis.fetch;
+    let refusals = 0;
+    const unsubscribe = forbidden.onForbidden(() => {
+      refusals += 1;
+    });
+    // why: the network is the boundary under test; the server answers with
+    // the mobile API's error envelope and the given status.
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { message: "Refused" } }), {
+        status,
+      })) as typeof fetch;
+    try {
+      const request = client.apiFetch("/api/mobile/dashboard?orgId=org_1");
+      answerRead("token-a");
+      const result = await request;
+      return { result, refusals };
+    } finally {
+      unsubscribe();
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  it("tells the 403 listeners, so the workspace context re-reads /me", async () => {
+    const { result, refusals } = await fetchAnswering(403);
+
+    assert.equal(result.status, 403);
+    assert.equal(refusals, 1);
+  });
+
+  it("does not tell them about a 404", async () => {
+    const { refusals } = await fetchAnswering(404);
+
+    assert.equal(refusals, 0);
   });
 });
 

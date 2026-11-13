@@ -21,6 +21,7 @@
  */
 import { parseSequentialId } from "./sequential-id";
 import { isSameOrigin } from "./server/contract";
+import { isWorkspaceInactiveRefusal } from "./workspace-access";
 
 /**
  * Extracts a Shelf QR ID from a scanned barcode value, judging the shape only.
@@ -261,7 +262,12 @@ export async function runScanPlan<
 
   const fallback = await lookups.barcode(data);
   // Not found there too, or refused outright: the QR route's answer stands.
-  const addsNothing = isNotFound(fallback) || fallback.status === 403;
+  // A refusal that names an inactive workspace is the exception: the code was
+  // found, and the person needs to hear why it cannot open.
+  const addsNothing =
+    isNotFound(fallback) ||
+    (fallback.status === 403 &&
+      !isWorkspaceInactiveRefusal(fallback.errorDetails));
   return addsNothing
     ? { kind: "qr", lookupId: plan.lookupId, answer }
     : { kind: "barcode", answer: fallback };

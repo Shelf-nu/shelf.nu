@@ -93,9 +93,11 @@ vitest.mock("~/utils/error", () => ({
 
 import {
   getMobileUserContext,
+  getMobileWorkspaceAccess,
   requireMobileAuth,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { recordScan, recordScanNonFatal } from "~/modules/scan/service.server";
 
 const mockUser = { id: "user-1", email: "test@example.com" };
@@ -202,6 +204,37 @@ describe("GET /api/mobile/get-scanned-item/:qrId", () => {
     expect((result as unknown as Response).status).toBe(404);
     expect(recordScanNonFatal).not.toHaveBeenCalled();
     expect(recordScan).not.toHaveBeenCalled();
+  });
+
+  it("tags a code whose workspace is inactive, so the audit scanner can title it", async () => {
+    const message =
+      "The workspace this code belongs to is inactive because its subscription has expired.";
+    // The gate's refusal; the `ShelfError` mock keeps message and status, so
+    // the title the route reads is set on it here.
+    const inactiveError = Object.assign(
+      new ShelfError({
+        cause: null,
+        title: "Workspace inactive",
+        message,
+        label: "Auth",
+        status: 403,
+      }),
+      { title: "Workspace inactive" }
+    );
+    vitest.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
+      access: "inactive",
+      error: inactiveError,
+    });
+    vitest.mocked(makeShelfError).mockReturnValueOnce(inactiveError);
+
+    const result = await run(createRequest());
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(await (result as unknown as Response).json()).toEqual({
+      error: { message, reason: "workspace_inactive" },
+    });
+    expect(makeShelfError).toHaveBeenCalledWith(inactiveError);
+    expect(db.asset.findFirst).not.toHaveBeenCalled();
   });
 
   describe("custody visibility", () => {

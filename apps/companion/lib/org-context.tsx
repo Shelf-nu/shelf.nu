@@ -17,8 +17,11 @@ import {
   type WeekStartPreference,
 } from "@shelf/datetime";
 import { useAuth } from "./auth-context";
-import { api, type Organization } from "./api";
+import { api, onForbidden, type Organization } from "./api";
 import { setSentryUser } from "./sentry";
+import { createReadTracker } from "./read-tracker";
+import { createRecheckThrottle } from "./recheck-throttle";
+import { pickLandingOrg, refreshOpenOrg } from "./workspace-access";
 
 /**
  * Where an EXPLICIT workspace choice made on this device is persisted.
@@ -30,6 +33,13 @@ import { setSentryUser } from "./sentry";
  * behind unread.)
  */
 const SELECTED_ORG_KEY = "shelf_selected_org_id_v2";
+
+/**
+ * Shortest gap between two `/me` re-reads set off by refused requests. A
+ * screen that loads several things at once can collect several 403s; one
+ * re-read (plus at most one at the end of the gap) answers them all.
+ */
+const FORBIDDEN_RECHECK_GAP_MS = 15_000;
 
 /** User profile data returned by the /me endpoint */
 export type UserProfile = {
@@ -70,7 +80,11 @@ type OrgState = {
   formatPrefs: ResolvedFormatPrefs;
   isLoading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  /**
+   * Re-reads `/me`. Resolves `false` when the read failed, `true` otherwise.
+   * `silent` leaves the loading and error state alone.
+   */
+  refresh: (options?: { silent?: boolean }) => Promise<boolean>;
 };
 
 const OrgContext = createContext<OrgState | undefined>(undefined);
@@ -105,71 +119,119 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     setCurrentOrg(org);
   }, []);
 
-  const fetchOrgs = useCallback(async () => {
-    if (!user) {
-      setOrganizations([]);
-      currentOrgRef.current = null;
-      setCurrentOrg(null);
-      setUserProfile(null);
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
+  /**
+   * Overlapping `/me` reads: only the latest applies its answer, so a slow
+   * older read (a background re-check, say) cannot put back a workspace state
+   * that a newer one (a tap on "Check again") already replaced; and loading
+   * ends only when the read that carries the data ends.
+   */
+  const readsRef = useRef<ReturnType<typeof createReadTracker> | null>(null);
+  readsRef.current ??= createReadTracker(setIsLoading);
 
-    setIsLoading(true);
-    setError(null);
+  /**
+   * Reads `/me` and applies it. A `silent` read (the re-check after a refused
+   * request) leaves the loading and error state alone, so no screen flashes a
+   * spinner or an error for a check the person did not ask for.
+   *
+   * @returns `false` when the read failed, so a caller that asked for it can
+   *   say so; `true` when it applied, or a newer read took over.
+   */
+  const fetchOrgs = useCallback(
+    async (options?: { silent?: boolean }): Promise<boolean> => {
+      const silent = options?.silent === true;
+      const reads = readsRef.current!;
+      const readId = reads.begin(!silent);
+      try {
+        if (!user) {
+          setOrganizations([]);
+          currentOrgRef.current = null;
+          setCurrentOrg(null);
+          setUserProfile(null);
+          setIsLoading(false);
+          setError(null);
+          return true;
+        }
 
-    const { data, error: fetchError } = await api.me();
+        if (!silent) setError(null);
 
-    if (fetchError || !data) {
-      setError(fetchError || "Failed to load workspace data");
-      setIsLoading(false);
-      return;
-    }
+        const { data, error: fetchError } = await api.me();
 
-    // Store user profile
-    setUserProfile(data.user);
+        if (!reads.isLatest(readId)) return true;
 
-    const orgs = data.organizations;
-    setOrganizations(orgs);
+        if (fetchError || !data) {
+          if (!silent) {
+            setError(fetchError || "Failed to load workspace data");
+          }
+          return false;
+        }
 
-    // Landing hierarchy: an explicit choice made on THIS device wins, then the
-    // server's cross-device choice, then the server's landing order (which
-    // already leads with its own best pick).
-    let savedOrgId: string | null = null;
-    try {
-      savedOrgId = await AsyncStorage.getItem(SELECTED_ORG_KEY);
-    } catch {}
+        // A good answer clears an error left by an earlier failed read, a
+        // quiet one included, so no screen keeps showing it over fresh data.
+        setError(null);
 
-    const resolveLandingOrg = () => {
-      const deviceChoice = savedOrgId
-        ? orgs.find((o) => o.id === savedOrgId)
-        : null;
-      if (deviceChoice) return deviceChoice;
-      const serverChoice = data.lastSelectedOrganizationId
-        ? orgs.find((o) => o.id === data.lastSelectedOrganizationId)
-        : null;
-      return serverChoice || orgs[0];
-    };
+        // Store user profile
+        setUserProfile(data.user);
 
-    // Preserve the LIVE selection if still valid — read through the ref, so a
-    // workspace picked while this fetch was in flight is never stomped by a
-    // landing decision based on pre-fetch state.
-    const liveOrg = currentOrgRef.current;
-    if (liveOrg) {
-      const stillExists = orgs.find((o) => o.id === liveOrg.id);
-      if (!stillExists && orgs.length > 0) {
-        applyLandingOrg(resolveLandingOrg());
+        const orgs = data.organizations;
+        setOrganizations(orgs);
+
+        // Landing hierarchy: an explicit choice made on THIS device wins, then
+        // the server's cross-device choice, then the server's landing order
+        // (which already leads with its own best pick). An inactive workspace
+        // is passed over while an active one exists (see `pickLandingOrg`).
+        let savedOrgId: string | null = null;
+        try {
+          savedOrgId = await AsyncStorage.getItem(SELECTED_ORG_KEY);
+        } catch {}
+        if (!reads.isLatest(readId)) return true;
+
+        const landOnPreferredOrg = () => {
+          const landing = pickLandingOrg(orgs, [
+            savedOrgId,
+            data.lastSelectedOrganizationId,
+          ]);
+          if (landing) applyLandingOrg(landing);
+        };
+
+        // Keep the LIVE selection while it is still listed. Read through the
+        // ref, so a workspace picked while this fetch was in flight is never
+        // stomped by a landing decision based on pre-fetch state. It stays
+        // open even when it became inactive, so the person sees why instead
+        // of being moved.
+        const liveOrg = currentOrgRef.current;
+        if (liveOrg) {
+          const kept = refreshOpenOrg(liveOrg, orgs);
+          if (!kept) landOnPreferredOrg();
+          else if (kept !== liveOrg) applyLandingOrg(kept);
+        } else {
+          landOnPreferredOrg();
+        }
+        return true;
+      } finally {
+        reads.end(readId);
       }
-    } else if (orgs.length > 0) {
-      applyLandingOrg(resolveLandingOrg());
-    }
-
-    setIsLoading(false);
-  }, [user]);
+    },
+    [user]
+  );
 
   useEffect(() => {
     fetchOrgs();
+  }, [fetchOrgs]);
+
+  // A refused request may mean the open workspace became inactive while the
+  // app was open: re-read `/me` quietly, so the inactive screen replaces the
+  // screen's own error. The throttle runs at most once per gap and keeps one
+  // trailing re-read, so a refusal inside the gap is never lost.
+  useEffect(() => {
+    const recheck = createRecheckThrottle({
+      gapMs: FORBIDDEN_RECHECK_GAP_MS,
+      run: () => void fetchOrgs({ silent: true }),
+    });
+    const unsubscribe = onForbidden(recheck.request);
+    return () => {
+      unsubscribe();
+      recheck.cancel();
+    };
   }, [fetchOrgs]);
 
   // Keep Sentry's user/org/role scope in sync so every event (crashes included)

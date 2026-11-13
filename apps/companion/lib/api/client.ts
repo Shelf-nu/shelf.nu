@@ -13,6 +13,7 @@ import { postMultipart } from "./multipart-upload";
 import { CLIENT_USER_AGENT } from "./user-agent";
 import { chainAbort } from "../latest-request";
 import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
+import { notifyForbidden } from "./forbidden";
 
 export type { ApiErrorDetails };
 
@@ -361,6 +362,7 @@ export async function apiFetch<T>(
       const errorDetails = extractErrorDetails(json);
       // 403 = forbidden → user lacks permission, but session is valid
       if (response.status === 403) {
+        notifyForbidden();
         return {
           data: null,
           error:
@@ -398,10 +400,10 @@ export async function apiFetch<T>(
 
     // why warn, not error, when a retry follows: in development React
     // Native's LogBox promotes every console.error into a full-screen red
-    // overlay. A timeout we are about to retry — and usually recover from —
-    // is not worth stopping the app for, and on a slow or flaky connection
-    // it made the app unusable for testing while nothing was actually
-    // broken. Reserve the red box for the request that has given up.
+    // overlay. A timeout we are about to retry (and usually recover from) is
+    // not worth stopping the app for, and on a slow or flaky connection it
+    // would block testing while nothing is broken. Reserve the red box for
+    // the request that has given up.
     if (__DEV__) {
       const log = willRetry ? console.warn : console.error;
       log("[API] Fetch failed:", path, err);
@@ -466,6 +468,7 @@ export async function apiUpload<T>(
         return { data: null, error: "Session expired. Please sign in again." };
       }
       if (response.status === 403) {
+        notifyForbidden();
         return {
           data: null,
           error:

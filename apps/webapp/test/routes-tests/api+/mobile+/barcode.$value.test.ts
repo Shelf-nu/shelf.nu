@@ -51,6 +51,9 @@ vi.mock("~/database/db.server", () => ({
 // loads the Supabase admin client. The shared re-sign step has its own tests;
 // here it tags the row so the response shows the asset went through it.
 vi.mock("~/modules/api/mobile-auth.server", async (importOriginal) => ({
+  // The real error body, so a test pins what the scanner receives.
+  mobileScanErrorBody: (await importOriginal<typeof MobileAuthServer>())
+    .mobileScanErrorBody,
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   // The workspace gate stays real: it decides each owning sibling from the
@@ -250,8 +253,9 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
 
     assertIsDataWithResponseInit(response);
     expect(response.init?.status).toBe(403);
+    // The reason lets the scanner title the answer "Workspace inactive".
     expect(response.data).toEqual({
-      error: { message: INACTIVE_CODE_MESSAGE },
+      error: { message: INACTIVE_CODE_MESSAGE, reason: "workspace_inactive" },
     });
     // Only the current-workspace lookup ran; the sibling's payload was never read.
     expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
