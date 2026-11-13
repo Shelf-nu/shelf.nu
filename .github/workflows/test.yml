@@ -195,6 +195,7 @@ jobs:
   db-tests:
     name: 🗄️ Database tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:15.8

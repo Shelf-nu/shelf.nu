@@ -111,7 +111,7 @@ export async function withRollback<T>(
         const value = await fn(tx);
         throw new RollbackSentinel(value);
       },
-      { timeout: 30_000 }
+      { timeout: 25_000 }
     );
   } catch (error) {
     if (error instanceof RollbackSentinel) {
@@ -142,7 +142,7 @@ export async function commitAndExpect(
   fn: (tx: TxClient) => Promise<void>
 ): Promise<CommitResult> {
   try {
-    await getTestDb().$transaction(fn, { timeout: 30_000 });
+    await getTestDb().$transaction(fn, { timeout: 25_000 });
     return { ok: true };
   } catch (error) {
     return {

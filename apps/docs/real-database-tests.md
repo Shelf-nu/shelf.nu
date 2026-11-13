@@ -7,13 +7,14 @@ database and are named `*.db.test.ts`.
 
 ## Where things live
 
-| File                                     | Purpose                                              |
-| ---------------------------------------- | ---------------------------------------------------- |
-| `apps/webapp/vitest.db.config.ts`        | Vitest config for `test/db/**/*.db.test.ts`          |
-| `apps/webapp/test/db/global-setup.ts`    | Name guard, Supabase roles, `prisma migrate deploy`  |
-| `apps/webapp/test/db/client.ts`          | `getTestDb()`, `withRollback()`, `commitAndExpect()` |
-| `apps/webapp/test/db/fixtures.ts`        | `seedOrgWithPool()`, `seedBooking()`                 |
-| `apps/webapp/test/db/harness.db.test.ts` | Self-test proving the harness works                  |
+| File                                     | Purpose                                                |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `apps/webapp/vitest.db.config.ts`        | Vitest config for `test/db/**/*.db.test.ts`            |
+| `apps/webapp/test/db/global-setup.ts`    | Name guard, Supabase roles, `prisma migrate deploy`    |
+| `apps/webapp/test/db/setup-env.ts`       | Placeholder app env, database URLs set to the test URL |
+| `apps/webapp/test/db/client.ts`          | `getTestDb()`, `withRollback()`, `commitAndExpect()`   |
+| `apps/webapp/test/db/fixtures.ts`        | `seedOrgWithPool()`, `seedBooking()`                   |
+| `apps/webapp/test/db/harness.db.test.ts` | Self-test proving the harness works                    |
 
 The main suite (`pnpm webapp:test`) excludes `**/*.db.test.ts`, so these files
 never run without a database.
@@ -51,8 +52,8 @@ Global setup does three things before the tests run:
 
 1. Checks the `_test` suffix.
 2. Creates the `anon` and `authenticated` roles if they are missing. Supabase
-   has them; plain PostgreSQL does not, and migrations that grant or revoke on
-   them skip the statement when the role is absent.
+   has them; plain PostgreSQL does not. Migrations grant and revoke on these
+   roles, which fails when a role is absent, so the setup creates them first.
 3. Runs `prisma migrate deploy` with the `@shelf/database` schema. Migrations
    already applied are skipped, so reruns are fast.
 

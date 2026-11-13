@@ -7,9 +7,9 @@
  *    ends in `_test`, so the suite can never migrate or write to a dev or
  *    production database.
  * 2. Creates the `anon` and `authenticated` roles when missing. Supabase
- *    provides them; plain Postgres does not, and migrations that grant or
- *    revoke on them skip the statement when the role is absent. Creating
- *    them here makes grant and revoke assertions meaningful.
+ *    provides them; plain Postgres does not. Migrations grant and revoke on
+ *    these roles, which fails when a role is absent, so the setup creates
+ *    them first.
  * 3. Applies every migration with `prisma migrate deploy`, using the
  *    `@shelf/database` package's Prisma binary and schema. `DATABASE_URL`
  *    and `DIRECT_URL` point at the test database for that child process

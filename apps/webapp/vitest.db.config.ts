@@ -25,6 +25,9 @@ export default defineConfig({
     environment: "node",
     include: ["test/db/**/*.db.test.ts"],
     globalSetup: ["./test/db/global-setup.ts"],
+    // Placeholder app env plus DATABASE_URL/DIRECT_URL set to the validated
+    // TEST_DATABASE_URL, so app modules can be imported in every worker.
+    setupFiles: ["./test/db/setup-env.ts"],
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
