@@ -120,11 +120,11 @@ describe("refreshOpenOrg", () => {
 });
 
 describe("workspaceSwitchLabel", () => {
-  test("marks inactive and current workspaces", () => {
+  test("marks inactive and current workspaces, and reads out why one is inactive", () => {
     assert.equal(workspaceSwitchLabel(org("Team", false), "x"), "Team");
     assert.equal(
       workspaceSwitchLabel(org("Team", true), "x"),
-      "Team (inactive)"
+      "Team (inactive). Team is inactive."
     );
     assert.equal(
       workspaceSwitchLabel(org("Team", false), "Team"),
@@ -132,7 +132,7 @@ describe("workspaceSwitchLabel", () => {
     );
     assert.equal(
       workspaceSwitchLabel(org("Team", true), "Team"),
-      "Team (inactive, current)"
+      "Team (inactive, current). Team is inactive."
     );
   });
 });

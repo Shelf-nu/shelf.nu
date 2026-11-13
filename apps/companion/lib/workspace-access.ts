@@ -124,11 +124,14 @@ export function refreshOpenOrg(
 }
 
 /**
- * The switcher's label for a workspace.
+ * The switcher's screen-reader label for a workspace row. It replaces the
+ * row's visible text for screen readers, so it carries everything the row
+ * shows, the inactive reason included.
  *
  * @param org - The workspace.
  * @param currentOrgId - The workspace open now.
- * @returns Its name, marked "(inactive)" and "(current)" where they apply.
+ * @returns Its name, marked "(inactive)" and "(current)" where they apply,
+ *   followed by the reason when the workspace is inactive.
  */
 export function workspaceSwitchLabel(
   org: Organization,
@@ -138,7 +141,11 @@ export function workspaceSwitchLabel(
     isWorkspaceInactive(org) ? "inactive" : null,
     org.id === currentOrgId ? "current" : null,
   ].filter(Boolean);
-  return marks.length > 0 ? `${org.name} (${marks.join(", ")})` : org.name;
+  const label =
+    marks.length > 0 ? `${org.name} (${marks.join(", ")})` : org.name;
+  return isWorkspaceInactive(org)
+    ? `${label}. ${inactiveWorkspaceMessage(org)}`
+    : label;
 }
 
 /**
