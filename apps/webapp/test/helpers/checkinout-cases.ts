@@ -429,7 +429,17 @@ export function checkinoutMembership(
     userId: CALLER_ID,
     organizationId: ORG_ID,
     roles: c.roles,
-    organization: { ...checkinoutOrganization(), ...c.workspace },
+    organization: {
+      ...checkinoutOrganization(),
+      // The mobile workspace gate reads the owner, the owner's tier and the
+      // admin switch: an active TEAM workspace on the Team tier.
+      userId: CALLER_ID,
+      workspaceDisabled: false,
+      owner: { tier: { tierLimitId: "tier_2" } },
+      ...c.workspace,
+    },
+    // The caller's Shelf system roles: not a Shelf admin.
+    user: { roles: [] },
   };
 }
 

@@ -16,6 +16,15 @@ const createHash = init({
 
 const buildHash = process.env.BUILD_HASH || createHash();
 
+// Ordered build id (a build timestamp) baked into both the client and the
+// server bundle as `__SHELF_BUILD_ID__`. Unlike `buildHash`, two ids compare,
+// so a tab can tell whether the server it reached runs a newer build than its
+// own (see `app/utils/build-version.ts`). It is stored on `process.env` so
+// every evaluation of this config inside one build process (client and server
+// environments) reads the same value and both bundles get the same literal.
+process.env.SHELF_BUILD_ID ??= String(Date.now());
+const buildId = process.env.SHELF_BUILD_ID;
+
 // Resolve the generated Prisma browser entry that contains enum runtime values.
 // In pnpm, .prisma/client lives inside the @prisma/client store directory,
 // not at the project root, so we resolve the path dynamically.
@@ -72,8 +81,13 @@ const httpsConfig =
     ? { key: certKeyPath, cert: certPath }
     : undefined;
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   envDir: "../..",
+  define: {
+    // `vite serve` (dev) has no deploy to compare against, so every check
+    // reads "dev" and answers "unknown".
+    __SHELF_BUILD_ID__: JSON.stringify(command === "build" ? buildId : "dev"),
+  },
   ssr: {
     noExternal: [
       "@shelf/database",
@@ -159,4 +173,4 @@ export default defineConfig({
     reactRouter(),
     tsconfigPaths(),
   ],
-});
+}));
