@@ -214,7 +214,8 @@ export async function createNotesPerAsset(
     return { count: 0 };
   }
 
-  const assetIds = [...new Set(notes.map((note) => note.assetId))];
+  // The guard dedupes: an asset can carry more than one note in a batch.
+  const assetIds = notes.map((note) => note.assetId);
 
   try {
     const client = tx ?? db;
