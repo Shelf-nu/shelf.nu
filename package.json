@@ -17,6 +17,7 @@
     "webapp:build": "turbo run build --filter=@shelf/webapp",
     "webapp:test": "pnpm --filter @shelf/webapp test",
     "webapp:test:changed": "pnpm --filter @shelf/webapp test:changed",
+    "webapp:test:db": "pnpm --filter @shelf/webapp test:db",
     "webapp:lint": "pnpm --filter @shelf/webapp lint",
     "webapp:doctor": "pnpm --filter @shelf/webapp run doctor",
     "webapp:validate": "pnpm --filter @shelf/webapp validate",

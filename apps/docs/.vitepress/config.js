@@ -97,6 +97,7 @@ export default {
             text: "Protected Indexes and Foreign Keys",
             link: "/protected-indexes",
           },
+          { text: "Real Database Tests", link: "/real-database-tests" },
         ],
       },
       {

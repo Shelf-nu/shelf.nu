@@ -187,6 +187,58 @@ jobs:
       - name: 📱 Run companion tests
         run: pnpm --filter @shelf/companion test
 
+  # Tests that need a real, migrated PostgreSQL (`*.db.test.ts`): deferred
+  # constraint triggers, grants and anything else the mocked suite cannot see.
+  # The database is a throwaway service container, so no secret is involved
+  # and the job stays safe for fork PRs (see the SECURITY INVARIANT above).
+  # The harness creates the `anon`/`authenticated` roles plain Postgres lacks.
+  db-tests:
+    name: 🗄️ Database tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15.8
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # The harness refuses any database whose name does not end in _test.
+          POSTGRES_DB: shelf_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shelf_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shelf_test
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
+        env:
+          PRISMA_SKIP_POSTINSTALL_GENERATE: "true"
+
+      - name: 🔧 Generate Prisma client
+        run: pnpm --filter @shelf/database run db:generate
+
+      # Global setup migrates the service database, then the suite runs.
+      - name: 🗄️ Run database tests
+        run: pnpm webapp:test:db
+
   # One stable check that reports the combined result of every shard, so the
   # check name does not change when the shard count does. `always()` makes it
   # run — and fail — when a shard fails, instead of being skipped (a skipped
