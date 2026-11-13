@@ -3188,8 +3188,11 @@ export async function getAuditsForOrganization(params: {
   /** Items to be loaded per page */
   perPage?: number;
   search?: string | null;
-  /** Filter by status */
-  status?: AuditStatus | null;
+  /**
+   * Filter by status. A list keeps audits in any of the listed statuses, in
+   * the database, so `page`/`perPage` and the total count stay exact.
+   */
+  status?: AuditStatus | AuditStatus[] | null;
   /** Field to sort by */
   orderBy?: string;
   /** Sort direction */
@@ -3284,25 +3287,27 @@ export async function getAuditsForOrganization(params: {
       where.assets = { some: { assetId } };
     }
 
-    // An explicit status always wins. With none, ARCHIVED audits are hidden
-    // unless the caller opts in through `includeArchived`.
-    if (status) {
-      where.status = status;
+    // An explicit status always wins. With none (or an empty list), ARCHIVED
+    // audits are hidden unless the caller opts in through `includeArchived`.
+    const statuses = status == null ? [] : [status].flat();
+    if (statuses.length > 0) {
+      where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
     } else if (!includeArchived) {
       where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
-    // why: the companion's `prioritizeDeadlines` toggle surfaces work
-    // the user has to act on next — overdue first (asc dueDate puts
-    // earliest dates first, and any negative-offset overdue date is
-    // earliest), then upcoming dues, then audits without a deadline
-    // (Prisma's `nulls: "last"` keeps no-deadline rows from polluting
-    // the top of the list). The secondary `createdAt desc` is a stable
-    // tiebreaker so two same-day-due audits don't shuffle between
-    // requests.
+    // why: the companion's `prioritizeDeadlines` order surfaces work the user
+    // has to act on next: overdue first (asc dueDate puts the earliest dates
+    // first), then upcoming dues, then audits without a deadline (`nulls:
+    // "last"`). `createdAt desc` breaks ties between same-day dues, and `id`
+    // makes the order total, so consecutive pages never repeat or skip a row.
     const resolvedOrderBy: Prisma.AuditSessionOrderByWithRelationInput[] =
       prioritizeDeadlines
-        ? [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }]
+        ? [
+            { dueDate: { sort: "asc", nulls: "last" } },
+            { createdAt: "desc" },
+            { id: "asc" },
+          ]
         : [{ [orderBy]: orderDirection }];
 
     const [audits, totalAudits] = await Promise.all([
