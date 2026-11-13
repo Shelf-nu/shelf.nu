@@ -188,16 +188,55 @@ describe("revokeAccessToOrganization — owner protection", () => {
     expect(dbMock.user.update).toHaveBeenCalled();
   });
 
-  it("still revokes a user whose membership row is missing", async () => {
-    // Defensive: a missing row must not become a silent block on revocation
+  it("refuses with 404 and writes nothing for a user who is not a member of the workspace", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue(null);
+
+    await expect(
+      revokeAccessToOrganization({
+        userId: "non-member",
+        organizationId: "org-1",
+        actorOwnsWorkspace: true,
+      })
+    ).rejects.toMatchObject({ status: 404, shouldBeCaptured: false });
+
+    // Neither the user row nor any team member link may be touched.
+    expect(dbMock.teamMember.findMany).not.toHaveBeenCalled();
+    expect(dbMock.userOrganization.deleteMany).not.toHaveBeenCalled();
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 404 when the membership is removed between the first read and the lock", async () => {
+    dbMock.userOrganization.findFirst
+      .mockResolvedValueOnce({ roles: [OrganizationRoles.BASE] })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      revokeAccessToOrganization({
+        userId: "removed-user",
+        organizationId: "org-1",
+        actorOwnsWorkspace: true,
+      })
+    ).rejects.toMatchObject({ status: 404 });
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("clears the team member links of a missing membership when the caller allows it", async () => {
+    // System callers (SCIM, account deletion) converge on "no access", so a
+    // membership that is already gone still has its links cleared.
     dbMock.userOrganization.findFirst.mockResolvedValue(null);
     dbMock.userOrganization.deleteMany.mockResolvedValue({ count: 0 });
 
     await revokeAccessToOrganization({
-      userId: "ghost-user",
+      userId: "gone-user",
       organizationId: "org-1",
+      allowMissingMembership: true,
     });
 
+    expect(dbMock.teamMember.findMany).toHaveBeenCalledWith({
+      where: { userId: "gone-user", organizationId: "org-1" },
+      select: { id: true },
+    });
     expect(dbMock.user.update).toHaveBeenCalled();
   });
 });

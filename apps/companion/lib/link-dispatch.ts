@@ -40,6 +40,40 @@ export type QrLookups = {
   readonly lookup: (qrId: string, orgId?: string) => Promise<QrLookupResult>;
 };
 
+/**
+ * Where a QR link came from.
+ *
+ * - `os-link`: the OS delivered it (a label scanned with the system camera,
+ *   or a link opened in another app or web page). A code that does not
+ *   resolve opens the web QR page, which offers claim, link or sign-in.
+ * - `tapped`: tapped in text inside the app. A code that does not resolve
+ *   gets the web-only notice, and a code of another workspace than the one
+ *   on show gets the "other workspace" notice.
+ */
+export type QrLinkSource = "os-link" | "tapped";
+
+/**
+ * Whether opening a QR link records a scan.
+ *
+ * Opening a QR code's web address counts as a scan everywhere in Shelf: the
+ * web QR page records one for every visit, signed in or anonymous. An https
+ * link the OS delivers is that same address (a label scanned with the system
+ * camera, or the link opened elsewhere), so it records a scan too. A
+ * `shelf://qr/<id>` link never does: no label encodes the custom scheme, so
+ * only another app or a web page can produce it. A link tapped inside the app
+ * never records either.
+ *
+ * @param source - Where the link came from
+ * @param origin - The link's http(s) origin, or undefined for `shelf://`
+ * @returns True when the lookup should record a scan
+ */
+export function qrLinkRecordsScan(
+  source: QrLinkSource,
+  origin: string | undefined
+): boolean {
+  return source === "os-link" && origin !== undefined;
+}
+
 /** Where a QR code leads once looked up. */
 export type QrOutcome =
   /** Its asset or kit screen. */
@@ -56,22 +90,25 @@ export type QrOutcome =
 /**
  * Looks a QR code up and says where it leads.
  *
+ * Whether the lookup records a scan is decided by {@link qrLinkRecordsScan}:
+ * an https link the OS delivers records one, like the web QR page; a
+ * `shelf://` link and a link tapped in the app record nothing.
+ *
  * A code from another Shelf server is not looked up: its id means nothing
- * to the connected one, so it goes to that server's QR page. A camera scan
- * (`recordScan`, the default) records the scan, and a code that does not
- * resolve goes to the web QR page, which offers claim, link or sign-in. A
- * link tapped in the app records nothing, and a code that does not resolve
- * gets the web-only notice: the in-app browser has no Shelf session and
- * would only show the web login. A tapped code from another workspace than
- * the one on show gets the "other workspace" notice: its screen would look
- * the id up in the wrong workspace.
+ * to the connected one, so it goes to that server's QR page. An OS-delivered
+ * code that does not resolve goes to the web QR page, which offers claim,
+ * link or sign-in. A tapped code that does not resolve gets the web-only
+ * notice: the in-app browser has no Shelf session and would only show the
+ * web login. A tapped code from another workspace than the one on show gets
+ * the "other workspace" notice: its screen would look the id up in the
+ * wrong workspace.
  *
  * @param qrId - The QR code id.
  * @param origin - The origin the link carried, when it had one.
  * @param apiBaseUrl - Base URL of the connected Shelf server.
- * @param options - `recordScan: false` for a tapped link, with the
- *   workspace on show (`orgId`): the non-recording lookup needs it for a
- *   SAM id, and a code of another workspace is compared against it.
+ * @param options - Where the link came from (`source`), and for a tapped
+ *   link the workspace on show (`orgId`): the lookup needs it for a SAM id,
+ *   and a code of another workspace is compared against it.
  * @param lookups - The recording and non-recording lookups.
  * @returns Where the code leads. Never rejects: a failed lookup counts as
  *   not resolved.
@@ -80,7 +117,7 @@ export async function resolveQrOutcome(
   qrId: string,
   origin: string | undefined,
   apiBaseUrl: string,
-  { recordScan = true, orgId }: { recordScan?: boolean; orgId?: string },
+  { source, orgId }: { source: QrLinkSource; orgId?: string },
   lookups: QrLookups
 ): Promise<QrOutcome> {
   if (origin && !isSameOrigin(origin, apiBaseUrl)) {
@@ -89,11 +126,11 @@ export async function resolveQrOutcome(
 
   const url = `${apiBaseUrl}/qr/${qrId}`;
   try {
-    const { data, error } = recordScan
+    const { data, error } = qrLinkRecordsScan(source, origin)
       ? await lookups.scan(qrId)
       : await lookups.lookup(qrId, orgId);
     const codeOrgId = error ? undefined : data?.qr?.organizationId;
-    if (!recordScan && orgId && codeOrgId && codeOrgId !== orgId) {
+    if (source === "tapped" && orgId && codeOrgId && codeOrgId !== orgId) {
       return { kind: "web-only", url, reason: "other-workspace" };
     }
     const assetId = error ? undefined : data?.qr?.asset?.id;
@@ -116,7 +153,7 @@ export async function resolveQrOutcome(
     // Not resolved: handled below like an unknown code.
   }
 
-  return recordScan
+  return source === "os-link"
     ? { kind: "browser", url }
     : { kind: "web-only", url, reason: "qr-unresolved" };
 }

@@ -47,7 +47,10 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
-import { canEditModelReservations } from "~/utils/booking-model-requests";
+import {
+  canEditModelReservations,
+  getReservationCeiling,
+} from "~/utils/booking-model-requests";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
@@ -2176,7 +2179,7 @@ export async function assertOutstandingModelRequestsFit({
 /*                          getBookingModelTabData                            */
 /* -------------------------------------------------------------------------- */
 
-/** The upper bound on how many `AssetModel` rows the picker fetches at once. */
+/** Default page size of the Models tab's model list. */
 const MODEL_PICKER_LIMIT = 50;
 
 /**
@@ -2204,6 +2207,19 @@ type BookingForModelTab = {
 type BookingModelTabAssetModel = {
   id: string;
   name: string;
+  /** Public URL of the model's cover image, or null when it has none. */
+  image: string | null;
+  /** Public URL of the list-size thumbnail generated alongside `image`. */
+  thumbnailImage: string | null;
+  /** Category new assets of this model start in, when the model sets one. */
+  defaultCategory: { id: string; name: string; color: string } | null;
+  /**
+   * Units of this model the booking holds by name (standalone or kit-driven)
+   * that no custodian holds. `upsertBookingModelRequest` charges them against
+   * the pool alongside the reservation, so the client needs them to show the
+   * same ceiling the server enforces.
+   */
+  namedNotInCustody: number;
   total: number;
   available: number;
   reservedConcrete: number;
@@ -2217,27 +2233,23 @@ export type BookingModelTabData = {
   showModelsTab: boolean;
   /** Per-model availability for the current booking's window. */
   assetModels: BookingModelTabAssetModel[];
-  /** `assetModels` reshaped for {@link DynamicSelect}'s seed list. */
-  initialAssetModels: Array<{
-    id: string;
-    name: string;
-    metadata: {
-      total: number;
-      available: number;
-      reservedConcrete: number;
-      reservedViaRequest: number;
-      inCustody: number;
-    };
-  }>;
-  /** Full-org model count (not the truncated `MODEL_PICKER_LIMIT` list). */
+  /** Full-org model count, regardless of search or page. */
   totalAssetModels: number;
   /**
-   * How many models match the current `search` (equals `totalAssetModels`
-   * when no search is applied). This is the pagination denominator: a client
-   * that pages through the list needs the count of MATCHING rows, not the
+   * How many models the list can show: those matching the `search` and, when
+   * `showModelsWithoutAssets` is off, the asset filter. Equals
+   * `totalAssetModels` only with neither. This is the pagination denominator:
+   * a client paging the list needs the count of LISTABLE rows, not the
    * full-org count, to know when it has reached the end.
    */
   matchedAssetModels: number;
+  /**
+   * 1-based page `assetModels` was read from. Named apart from `page` because
+   * the loaders spread this payload beside their own asset/kit list paging.
+   */
+  modelsPage: number;
+  /** Page size `assetModels` was read with; pairs with `matchedAssetModels`. */
+  modelsPerPage: number;
   /** This booking's existing model-level requests, outstanding + fulfilled. */
   modelRequests: Array<{
     assetModelId: string;
@@ -2254,8 +2266,9 @@ export type BookingModelTabData = {
  *
  * Always counts the org's `AssetModel`s so the UI knows whether to render
  * the Models tab at all (hidden when the org has none). When there is at
- * least one model, also fetches the first `MODEL_PICKER_LIMIT` (sorted by
- * name) plus each one's availability in the booking's window, and projects
+ * least one model, also fetches one page of models (sorted by name, with
+ * image and default category) plus each one's availability in the booking's
+ * window, and projects
  * the booking's existing model-level requests for the tab's "active /
  * fulfilled" split.
  *
@@ -2267,11 +2280,8 @@ export type BookingModelTabData = {
  * scopes both the model count and list, preventing cross-org leakage.
  * @param booking - The booking these models are being reserved against.
  * Only `id`, `from`, `to`, and `modelRequests` are read.
- * @param search - Optional case-insensitive name filter. The seed list is
- * capped at `MODEL_PICKER_LIMIT`, so without this a model sorting after the
- * cap is unreachable. The web's DynamicSelect searches beyond the seed via
- * the `model-filters` endpoint; passing `search` here gives the same reach
- * to callers (e.g. the mobile picker) that render this list directly.
+ * @param search - Optional case-insensitive name filter. A page holds at most
+ * `perPage` models, so search and `page` are how a caller reaches the rest.
  * `totalAssetModels` stays the full-org count so "showing N of M" is honest.
  * @returns The Models tab payload; see {@link BookingModelTabData}.
  */
@@ -2281,30 +2291,44 @@ export async function getBookingModelTabData({
   search,
   page,
   perPage,
+  showModelsWithoutAssets = true,
+  clampPageToResults = false,
+  pinReservedModels = false,
 }: {
   organizationId: string;
   booking: BookingForModelTab;
   search?: string;
-  /**
-   * 1-based page for callers that paginate the model list (the mobile
-   * picker). Omitted by the web loaders, which render a seed list and reach
-   * the rest through search — they keep the historical single-page shape.
-   */
+  /** 1-based page of the model list. Defaults to the first page. */
   page?: number;
-  /**
-   * Page size for paginating callers. Defaults to `MODEL_PICKER_LIMIT` so
-   * omitting both params reproduces the pre-pagination behaviour exactly.
-   */
+  /** Page size, capped at 100. Defaults to `MODEL_PICKER_LIMIT`. */
   perPage?: number;
+  /**
+   * List models that have no bookable asset. Defaults to true. When false, the
+   * list and `matchedAssetModels` keep only models with at least one active
+   * INDIVIDUAL asset (the units `total` counts), plus any model this booking
+   * already reserves, so a reservation never drops out of view.
+   */
+  showModelsWithoutAssets?: boolean;
+  /**
+   * Clamp a page past the end of the list to the last page. The web tab sets
+   * it, so a stale URL lands on rows instead of an empty page with no way
+   * back. Paginating clients that stop on an empty page (the mobile picker)
+   * leave it off, because clamping would hand them the last page again.
+   */
+  clampPageToResults?: boolean;
+  /**
+   * List the models this booking reserves first, so a reservation is never
+   * stranded on a later page. The web tab sets it. Off by default: the order
+   * then depends on the booking's reservations, which can change between two
+   * page fetches, and a client that appends pages (the mobile picker) would
+   * repeat or skip a model.
+   */
+  pinReservedModels?: boolean;
 }): Promise<BookingModelTabData> {
   try {
-    const assetModelsCount = await db.assetModel.count({
-      where: { organizationId },
-    });
-    const showModelsTab = assetModelsCount > 0;
-
-    // Case-insensitive name filter, applied to the seed fetch only (not the
-    // full-org count/showModelsTab). Trimmed; blank search = no filter.
+    // Case-insensitive name filter (trimmed; blank = no filter). It narrows
+    // the listed page and `matchedAssetModels`; `totalAssetModels` and
+    // `showModelsTab` stay full-org counts.
     // Escape the LIKE metacharacters (`%` `_` and the escape char `\`) so a
     // literal search like "model_1" matches literally instead of treating `_`
     // as a single-char wildcard (Prisma `contains` compiles to ILIKE).
@@ -2318,65 +2342,160 @@ export async function getBookingModelTabData({
         }
       : {};
 
+    // Models with something to book, plus those this booking already
+    // reserves. Mirrors the asset filter `total` counts in
+    // `getAssetModelAvailabilities`, so a listed model never shows "No assets".
+    const withAssetsWhere: Prisma.AssetModelWhereInput = showModelsWithoutAssets
+      ? {}
+      : {
+          OR: [
+            {
+              assets: {
+                some: { type: AssetType.INDIVIDUAL, archivedAt: null },
+              },
+            },
+            {
+              id: { in: booking.modelRequests.map((r) => r.assetModelId) },
+            },
+          ],
+        };
+    const listWhere: Prisma.AssetModelWhereInput = {
+      organizationId,
+      ...searchWhere,
+      ...withAssetsWhere,
+    };
+
     let assetModels: BookingModelTabAssetModel[] = [];
 
     /**
-     * Count of models matching the search. Paginating callers need this to
-     * know when they've reached the end; without a search it's the same query
-     * as the full-org count, so reuse that rather than issuing a second one.
+     * The full-org count (whether the tab shows at all) and the count of
+     * models the list can show, read together. With no search and no filter
+     * the two are the same query, so the second is not issued.
      */
-    const matchedAssetModels = trimmedSearch
-      ? await db.assetModel.count({ where: { organizationId, ...searchWhere } })
-      : assetModelsCount;
+    const needsListCount = Boolean(trimmedSearch) || !showModelsWithoutAssets;
+    const [assetModelsCount, listCount] = await Promise.all([
+      db.assetModel.count({ where: { organizationId } }),
+      needsListCount
+        ? db.assetModel.count({ where: listWhere })
+        : Promise.resolve(null),
+    ]);
+    const showModelsTab = assetModelsCount > 0;
+    const matchedAssetModels = listCount ?? assetModelsCount;
 
-    // Page size defaults to the historical cap, so callers that pass neither
-    // param (the web loaders) get byte-identical behaviour to before.
+    // perPage is capped at 100 and defaults to MODEL_PICKER_LIMIT; page is
+    // 1-based. With `clampPageToResults`, a page past the end reads the last.
     const effectivePerPage =
       perPage && perPage > 0 ? Math.min(perPage, 100) : MODEL_PICKER_LIMIT;
-    const effectivePage = page && page > 1 ? page : 1;
+    const requestedPage = page && page > 1 ? page : 1;
+    const lastPage = Math.max(
+      1,
+      Math.ceil(matchedAssetModels / effectivePerPage)
+    );
+    const effectivePage = clampPageToResults
+      ? Math.min(requestedPage, lastPage)
+      : requestedPage;
 
     if (showModelsTab) {
-      const rawModels = await db.assetModel.findMany({
-        where: { organizationId, ...searchWhere },
-        select: { id: true, name: true },
-        /**
-         * `AssetModel.name` is NOT unique, so name alone is not a stable sort:
-         * tied rows can repeat on one page and vanish from the next, leaving
-         * models unreachable — exactly what this pagination exists to prevent.
-         * `id` breaks the tie deterministically.
-         */
-        orderBy: [{ name: "asc" }, { id: "asc" }],
-        skip: (effectivePage - 1) * effectivePerPage,
-        take: effectivePerPage,
-      });
+      const select = {
+        id: true,
+        name: true,
+        image: true,
+        thumbnailImage: true,
+        defaultCategory: { select: { id: true, name: true, color: true } },
+      } satisfies Prisma.AssetModelSelect;
+      /**
+       * `AssetModel.name` is NOT unique, so name alone is not a stable sort:
+       * tied rows can repeat on one page and vanish from the next, leaving
+       * models unreachable. `id` breaks the tie deterministically.
+       */
+      const orderBy: Prisma.AssetModelOrderByWithRelationInput[] = [
+        { name: "asc" },
+        { id: "asc" },
+      ];
 
-      const availabilities = await Promise.all(
-        rawModels.map((m) =>
-          getAssetModelAvailability({
-            assetModelId: m.id,
-            organizationId,
-            bookingId: booking.id,
-            from: booking.from,
-            to: booking.to,
-          })
-        )
+      /**
+       * With `pinReservedModels`, the models this booking reserves lead the
+       * list. It reads as one sequence: reserved models matching the filters
+       * (by name), then the rest (by name), and a page is a window onto that
+       * sequence. A booking reserves few models, so the reserved half is read
+       * whole and sliced here. Without it the reserved half is empty and the
+       * list is purely by name.
+       */
+      const reservedIds = pinReservedModels
+        ? [...new Set(booking.modelRequests.map((r) => r.assetModelId))]
+        : [];
+      const windowStart = (effectivePage - 1) * effectivePerPage;
+      const reserved =
+        reservedIds.length > 0
+          ? await db.assetModel.findMany({
+              where: { AND: [listWhere, { id: { in: reservedIds } }] },
+              select,
+              orderBy,
+            })
+          : [];
+      const pinned = reserved.slice(
+        windowStart,
+        windowStart + effectivePerPage
       );
+      const room = effectivePerPage - pinned.length;
+      const rest =
+        room > 0
+          ? await db.assetModel.findMany({
+              where:
+                reservedIds.length > 0
+                  ? { AND: [listWhere, { id: { notIn: reservedIds } }] }
+                  : listWhere,
+              select,
+              orderBy,
+              skip: Math.max(0, windowStart - reserved.length),
+              take: room,
+            })
+          : [];
+      const rawModels = [...pinned, ...rest];
+      const pageIds = rawModels.map((m) => m.id);
 
-      assetModels = rawModels.map((m, i) => ({
-        id: m.id,
-        name: m.name,
-        total: availabilities[i].total,
-        available: availabilities[i].available,
-        reservedConcrete: availabilities[i].reservedConcrete,
-        reservedViaRequest: availabilities[i].reservedViaRequest,
-        inCustody: availabilities[i].inCustody,
-      }));
+      // One batched pool read and one named-units read for the whole page.
+      const [availabilities, heldByModel] = await Promise.all([
+        getAssetModelAvailabilities({
+          assetModelIds: pageIds,
+          organizationId,
+          bookingId: booking.id,
+          from: booking.from,
+          to: booking.to,
+        }),
+        pageIds.length > 0
+          ? readOwnNamedUnits({
+              bookingId: booking.id,
+              assetModelIds: pageIds,
+              organizationId,
+              tx: db,
+            })
+          : Promise.resolve(new Map<string, OwnNamedUnits>()),
+      ]);
+
+      assetModels = rawModels.map((m) => {
+        // The batch returns an entry for every id it is asked about.
+        const availability = availabilities.get(m.id)!;
+        const held = heldByModel.get(m.id);
+        return {
+          id: m.id,
+          name: m.name,
+          image: m.image,
+          thumbnailImage: m.thumbnailImage,
+          defaultCategory: m.defaultCategory,
+          namedNotInCustody: (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0),
+          total: availability.total,
+          available: availability.available,
+          reservedConcrete: availability.reservedConcrete,
+          reservedViaRequest: availability.reservedViaRequest,
+          inCustody: availability.inCustody,
+        };
+      });
     }
 
-    // Ship all requests (outstanding + fulfilled). The Models tab UI splits
-    // them into "Active reservations" (editable, not yet fully fulfilled)
-    // and "Fulfilled" (historical, read-only) — the audit trail for "this
-    // booking started life as 3 × Dell" on an ONGOING booking.
+    // Ship all requests (outstanding + fulfilled). The Models tab shows an
+    // outstanding one with its edit controls and a fulfilled one read-only:
+    // the record that this booking started as "3 x Dell" on an ONGOING one.
     const modelRequests = booking.modelRequests.map((req) => ({
       assetModelId: req.assetModelId,
       assetModelName: req.assetModel.name,
@@ -2388,33 +2507,18 @@ export async function getBookingModelTabData({
           : req.fulfilledAt,
     }));
 
-    // Shape for `DynamicSelect`. The picker reads `initialAssetModels` as
-    // its seed list and `totalAssetModels` to decide whether to offer the
-    // "show all / search" affordance. Availability goes on `metadata` so
-    // the renderItem can show e.g. "5 / 5 available" inline per option.
-    const initialAssetModels = assetModels.map((m) => ({
-      id: m.id,
-      name: m.name,
-      metadata: {
-        total: m.total,
-        available: m.available,
-        reservedConcrete: m.reservedConcrete,
-        reservedViaRequest: m.reservedViaRequest,
-        inCustody: m.inCustody,
-      },
-    }));
-
     return {
       showModelsTab,
       assetModels,
-      initialAssetModels,
       totalAssetModels: assetModelsCount,
       matchedAssetModels,
+      modelsPage: effectivePage,
+      modelsPerPage: effectivePerPage,
       modelRequests,
     };
   } catch (cause) {
-    // Don't re-wrap a ShelfError already thrown by getAssetModelAvailability
-    // — that would bury its original status/message under a generic one.
+    // Don't re-wrap a ShelfError already thrown by the availability read:
+    // that would bury its original status/message under a generic one.
     if (cause instanceof ShelfError) throw cause;
     throw new ShelfError({
       cause,
@@ -2614,9 +2718,13 @@ export async function writeBookingModelRequestInTx(
     );
 
     if (!fits) {
+      // The same ceiling the Models tab shows, so the two cannot disagree.
       const headroom = Math.max(
         0,
-        availability.available - namedNotInCustody + existingFulfilled
+        getReservationCeiling(
+          { available: availability.available, namedNotInCustody },
+          existingFulfilled
+        )
       );
       const heldNote =
         namedNotInCustody > 0
@@ -3189,7 +3297,10 @@ export async function reserveModelsUpToAvailability({
             // holds by name are counted, the headroom the write core checks.
             const headroom = Math.max(
               0,
-              availability.available - namedNotInCustody
+              getReservationCeiling(
+                { available: availability.available, namedNotInCustody },
+                0
+              )
             );
             const reserved = Math.min(outstanding, headroom);
             if (reserved > 0) {

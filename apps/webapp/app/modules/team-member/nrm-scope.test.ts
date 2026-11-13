@@ -6,12 +6,14 @@ import { getNrmIndexWhere, getNrmSelectionWhere } from "./nrm-scope";
 const ORG = "org-1";
 
 describe("getNrmIndexWhere", () => {
-  it("excludes soft-deleted members, registered users and pending invites", () => {
+  it("excludes soft-deleted members, registered users and pending invites of this workspace", () => {
     expect(getNrmIndexWhere({ organizationId: ORG })).toEqual({
       deletedAt: null,
       organizationId: ORG,
       userId: null,
-      receivedInvites: { none: { status: InviteStatuses.PENDING } },
+      receivedInvites: {
+        none: { status: InviteStatuses.PENDING, organizationId: ORG },
+      },
     });
   });
 
@@ -49,7 +51,9 @@ describe("getNrmSelectionWhere", () => {
       deletedAt: null,
       organizationId: ORG,
       userId: null,
-      receivedInvites: { none: { status: InviteStatuses.PENDING } },
+      receivedInvites: {
+        none: { status: InviteStatuses.PENDING, organizationId: ORG },
+      },
     });
     expect(where.id).toBeUndefined();
   });
@@ -80,7 +84,9 @@ describe("getNrmSelectionWhere", () => {
       deletedAt: null,
       organizationId: ORG,
       userId: null,
-      receivedInvites: { none: { status: InviteStatuses.PENDING } },
+      receivedInvites: {
+        none: { status: InviteStatuses.PENDING, organizationId: ORG },
+      },
       id: { in: ["a", "b"] },
     });
   });

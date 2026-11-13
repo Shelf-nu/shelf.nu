@@ -297,3 +297,71 @@ describe("GET /api/mobile/bookings/available-assets: the named booking", () => {
     expect(bookingAssetFindManyMock).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/mobile/bookings/available-assets: the list's un-hidden booking", () => {
+  /** The `unhideAssetsBookigIds` values the list service was asked to honour. */
+  function unhiddenBookingIds() {
+    const { filters } = listMock.mock.calls[0][0];
+    return new URLSearchParams(filters).getAll("unhideAssetsBookigIds");
+  }
+
+  it("does not un-hide the assets of a booking the caller may not see", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+
+    await rows();
+
+    expect(unhiddenBookingIds()).toEqual([]);
+  });
+
+  it("does not un-hide the assets of a booking from another workspace", async () => {
+    bookingFindFirstMock.mockResolvedValue(null);
+
+    await rows({ unhideAssetsBookigIds: "booking-elsewhere" });
+
+    expect(unhiddenBookingIds()).toEqual([]);
+  });
+
+  it("un-hides only the one visible booking, whatever else the caller sends", async () => {
+    const url = new URL(
+      "http://localhost:3000/api/mobile/bookings/available-assets"
+    );
+    url.searchParams.set("orgId", "org-1");
+    url.searchParams.set("bookingFrom", FROM);
+    url.searchParams.set("bookingTo", TO);
+    url.searchParams.set("hideUnavailable", "true");
+    url.searchParams.append("unhideAssetsBookigIds", BOOKING_ID);
+    url.searchParams.append("unhideAssetsBookigIds", "booking-other");
+
+    await loader(createLoaderArgs({ request: new Request(url) }));
+
+    expect(unhiddenBookingIds()).toEqual([BOOKING_ID]);
+  });
+});
+
+describe("GET /api/mobile/bookings/available-assets: custodian-name search", () => {
+  it("limits a custodian-name match to the caller's own custody when they may not see all custody", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+
+    await rows();
+
+    expect(listMock.mock.calls[0][0].custodySearchScope).toEqual({
+      userId: CALLER_ID,
+    });
+  });
+
+  it("matches every custodian for a caller who sees all custody", async () => {
+    await rows();
+
+    expect(listMock.mock.calls[0][0].custodySearchScope).toBe("all");
+  });
+
+  it("resolves the caller's access once per request", async () => {
+    await rows();
+
+    expect(getMobileUserContext).toHaveBeenCalledTimes(1);
+  });
+});

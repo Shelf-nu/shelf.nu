@@ -414,6 +414,12 @@ export type DrainScanQueueArgs<
   ) => void;
   /** A scan exhausted its retries and moved to `failed`. */
   onFailed?: (entry: E) => void;
+  /**
+   * Checked before every send; false stops the drain with the rest of the
+   * queue left in place (no backoff). The hook uses it to stop once the queue
+   * owner's session is over (a sign-out, another account, a server switch).
+   */
+  mayContinue?: () => boolean;
 };
 
 /**
@@ -446,8 +452,10 @@ export async function drainScanQueue<
   persist,
   onSynced,
   onFailed,
+  mayContinue,
 }: DrainScanQueueArgs<E, I>): Promise<{ backoffAttempt: number | null }> {
   while (queue.current.length > 0) {
+    if (mayContinue && !mayContinue()) return { backoffAttempt: null };
     const entry = queue.current[0];
     let answer: ReplayAnswer | null = null;
     try {

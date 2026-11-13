@@ -7,6 +7,7 @@ import { db } from "~/database/db.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
@@ -203,6 +204,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         currentSearchParams,
         settings,
         timeZone,
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         // Gated on `audit: create`, which neither BASE nor SELF_SERVICE holds —
         // unlike `audits.add-assets`, which is `audit: update` and does narrow.
         allowedTeamMemberIds: "all",

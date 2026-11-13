@@ -20,7 +20,9 @@ const NRM_BASE_SCOPE = {
   deletedAt: null,
   organizationId: ORG,
   userId: null,
-  receivedInvites: { none: { status: InviteStatuses.PENDING } },
+  receivedInvites: {
+    none: { status: InviteStatuses.PENDING, organizationId: ORG },
+  },
 };
 
 beforeEach(() => {

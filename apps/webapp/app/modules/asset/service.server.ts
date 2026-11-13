@@ -223,6 +223,8 @@ import {
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
+import { custodySearchScopeFor } from "./search-union.server";
+import type { CustodySearchScope } from "./search-union.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
@@ -781,10 +783,17 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   archivedFilter,
   lastAuditDateAccess = "hidden",
   includeHiddenColumns = false,
+  custodySearchScope,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   settings: AssetIndexSettings;
+  /**
+   * Whose custody the search may match by custodian name (see
+   * `custodySearchScopeFor`). Required so every caller states the viewer's
+   * custody visibility.
+   */
+  custodySearchScope: CustodySearchScope;
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
@@ -871,7 +880,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
 
     const whereClause = generateWhereClause(
       organizationId,
-      search,
+      search ? { text: search, custodySearchScope } : null,
       parsedFilters,
       assetIds,
       bookableScope,
@@ -4095,6 +4104,7 @@ export async function bulkArchiveAssets({
       // Reachable only with the asset `archive` permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
@@ -4295,6 +4305,7 @@ export async function bulkUnarchiveAssets({
       // Reachable only with the asset `archive` permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
@@ -5613,6 +5624,7 @@ export async function getPaginatedAndFilterableAssets({
   bookableScope,
   canSeeAllCustody,
   userId,
+  custodySearchScope,
   locationIdsOverride,
   honorArchivedView = false,
   honorLowStockFilter = false,
@@ -5648,6 +5660,13 @@ export async function getPaginatedAndFilterableAssets({
    */
   canSeeAllCustody: boolean;
   userId?: string;
+  /**
+   * Whose custody the search may match by custodian name, from
+   * `custodySearchScopeFor` with the viewer's real custody visibility.
+   * Separate from `canSeeAllCustody`, which pickers set to `false` only to
+   * skip the custodian roster they never render.
+   */
+  custodySearchScope: CustodySearchScope;
   /**
    * Honour the `?archived=` view param (issue #382). Off by default, so every
    * list shows active assets unless its caller opts in: the asset index and
@@ -5744,6 +5763,7 @@ export async function getPaginatedAndFilterableAssets({
           organizationId,
           searchParams,
           teamMemberIds: scopedTeamMemberIds,
+          custodySearchScope,
           bookableScope,
           locationIdsOverride,
           honorArchivedView,
@@ -7126,6 +7146,7 @@ export async function bulkDeleteAssets({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
@@ -7258,6 +7279,7 @@ export async function bulkCheckOutAssets({
   bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  custodySearchScope,
 }: {
   userId: User["id"];
   /**
@@ -7297,6 +7319,12 @@ export async function bulkCheckOutAssets({
    * exactly that person's assets.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Whose custody a "select all" search matches by custodian name, from
+   * `custodySearchScopeFor`. Required for the same reason as
+   * `allowedTeamMemberIds`.
+   */
+  custodySearchScope: CustodySearchScope;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -7306,6 +7334,7 @@ export async function bulkCheckOutAssets({
       currentSearchParams,
       settings,
       allowedTeamMemberIds,
+      custodySearchScope,
       timeZone,
       lastAuditDateAccess,
       bookableScope,
@@ -7589,6 +7618,7 @@ export async function bulkCheckInAssets({
   bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  custodySearchScope,
 }: {
   userId: User["id"];
   /**
@@ -7625,6 +7655,12 @@ export async function bulkCheckInAssets({
    * with the SELF_SERVICE `asset: custody` permission.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Whose custody a "select all" search matches by custodian name, from
+   * `custodySearchScopeFor`. Required for the same reason as
+   * `allowedTeamMemberIds`.
+   */
+  custodySearchScope: CustodySearchScope;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -7634,6 +7670,7 @@ export async function bulkCheckInAssets({
       currentSearchParams,
       settings,
       allowedTeamMemberIds,
+      custodySearchScope,
       timeZone,
       lastAuditDateAccess,
       bookableScope,
@@ -7889,6 +7926,7 @@ export async function bulkUpdateAssetLocation({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       lastAuditDateAccess,
       bookableScope,
@@ -8198,6 +8236,7 @@ export async function bulkUpdateAssetMinQuantity({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       lastAuditDateAccess,
       bookableScope,
       timeZone,
@@ -8333,6 +8372,7 @@ export async function bulkUpdateAssetCategory({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       lastAuditDateAccess,
       bookableScope,
@@ -8568,6 +8608,7 @@ export async function bulkUpdateAssetModel({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       lastAuditDateAccess,
       bookableScope,
     });
@@ -8915,6 +8956,7 @@ export async function bulkAssignAssetTags({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       lastAuditDateAccess,
       bookableScope,
@@ -9140,6 +9182,7 @@ export async function bulkMarkAvailability({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
       lastAuditDateAccess,
       bookableScope,
@@ -9476,6 +9519,10 @@ export async function getUserAssetsTabLoaderData({
       // principal, refused it, and rendered both tabs empty for every role.
       canSeeAllCustody,
       userId: viewerId,
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody,
+        userId: viewerId,
+      }),
       filters: filtersSearchParams.toString(),
     });
 

@@ -48,6 +48,8 @@ import { resolveBookableListScope } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
 import { parseFiltersWithHierarchy } from "./query.server";
+import { custodySearchScopeFor } from "./search-union.server";
+import type { CustodySearchScope } from "./search-union.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
@@ -312,6 +314,7 @@ export async function simpleModeLoader({
       // This route renders the custodian filter, so its seed is scoped by the
       // custody rule for every restricted role.
       canSeeAllCustody,
+      custodySearchScope: custodySearchScopeFor({ canSeeAllCustody, userId }),
       honorArchivedView,
       // The simple index renders the "Low stock only" toggle.
       honorLowStockFilter: true,
@@ -623,6 +626,7 @@ async function getAssetModelRollupPage({
   filters,
   parsedFilters,
   bookableScope,
+  custodySearchScope,
   honorArchivedView,
   sortBy,
   sortDirection,
@@ -634,6 +638,8 @@ async function getAssetModelRollupPage({
   parsedFilters: Filter[];
   /** The caller's list scope; `null` lists every asset. */
   bookableScope: BookableListScope | null;
+  /** Whose custody the search may match by custodian name. */
+  custodySearchScope: CustodySearchScope;
   /** Honour `?archived=` (issue #382); see `canViewArchivedAssets`. */
   honorArchivedView: boolean;
   sortBy: AssetModelRollupSortKey;
@@ -661,6 +667,7 @@ async function getAssetModelRollupPage({
     await getAssetModelRollup({
       organizationId,
       search,
+      custodySearchScope,
       filters: parsedFilters,
       timeZone,
       page,
@@ -852,6 +859,10 @@ export async function advancedModeLoader({
           // restricted role's model counts describe the assets it can actually
           // see rather than the whole workspace.
           bookableScope: resolveBookableListScope({ access, userId }),
+          custodySearchScope: custodySearchScopeFor({
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+          }),
           honorArchivedView,
           sortBy: modelSortBy,
           sortDirection: modelSortDirection,
@@ -863,6 +874,10 @@ export async function advancedModeLoader({
           filters,
           settings,
           getBookings: view === "availability",
+          custodySearchScope: custodySearchScopeFor({
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+          }),
           canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
           bookableScope: resolveBookableListScope({ access, userId }),
           preParsedFilters: parsedFilters,

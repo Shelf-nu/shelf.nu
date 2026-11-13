@@ -36,3 +36,25 @@ export function isSheetViewport(): boolean {
     window.matchMedia(SHEET_MEDIA_QUERY).matches
   );
 }
+
+/**
+ * The first of the given elements the stylesheet actually shows.
+ *
+ * The sheet menus render two triggers, a desktop one (`hidden md:flex`) and a
+ * mobile one (`md:hidden`), and only one is displayed at a time. Use this to
+ * pick the one focus can go back to when a dialog opened from the menu closes.
+ *
+ * @param elements - Candidates in order of preference; `null` entries are skipped
+ * @returns The first displayed element, or the last candidate when none reads
+ *   as displayed (a test DOM without the stylesheet), or `null`
+ */
+export function firstDisplayedElement(
+  ...elements: (HTMLElement | null)[]
+): HTMLElement | null {
+  const present = elements.filter((el): el is HTMLElement => el !== null);
+  return (
+    present.find((el) => getComputedStyle(el).display !== "none") ??
+    present.at(-1) ??
+    null
+  );
+}

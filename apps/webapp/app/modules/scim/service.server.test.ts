@@ -17,6 +17,7 @@ vi.mock("~/database/db.server", () => ({
   db: {
     user: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
@@ -313,11 +314,13 @@ describe("createScimUser", () => {
 
   it("should throw 409 when the user is already mapped in the org", async () => {
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue({
-      ...mockShelfUser,
-      scimExternalIds: [{ scimExternalId: SCIM_ID }],
-      userOrganizations: [{ id: "uo-1" }],
-    });
+    mockDb.db.user.findMany.mockResolvedValue([
+      {
+        ...mockShelfUser,
+        scimExternalIds: [{ scimExternalId: SCIM_ID }],
+        userOrganizations: [{ id: "uo-1" }],
+      },
+    ]);
 
     await expect(
       createScimUser(ORG_ID, {
@@ -327,13 +330,41 @@ describe("createScimUser", () => {
     ).rejects.toMatchObject({ status: 409, scimType: "uniqueness" });
   });
 
+  it("should find an existing user whose stored email differs only by case", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findMany.mockResolvedValue([
+      {
+        ...mockShelfUser,
+        email: "Jane@Example.com",
+        scimExternalIds: [{ scimExternalId: SCIM_ID }],
+        userOrganizations: [{ id: "uo-1" }],
+      },
+    ]);
+
+    await expect(
+      createScimUser(ORG_ID, {
+        userName: "jane@example.com",
+        externalId: SCIM_ID,
+      })
+    ).rejects.toMatchObject({ status: 409, scimType: "uniqueness" });
+
+    expect(mockDb.db.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { in: ["jane@example.com"], mode: "insensitive" } },
+      })
+    );
+    expect(mockUserService.createUser).not.toHaveBeenCalled();
+  });
+
   it("should attach + map an existing user who is not yet in the org", async () => {
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue({
-      ...mockShelfUser,
-      scimExternalIds: [],
-      userOrganizations: [],
-    });
+    mockDb.db.user.findMany.mockResolvedValue([
+      {
+        ...mockShelfUser,
+        scimExternalIds: [],
+        userOrganizations: [],
+      },
+    ]);
     // @ts-expect-error - vitest mock type
     mockDb.db.userOrganization.create.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
@@ -370,11 +401,13 @@ describe("createScimUser", () => {
   it("should adopt an existing member without re-granting membership", async () => {
     // Existing member (has membership) but no SCIM mapping → adopt: map only.
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue({
-      ...mockShelfUser,
-      scimExternalIds: [],
-      userOrganizations: [{ id: "uo-1" }],
-    });
+    mockDb.db.user.findMany.mockResolvedValue([
+      {
+        ...mockShelfUser,
+        scimExternalIds: [],
+        userOrganizations: [{ id: "uo-1" }],
+      },
+    ]);
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.create.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
@@ -391,7 +424,7 @@ describe("createScimUser", () => {
 
   it("should create a new user, mapping and team member", async () => {
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue(null);
+    mockDb.db.user.findMany.mockResolvedValue([]);
     // @ts-expect-error - vitest mock type
     mockUserService.createUser.mockResolvedValue({ id: "new-user-id" });
     // @ts-expect-error - vitest mock type
@@ -432,7 +465,7 @@ describe("createScimUser", () => {
     // An IdP may provision an already-suspended account. Creating it with
     // membership would hand a disabled user working Shelf access.
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue(null);
+    mockDb.db.user.findMany.mockResolvedValue([]);
     // @ts-expect-error - vitest mock type
     mockUserService.createUser.mockResolvedValue({ id: "new-user-id" });
     // @ts-expect-error - vitest mock type
@@ -469,11 +502,13 @@ describe("createScimUser", () => {
 
   it("should not grant membership when adopting an existing user as inactive", async () => {
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue({
-      ...mockShelfUser,
-      scimExternalIds: [],
-      userOrganizations: [],
-    });
+    mockDb.db.user.findMany.mockResolvedValue([
+      {
+        ...mockShelfUser,
+        scimExternalIds: [],
+        userOrganizations: [],
+      },
+    ]);
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.create.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
@@ -503,11 +538,13 @@ describe("createScimUser", () => {
     // an active user. An existing member is revoked so the state matches the
     // request (otherwise a suspended identity keeps access).
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUnique.mockResolvedValue({
-      ...mockShelfUser,
-      scimExternalIds: [],
-      userOrganizations: [{ id: "uo-1" }],
-    });
+    mockDb.db.user.findMany.mockResolvedValue([
+      {
+        ...mockShelfUser,
+        scimExternalIds: [],
+        userOrganizations: [{ id: "uo-1" }],
+      },
+    ]);
     // @ts-expect-error - vitest mock type
     mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
     // @ts-expect-error - vitest mock type
@@ -524,6 +561,7 @@ describe("createScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     // Access is revoked, but the mapping must still be persisted so SCIM now
     // manages this user (and can later reactivate them).
@@ -545,7 +583,7 @@ describe("createScimUser", () => {
       })
     ).rejects.toMatchObject({ status: 400, scimType: "invalidValue" });
 
-    expect(mockDb.db.user.findUnique).not.toHaveBeenCalled();
+    expect(mockDb.db.user.findMany).not.toHaveBeenCalled();
     expect(mockUserService.createUser).not.toHaveBeenCalled();
   });
 
@@ -625,6 +663,7 @@ describe("replaceScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     expect(result.active).toBe(false);
   });
@@ -666,7 +705,7 @@ describe("replaceScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
     // @ts-expect-error - vitest mock type: uniqueness check returns no conflict
-    mockDb.db.user.findUnique.mockResolvedValue(null);
+    mockDb.db.user.findFirst.mockResolvedValue(null);
     // @ts-expect-error - vitest mock type
     mockDb.db.user.update.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
@@ -691,7 +730,7 @@ describe("replaceScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
     // @ts-expect-error - vitest mock type: uniqueness check finds a conflict
-    mockDb.db.user.findUnique.mockResolvedValue({ id: "other-user" });
+    mockDb.db.user.findFirst.mockResolvedValue({ id: "other-user" });
 
     await expect(
       replaceScimUser(ORG_ID, SCIM_ID, { userName: "taken@example.com" })
@@ -706,7 +745,7 @@ describe("replaceScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
     // @ts-expect-error - vitest mock type: pre-check finds nothing
-    mockDb.db.user.findUnique.mockResolvedValue(null);
+    mockDb.db.user.findFirst.mockResolvedValue(null);
     // @ts-expect-error - vitest mock type
     mockDb.db.user.update.mockRejectedValue(
       new PrismaClientKnownRequestError("Unique constraint failed", {
@@ -734,6 +773,63 @@ describe("replaceScimUser", () => {
 
     expect(mockDb.db.user.update).not.toHaveBeenCalled();
     expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("should treat an address held by another user in a different case as taken", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type: another account stores "Taken@Example.com"
+    mockDb.db.user.findFirst.mockResolvedValue({ id: "other-user" });
+
+    await expect(
+      replaceScimUser(ORG_ID, SCIM_ID, { userName: "taken@example.com" })
+    ).rejects.toMatchObject({ status: 409, scimType: "uniqueness" });
+
+    expect(mockDb.db.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        email: { in: ["taken@example.com"], mode: "insensitive" },
+        id: { not: "user-abc" },
+      },
+      select: { id: true },
+    });
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("should NOT mutate the global identity of a user whose only membership is in another org", async () => {
+    // A mapping with no membership here and one membership elsewhere: the
+    // state left by adopting another workspace's user with active:false.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(
+      scimMapping({ userOrganizations: [] }, 1)
+    );
+
+    const result = await replaceScimUser(ORG_ID, SCIM_ID, {
+      userName: "newjane@example.com",
+      name: { givenName: "Janet", familyName: "Doe" },
+      active: false,
+    });
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+    expect(result.active).toBe(false);
+  });
+
+  it("should NOT mutate the global identity of a mapped user with no membership anywhere", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(
+      scimMapping({ userOrganizations: [] }, 0)
+    );
+
+    const result = await replaceScimUser(ORG_ID, SCIM_ID, {
+      userName: "newjane@example.com",
+      name: { givenName: "Janet", familyName: "Doe" },
+      active: false,
+    });
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+    expect(result.active).toBe(false);
   });
 
   it("should NOT mutate the global identity of a user in multiple orgs", async () => {
@@ -799,6 +895,7 @@ describe("patchScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     expect(result.active).toBe(false);
   });
@@ -1225,7 +1322,7 @@ describe("patchScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
     // @ts-expect-error - vitest mock type: uniqueness check
-    mockDb.db.user.findUnique.mockResolvedValue(null);
+    mockDb.db.user.findFirst.mockResolvedValue(null);
     // @ts-expect-error - vitest mock type
     mockDb.db.user.update.mockResolvedValue({});
     mockUpdateUserById.mockResolvedValue({});
@@ -1261,6 +1358,25 @@ describe("patchScimUser", () => {
 
     expect(mockDb.db.user.update).not.toHaveBeenCalled();
     expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("should NOT mutate the global identity of a user whose only membership is in another org", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(
+      scimMapping({ userOrganizations: [] }, 1)
+    );
+
+    const result = await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [
+        { op: "replace", path: "userName", value: "newjane@example.com" },
+        { op: "replace", path: "name.givenName", value: "Janet" },
+      ],
+    });
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+    expect(result.active).toBe(false);
   });
 
   it("should NOT mutate the global identity of a user in multiple orgs", async () => {
@@ -1315,6 +1431,7 @@ describe("deactivateScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+      allowMissingMembership: true,
     });
     expect(mockDb.db.userScimExternalId.deleteMany).toHaveBeenCalledWith({
       where: { organizationId: ORG_ID, scimExternalId: SCIM_ID },

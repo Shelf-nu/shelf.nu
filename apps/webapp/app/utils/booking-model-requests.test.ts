@@ -5,10 +5,14 @@ import {
   canEditModelReservations,
   countReservedModelUnits,
   countUnassignedModelUnits,
-  getModelPoolRemaining,
+  getReservationCeiling,
   getModelRequestQuantityIssue,
   getOutstandingModelRequests,
-  isModelPoolOverCommitted,
+  isReservationOverCommitted,
+  MODEL_TAB_PAGE_PARAM,
+  MODEL_TAB_SEARCH_PARAM,
+  MODEL_TAB_SHOW_EMPTY_PARAM,
+  readModelTabParams,
   summarizeUnassignedUnits,
 } from "./booking-model-requests";
 
@@ -272,70 +276,65 @@ describe("summarizeUnassignedUnits", () => {
   });
 });
 
-describe("isModelPoolOverCommitted", () => {
-  const counts = {
-    total: 5,
-    inCustody: 0,
-    reservedConcrete: 0,
-    reservedViaRequest: 0,
-  };
-
-  it("is false when the promises fit the stock", () => {
-    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 3 })).toBe(
-      false
-    );
-  });
-
-  it("is false when the stock is exactly spoken for", () => {
-    // The boundary matters: exactly-empty is not over-committed, and it is the
-    // case an off-by-one here would misreport as a shortfall on every full pool.
-    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 5 })).toBe(
-      false
-    );
-  });
-
-  it("is true when more units are promised than exist", () => {
-    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 6 })).toBe(
-      true
-    );
-  });
-
-  it("counts custody and both kinds of reservation against the pool", () => {
-    // 5 total − 2 in custody − 2 concrete − 2 via request = −1.
+describe("getReservationCeiling", () => {
+  it("is the free units when the booking holds nothing by name", () => {
     expect(
-      isModelPoolOverCommitted({
-        total: 5,
-        inCustody: 2,
-        reservedConcrete: 2,
-        reservedViaRequest: 2,
-      })
-    ).toBe(true);
+      getReservationCeiling({ available: 4, namedNotInCustody: 0 }, 0)
+    ).toBe(4);
   });
-});
 
-describe("getModelPoolRemaining", () => {
-  it("returns how many units are free", () => {
+  it("takes off units the booking already holds by name", () => {
+    // Two named units of four free leave room for a reservation of two.
     expect(
-      getModelPoolRemaining({
-        total: 5,
-        inCustody: 1,
-        reservedConcrete: 2,
-        reservedViaRequest: 0,
-      })
+      getReservationCeiling({ available: 4, namedNotInCustody: 2 }, 0)
     ).toBe(2);
   });
 
-  it("goes negative when the pool owes more than it holds", () => {
-    // The signed result is the reason this exists: `available` is clamped at
-    // zero, so it reports this case and an exactly-empty pool identically.
+  it("adds back units the reservation has already been fulfilled with", () => {
+    // Those two named units ARE the reservation's assigned units, so the
+    // reservation may still total four.
     expect(
-      getModelPoolRemaining({
-        total: 5,
-        inCustody: 0,
-        reservedConcrete: 4,
-        reservedViaRequest: 3,
-      })
-    ).toBe(-2);
+      getReservationCeiling({ available: 4, namedNotInCustody: 2 }, 2)
+    ).toBe(4);
+  });
+
+  it("does not take off a fulfilled unit a custodian holds", () => {
+    // The pool already deducted the custody unit, so it is not named here.
+    expect(
+      getReservationCeiling({ available: 3, namedNotInCustody: 0 }, 1)
+    ).toBe(4);
+  });
+});
+
+describe("isReservationOverCommitted", () => {
+  const pool = { available: 3, namedNotInCustody: 0 };
+
+  it("is false when the reservation fits", () => {
+    expect(
+      isReservationOverCommitted(pool, { quantity: 2, fulfilled: 0 })
+    ).toBe(false);
+  });
+
+  it("is false when the reservation takes exactly what is left", () => {
+    // The boundary matters: a full pool is not over-committed.
+    expect(
+      isReservationOverCommitted(pool, { quantity: 3, fulfilled: 0 })
+    ).toBe(false);
+  });
+
+  it("is true when the reservation asks for more than is left", () => {
+    expect(
+      isReservationOverCommitted(pool, { quantity: 4, fulfilled: 0 })
+    ).toBe(true);
+  });
+
+  it("counts units held by name against the same pool", () => {
+    expect(
+      isReservationOverCommitted(
+        { available: 3, namedNotInCustody: 2 },
+        { quantity: 2, fulfilled: 0 }
+      )
+    ).toBe(true);
   });
 });
 
@@ -436,5 +435,48 @@ describe("getModelRequestQuantityIssue", () => {
     );
     // No capacity to judge against, so any quantity above the floor passes.
     expect(getModelRequestQuantityIssue(99, unknownPool)).toBeNull();
+  });
+});
+
+describe("readModelTabParams", () => {
+  /** Builds the URL params the Models tab writes. */
+  const params = (search?: string, page?: string) => {
+    const p = new URLSearchParams({ s: "asset search" });
+    if (search !== undefined) p.set(MODEL_TAB_SEARCH_PARAM, search);
+    if (page !== undefined) p.set(MODEL_TAB_PAGE_PARAM, page);
+    return p;
+  };
+
+  it("reads the trimmed model search and page", () => {
+    expect(readModelTabParams(params("  dell ", "3"))).toEqual({
+      search: "dell",
+      page: 3,
+      showModelsWithoutAssets: false,
+    });
+  });
+
+  it("ignores the asset list's own search", () => {
+    expect(readModelTabParams(params())).toEqual({
+      showModelsWithoutAssets: false,
+    });
+  });
+
+  it("omits a blank search and any page that is not a whole number above 1", () => {
+    const none = { showModelsWithoutAssets: false };
+    expect(readModelTabParams(params("   ", "1"))).toEqual(none);
+    expect(readModelTabParams(params(undefined, "0"))).toEqual(none);
+    expect(readModelTabParams(params(undefined, "2.5"))).toEqual(none);
+    expect(readModelTabParams(params(undefined, "abc"))).toEqual(none);
+  });
+
+  it("hides models without assets unless the toggle is exactly on", () => {
+    const withToggle = (value: string) => {
+      const p = params();
+      p.set(MODEL_TAB_SHOW_EMPTY_PARAM, value);
+      return readModelTabParams(p).showModelsWithoutAssets;
+    };
+    expect(withToggle("true")).toBe(true);
+    expect(withToggle("false")).toBe(false);
+    expect(withToggle("1")).toBe(false);
   });
 });

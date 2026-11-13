@@ -1,7 +1,9 @@
+import { SENTRY_TUNNEL_MAX_ENVELOPE_BYTES } from "~/utils/constants";
 import {
   buildSentryEnvelopeUrl,
   envelopeDsnMatches,
   getConfiguredSentryTarget,
+  readBodyWithinLimit,
 } from "~/utils/sentry-tunnel.server";
 import type { Route } from "./+types/sentry-tunnel";
 
@@ -13,9 +15,13 @@ import type { Route } from "./+types/sentry-tunnel";
  * Enhanced Tracking Protection).
  *
  * The destination is pinned to the server's own configured Sentry project. The
- * DSN in the client's envelope is only ever compared against it — it never
- * builds the URL we fetch. Deriving the host from the envelope made this a
- * full-read SSRF; see `~/utils/sentry-tunnel.server` for the full account.
+ * DSN in the client's envelope is only ever compared against it: it never
+ * builds the URL we fetch, so the caller chooses nothing about where the
+ * request goes; see `~/utils/sentry-tunnel.server`.
+ *
+ * The body is capped at {@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES} here as well
+ * as in the server middleware, so the bound holds for every method and path
+ * spelling that reaches this action.
  *
  * @see https://docs.sentry.io/platforms/javascript/troubleshooting/#using-the-tunnel-option
  * @see {@link file://./../../utils/sentry-tunnel.server.ts}
@@ -33,7 +39,15 @@ export async function action({ request }: Route.ActionArgs) {
       return new Response("Sentry tunnel is not configured", { status: 404 });
     }
 
-    const envelopeBytes = await request.arrayBuffer();
+    const envelopeBytes = await readBodyWithinLimit(
+      request,
+      SENTRY_TUNNEL_MAX_ENVELOPE_BYTES
+    );
+
+    if (!envelopeBytes) {
+      return new Response("Envelope too large", { status: 413 });
+    }
+
     const envelope = new TextDecoder().decode(envelopeBytes);
 
     // The first line of the envelope is a JSON header containing the DSN

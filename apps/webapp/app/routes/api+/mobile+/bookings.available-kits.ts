@@ -1,10 +1,13 @@
 import { data, type LoaderFunctionArgs } from "react-router";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -25,7 +28,11 @@ import { makeShelfError } from "~/utils/error";
  * `bookingTo` and `hideUnavailable=true` (the service 400s without both dates).
  *
  * Query: ?orgId & bookingFrom & bookingTo & hideUnavailable=true
- *        & s? (search) & page? & per_page?
+ *        & currentBookingId? & s? (search) & page? & per_page?
+ *
+ * `currentBookingId` keeps that booking's own kits selectable, which reveals
+ * what it holds, so it must name a booking in this workspace that the caller
+ * may see; any other id answers 404.
  *
  * @see {@link file://./bookings.available-assets.ts} the asset twin
  */
@@ -44,7 +51,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // double-book). Passing the booking being edited both enables the filter AND
     // keeps that booking's own kits selectable (re-add on edit).
     const currentBookingId =
-      new URL(request.url).searchParams.get("currentBookingId") ?? undefined;
+      new URL(request.url).searchParams.get("currentBookingId")?.trim() ||
+      undefined;
+
+    if (currentBookingId) {
+      const [booking, { access }] = await Promise.all([
+        db.booking.findFirst({
+          where: { id: currentBookingId, organizationId },
+          select: {
+            id: true,
+            custodianUserId: true,
+            custodianTeamMember: { select: { userId: true } },
+          },
+        }),
+        getMobileUserContext(user.id, organizationId),
+      ]);
+      if (!booking || !canSeeBooking({ access, booking, userId: user.id })) {
+        return data(
+          { error: { message: "Booking not found in this workspace." } },
+          { status: 404 }
+        );
+      }
+    }
 
     const { kits, page, perPage, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({

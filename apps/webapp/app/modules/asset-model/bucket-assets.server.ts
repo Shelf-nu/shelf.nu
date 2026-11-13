@@ -34,6 +34,7 @@ import {
   resolveBookableListScope,
 } from "~/modules/asset/list-scope.server";
 import type { BookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { ArchivedFilter } from "~/modules/asset/types";
 import {
@@ -248,6 +249,10 @@ export async function loadAssetModelBucketAssets({
         settings,
         filters: stringifyFilters(forwarded),
         canUseBarcodes,
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         timeZone,
         bookableScope,
         honorArchivedView,

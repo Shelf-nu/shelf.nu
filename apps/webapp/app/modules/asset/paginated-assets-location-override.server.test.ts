@@ -58,6 +58,7 @@ const ORG = "org-1";
 /** Loads the list for `?location=campus`, with an optional override. */
 function load(locationIdsOverride?: string[]) {
   return getPaginatedAndFilterableAssets({
+    custodySearchScope: "all",
     request: new Request("https://shelf.test/bookings/b1?location=campus"),
     organizationId: ORG,
     canSeeAllCustody: true,

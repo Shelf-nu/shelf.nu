@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { resolveAssetSearchIds } from "~/modules/asset/search-ids.server";
+import type { CustodySearchScope } from "~/modules/asset/search-union.server";
 import { splitAssetSearchTerms } from "~/modules/asset/search.server";
 
 /**
@@ -30,6 +31,8 @@ import { splitAssetSearchTerms } from "~/modules/asset/search.server";
  *
  * @param organizationId - Tenant scope; every UNION branch is org-scoped.
  * @param search - Raw (already length-capped) search term from the request.
+ * @param custodySearchScope - Whose custody the custodian-name branch may
+ *   match (see `custodySearchScopeFor`).
  * @returns `{}` for a genuinely empty search (no filter); an always-false
  *   `{ id: { in: [] } }` for whitespace/bare-comma input (a debounced
  *   type-ahead space must not flash the full list) or a search with no
@@ -40,9 +43,11 @@ import { splitAssetSearchTerms } from "~/modules/asset/search.server";
 export async function resolveMobileAssetSearchWhere({
   organizationId,
   search,
+  custodySearchScope,
 }: {
   organizationId: string;
   search: string;
+  custodySearchScope: CustodySearchScope;
 }): Promise<Prisma.AssetWhereInput> {
   const searchTerms = splitAssetSearchTerms(search);
 
@@ -62,6 +67,7 @@ export async function resolveMobileAssetSearchWhere({
   const ids = await resolveAssetSearchIds({
     organizationId,
     terms: searchTerms,
+    custodySearchScope,
   });
 
   return { id: { in: ids } };

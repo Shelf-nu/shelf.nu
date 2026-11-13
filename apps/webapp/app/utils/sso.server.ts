@@ -82,30 +82,43 @@ async function findAuthUserOrNull(userId: string) {
   }
 }
 
+/** The lowercased domain of the session's authenticated email. */
+function sessionEmailDomain(authSession: AuthSession): string {
+  return authSession.email.split("@")[1]?.toLowerCase() ?? "";
+}
+
 /**
- * Refuses an SSO callback that matched a Shelf account by email unless the
- * authenticated auth user holds an identity from the SSO provider registered
- * for the session email's domain (`provider = 'sso:<id>'`, the same binding
- * the account conversion seeds and the claims reader trusts).
+ * Refuses an SSO callback unless the authenticated auth user holds an identity
+ * from the SSO provider registered for the session email's domain
+ * (`provider = 'sso:<id>'`, the same binding the account conversion seeds and
+ * the claims reader trusts).
  *
- * Every email-matched branch rewrites or updates an account the session does
- * not own by id (the SCIM re-key, the duplicate merge, the profile update), so
- * the email alone must not decide it: an identity from another provider can
- * carry any email the IdP behind it chooses to assert. One query covers both
- * the domain's provider and the identity.
+ * An identity from another provider can carry any email the IdP behind it
+ * chooses to assert, so the email alone must decide neither an account
+ * matched by email (the SCIM re-key, the duplicate merge, the profile update)
+ * nor a new account created on a domain that has its own provider. One query
+ * covers both the domain's provider and the identity.
  *
  * @param authSession - the session just refreshed and checked as SAML
- * @param matchedUserId - the Shelf account matched by email, for the log
+ * @param options.matchedUserId - the Shelf account matched by email, for the log
+ * @param options.allowUnregisteredDomain - accept a domain with no registered
+ *   provider. Only the new-user branch passes it: such a domain has no
+ *   provider an identity could be checked against.
  * @throws {ShelfError} 403 when the session holds no identity from the
- *   domain's provider, or the domain has none
+ *   domain's provider, or the domain has none and that is not allowed
  */
 async function assertSessionHoldsDomainProviderIdentity(
   authSession: AuthSession,
-  matchedUserId: string
+  {
+    matchedUserId,
+    allowUnregisteredDomain = false,
+  }: { matchedUserId?: string; allowUnregisteredDomain?: boolean } = {}
 ): Promise<void> {
-  const domain = authSession.email.split("@")[1]?.toLowerCase() ?? "";
+  const domain = sessionEmailDomain(authSession);
 
-  const [binding] = await db.$queryRaw<{ held: boolean }[]>`
+  const [binding] = await db.$queryRaw<
+    { held: boolean; registered: boolean }[]
+  >`
     SELECT EXISTS (
       SELECT 1
       FROM auth.identities i
@@ -113,10 +126,14 @@ async function assertSessionHoldsDomainProviderIdentity(
         ON i.provider = 'sso:' || d.sso_provider_id::text
       WHERE i.user_id = ${authSession.userId}::uuid
         AND lower(d.domain) = ${domain}
-    ) AS "held"
+    ) AS "held",
+    EXISTS (
+      SELECT 1 FROM auth.sso_domains d WHERE lower(d.domain) = ${domain}
+    ) AS "registered"
   `;
 
   if (binding?.held) return;
+  if (allowUnregisteredDomain && binding?.registered === false) return;
 
   throw new ShelfError({
     cause: null,
@@ -124,6 +141,62 @@ async function assertSessionHoldsDomainProviderIdentity(
     title: "Single sign-on required",
     message: "Please sign in with your organization's single sign-on.",
     additionalData: { userId: authSession.userId, matchedUserId },
+    label: "Auth",
+    shouldBeCaptured: true,
+  });
+}
+
+/**
+ * Refuses to merge a duplicate SSO login onto an account whose auth user
+ * already holds an SSO identity from a provider that is registered in the
+ * project but not for the session email's domain. The duplicate merge moves
+ * identities onto the account and seals it to the domain's provider, so an
+ * account already bound to another organization's live IdP is left for
+ * support to look at instead.
+ *
+ * Identities from a provider that no longer exists do not count: a customer
+ * who re-registers their IdP gets a new provider id, and their accounts still
+ * carry identities from the old one. Those logins must keep merging.
+ *
+ * @param authSession - the session of the duplicate SSO login
+ * @param existingUserId - the account matched by email, which has an auth user
+ * @throws {ShelfError} 403 when the account holds such an identity
+ */
+async function assertAccountHoldsNoForeignSsoIdentity(
+  authSession: AuthSession,
+  existingUserId: string
+): Promise<void> {
+  const domain = sessionEmailDomain(authSession);
+
+  const [row] = await db.$queryRaw<{ foreign: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM auth.identities i
+      WHERE i.user_id = ${existingUserId}::uuid
+        AND i.provider LIKE 'sso:%'
+        AND EXISTS (
+          SELECT 1
+          FROM auth.sso_providers p
+          WHERE i.provider = 'sso:' || p.id::text
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM auth.sso_domains d
+          WHERE lower(d.domain) = ${domain}
+            AND i.provider = 'sso:' || d.sso_provider_id::text
+        )
+    ) AS "foreign"
+  `;
+
+  if (!row?.foreign) return;
+
+  throw new ShelfError({
+    cause: null,
+    status: 403,
+    title: "Account needs attention",
+    message:
+      "This account is linked to a different single sign-on provider. Please contact our support team.",
+    additionalData: { userId: authSession.userId, existingUserId },
     label: "Auth",
     shouldBeCaptured: true,
   });
@@ -445,17 +518,20 @@ export function isSsoAccountLinkedError(cause: unknown): cause is ShelfError {
  *    user is an email/password account is refused instead.
  *
  * Otherwise the Shelf user is matched by email without regard to letter case
- * (see `findSsoCallbackUserByEmail`); no match means a new user. A match is
- * acted on only when the authenticated auth user holds an identity from the
- * SSO provider registered for the email's domain (403 otherwise, touching
- * nothing). For a match:
+ * (see `findSsoCallbackUserByEmail`); no match means a new user, created only
+ * when the email's domain has no registered SSO provider or the authenticated
+ * auth user holds an identity from it. A match is acted on only when the
+ * authenticated auth user holds an identity from the SSO provider registered
+ * for the email's domain (403 otherwise, touching nothing). For a match:
  * 2. Look up the Shelf user's auth account. Only a genuine 404 counts as
  *    "no auth account"; any other failure is rethrown.
  * 3. No auth account and the ids differ: a SCIM-provisioned placeholder. Re-key
  *    the Shelf user to the SSO auth UUID.
  * 4. Auth account exists, the ids differ and the user is approved for SSO
- *    (`user.sso`): Supabase created a duplicate SSO auth user. Reconcile it onto
- *    the original account via `reconcileDuplicateSsoLogin`, then throw the
+ *    (`user.sso`): Supabase created a duplicate SSO auth user. Unless the
+ *    original account holds an SSO identity from a provider not registered
+ *    for the domain (403), reconcile the duplicate onto it via
+ *    `reconcileDuplicateSsoLogin`, then throw the
  *    account-linked notice (`isSsoAccountLinkedError`) asking the user to sign
  *    in again. The current session belongs to the deleted duplicate, so the
  *    caller must not issue it.
@@ -582,7 +658,9 @@ export async function resolveUserAndOrgForSsoCallback({
     if (user) {
       // Everything below acts on an account matched by email only, so the
       // session must first prove it came from the domain's own provider.
-      await assertSessionHoldsDomainProviderIdentity(authSession, user.id);
+      await assertSessionHoldsDomainProviderIdentity(authSession, {
+        matchedUserId: user.id,
+      });
 
       const authUser = await findAuthUserOrNull(user.id);
 
@@ -615,6 +693,7 @@ export async function resolveUserAndOrgForSsoCallback({
       // `user.sso` accounts are merged automatically; un-approved accounts
       // fall through to the support message below.
       if (user.sso) {
+        await assertAccountHoldsNoForeignSsoIdentity(authSession, user.id);
         await reconcileDuplicateSsoLogin({
           authSession,
           existingUser: { id: user.id, email: user.email, sso: user.sso },
@@ -651,8 +730,15 @@ export async function resolveUserAndOrgForSsoCallback({
       return { user: response.user, org: response.org };
     }
 
-    // New user case - create them with SSO. There is no stored name to fall
-    // back on, so an IdP that sends none cannot create an account.
+    // New user case - create them with SSO. On a domain with a registered
+    // provider the account is created only for that provider's identity;
+    // a domain without one has nothing to check against.
+    await assertSessionHoldsDomainProviderIdentity(authSession, {
+      allowUnregisteredDomain: true,
+    });
+
+    // There is no stored name to fall back on, so an IdP that sends none
+    // cannot create an account.
     if (!firstName || !lastName) {
       throw new ShelfError({
         cause: null,

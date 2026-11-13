@@ -28,6 +28,9 @@
  *    the first hover fetches the breakdown, and only its booking and kit
  *    lists join the card; the server's figures stay. With detail-page props
  *    (lists inline) the badge never fetches.
+ *  - A checked-out INDIVIDUAL asset links the booking that `ongoing-booking`
+ *    names when it opens for the viewer, names it without a link when it
+ *    does not, and shows no booking when that route answers `booking: null`.
  *
  * @see {@link file://./asset-status-badge.tsx}
  */
@@ -37,6 +40,7 @@ import { act, render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import type { OngoingBookingPayload } from "~/routes/api+/assets.$assetId.ongoing-booking";
 import { AssetStatusBadge } from "./asset-status-badge";
 import type { QuantityAwareAsset, QuantityBreakdown } from "./quantity-data";
 
@@ -54,6 +58,9 @@ const apiQueryCalls: Array<{ api: string; enabled: boolean }> = [];
  */
 let lazyBreakdownResponse: QuantityAwareAsset | undefined;
 
+/** What the mocked `/ongoing-booking` query answers once it is enabled. */
+let ongoingBookingResponse: OngoingBookingPayload | undefined;
+
 // why: AssetStatusBadge uses `useApiQuery` for two endpoints
 // (`/api/assets/:id/quantity-breakdown` and
 // `/api/assets/:id/ongoing-booking`). We mock the hook so the test
@@ -63,10 +70,13 @@ let lazyBreakdownResponse: QuantityAwareAsset | undefined;
 vi.mock("~/hooks/use-api-query", () => ({
   default: ({ api, enabled }: { api: string; enabled?: boolean }) => {
     apiQueryCalls.push({ api, enabled: !!enabled });
-    const data =
-      enabled && api.includes("/quantity-breakdown")
-        ? lazyBreakdownResponse
-        : undefined;
+    const data = !enabled
+      ? undefined
+      : api.includes("/quantity-breakdown")
+      ? lazyBreakdownResponse
+      : api.includes("/ongoing-booking")
+      ? ongoingBookingResponse
+      : undefined;
     return { data, isLoading: false, error: undefined };
   },
 }));
@@ -93,6 +103,7 @@ vi.mock("../../shared/hover-card", () => ({
 beforeEach(() => {
   apiQueryCalls.length = 0;
   lazyBreakdownResponse = undefined;
+  ongoingBookingResponse = undefined;
 });
 
 /** Whether the breakdown endpoint for `id` was ever queried with `enabled`. */
@@ -442,6 +453,61 @@ describe("AssetStatusBadge", () => {
 
       expect(screen.queryByText("Reserved")).not.toBeInTheDocument();
       expect(screen.getByText("Available")).toBeInTheDocument();
+    });
+  });
+
+  describe("ongoing booking hover card", () => {
+    /** A checked-out INDIVIDUAL asset, as the asset index renders it. */
+    function renderCheckedOut() {
+      render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-out-1"
+            status="CHECKED_OUT"
+            availableToBook
+            asset={{
+              type: "INDIVIDUAL",
+              quantity: 1,
+              custody: null,
+              bookingAssets: [],
+              assetKits: [],
+            }}
+          />
+        </MemoryRouter>
+      );
+    }
+
+    it("links the booking the route names", () => {
+      ongoingBookingResponse = {
+        booking: { id: "booking-1", name: "Field shoot", canOpen: true },
+      };
+
+      renderCheckedOut();
+
+      expect(screen.getByRole("link", { name: "Field shoot" })).toHaveAttribute(
+        "href",
+        "/bookings/booking-1"
+      );
+    });
+
+    it("names the booking without a link when it does not open for the viewer", () => {
+      ongoingBookingResponse = {
+        booking: { id: "booking-1", name: "Field shoot", canOpen: false },
+      };
+
+      renderCheckedOut();
+
+      expect(screen.getByText("Field shoot")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    });
+
+    it("shows no booking when the route withholds it", () => {
+      ongoingBookingResponse = { booking: null };
+
+      renderCheckedOut();
+
+      expect(screen.getByText("Checked out")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
     });
   });
 });

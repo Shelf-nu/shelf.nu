@@ -1,29 +1,29 @@
 ---
-description: Never render CheckoutDialog (or any dialog with selects or pickers) inside a DropdownMenu; open it from the menu row and render it beside the menu.
+description: Never render a dialog (CheckoutDialog, CheckinDialog, anything with pickers) inside a DropdownMenuItem; render it beside the menu, controlled, and open it from the row.
 paths:
   - "apps/webapp/app/components/**/*.tsx"
   - "apps/webapp/app/routes/**/*.tsx"
 ---
 
-# Never Put `CheckoutDialog` Inside A `DropdownMenu`
+# Never Put A Dialog Inside A `DropdownMenuItem`
 
-React bubbles a portaled dialog's events through its component parents, and a
-Radix `DropdownMenuItem` takes focus on every mouse move it sees. Inside a menu
-item, the dialog's "From location" picker loses focus as the mouse moves and its
-list closes, so no location can be picked. Nothing throws.
+A dialog inside a menu row breaks two ways. The menu closes when a row is
+picked (desktop sheet menus included), which unmounts the dialog with it. And
+React bubbles the portaled dialog's events through the row, which takes focus
+on every mouse move, so a picker inside it closes before an option is chosen.
 
-Render the dialog beside the menu, controlled, and open it from the item's
-`onSelect` (Enter and Space click the item, never a button inside it):
+Render the dialog beside the menu, controlled (`open`, `onOpenChange`,
+`returnFocusTo`), and open it from the row. Enter and Space reach the row's
+button (see `DropdownMenuItem`), so its `onClick` or the item's `onSelect` both work:
 
 ```tsx
 // ❌ Bad
-<DropdownMenuItem><CheckoutDialog booking={booking} /></DropdownMenuItem>
+<DropdownMenuItem><CheckinDialog booking={booking} /></DropdownMenuItem>
 
 // ✅ Good
-<CheckoutDialog booking={booking} open={open} onOpenChange={setOpen}
+<CheckinDialog booking={booking} open={open} onOpenChange={setOpen}
   returnFocusTo={() => triggerRef.current} />
 <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setOpen(true); closeMenu(); }}>
 ```
 
-The same holds for any dialog with a popover, select or date picker. See
-`checkout-dropdown.tsx`; pinned by `checkout-dropdown.test.tsx`.
+See `checkout-dropdown.tsx` and `checkin-dropdown.tsx`; pinned by their tests.

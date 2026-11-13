@@ -11,6 +11,7 @@
  * @see {@link file://./mobile-asset-search.server.ts}
  * @see {@link file://./../asset/search-union.server.ts}
  */
+import type { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { resolveMobileAssetSearchWhere } from "./mobile-asset-search.server";
 
@@ -25,6 +26,8 @@ vi.mock("~/database/db.server", () => ({
 
 describe("resolveMobileAssetSearchWhere", () => {
   const queryRawMock = vi.mocked(db.$queryRaw);
+  /** A viewer who may see all custody. */
+  const args = { organizationId: "o1", custodySearchScope: "all" as const };
 
   beforeEach(() => {
     queryRawMock.mockReset().mockResolvedValue([{ id: "a1" }, { id: "a2" }]);
@@ -32,7 +35,7 @@ describe("resolveMobileAssetSearchWhere", () => {
 
   it("returns no filter and runs no UNION for a truly empty search", async () => {
     await expect(
-      resolveMobileAssetSearchWhere({ organizationId: "o1", search: "" })
+      resolveMobileAssetSearchWhere({ ...args, search: "" })
     ).resolves.toEqual({});
     expect(queryRawMock).not.toHaveBeenCalled();
   });
@@ -43,7 +46,7 @@ describe("resolveMobileAssetSearchWhere", () => {
     for (const input of ["  , ", "   ", ","]) {
       queryRawMock.mockClear();
       await expect(
-        resolveMobileAssetSearchWhere({ organizationId: "o1", search: input })
+        resolveMobileAssetSearchWhere({ ...args, search: input })
       ).resolves.toEqual({ id: { in: [] } });
       expect(queryRawMock).not.toHaveBeenCalled();
     }
@@ -51,15 +54,32 @@ describe("resolveMobileAssetSearchWhere", () => {
 
   it("resolves a real search to the id set the UNION returns", async () => {
     await expect(
-      resolveMobileAssetSearchWhere({ organizationId: "o1", search: "tripod" })
+      resolveMobileAssetSearchWhere({ ...args, search: "tripod" })
     ).resolves.toEqual({ id: { in: ["a1", "a2"] } });
     expect(queryRawMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches custodian names only on the viewer's own custody when they may not see all custody", async () => {
+    await resolveMobileAssetSearchWhere({
+      organizationId: "o1",
+      search: "alice",
+      custodySearchScope: { userId: "viewer-1" },
+    });
+    const sql = queryRawMock.mock.calls[0][0] as Prisma.Sql;
+    expect(sql.sql).toContain('tm."userId" = ?');
+    expect(sql.values).toContain("viewer-1");
+  });
+
+  it("matches every custodian's name for a viewer who sees all custody", async () => {
+    await resolveMobileAssetSearchWhere({ ...args, search: "alice" });
+    const sql = queryRawMock.mock.calls[0][0] as Prisma.Sql;
+    expect(sql.sql).not.toContain('tm."userId" = ?');
   });
 
   it("returns an always-false id filter when the UNION finds no matches", async () => {
     queryRawMock.mockResolvedValue([]);
     await expect(
-      resolveMobileAssetSearchWhere({ organizationId: "o1", search: "zzz" })
+      resolveMobileAssetSearchWhere({ ...args, search: "zzz" })
     ).resolves.toEqual({ id: { in: [] } });
   });
 
@@ -70,7 +90,7 @@ describe("resolveMobileAssetSearchWhere", () => {
     // multi-term, mixed-case input rather than short-circuiting.
     await expect(
       resolveMobileAssetSearchWhere({
-        organizationId: "o1",
+        ...args,
         search: "  Tripod, Canon ",
       })
     ).resolves.toEqual({ id: { in: ["a1", "a2"] } });
@@ -84,7 +104,7 @@ describe("resolveMobileAssetSearchWhere", () => {
     // more correct) full result set directly — no second query.
     await expect(
       resolveMobileAssetSearchWhere({
-        organizationId: "o1",
+        ...args,
         search: "SAM-0001",
       })
     ).resolves.toEqual({ id: { in: ["a1", "a2"] } });

@@ -31,6 +31,7 @@ import useApiQuery from "~/hooks/use-api-query";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRememberedListHref } from "~/hooks/use-remembered-list-href";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -686,9 +687,10 @@ export function CommandPalette() {
 
   const shortcutLabel = useMemo(() => getShortcutLabel(), []);
 
+  const withListFilters = useRememberedListHref();
   const handleSelect = (href: string) => {
     setOpen(false);
-    void navigate(href);
+    void navigate(withListFilters(href));
   };
 
   return (
