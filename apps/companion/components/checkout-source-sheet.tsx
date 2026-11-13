@@ -14,7 +14,7 @@
  * keeps every answer on screen.
  *
  * @see {@link file://../app/(tabs)/bookings/[id].tsx} booking detail check-out
- * @see {@link file://../app/(tabs)/scanner.tsx} Scan tab check-out and fulfil
+ * @see {@link file://./scanner/scanner-screen.tsx} booking check-out and fulfil
  * @see {@link file://../lib/custody-source-options.ts} the rows and defaults
  */
 import { useEffect, useState } from "react";

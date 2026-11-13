@@ -12,7 +12,7 @@
  * The drawer height is capped against the window (see
  * `lib/batch-drawer-layout.ts`) so it never reaches the camera controls.
  *
- * @see {@link file://./../../app/(tabs)/scanner.tsx} the host screen
+ * @see {@link file://./scanner-screen.tsx} the host screen
  * @see {@link file://./batch-blockers.tsx} the blocker card above the submit
  */
 import {
