@@ -23,6 +23,7 @@ import {
   fetchStripeSubscription,
   getCustomerActiveSubscription,
   getCustomerNotificationData,
+  getCustomerSubscriptionsWithProducts,
   getDataFromStripeEvent,
   getInvoiceNotificationData,
   getStripeCustomer,
@@ -33,13 +34,20 @@ import {
 
 import { resolveUserGreetingName } from "~/utils/user";
 import {
+  addonTypesOf,
+  askAdminToPickWorkspaceOnce,
+  findOwnedTeamWorkspaces,
   highestPlanTier,
   isAddonSubscription,
   isHigherOrEqualTier,
   isHigherTier,
+  isInvoiceBilled,
   isTierId,
+  linkedMetadata,
   liveTierOf,
+  resolveTeamWorkspaceForPlan,
   sendAdminInvoiceEmail,
+  sendAdminWorkspaceLinkedEmail,
   type WebhookUser,
 } from "./helpers.server";
 
@@ -483,6 +491,146 @@ function buildUpgradeCompletedProps(
   };
 }
 
+/**
+ * Links an invoice-billed Team subscription that names no workspace to the
+ * Team workspace its customer means, then switches its bundled add-ons on
+ * there.
+ *
+ * Invoice-billed subscriptions (`isInvoiceBilled`) are created in the Stripe
+ * dashboard, so they carry no `metadata.organizationId`. Checkout
+ * subscriptions are left to the workspace creation link.
+ *
+ * When the user owns no Team workspace the answer is `"unplaced"` straight
+ * from the database, for any Team subscription and whatever its status, and
+ * the next Team workspace they create picks an invoice-billed one up
+ * (`linkWaitingSubscriptionsToWorkspace`). Otherwise, for an invoice-billed
+ * subscription that Stripe still holds as active or trialing,
+ * `resolveTeamWorkspaceForPlan` decides:
+ * - no candidate workspace: `"unplaced"`, as above;
+ * - one certain workspace: the add-ons switch on there, the subscription's
+ *   metadata names it (`linkedMetadata`), and the admin is told;
+ * - anything else: nothing is guessed and the admin is asked to pick, once
+ *   per subscription (`askAdminToPickWorkspaceOnce`).
+ *
+ * The subscription is read again from Stripe first, so a retried or late
+ * event for a subscription linked or cancelled since is left alone. The
+ * add-ons are switched on before the metadata is written: if the sync fails,
+ * the subscription is still unlinked when Stripe retries the event, and the
+ * retry does it all again. Writing the metadata first would make the retry
+ * skip a subscription whose add-ons never switched on.
+ *
+ * @param args.eventType - The Stripe event type being handled
+ * @param args.subscription - The subscription from the event
+ * @param args.tierId - The tier the subscription carries
+ * @param args.user - The user the customer belongs to
+ * @param args.loadSubscriptions - The event's shared read of the customer's
+ *   subscriptions (`createCustomerSubscriptionsLoader`)
+ * @returns `"unplaced"` when the user owns no Team workspace the subscription
+ *   could belong to, `"linked"` or `"ask"` after acting, and `"skipped"` when
+ *   the subscription is not one to link
+ */
+async function linkSubscriptionToTeamWorkspace({
+  eventType,
+  subscription,
+  tierId,
+  user,
+  loadSubscriptions,
+}: {
+  eventType: string;
+  subscription: Stripe.Subscription;
+  tierId: string | undefined;
+  user: WebhookUser;
+  loadSubscriptions: () => Promise<Stripe.Subscription[]>;
+}): Promise<"skipped" | "unplaced" | "linked" | "ask"> {
+  if (subscription.metadata?.organizationId) return "skipped";
+  if (!isTierId(tierId) || !isHigherOrEqualTier(tierId, TierId.tier_2)) {
+    return "skipped";
+  }
+
+  const owned = await findOwnedTeamWorkspaces(user.id);
+  if (owned.length === 0) return "unplaced";
+  if (!isInvoiceBilled(subscription)) return "skipped";
+  if (subscription.status !== "active" && subscription.status !== "trialing") {
+    return "skipped";
+  }
+
+  const subscriptions = await loadSubscriptions();
+  const current = subscriptions.find((sub) => sub.id === subscription.id);
+  if (!current || current.metadata?.organizationId) return "skipped";
+  if (current.status !== "active" && current.status !== "trialing") {
+    return "skipped";
+  }
+
+  const { candidates, unlinkedPlans, workspace } = resolveTeamWorkspaceForPlan({
+    owned,
+    subscriptions,
+  });
+  if (candidates.length === 0) return "unplaced";
+  if (!workspace) {
+    await askAdminToPickWorkspaceOnce({
+      user,
+      subscriptions: [current],
+      related: unlinkedPlans,
+      ownedCount: owned.length,
+      candidates,
+    });
+    return "ask";
+  }
+
+  // The add-ons come from the subscription as Stripe holds it now: a late
+  // event may still list an add-on that has since been removed.
+  const addonTypes = addonTypesOf(current);
+  const hasAuditAddon = addonTypes.includes("audits");
+  const hasBarcodeAddon = addonTypes.includes("barcodes");
+  const metadata = linkedMetadata(current.metadata, workspace.id);
+  await syncBundledAddons({
+    eventType,
+    subscription: {
+      ...current,
+      metadata: { ...current.metadata, organizationId: workspace.id },
+    },
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
+  await stripe.subscriptions.update(subscription.id, { metadata });
+
+  sendAdminWorkspaceLinkedEmail({
+    user,
+    subscriptionId: subscription.id,
+    workspace,
+    addons: [
+      ...(hasAuditAddon ? ["Audits"] : []),
+      ...(hasBarcodeAddon ? ["Barcodes"] : []),
+    ],
+  });
+  return "linked";
+}
+
+/**
+ * The tier a user keeps after one of their plan subscriptions stopped
+ * granting a plan (paused, cancelled or overdue).
+ *
+ * A customer can pay for one plan subscription per workspace, so another live
+ * subscription may still grant the user's tier. Read from Stripe as it is
+ * now, through `liveTierOf`; a paused or cancelled subscription no longer
+ * counts by its status.
+ *
+ * @param customerId - The Stripe customer of the subscription
+ * @param exceptSubscriptionId - A subscription to leave out although its
+ *   status still grants a plan: one whose invoice is overdue stays `past_due`
+ * @returns The highest tier the customer's other live subscriptions grant,
+ *   Free when none does
+ */
+async function remainingTierOf(
+  customerId: string,
+  exceptSubscriptionId?: string
+): Promise<TierId> {
+  const subscriptions = await getCustomerSubscriptionsWithProducts(customerId);
+  return liveTierOf(
+    subscriptions.filter((sub) => sub.id !== exceptSubscriptionId)
+  );
+}
+
 // ─── Checkout ──────────────────────────────────────────────
 
 export async function handleCheckoutCompleted(
@@ -560,8 +708,15 @@ export async function handleSubscriptionCreated(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (
     isAddonSubscription({
@@ -652,7 +807,27 @@ export async function handleSubscriptionCreated(
           status: 500,
         });
       });
+  }
 
+  // An add-on bundled on a subscription that is not live yet (`incomplete`)
+  // is switched on by the update that activates it.
+  if (subscription.status === "active" || subscription.status === "trialing") {
+    await syncBundledAddons({
+      eventType: event.type,
+      subscription,
+      hasAuditAddon,
+      hasBarcodeAddon,
+    });
+  }
+  const workspaceLink = await linkSubscriptionToTeamWorkspace({
+    eventType: event.type,
+    subscription,
+    tierId,
+    user,
+    loadSubscriptions: createCustomerSubscriptionsLoader(customerId),
+  });
+
+  if (!isTrialSubscription && !isTransferredSubscription) {
     // Direct paid conversion (non-trial, non-transfer): a free user just
     // became paying. Best-effort funnel event — never blocks the webhook.
     captureServerEvent({
@@ -666,12 +841,26 @@ export async function handleSubscriptionCreated(
       user,
     });
     const subscriptionName = product?.name || "Shelf Subscription";
+    // A Team plan is used in a Team workspace, so a customer with no
+    // workspace the subscription could belong to is sent to create one. A
+    // Checkout subscription's add-ons reach that workspace through the
+    // creation link's params; an invoice-billed one is found by
+    // `linkWaitingSubscriptionsToWorkspace`.
+    const needsTeamWorkspace = workspaceLink === "unplaced";
+    const newWorkspaceAddons = isInvoiceBilled(subscription)
+      ? undefined
+      : { audits: hasAuditAddon, barcodes: hasBarcodeAddon };
 
     for (const email of emailsToNotify) {
       sendEmail({
         to: email,
         subject: "Your Shelf subscription is now active",
-        text: subscriptionGrantedText({ customerName, subscriptionName }),
+        text: subscriptionGrantedText({
+          customerName,
+          subscriptionName,
+          needsTeamWorkspace,
+          newWorkspaceAddons,
+        }),
       });
     }
   }
@@ -733,21 +922,23 @@ export async function handleSubscriptionPaused(
     user.tierId
   );
 
-  if (
-    subscription.status === "paused" &&
-    pausedSubscriptionIsHigherOrEqualTier
-  ) {
+  const remainingTierId =
+    subscription.status === "paused" && pausedSubscriptionIsHigherOrEqualTier
+      ? await remainingTierOf(customerId)
+      : undefined;
+
+  if (remainingTierId && isHigherTier(user.tierId, remainingTierId)) {
     await db.user
       .update({
         where: { customerId },
-        data: { tierId: "free" },
+        data: { tierId: remainingTierId },
         select: { id: true },
       })
       .catch((cause) => {
         throw new ShelfError({
           cause,
           message: "Failed to update user tier",
-          additionalData: { customerId, tierId, event },
+          additionalData: { customerId, tierId, remainingTierId, event },
           label: "Stripe webhook",
           status: 500,
         });
@@ -814,6 +1005,24 @@ export async function handleSubscriptionUpdated(
   // subscriptions; they share one read.
   const loadSubscriptions = createCustomerSubscriptionsLoader(customerId);
 
+  const previousStatus = (
+    event.data.previous_attributes as
+      | { status?: Stripe.Subscription.Status }
+      | undefined
+  )?.status;
+  // A subscription that just started (its first payment cleared, or it was
+  // resumed) is linked the same way as one created live. A recovered failed
+  // renewal (`past_due`) was live all along and is left alone.
+  if (previousStatus === "incomplete" || previousStatus === "paused") {
+    await linkSubscriptionToTeamWorkspace({
+      eventType: event.type,
+      subscription,
+      tierId,
+      user,
+      loadSubscriptions,
+    });
+  }
+
   // The removed products feed the add-on side (workspace-linked
   // subscriptions only) and the plan downgrade; skip the lookups when neither
   // can act.
@@ -849,11 +1058,6 @@ export async function handleSubscriptionUpdated(
   // to active. The trial-creation path already set the user's paid tier, so
   // no raise happens for these; detect the transition explicitly, otherwise
   // every trial-originated paid conversion is missed.
-  const previousStatus = (
-    event.data.previous_attributes as
-      | { status?: Stripe.Subscription.Status }
-      | undefined
-  )?.status;
   const isTrialConversion =
     previousStatus === "trialing" && subscription.status === "active";
 
@@ -939,42 +1143,48 @@ export async function handleSubscriptionDeleted(
     user.tierId
   );
 
-  if (deletedSubscriptionIsHigherOrEqualTier) {
+  const remainingTierId = deletedSubscriptionIsHigherOrEqualTier
+    ? await remainingTierOf(customerId)
+    : undefined;
+
+  if (remainingTierId && isHigherTier(user.tierId, remainingTierId)) {
     await db.user
       .update({
         where: { customerId },
-        data: { tierId: TierId.free },
+        data: { tierId: remainingTierId },
         select: { id: true },
       })
       .catch((cause) => {
         throw new ShelfError({
           cause,
           message: "Failed to delete user subscription",
-          additionalData: { customerId, event },
+          additionalData: { customerId, remainingTierId, event },
           label: "Stripe webhook",
           status: 500,
         });
       });
 
-    // Count churn only for users who actually paid. Trial users are placed on
-    // the paid tier at trial start, so the tier guard above also passes for a
-    // mid-trial cancellation — exclude those (still inside the trial window) so
-    // trial abandonment doesn't inflate churn. Best-effort; never blocks.
-    const stillWithinTrial = subscription.trial_end
-      ? subscription.trial_end * 1000 > Date.now()
-      : false;
-    if (!stillWithinTrial) {
-      captureServerEvent({
-        distinctId: user.id,
-        event: "subscription_cancelled",
-        properties: { tierId: tierId ?? "unknown" },
-      });
-    }
-
     // Only reset branding when downgrading from Plus (tier_1) to Free
     if (user.tierId === TierId.tier_1) {
       await resetPersonalWorkspaceBranding(user.id);
     }
+  }
+
+  // Count churn only for users who actually paid and have no plan left,
+  // including a user an overdue invoice already moved to Free. Trial users
+  // are placed on the paid tier at trial start, so the tier guard above also
+  // passes for a mid-trial cancellation: exclude those (still inside the
+  // trial window) so trial abandonment doesn't inflate churn. Best-effort;
+  // never blocks.
+  const stillWithinTrial = subscription.trial_end
+    ? subscription.trial_end * 1000 > Date.now()
+    : false;
+  if (remainingTierId === TierId.free && !stillWithinTrial) {
+    captureServerEvent({
+      distinctId: user.id,
+      event: "subscription_cancelled",
+      properties: { tierId: tierId ?? "unknown" },
+    });
   }
 
   return OK();
@@ -1285,20 +1495,27 @@ export async function handleInvoiceOverdue(
       subscription,
     });
 
-    // Only downgrade for non-addon subscription products with a tier
-    if (tierId && productType !== "addon") {
-      if (isHigherOrEqualTier(tierId as TierId, user.tierId)) {
+    // Only downgrade for non-addon subscription products with a tier, and
+    // only to what the customer's other live subscriptions still grant.
+    const remainingTierId =
+      tierId &&
+      productType !== "addon" &&
+      isHigherOrEqualTier(tierId as TierId, user.tierId)
+        ? await remainingTierOf(customerId, subscription.id)
+        : undefined;
+    if (remainingTierId) {
+      if (isHigherTier(user.tierId, remainingTierId)) {
         await db.user
           .update({
             where: { customerId },
-            data: { tierId: TierId.free },
+            data: { tierId: remainingTierId },
             select: { id: true },
           })
           .catch((cause) => {
             throw new ShelfError({
               cause,
               message: "Failed to downgrade user tier for overdue invoice",
-              additionalData: { customerId, tierId, event },
+              additionalData: { customerId, tierId, remainingTierId, event },
               label: "Stripe webhook",
               status: 500,
             });

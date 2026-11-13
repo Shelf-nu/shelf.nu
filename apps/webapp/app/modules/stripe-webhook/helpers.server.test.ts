@@ -35,28 +35,48 @@ vi.mock(import("~/utils/env"), async (importOriginal) => {
 
 // why: Stripe SDK makes external API calls; we need a controllable
 // constructEventAsync and the real StripeSignatureVerificationError class
-const { mockConstructEventAsync } = vi.hoisted(() => ({
+const {
+  mockConstructEventAsync,
+  mockGetCustomerSubscriptions,
+  mockSubscriptionsList,
+  mockSubscriptionsUpdate,
+} = vi.hoisted(() => ({
   mockConstructEventAsync: vi.fn(),
+  mockGetCustomerSubscriptions: vi.fn(),
+  mockSubscriptionsList: vi.fn(),
+  mockSubscriptionsUpdate: vi.fn(),
 }));
 
-vi.mock("~/utils/stripe.server", () => ({
-  stripe: {
-    webhooks: {
-      constructEventAsync: mockConstructEventAsync,
-    },
-  },
-}));
+vi.mock(import("~/utils/stripe.server"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    stripe: {
+      webhooks: { constructEventAsync: mockConstructEventAsync },
+      subscriptions: {
+        list: mockSubscriptionsList,
+        update: mockSubscriptionsUpdate,
+      },
+    } as never,
+    getCustomerSubscriptionsWithProducts: mockGetCustomerSubscriptions,
+  };
+});
 
 // why: Database module connects to Prisma during import
-const { mockFindFirstOrThrow } = vi.hoisted(() => ({
-  mockFindFirstOrThrow: vi.fn(),
-}));
+const { mockFindFirstOrThrow, mockUserFindUnique, mockOrgFindMany } =
+  vi.hoisted(() => ({
+    mockFindFirstOrThrow: vi.fn(),
+    mockUserFindUnique: vi.fn(),
+    mockOrgFindMany: vi.fn(),
+  }));
 
 vi.mock("~/database/db.server", () => ({
   db: {
     user: {
       findFirstOrThrow: mockFindFirstOrThrow,
+      findUnique: mockUserFindUnique,
     },
+    organization: { findMany: mockOrgFindMany },
   },
 }));
 
@@ -67,6 +87,19 @@ const { mockSendEmail } = vi.hoisted(() => ({
 
 vi.mock("~/emails/mail.server", () => ({
   sendEmail: mockSendEmail,
+}));
+
+// why: the add-on handlers write the workspace's add-on flags; what matters
+// here is which subscription and workspace reach them
+const { mockAuditAddonWebhook, mockBarcodeAddonWebhook } = vi.hoisted(() => ({
+  mockAuditAddonWebhook: vi.fn(),
+  mockBarcodeAddonWebhook: vi.fn(),
+}));
+vi.mock("~/modules/audit/addon.server", () => ({
+  handleAuditAddonWebhook: mockAuditAddonWebhook,
+}));
+vi.mock("~/modules/barcode/addon.server", () => ({
+  handleBarcodeAddonWebhook: mockBarcodeAddonWebhook,
 }));
 
 // why: We need the StripeSignatureVerificationError class for instanceof
@@ -82,15 +115,23 @@ const { FakeStripeSignatureVerificationError } = vi.hoisted(() => {
 });
 
 vi.mock("stripe", () => ({
-  default: {
-    errors: {
-      StripeSignatureVerificationError: FakeStripeSignatureVerificationError,
-    },
-  },
+  // A constructible `function`: the real `~/utils/stripe.server` module calls
+  // `new Stripe(...)` when it loads.
+  default: Object.assign(
+    vi.fn().mockImplementation(function () {
+      return {};
+    }),
+    {
+      errors: {
+        StripeSignatureVerificationError: FakeStripeSignatureVerificationError,
+      },
+    }
+  ),
 }));
 
 import {
   highestPlanTier,
+  linkWaitingSubscriptionsToWorkspace,
   isAddonSubscription,
   isHigherTier,
   isTierId,
@@ -444,5 +485,358 @@ describe("parseCustomInstallCustomers", () => {
     expect(parseCustomInstallCustomers(undefined)).toEqual([]);
     expect(parseCustomInstallCustomers("")).toEqual([]);
     expect(parseCustomInstallCustomers("  ,  ")).toEqual([]);
+  });
+});
+
+describe("linkWaitingSubscriptionsToWorkspace", () => {
+  const TEAM = { id: "prod_team", metadata: { shelf_tier: "tier_2" } };
+  const PLUS = { id: "prod_plus", metadata: { shelf_tier: "tier_1" } };
+  const AUDITS = {
+    id: "prod_audits",
+    metadata: { product_type: "addon", addon_type: "audits" },
+  };
+  const BARCODES = {
+    id: "prod_barcodes",
+    metadata: { product_type: "addon", addon_type: "barcodes" },
+  };
+
+  /** A customer subscription as Stripe holds it, products expanded. */
+  function subscription(
+    products: { id: string; metadata: Record<string, string> }[],
+    {
+      id = "sub_1",
+      status = "active",
+      metadata = {},
+      collection_method = "send_invoice",
+    }: {
+      id?: string;
+      status?: string;
+      metadata?: Record<string, string>;
+      collection_method?: string;
+    } = {}
+  ) {
+    return {
+      id,
+      status,
+      metadata,
+      collection_method,
+      items: { data: products.map((product) => ({ price: { product } })) },
+    };
+  }
+
+  /** Makes Stripe hold these subscriptions, for both the plain list and the expanded read. */
+  function stripeHolds(...subscriptions: ReturnType<typeof subscription>[]) {
+    mockSubscriptionsList.mockResolvedValue({
+      data: subscriptions,
+      has_more: false,
+    });
+    mockGetCustomerSubscriptions.mockResolvedValue(subscriptions);
+  }
+
+  /** Runs the helper for the workspace the user just created. */
+  function linkToNewWorkspace() {
+    return linkWaitingSubscriptionsToWorkspace({
+      userId: "user-1",
+      organizationId: "org-new",
+    });
+  }
+
+  /** The workspace ids written to subscription metadata, in call order. */
+  function organizationIdsWritten() {
+    return mockSubscriptionsUpdate.mock.calls
+      .map(([, params]) => params.metadata?.organizationId)
+      .filter(Boolean);
+  }
+
+  /** The subjects of the emails sent to the admin. */
+  function adminEmailSubjects() {
+    return mockSendEmail.mock.calls
+      .map(([email]) => email)
+      .filter((email) => email.to === "admin@test.com")
+      .map((email) => email.subject as string);
+  }
+
+  /** The add-ons switched on, as `<type>:<subscription>:<workspace>`. */
+  function addonsSwitchedOn() {
+    return [
+      ...mockAuditAddonWebhook.mock.calls.map(
+        ([args]) => `audits:${args.subscription.id}:${args.organizationId}`
+      ),
+      ...mockBarcodeAddonWebhook.mock.calls.map(
+        ([args]) => `barcodes:${args.subscription.id}:${args.organizationId}`
+      ),
+    ];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAdminEmail.value = "admin@test.com";
+    mockUserFindUnique.mockResolvedValue({
+      customerId: "cus_1",
+      email: "owner@example.com",
+    });
+    // The new workspace is the only Team workspace the user owns unless a
+    // test says otherwise.
+    mockOrgFindMany.mockResolvedValue([{ id: "org-new", name: "ZZ New" }]);
+  });
+
+  it("links the waiting plan to the user's first Team workspace and switches its add-ons on there", async () => {
+    stripeHolds(subscription([TEAM, AUDITS, BARCODES]));
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      metadata: { organizationId: "org-new" },
+    });
+    expect(addonsSwitchedOn()).toEqual([
+      "audits:sub_1:org-new",
+      "barcodes:sub_1:org-new",
+    ]);
+    expect(mockAuditAddonWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "customer.subscription.created",
+        subscription: expect.objectContaining({
+          metadata: { organizationId: "org-new" },
+        }),
+      })
+    );
+    expect(mockOrgFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-1", type: "TEAM" } })
+    );
+  });
+
+  it("leaves the subscription unlinked when switching an add-on on fails", async () => {
+    stripeHolds(subscription([TEAM, AUDITS]));
+    mockAuditAddonWebhook.mockRejectedValueOnce(new Error("database down"));
+
+    await expect(linkToNewWorkspace()).rejects.toThrow("database down");
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("switches on the add-ons of a past-due subscription too", async () => {
+    stripeHolds(subscription([TEAM, AUDITS], { status: "past_due" }));
+
+    await linkToNewWorkspace();
+
+    expect(addonsSwitchedOn()).toEqual(["audits:sub_1:org-new"]);
+  });
+
+  it("links a plan-only subscription too, so a later plan does not count this workspace as free", async () => {
+    stripeHolds(subscription([TEAM], { metadata: { po_number: "PO-1" } }));
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      metadata: { po_number: "PO-1", organizationId: "org-new" },
+    });
+    expect(addonsSwitchedOn()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([]);
+  });
+
+  it("links next to workspaces that already have their own plan subscription", async () => {
+    stripeHolds(
+      subscription([TEAM], {
+        id: "sub_0",
+        metadata: { organizationId: "org-old" },
+      }),
+      subscription([TEAM, BARCODES])
+    );
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(addonsSwitchedOn()).toEqual(["barcodes:sub_1:org-new"]);
+  });
+
+  it("does not let an unlinked Plus plan make the Team workspace uncertain", async () => {
+    stripeHolds(
+      subscription([PLUS], {
+        id: "sub_plus",
+        collection_method: "charge_automatically",
+      }),
+      subscription([TEAM, AUDITS])
+    );
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual(["org-new"]);
+    expect(addonsSwitchedOn()).toEqual(["audits:sub_1:org-new"]);
+  });
+
+  it("asks the admin when waiting add-ons could also belong to another Team workspace", async () => {
+    stripeHolds(subscription([TEAM, AUDITS]));
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual([]);
+    expect(addonsSwitchedOn()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([
+      expect.stringContaining("Needs you"),
+    ]);
+  });
+
+  it("asks the admin when two plan subscriptions without a workspace wait for one workspace", async () => {
+    stripeHolds(
+      subscription([TEAM], {
+        id: "sub_checkout",
+        collection_method: "charge_automatically",
+      }),
+      subscription([TEAM, AUDITS], { id: "sub_invoice" })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual([]);
+    const [email] = mockSendEmail.mock.calls[0];
+    expect(email.subject).toContain("Needs you");
+    expect(email.text).toContain("sub_checkout");
+    expect(email.text).toContain("sub_invoice");
+  });
+
+  it("asks the admin instead of putting several add-on subscriptions on one workspace", async () => {
+    stripeHolds(
+      subscription([AUDITS], { id: "sub_audits_a" }),
+      subscription([AUDITS], { id: "sub_audits_b" })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual([]);
+    expect(addonsSwitchedOn()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([
+      "Needs you: more than one subscription has no workspace, pick in Stripe metadata",
+    ]);
+    const [email] = mockSendEmail.mock.calls[0];
+    expect(email.text).toContain("sub_audits_a");
+    expect(email.text).toContain("sub_audits_b");
+  });
+
+  it("stays quiet when only plans without add-ons are ambiguous", async () => {
+    stripeHolds(
+      subscription([TEAM], { id: "sub_a" }),
+      subscription([TEAM], { id: "sub_b" })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(adminEmailSubjects()).toEqual([]);
+  });
+
+  it("makes one Stripe call when every live subscription already names a workspace", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        metadata: { organizationId: "org-old" },
+      }),
+      subscription([TEAM, BARCODES], { id: "sub_2", status: "canceled" })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
+    expect(mockOrgFindMany).not.toHaveBeenCalled();
+  });
+
+  it("leaves Checkout subscriptions to the creation link and makes one Stripe call", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        collection_method: "charge_automatically",
+      })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(mockGetCustomerSubscriptions).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(addonsSwitchedOn()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([]);
+  });
+
+  it("does not mark a subscription as asked when no admin email is configured", async () => {
+    mockAdminEmail.value = undefined;
+    stripeHolds(subscription([TEAM, AUDITS]));
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not ask the admin again about subscriptions already asked about", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        metadata: { workspacePickRequestedAt: "2026-11-10T00:00:00.000Z" },
+      })
+    );
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(adminEmailSubjects()).toEqual([]);
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("clears the asked mark when it links", async () => {
+    stripeHolds(
+      subscription([TEAM, AUDITS], {
+        metadata: { workspacePickRequestedAt: "2026-11-10T00:00:00.000Z" },
+      })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      metadata: { workspacePickRequestedAt: "", organizationId: "org-new" },
+    });
+  });
+
+  it("reads every page when Stripe's plain list has more than one page", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      data: [
+        subscription([TEAM], {
+          id: "sub_0",
+          metadata: { organizationId: "org-old" },
+        }),
+      ],
+      has_more: true,
+    });
+    mockGetCustomerSubscriptions.mockResolvedValue([
+      subscription([TEAM], {
+        id: "sub_0",
+        metadata: { organizationId: "org-old" },
+      }),
+      subscription([TEAM, AUDITS], { id: "sub_page_2" }),
+    ]);
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(addonsSwitchedOn()).toEqual(["audits:sub_page_2:org-new"]);
+  });
+
+  it("reads nothing from Stripe for a user without a customer", async () => {
+    mockUserFindUnique.mockResolvedValue({ customerId: null, email: "x" });
+
+    await linkToNewWorkspace();
+
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
   });
 });
