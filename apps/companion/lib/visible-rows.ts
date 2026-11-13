@@ -68,18 +68,21 @@ export function searchRows<T extends { name: string }>(
  *
  * @param items - The rows that match the current search.
  * @param selectedId - The selected row, if any. When it matches the search
- *   but sorts after the cap it is drawn first, so the dropdown opens on the
- *   checked row instead of hiding it.
+ *   but sorts after the cap it is drawn first, in place of the last capped
+ *   row, so the dropdown opens on the checked row instead of hiding it and
+ *   still draws at most {@link MAX_DROPDOWN_ROWS} rows.
  * @returns The rows to draw, and how many matching rows were left out.
  */
 export function visibleRows<T extends { id: string }>(
   items: T[],
   selectedId?: string | null
 ): { rows: T[]; hiddenCount: number } {
-  const rows = items.slice(0, MAX_DROPDOWN_ROWS);
+  let rows = items.slice(0, MAX_DROPDOWN_ROWS);
   if (selectedId && !rows.some((row) => row.id === selectedId)) {
     const selected = items.find((row) => row.id === selectedId);
-    if (selected) rows.unshift(selected);
+    if (selected) {
+      rows = [selected, ...items.slice(0, MAX_DROPDOWN_ROWS - 1)];
+    }
   }
   return { rows, hiddenCount: items.length - rows.length };
 }

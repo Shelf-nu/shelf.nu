@@ -99,10 +99,12 @@ test("draws the selected row first when it sorts after the cap", () => {
 
   const { rows, hiddenCount } = visibleRows(items, "row-97");
 
-  assert.equal(rows.length, MAX_DROPDOWN_ROWS + 1);
+  // Still a full page, so the hint reads "Showing 50 out of 120".
+  assert.equal(rows.length, MAX_DROPDOWN_ROWS);
   assert.equal(rows[0].id, "row-97");
   assert.equal(rows[1].id, "row-0");
-  assert.equal(hiddenCount, 120 - rows.length);
+  assert.equal(rows[rows.length - 1].id, `row-${MAX_DROPDOWN_ROWS - 2}`);
+  assert.equal(hiddenCount, 120 - MAX_DROPDOWN_ROWS);
 });
 
 test("does not repeat a selected row that is already drawn", () => {
@@ -120,8 +122,8 @@ test("draws a selected row just past the cap first", () => {
   const { rows, hiddenCount } = visibleRows(items, `row-${MAX_DROPDOWN_ROWS}`);
 
   assert.equal(rows[0].id, `row-${MAX_DROPDOWN_ROWS}`);
-  assert.equal(rows.length, MAX_DROPDOWN_ROWS + 1);
-  assert.equal(hiddenCount, 0);
+  assert.equal(rows.length, MAX_DROPDOWN_ROWS);
+  assert.equal(hiddenCount, 1);
 });
 
 test("hides nothing when the rows exactly fill the cap", () => {
