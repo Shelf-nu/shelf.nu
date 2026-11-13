@@ -17,6 +17,8 @@
  * form's page (its resolved `action` pathname) or one of its child routes,
  * such as a booking's manage-assets modal. This form's own submission is
  * never blocked, and closing or reloading the tab shows the browser prompt.
+ * While dirty, the form also counts itself in `dirtyFormCountAtom`, so UI
+ * outside it (the new-version reload button) can warn before a reload.
  *
  * Every mounted instance registers a `useBlocker`, and React Router honours
  * only the most recently registered one. Mount the hook only where tracking
@@ -25,6 +27,7 @@
  *
  * @see {@link file://./../components/forms/unsaved-changes-bar.tsx}
  * @see {@link file://./use-discard-remount.ts}
+ * @see {@link file://./../atoms/unsaved-changes.ts}
  */
 import {
   useCallback,
@@ -35,7 +38,9 @@ import {
   useState,
 } from "react";
 import type { RefCallback, RefObject } from "react";
+import { useSetAtom } from "jotai";
 import { useBlocker, useNavigation } from "react-router";
+import { dirtyFormCountAtom } from "~/atoms/unsaved-changes";
 
 /**
  * Where a form stands relative to what was loaded.
@@ -404,6 +409,15 @@ export function useUnsavedChanges({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [shouldGuard]);
+
+  const setDirtyFormCount = useSetAtom(dirtyFormCountAtom);
+  // why: keyed on `isDirty`, not `shouldGuard`, so the form still counts
+  // while its save is in flight and has not settled yet
+  useEffect(() => {
+    if (!isDirty) return;
+    setDirtyFormCount((count) => count + 1);
+    return () => setDirtyFormCount((count) => Math.max(0, count - 1));
+  }, [isDirty, setDirtyFormCount]);
 
   let state: UnsavedChangesState;
   if (blocker.state === "blocked") {
