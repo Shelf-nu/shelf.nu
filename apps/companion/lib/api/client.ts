@@ -400,10 +400,10 @@ export async function apiFetch<T>(
 
     // why warn, not error, when a retry follows: in development React
     // Native's LogBox promotes every console.error into a full-screen red
-    // overlay. A timeout we are about to retry — and usually recover from —
-    // is not worth stopping the app for, and on a slow or flaky connection
-    // it made the app unusable for testing while nothing was actually
-    // broken. Reserve the red box for the request that has given up.
+    // overlay. A timeout we are about to retry (and usually recover from) is
+    // not worth stopping the app for, and on a slow or flaky connection it
+    // would block testing while nothing is broken. Reserve the red box for
+    // the request that has given up.
     if (__DEV__) {
       const log = willRetry ? console.warn : console.error;
       log("[API] Fetch failed:", path, err);

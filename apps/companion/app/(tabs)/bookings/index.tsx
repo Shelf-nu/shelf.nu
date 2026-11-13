@@ -300,11 +300,10 @@ function BookingsListContent() {
    * Re-fetch immediately when the filter, search, or sort changes.
    *
    * Skipped entirely while the calendar is the visible lens: it runs its own
-   * query against the same filters, so every pill tap and every debounced
-   * keystroke was firing BOTH - a findMany and a count for a list that is not
-   * on screen, alongside the calendar's own. `view` is a dependency so
-   * switching back to the list refetches it with whatever the filters became
-   * in the meantime.
+   * query against the same filters, so fetching here as well would send a
+   * findMany and a count for a list that is not on screen on every pill tap
+   * and debounced keystroke. `view` is a dependency so switching back to the
+   * list refetches it with whatever the filters became in the meantime.
    */
   useEffect(() => {
     if (!currentOrg || !hasFetchedBookings.current || view !== "list") return;
@@ -654,11 +653,9 @@ function BookingsListContent() {
       {/* Keyword search + sort.
           why here rather than inside the list branch: search and the status
           pills say WHAT you are looking at, and the header switch says HOW.
-          They compose. Hiding them in calendar mode meant a filter you had
-          set was silently ignored the moment you switched lens, and the two
-          views disagreed by default — the list opens on Active (four
-          statuses) while the calendar was drawing five. Web applies the same
-          filter set to its calendar; this now matches. */}
+          They compose: a filter applies to both lenses, so switching lens
+          never silently drops one, and both open on the same Active set.
+          Web applies the same filter set to its calendar. */}
       <View style={styles.searchRow}>
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={18} color={colors.mutedLight} />
@@ -859,11 +856,11 @@ const useStyles = createStyles((colors, shadows) => ({
   /**
    * Two-state lens switch in the native header.
    *
-   * why: no track. A grey track on a white header is nearly invisible, and the
-   * active chip inside it was white on near-white, so the selected state did
-   * not read at all. Colour carries the state instead, using exactly the
-   * active/inactive language of the tab bar directly below, which users already
-   * understand without being taught.
+   * why: no track. A grey track on a white header is nearly invisible, and a
+   * white chip inside it would make the selected state unreadable. Colour
+   * carries the state instead, using exactly the active/inactive language of
+   * the tab bar directly below, which users already understand without being
+   * taught.
    */
   lens: {
     flexDirection: "row",
