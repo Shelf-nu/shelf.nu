@@ -148,6 +148,13 @@ describe("booking source tables", () => {
     const db = getTestDb();
     const seeded = await db.$transaction(async (tx) => {
       const slice = await seedSlice(tx);
+      // The deferred source contract only lets a converted slice own source
+      // rows, so this committed slice is AUTO with one row planning all 4.
+      await tx.$executeRaw`
+        UPDATE "BookingAsset"
+        SET "sourceAllocation" = 'AUTO', "sourcesConvertedAt" = now()
+        WHERE "id" = ${slice.sliceId}
+      `;
       const source = await tx.bookingAssetSource.create({
         data: {
           organizationId: slice.organizationId,

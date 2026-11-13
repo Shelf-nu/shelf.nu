@@ -54,6 +54,35 @@ We have multiple user creation flows throughout the application (registration, i
 
 ---
 
+### Booking source contract (`booking_source_contract_*`)
+
+**Purpose**: Enforces the booking source contract on the final state of every transaction that touches a booking slice, its source rows, its disposition shares or a booking's consumption logs.
+
+**Migration File**: [`20261112100100_booking_source_contract`](https://github.com/Shelf-nu/shelf.nu/tree/main/packages/database/prisma/migrations/20261112100100_booking_source_contract/migration.sql)
+
+| Trigger                                 | Table                     | Kind                                        | Events                                              |
+| --------------------------------------- | ------------------------- | ------------------------------------------- | --------------------------------------------------- |
+| `booking_asset_source_first_mode`       | `BookingAsset`            | immediate, `AFTER ... FOR EACH ROW`         | INSERT, UPDATE, DELETE                              |
+| `booking_source_contract_booking_asset` | `BookingAsset`            | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, UPDATE, DELETE                              |
+| `booking_source_contract_source`        | `BookingAssetSource`      | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, UPDATE, DELETE                              |
+| `booking_source_contract_share`         | `BookingDispositionShare` | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, UPDATE, DELETE                              |
+| `booking_source_contract_log_insert`    | `ConsumptionLog`          | constraint, `DEFERRABLE INITIALLY DEFERRED` | INSERT, only when `bookingId` is set                |
+| `booking_source_contract_log_update`    | `ConsumptionLog`          | constraint, `DEFERRABLE INITIALLY DEFERRED` | UPDATE, only when the old or new `bookingId` is set |
+| `booking_source_contract_log_delete`    | `ConsumptionLog`          | constraint, `DEFERRABLE INITIALLY DEFERRED` | DELETE, only when `bookingId` was set               |
+
+**What it does**:
+
+- The immediate trigger records each slice's `sourceAllocation` the first time the transaction touches it, in a per-transaction temp table (`pg_temp.booking_source_first_mode`, `ON COMMIT DROP`).
+- At COMMIT the deferred triggers derive the affected slice ids and `(bookingId, assetId)` group keys from each row's old and new values, and add each key once to `pg_temp.booking_source_checked`. The call that adds a key runs `check_booking_source_slice(sliceId)` or `check_booking_source_group(bookingId, assetId)` against the final state, so each slice and group is checked once per transaction.
+- A slice that no longer exists is skipped. A group whose booking no longer exists is skipped. A group with no slices left is still checked, because its orphaned shares remain.
+- A violation raises `booking_source_check_<n>: <detail>` with SQLSTATE `check_violation` (23514), `n` being the contract check number (1 to 10). The migration file lists every check.
+
+**Why we use it**: source rows and disposition shares must agree with the slice counters across many writers (check-out, check-in, kit changes, location delete, conversion). Checking the final state at COMMIT catches a missed writer, while letting a writer pass through intermediate states inside its transaction. Unconverted (LEGACY) groups only get the no-downgrade, LEGACY-group and no-source-row checks, so writers that know nothing about source rows keep working unchanged.
+
+**Do not** run `SET CONSTRAINTS ALL IMMEDIATE` in a transaction that writes these tables: each key is checked once per transaction, so a check fired early is not repeated for later writes.
+
+---
+
 ## Adding New Triggers
 
 When adding new triggers to the project:
