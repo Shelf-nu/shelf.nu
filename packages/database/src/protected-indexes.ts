@@ -59,7 +59,7 @@ export const PROTECTED_FOREIGN_KEYS = [
   // Which booking slice a consumption log row is attributed to (SET NULL).
   "ConsumptionLog_bookingAssetId_fkey",
   // Booking slice source rows: removed with their slice and workspace; a
-  // location with source rows cannot be deleted (RESTRICT).
+  // location with source rows cannot be deleted (NO ACTION).
   "BookingAssetSource_bookingAssetId_fkey",
   "BookingAssetSource_locationId_fkey",
   "BookingAssetSource_organizationId_fkey",

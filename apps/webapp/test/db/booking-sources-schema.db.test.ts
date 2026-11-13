@@ -5,7 +5,8 @@
  * `BookingDispositionShare` against a real database: the tables exist, RLS is
  * on and the Supabase API roles hold no table privileges, the foreign keys
  * delete the way the accounting model needs (a location with source rows
- * cannot be deleted, deleting an asset removes its shares), the
+ * cannot be deleted, its workspace still can, deleting an asset removes its
+ * shares), the
  * `NULLS NOT DISTINCT` unique key holds for location-less kinds, and every
  * foreign key column has an index led by that column.
  *
@@ -19,7 +20,12 @@
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { TxClient } from "./client";
-import { disconnectTestDb, getTestDb, withRollback } from "./client";
+import {
+  commitAndExpect,
+  disconnectTestDb,
+  getTestDb,
+  withRollback,
+} from "./client";
 import { seedBooking, seedOrgWithPool } from "./fixtures";
 
 /** The two tables this migration creates. */
@@ -135,6 +141,54 @@ describe("booking source tables", () => {
     ).rejects.toThrow(/BookingAssetSource_locationId_fkey/);
   });
 
+  it("let a workspace with LOCATION source rows be deleted", async () => {
+    // Locations and source rows both cascade from the workspace. The location
+    // foreign key is checked at the end of the statement (NO ACTION), so the
+    // delete succeeds whichever cascade Postgres runs first.
+    const db = getTestDb();
+    const seeded = await db.$transaction(async (tx) => {
+      const slice = await seedSlice(tx);
+      const source = await tx.bookingAssetSource.create({
+        data: {
+          organizationId: slice.organizationId,
+          bookingAssetId: slice.sliceId,
+          kind: "LOCATION",
+          locationId: slice.locationId,
+          quantity: 4,
+        },
+        select: { id: true },
+      });
+      return { ...slice, sourceId: source.id };
+    });
+
+    try {
+      const result = await commitAndExpect(async (tx) => {
+        await tx.$executeRaw`
+          DELETE FROM "Organization" WHERE "id" = ${seeded.organizationId}
+        `;
+      });
+
+      expect(result).toEqual({ ok: true });
+      expect(
+        await db.bookingAssetSource.findUnique({
+          where: { id: seeded.sourceId },
+        })
+      ).toBeNull();
+      expect(
+        await db.location.findUnique({ where: { id: seeded.locationId } })
+      ).toBeNull();
+    } finally {
+      // The workspace owner outlives the workspace; remove it so committed
+      // fixtures do not pile up. Best effort: a leftover user is harmless.
+      await db.$executeRaw`
+        DELETE FROM "Organization" WHERE "id" = ${seeded.organizationId}
+      `.catch(() => undefined);
+      await db.$executeRaw`
+        DELETE FROM "User" WHERE "id" = ${seeded.userId}
+      `.catch(() => undefined);
+    }
+  });
+
   it("allow one row per location-less kind per slice (NULLS NOT DISTINCT)", async () => {
     await expect(
       withRollback(async (tx) => {
@@ -234,10 +288,10 @@ describe("booking source tables", () => {
       ORDER BY c.conname
     `;
 
-    // confdeltype: c = CASCADE, r = RESTRICT, n = SET NULL.
+    // confdeltype: c = CASCADE, a = NO ACTION, n = SET NULL.
     expect(rows.map(({ conname, ondelete }) => [conname, ondelete])).toEqual([
       ["BookingAssetSource_bookingAssetId_fkey", "c"],
-      ["BookingAssetSource_locationId_fkey", "r"],
+      ["BookingAssetSource_locationId_fkey", "a"],
       ["BookingAssetSource_organizationId_fkey", "c"],
       ["BookingDispositionShare_assetId_fkey", "c"],
       ["BookingDispositionShare_bookingAssetId_fkey", "n"],

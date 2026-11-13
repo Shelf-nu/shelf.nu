@@ -2037,7 +2037,7 @@ enum DispositionShareOrigin {
  * relation on `BookingAsset` (its grandparent `Booking` is a hub) or a
  * back-relation on `Location` / `Organization` pushes the extended client's
  * generics past TypeScript's recursion limit (TS2321). The migration SQL
- * creates the foreign keys (`bookingAssetId` CASCADE, `locationId` RESTRICT,
+ * creates the foreign keys (`bookingAssetId` CASCADE, `locationId` NO ACTION,
  * `organizationId` CASCADE), the CHECK constraints and the unique key
  * `BookingAssetSource_slice_kind_location_key` on
  * `(bookingAssetId, kind, locationId) NULLS NOT DISTINCT`, which Prisma
@@ -2048,7 +2048,7 @@ model BookingAssetSource {
   organizationId   String
   bookingAssetId   String
   kind             BookingSourceKind
-  // Set if and only if `kind` is LOCATION. RESTRICT: a location with source
+  // Set if and only if `kind` is LOCATION. NO ACTION: a location with source
   // rows must be evacuated before it can be deleted.
   locationId       String?
   // Planned units on this row (its share of the slice's booked quantity).

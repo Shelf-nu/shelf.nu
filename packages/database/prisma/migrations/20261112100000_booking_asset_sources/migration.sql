@@ -121,12 +121,16 @@ ALTER TABLE "BookingAssetSource"
   FOREIGN KEY ("bookingAssetId") REFERENCES "BookingAsset"("id")
   ON DELETE CASCADE ON UPDATE CASCADE;
 
--- RESTRICT: deleting a location first moves every source row off it; a row
+-- NO ACTION: deleting a location first moves every source row off it; a row
 -- the service missed makes the delete fail loudly instead of losing units.
+-- Not RESTRICT: RESTRICT is checked at once, so deleting a workspace would
+-- fail whenever its locations cascade before its source rows (both cascade
+-- from "Organization"). NO ACTION is checked at the end of the statement,
+-- after every cascade of that statement has run.
 ALTER TABLE "BookingAssetSource"
   ADD CONSTRAINT "BookingAssetSource_locationId_fkey"
   FOREIGN KEY ("locationId") REFERENCES "Location"("id")
-  ON DELETE RESTRICT ON UPDATE CASCADE;
+  ON DELETE NO ACTION ON UPDATE CASCADE;
 
 ALTER TABLE "BookingAssetSource"
   ADD CONSTRAINT "BookingAssetSource_organizationId_fkey"
