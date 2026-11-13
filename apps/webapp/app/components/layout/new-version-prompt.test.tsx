@@ -1,7 +1,7 @@
 /**
- * Tests for the new-version prompt: when it shows, how Dismiss remembers a
- * build, the unsaved-changes hint on Reload, and which events ask the server
- * for its build.
+ * Tests for the new-version prompt: when it shows, that it cannot be
+ * dismissed, the unsaved-changes hint on Reload, and which events ask the
+ * server for its build.
  *
  * @see {@link file://./new-version-prompt.tsx}
  */
@@ -10,10 +10,7 @@ import { getDefaultStore } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dirtyFormCountAtom } from "~/atoms/unsaved-changes";
 import type { BuildVersionState } from "~/utils/build-version-checker";
-import {
-  DISMISSED_BUILD_ID_STORAGE_KEY,
-  NewVersionPrompt,
-} from "./new-version-prompt";
+import { NewVersionPrompt } from "./new-version-prompt";
 
 /** A checker store the tests drive by hand. */
 const fakeChecker = vi.hoisted(() => {
@@ -67,7 +64,6 @@ beforeEach(() => {
   fakeChecker.check.mockClear();
   fakeChecker.checkThrottled.mockClear();
   navigation.state = "idle";
-  window.sessionStorage.clear();
   jotaiStore.set(dirtyFormCountAtom, 0);
   reloadMock.mockClear();
   // why: happy-dom cannot reload a page; the tests only need to see the call
@@ -114,29 +110,13 @@ describe("NewVersionPrompt", () => {
     expect(reloadMock).toHaveBeenCalledTimes(1);
   });
 
-  it("hides on Dismiss and remembers the dismissed build", () => {
+  it("cannot be dismissed", () => {
     render(<NewVersionPrompt />);
     announce("200");
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(window.sessionStorage.getItem(DISMISSED_BUILD_ID_STORAGE_KEY)).toBe(
-      "200"
-    );
-  });
-
-  it("stays hidden for a build dismissed earlier in the session", () => {
-    window.sessionStorage.setItem(DISMISSED_BUILD_ID_STORAGE_KEY, "200");
-    render(<NewVersionPrompt />);
-    announce("200");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("shows again for a build newer than the dismissed one", () => {
-    render(<NewVersionPrompt />);
-    announce("200");
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    announce("300");
     expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss" })
+    ).not.toBeInTheDocument();
   });
 
   it("asks to save first while a form holds unsaved changes", () => {
