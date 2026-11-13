@@ -5,6 +5,7 @@
  */
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { parseBuildVersionResponse } from "~/utils/build-version";
 import { BUILD_VERSION_PATH, buildVersion } from "./build-version";
 
 /** Mirrors `server/index.ts`: the endpoint sits in front of a catch-all that redirects to login. */
@@ -22,8 +23,9 @@ describe("buildVersion", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-type")).toContain("application/json");
-    // `vitest.config.ts` injects "test" as the build id.
-    await expect(response.json()).resolves.toEqual({ buildId: "test" });
+    // The client's own parser reads the body, so a payload change on either
+    // side fails here. `vitest.config.ts` injects "test" as the build id.
+    expect(parseBuildVersionResponse(await response.json())).toBe("test");
   });
 
   it("leaves every other path to the rest of the app", async () => {

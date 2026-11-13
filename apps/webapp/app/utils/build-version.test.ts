@@ -100,6 +100,12 @@ describe("isChunkLoadError", () => {
     ).toBe(true);
   });
 
+  it("ignores a message that only mentions loading a chunk", () => {
+    expect(
+      isChunkLoadError(new Error("Error loading chunked upload for asset"))
+    ).toBe(false);
+  });
+
   it("ignores an ordinary render error", () => {
     expect(
       isChunkLoadError(

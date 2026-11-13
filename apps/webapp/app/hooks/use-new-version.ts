@@ -12,13 +12,13 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useNavigation } from "react-router";
 import type { BuildVersionState } from "~/utils/build-version-checker";
-import { getBuildVersionChecker } from "~/utils/build-version-checker";
-
-/** What the server render and the first hydration pass always see. */
-const CURRENT: BuildVersionState = { status: "current" };
+import {
+  CURRENT_STATE,
+  getBuildVersionChecker,
+} from "~/utils/build-version-checker";
 
 /** Server snapshot: SSR never knows of a newer build. */
-const getServerSnapshot = () => CURRENT;
+const getServerSnapshot = () => CURRENT_STATE;
 
 /**
  * Reads whether the server runs a newer build than this tab.

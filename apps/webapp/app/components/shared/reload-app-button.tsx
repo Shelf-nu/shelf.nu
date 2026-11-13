@@ -23,10 +23,11 @@ type ReloadAppButtonProps = {
  * Reloads the page when clicked, and only then: nothing in the app reloads
  * on its own.
  *
- * While any form holds unsaved changes it shows a hint to save first. Those
- * forms are also protected by the browser's own `beforeunload` confirm,
- * which `useUnsavedChanges` registers while they are dirty, so a click never
- * silently discards work.
+ * While a form that tracks its changes with `useUnsavedChanges` is dirty, it
+ * shows a hint to save first, and that hook's `beforeunload` handler makes the
+ * browser confirm the reload. Neither covers a form while its save is in
+ * flight, nor a form that does not use the hook: reloading over those
+ * discards what they hold.
  *
  * @param props - See `ReloadAppButtonProps`
  */

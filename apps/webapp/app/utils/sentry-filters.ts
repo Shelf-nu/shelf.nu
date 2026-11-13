@@ -16,6 +16,7 @@
  * @see {@link file://./../../server/instrument.server.ts} — server counterpart
  */
 import type { ErrorEvent } from "@sentry/react-router";
+import { MODULE_LOAD_FAILURE_PATTERN } from "./build-version";
 
 /**
  * HTTP statuses that represent EXPECTED client-side terminal states rather
@@ -109,15 +110,6 @@ function isBareGatewayStatusError(event: ErrorEvent): boolean {
     return hasNoFirstPartyFrame(v);
   });
 }
-
-/**
- * Messages browsers use when a JavaScript module fails to download or
- * evaluate as a module: Chrome/Edge ("Failed to fetch dynamically imported
- * module"), Firefox ("error loading dynamically imported module") and Safari
- * ("Importing a module script failed").
- */
-const MODULE_LOAD_FAILURE_PATTERN =
-  /dynamically imported module|importing a module script failed/i;
 
 /**
  * Whether an error message reports a JavaScript chunk that could not be

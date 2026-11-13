@@ -85,23 +85,22 @@ export function parseBuildVersionResponse(body: unknown): string | null {
 }
 
 /**
- * Messages browsers and bundlers use when a lazily loaded chunk or stylesheet
- * cannot be fetched, typically because a deploy removed the file the tab's
- * build points at. Matched case-insensitively as substrings.
+ * Messages browsers use when a JavaScript module fails to download or
+ * evaluate as a module: Chrome and Edge ("Failed to fetch dynamically
+ * imported module"), Firefox ("error loading dynamically imported module")
+ * and Safari ("Importing a module script failed"). The one definition for
+ * both the lazy-load boundary and the client Sentry filters.
  */
-const CHUNK_LOAD_ERROR_PATTERNS = [
-  // Chrome and Edge
-  "failed to fetch dynamically imported module",
-  // Safari
-  "importing a module script failed",
-  // Firefox
-  "error loading dynamically imported module",
-  // Vite preload helper, when a chunk's CSS fails to load
-  "unable to preload css",
-  // Generic bundler wording
-  "loading chunk",
-  "chunkloaderror",
-];
+export const MODULE_LOAD_FAILURE_PATTERN =
+  /dynamically imported module|importing a module script failed/i;
+
+/**
+ * Bundler wording for a chunk that could not be fetched: Vite's preload
+ * helper when a chunk's stylesheet fails, and webpack-style
+ * "Loading chunk <id> failed" / `ChunkLoadError`.
+ */
+const BUNDLER_CHUNK_FAILURE_PATTERN =
+  /unable to preload css|loading (?:css )?chunk \S+ failed|chunkloaderror/i;
 
 /**
  * Tells whether an error means a build chunk failed to load.
@@ -115,8 +114,8 @@ export function isChunkLoadError(error: unknown): boolean {
   const { message } = error as { message?: unknown };
   if (typeof message !== "string") return false;
 
-  const normalized = message.toLowerCase();
-  return CHUNK_LOAD_ERROR_PATTERNS.some((pattern) =>
-    normalized.includes(pattern)
+  return (
+    MODULE_LOAD_FAILURE_PATTERN.test(message) ||
+    BUNDLER_CHUNK_FAILURE_PATTERN.test(message)
   );
 }

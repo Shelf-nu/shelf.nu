@@ -74,7 +74,8 @@ export type BuildVersionChecker = {
   checkThrottled(): Promise<BuildComparison | null>;
 };
 
-const CURRENT_STATE: BuildVersionState = { status: "current" };
+/** The state before any newer build is seen, and always during SSR. */
+export const CURRENT_STATE: BuildVersionState = { status: "current" };
 
 /**
  * Creates a build version store.

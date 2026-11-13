@@ -13,11 +13,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BuildComparison } from "~/utils/build-version";
 import type { BuildVersionState } from "~/utils/build-version-checker";
-import {
-  CHUNK_FAILURE_CHECK_TIMEOUT_MS,
-  chunkFailureBuildLabel,
-  LazyLoadBoundary,
-} from "./lazy-load-boundary";
+import { chunkFailureBuildLabel, LazyLoadBoundary } from "./lazy-load-boundary";
 
 const { mockCheck, mockGetSnapshot } = vi.hoisted(() => ({
   mockCheck: vi.fn<() => Promise<BuildComparison>>(),
@@ -196,17 +192,14 @@ describe("LazyLoadBoundary", () => {
     );
   });
 
-  it("reports the build as unknown when the check does not answer in time", async () => {
-    // shouldAdvanceTime keeps React and findByText moving on real time while
-    // the test can still jump the check timeout forward.
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it("reports at pagehide when the page unloads before the check answers", async () => {
     mockCheck.mockReturnValue(new Promise<BuildComparison>(() => {}));
     renderChunkFailure();
 
-    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(await screen.findByText("Reload")).toBeInTheDocument();
     expect(Sentry.captureException).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(CHUNK_FAILURE_CHECK_TIMEOUT_MS);
+    window.dispatchEvent(new Event("pagehide"));
 
     expect(Sentry.captureException).toHaveBeenCalledWith(
       expect.objectContaining({ message: CHUNK_ERROR_MESSAGE }),
@@ -218,6 +211,23 @@ describe("LazyLoadBoundary", () => {
         },
       }
     );
+  });
+
+  it("reports a chunk failure once, whichever of check and pagehide comes first", async () => {
+    let answer: (comparison: BuildComparison) => void = () => {};
+    mockCheck.mockReturnValue(
+      new Promise<BuildComparison>((resolve) => {
+        answer = resolve;
+      })
+    );
+    renderChunkFailure();
+    expect(await screen.findByText("Reload")).toBeInTheDocument();
+
+    answer("same");
+    await waitFor(() => expect(Sentry.captureException).toHaveBeenCalled());
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
   });
 });
 
