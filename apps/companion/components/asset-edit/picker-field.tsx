@@ -11,6 +11,14 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import {
+  DROPDOWN_MAX_HEIGHT,
+  moreRowsHint,
+  searchRows,
+  visibleRows,
+  type IncompleteListNotice as Notice,
+} from "@/lib/visible-rows";
+import { IncompleteListNotice } from "./incomplete-list-notice";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 
 type PickerItem = {
@@ -23,6 +31,12 @@ type PickerFieldProps<T extends PickerItem> = {
   label: string;
   items: T[];
   selectedId: string | null;
+  /**
+   * The selected item as the form holds it. Shown on the button when `items`
+   * does not contain it (still loading, or a list that is missing rows), so a
+   * saved value is never displayed as "nothing selected".
+   */
+  selectedFallback?: T | null;
   onSelect: (item: T | null) => void;
   onClear: () => void;
   isLoading: boolean;
@@ -37,12 +51,17 @@ type PickerFieldProps<T extends PickerItem> = {
   clearLabel?: string;
   /** Called when the picker is toggled open/closed */
   onToggle?: (isOpen: boolean) => void;
+  /** Set when `items` is missing rows; shown under the open dropdown. */
+  notice?: Notice | null;
+  /** Loads the items again, from the notice's Retry button. */
+  onRetry?: () => void;
 };
 
 export function PickerField<T extends PickerItem>({
   label,
   items,
   selectedId,
+  selectedFallback,
   onSelect,
   onClear,
   isLoading,
@@ -52,19 +71,23 @@ export function PickerField<T extends PickerItem>({
   placeholder = `No ${label.toLowerCase()}`,
   clearLabel = `Clear ${label.toLowerCase()}`,
   onToggle,
+  notice,
+  onRetry,
 }: PickerFieldProps<T>) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const selectedItem = items.find((item) => item.id === selectedId) ?? null;
+  const selectedItem =
+    items.find((item) => item.id === selectedId) ??
+    (selectedFallback?.id === selectedId ? selectedFallback : null);
 
-  const filteredItems = search
-    ? items.filter((item) =>
-        item.name.toLowerCase().includes(search.toLowerCase())
-      )
-    : items;
+  // Closest matches first, so the cap below never hides the row being typed.
+  const filteredItems = searchRows(items, search);
+  // Draw at most a page of rows, led by the selected one when it sorts after
+  // them; the search box reaches the rest.
+  const shownItems = visibleRows(filteredItems, selectedId);
 
   const toggleOpen = () => {
     const next = !isOpen;
@@ -139,7 +162,7 @@ export function PickerField<T extends PickerItem>({
             </Text>
           ) : (
             <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-              {filteredItems.map((item) => (
+              {shownItems.rows.map((item) => (
                 <TouchableOpacity
                   key={item.id}
                   style={[
@@ -159,6 +182,13 @@ export function PickerField<T extends PickerItem>({
                   )}
                 </TouchableOpacity>
               ))}
+              {/* Last row of the list, so it scrolls with the rows instead of
+                  taking fixed height from them. */}
+              {shownItems.hiddenCount > 0 && (
+                <Text style={styles.pickerHint}>
+                  {moreRowsHint(shownItems.rows.length, filteredItems.length)}
+                </Text>
+              )}
             </ScrollView>
           )}
           {selectedId && (
@@ -167,6 +197,13 @@ export function PickerField<T extends PickerItem>({
             </TouchableOpacity>
           )}
         </View>
+      )}
+      {isOpen && !isLoading && notice && (
+        <IncompleteListNotice
+          notice={notice}
+          onRetry={onRetry}
+          retryLabel={`Retry loading ${label.toLowerCase()} list`}
+        />
       )}
     </View>
   );
@@ -214,7 +251,7 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.gray300,
     borderRadius: borderRadius.sm,
     marginTop: spacing.xs,
-    maxHeight: 220,
+    maxHeight: DROPDOWN_MAX_HEIGHT,
     ...shadows.md,
   },
   pickerSearch: {
@@ -233,6 +270,13 @@ const useStyles = createStyles((colors, shadows) => ({
     textAlign: "center",
     color: colors.mutedLight,
     fontSize: fontSize.base,
+  },
+  pickerHint: {
+    paddingHorizontal: 14,
+    paddingVertical: spacing.sm,
+    textAlign: "center",
+    color: colors.mutedLight,
+    fontSize: fontSize.sm,
   },
   pickerItem: {
     flexDirection: "row",
