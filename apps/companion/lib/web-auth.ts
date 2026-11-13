@@ -20,7 +20,11 @@ import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { getApiBaseUrl } from "./api";
 import { getServerVersion } from "./server";
-import { getSupabase } from "./supabase";
+import { getSupabase, prepareStoredSessionForSignIn } from "./supabase";
+import {
+  SERVER_CHANGED_DURING_SIGN_IN,
+  signInWithPreparedSession,
+} from "./session-storage";
 
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
@@ -179,18 +183,24 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
     }
 
     if (getServerVersion() !== serverVersionAtStart) {
-      return { error: "The server changed during sign-in. Please try again." };
+      return { error: SERVER_CHANGED_DURING_SIGN_IN };
     }
 
-    const { error } = await getSupabase().auth.setSession({
-      access_token: payload.accessToken,
-      refresh_token: payload.refreshToken,
+    const { accessToken, refreshToken } = payload;
+
+    // A session a past sign-out could not delete stays refused until it is
+    // verifiably removed (`prepareStoredSessionForSignIn`).
+    return await signInWithPreparedSession({
+      prepare: prepareStoredSessionForSignIn,
+      serverUnchanged: () => getServerVersion() === serverVersionAtStart,
+      signIn: async () => {
+        const { error } = await getSupabase().auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        return { error: error?.message ?? null };
+      },
     });
-    if (error) {
-      return { error: error.message };
-    }
-
-    return { error: null };
   } catch (cause) {
     return {
       error:

@@ -214,7 +214,7 @@ SUPABASE_ANON_PUBLIC="your-anon-public-key"
 SUPABASE_SERVICE_ROLE="your-service-role-key"
 
 # App configuration
-SESSION_SECRET="your-super-secret-session-key"
+SESSION_SECRET="generate-with-openssl-rand-hex-32"  # openssl rand -hex 32
 SERVER_URL="https://localhost:3000"  # With SSL (recommended)
 # SERVER_URL="http://localhost:3000"  # Without SSL
 FINGERPRINT="a-custom-host-fingerprint"
@@ -234,7 +234,7 @@ MAPTILER_TOKEN="your-maptiler-token"
 GEOCODING_USER_AGENT="Your App Name (https://yoursite.com)"
 
 # Security
-INVITE_TOKEN_SECRET="your-invite-token-secret"
+INVITE_TOKEN_SECRET="generate-with-openssl-rand-hex-32"  # openssl rand -hex 32
 
 # Analytics (optional)
 MICROSOFT_CLARITY_ID="your-clarity-id"

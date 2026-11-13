@@ -87,7 +87,7 @@ import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.ser
 import { defaultUserCategories } from "../category/default-categories";
 import {
   caseInsensitiveEmailFilter,
-  normalizeInviteEmail,
+  pickUserForEmail,
 } from "../invite/helpers";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
@@ -224,30 +224,6 @@ export async function findUserById(id: User["id"]) {
       label,
     });
   }
-}
-
-/**
- * Picks the account an email address resolves to among rows that match it
- * without regard to letter case.
- *
- * Stored addresses can carry capitals from before every path lowercased them,
- * so one person can have rows that differ only by case. The row stored in
- * lowercase wins, since that is what every path writes today; otherwise the
- * oldest, so the same address always resolves to the same account.
- *
- * @param users - Matching rows, ordered oldest first
- * @param email - The address being resolved
- * @returns The account to use, or null when there is none
- */
-function pickUserForEmail<T extends { email: string }>(
-  users: T[],
-  email: string
-): T | null {
-  return (
-    users.find((user) => user.email === normalizeInviteEmail(email)) ??
-    users[0] ??
-    null
-  );
 }
 
 /**
@@ -1734,6 +1710,7 @@ export async function softDeleteUser(id: User["id"]) {
         await revokeMembershipInTx(tx, {
           userId: id,
           organizationId: userOrg.organizationId,
+          allowMissingMembership: true,
         });
       }
 
@@ -1904,9 +1881,13 @@ export { lockMembership };
  * membership lock, refuses the owner, deletes the membership and disconnects
  * every team member linked to the user in that workspace.
  *
- * A membership that no longer exists is not an error: the team-member links
- * are still cleared. Clearing `lastSelectedOrganizationId` is left to the
- * caller, after commit (see {@link clearLastSelectedOrganization}).
+ * A user without a membership in the workspace is refused with a 404, so a
+ * caller can only act on its own workspace's members. System callers that
+ * converge on "no access" (SCIM, account deletion) pass
+ * `allowMissingMembership`: for them a membership that is already gone is not
+ * an error, and the team-member links are still cleared. Clearing
+ * `lastSelectedOrganizationId` is left to the caller, after commit (see
+ * {@link clearLastSelectedOrganization}).
  *
  * @param tx - The surrounding transaction
  * @param args.userId - The member losing access
@@ -1914,10 +1895,13 @@ export { lockMembership };
  * @param args.actorOwnsWorkspace - For a member revoking another member:
  *   `access.ownsWorkspace` of the actor. Left undefined by system callers
  *   (SSO, SCIM, account deletion), which are not bound by the owner-only rule.
+ * @param args.allowMissingMembership - Treat a missing membership as already
+ *   revoked instead of refusing it
  * @returns The updated user row
- * @throws {ShelfError} 400 when the member owns the workspace; 403 when the
- *   actor does not own the workspace and the member's effective role needs
- *   the owner to change it
+ * @throws {ShelfError} 404 when the user is not a member and
+ *   `allowMissingMembership` is not set; 400 when the member owns the
+ *   workspace; 403 when the actor does not own the workspace and the member's
+ *   effective role needs the owner to change it
  */
 export async function revokeMembershipInTx(
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
@@ -1925,13 +1909,26 @@ export async function revokeMembershipInTx(
     userId,
     organizationId,
     actorOwnsWorkspace,
+    allowMissingMembership = false,
   }: {
     userId: User["id"];
     organizationId: Organization["id"];
     actorOwnsWorkspace?: boolean;
+    allowMissingMembership?: boolean;
   }
 ) {
   const persisted = await lockMembership(tx, { userId, organizationId });
+
+  if (!persisted && !allowMissingMembership) {
+    throw new ShelfError({
+      cause: null,
+      message: "User is not a member of this organization",
+      additionalData: { userId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
 
   if (persisted && isWorkspaceOwner(persisted.roles)) {
     throw new ShelfError({
@@ -2032,17 +2029,21 @@ export async function clearLastSelectedOrganization({
  * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the member doing
  *   the revoking; undefined for system callers (see {@link revokeMembershipInTx})
  * @returns The updated user row
- * @throws {ShelfError} 400 when the member owns the workspace; 403 when the
- *   actor may not revoke this member
+ * @throws {ShelfError} 404 when the user is not a member (unless
+ *   `allowMissingMembership`); 400 when the member owns the workspace; 403
+ *   when the actor may not revoke this member
  */
 export async function revokeAccessToOrganization({
   userId,
   organizationId,
   actorOwnsWorkspace,
+  allowMissingMembership,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   actorOwnsWorkspace?: boolean;
+  /** See {@link revokeMembershipInTx}. */
+  allowMissingMembership?: boolean;
 }) {
   try {
     /**
@@ -2069,7 +2070,12 @@ export async function revokeAccessToOrganization({
     }
 
     const result = await db.$transaction((tx) =>
-      revokeMembershipInTx(tx, { userId, organizationId, actorOwnsWorkspace })
+      revokeMembershipInTx(tx, {
+        userId,
+        organizationId,
+        actorOwnsWorkspace,
+        allowMissingMembership,
+      })
     );
 
     await clearLastSelectedOrganization({ userId, organizationId });

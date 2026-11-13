@@ -3,8 +3,9 @@
  *
  * Stops the user leaving a form screen (back button, back swipe, a navigation
  * that removes the screen) and asks before their edits are thrown away. Used by
- * the new asset, new booking and edit booking screens, and by the edit asset
- * form through `useFormValidation`.
+ * the new asset, new booking and edit booking screens, by the edit asset form
+ * through `useFormValidation`, and by the booking scanner (which passes a
+ * notice for held leaves and stops only a person's own back actions).
  *
  * @see {@link file://./use-form-validation.ts} the edit asset form's guard
  * @see {@link file://./../lib/edit-leave-guard.ts} the edit asset decision rules
@@ -32,7 +33,34 @@ type DiscardGuardOptions = {
   title: string;
   /** Body of the "Discard?" alert. */
   message: string;
+  /**
+   * Shown when a stopped leave is held, so the user knows why nothing
+   * happened. Without it a hold is silent.
+   */
+  holdNotice?: { title: string; message: string };
+  /**
+   * Navigation action types the guard stops (for example `GO_BACK`, `POP`).
+   * Any other removal passes untouched, before `decide` runs, so a "hold"
+   * applies only to these too. Without it every removal is stopped.
+   */
+  guardedActions?: readonly string[];
 };
+
+/**
+ * Whether the guard stops a removal caused by this navigation action.
+ *
+ * @param action - the action from the `beforeRemove` event
+ * @param guardedActions - the action types to stop, or undefined for all
+ * @returns true when the guard should decide on this removal
+ */
+export function isGuardedRemoval(
+  action: unknown,
+  guardedActions: readonly string[] | undefined
+): boolean {
+  if (!guardedActions) return true;
+  const type = (action as { type?: unknown } | null)?.type;
+  return typeof type === "string" && guardedActions.includes(type);
+}
 
 /**
  * Guards a form screen against losing unsaved edits.
@@ -51,6 +79,8 @@ export function useDiscardGuard({
   decide,
   title,
   message,
+  holdNotice,
+  guardedActions,
 }: DiscardGuardOptions): void {
   const [leaving, setLeaving] = useState(false);
 
@@ -64,14 +94,18 @@ export function useDiscardGuard({
     }, [])
   );
 
-  usePreventRemove(active && !leaving, ({ repeat }) => {
+  usePreventRemove(active && !leaving, ({ data, repeat }) => {
     const leave = () => {
       setLeaving(true);
       repeat();
     };
+    if (!isGuardedRemoval(data?.action, guardedActions)) return leave();
     const decision = decide();
     if (decision === "leave") return leave();
-    if (decision === "hold") return;
+    if (decision === "hold") {
+      if (holdNotice) Alert.alert(holdNotice.title, holdNotice.message);
+      return;
+    }
     Alert.alert(title, message, [
       { text: "Keep Editing", style: "cancel" },
       { text: "Discard", style: "destructive", onPress: leave },

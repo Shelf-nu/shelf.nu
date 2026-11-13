@@ -56,6 +56,7 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -79,6 +80,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { readModelTabParams } from "~/utils/booking-model-requests";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -87,6 +89,7 @@ import { isFormProcessing } from "~/utils/form";
 import {
   payload,
   error,
+  getCurrentSearchParams,
   getParams,
   parseData,
   safeRedirect,
@@ -238,6 +241,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const modelTabData = await getBookingModelTabData({
       organizationId,
       booking,
+      ...readModelTabParams(getCurrentSearchParams(request)),
+      // A stale page in the URL lands on the last page, not an empty one.
+      clampPageToResults: true,
+      // This booking's reservations lead the list, as on the tab's own route.
+      pinReservedModels: true,
     });
 
     const { page, perPage, kits, search, totalKits, totalPages } =
@@ -775,15 +783,25 @@ export default function AddKitsToBooking() {
     showModelsTab,
     assetModels,
     modelRequests,
+    matchedAssetModels,
+    modelsPage,
+    modelsPerPage,
   } = useLoaderData<typeof loader>();
 
   /**
-   * Local state for the active tab value. "kits" is the default on mount.
-   * "assets" always navigates away (existing manage-assets route); "models"
-   * renders inline via `ManageModelRequests`, mirroring manage-assets' tab
-   * pattern.
+   * Local state for the active tab value. "assets" always navigates away (the
+   * manage-assets route); "models" renders inline via `ManageModelRequests`,
+   * mirroring manage-assets' tab pattern.
+   *
+   * Seeded from `?tab=models`, which the Models tab's search and paging write,
+   * so a reload stays on the tab the operator was using. "kits" otherwise.
    */
-  const [activeTab, setActiveTab] = useState<"kits" | "models">("kits");
+  const [searchParams] = useSearchParams();
+  // Only when the tab exists: a workspace without models never renders it, so
+  // a stale `?tab=models` would otherwise open the dialog with no tab shown.
+  const [activeTab, setActiveTab] = useState<"kits" | "models">(() =>
+    searchParams.get("tab") === "models" && showModelsTab ? "models" : "kits"
+  );
 
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -982,6 +1000,9 @@ export default function AddKitsToBooking() {
             bookingId={booking.id}
             assetModels={assetModels}
             modelRequests={modelRequests}
+            matchedAssetModels={matchedAssetModels}
+            modelsPage={modelsPage}
+            modelsPerPage={modelsPerPage}
           />
         </TabsContent>
       ) : null}

@@ -17,7 +17,17 @@
  * @see ./discovery.ts — decides WHICH server to switch to
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getSupabase, rebuildSupabase } from "../supabase";
+import {
+  blockStoredSession,
+  currentSessionStorageKey,
+  getSupabase,
+  getSupabaseClientUrl,
+  persistedSessionRemover,
+  rebuildSupabase,
+} from "../supabase";
+import { callEach } from "../call-each";
+import { endSessionOnDevice } from "./end-session";
+import { serverScope } from "./server-scope";
 import { runBeforeSessionEnd } from "./session-end";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
@@ -71,13 +81,9 @@ const listeners = new Set<() => void>();
 /** Notifies subscribers that the active server changed. */
 function notifyServerChange(): void {
   version += 1;
-  listeners.forEach((listener) => {
-    try {
-      listener();
-    } catch (e) {
-      // One bad subscriber must not abort the rest of the switch.
-      if (__DEV__) console.error("[Server] change listener failed:", e);
-    }
+  // One bad subscriber must not abort the rest of the switch.
+  callEach(listeners, (e) => {
+    if (__DEV__) console.error("[Server] change listener failed:", e);
   });
 }
 
@@ -218,32 +224,62 @@ async function clearServerScopedState(): Promise<void> {
  * Ends the current session on the outgoing client.
  *
  * The before-session-end tasks (`./session-end.ts`) run first, while the
- * session is still live.
- *
- * A network failure does NOT throw — supabase-js returns the error and, for a
- * non-4xx failure, skips removing the local session. Left at that, the previous
- * server's refresh token stays in SecureStore under its own project key and is
- * silently restored the next time the app reconnects there: the UI would show a
- * signed-out user while a live session waited on disk. So a failed revoke falls
- * back to a local teardown, which cannot fail for network reasons.
+ * session is still live. The teardown then goes through
+ * {@link endSessionOnDevice}, which removes the stored session even when the
+ * revoke cannot reach the server: otherwise the previous server's refresh
+ * token would stay in SecureStore under its own project key and be restored
+ * the next time the app reconnects there.
  *
  * @returns Resolves once the session is gone locally, whatever the server said.
  */
 async function endSessionOnOutgoingClient(): Promise<void> {
   await runBeforeSessionEnd();
-
-  try {
-    const { error } = await getSupabase().auth.signOut();
-    if (!error) return;
-  } catch {
-    // Fall through to the local teardown below.
+  const storageKey = currentSessionStorageKey();
+  const serverUrl = getSupabaseClientUrl();
+  // A stored session that survives every delete is refused from then on, so
+  // reconnecting to this server later cannot restore it.
+  const outcome = await endSessionOnDevice(
+    getSupabase(),
+    persistedSessionRemover(),
+    {
+      blockStoredSession: async () =>
+        storageKey ? blockStoredSession(storageKey) : false,
+    }
+  );
+  if (outcome === "incomplete" || outcome === "unprotected") {
+    try {
+      reportIncompleteTeardown?.(serverUrl, {
+        blockStored: outcome === "incomplete",
+      });
+    } catch {
+      // Telemetry must never stop a server switch.
+    }
   }
+}
 
-  try {
-    await getSupabase().auth.signOut({ scope: "local" });
-  } catch (e) {
-    if (__DEV__) console.error("[Server] local sign-out failed:", e);
-  }
+/** Reports a teardown that could not confirm the stored session is gone. */
+export type IncompleteTeardownReporter = (
+  server: string | null,
+  details: { blockStored: boolean }
+) => void;
+
+/**
+ * Where a server switch reports an incomplete teardown. Injected (by
+ * `trackServerTag` in `../sentry.ts`) because the Sentry module imports this
+ * one, so this module must not import it back.
+ */
+let reportIncompleteTeardown: IncompleteTeardownReporter | null = null;
+
+/**
+ * Sets the reporter a server switch calls when it could not confirm the
+ * outgoing session is gone (the same report a sign-out sends).
+ *
+ * @param reporter - The reporter, or null to stop reporting
+ */
+export function setIncompleteTeardownReporter(
+  reporter: IncompleteTeardownReporter | null
+): void {
+  reportIncompleteTeardown = reporter;
 }
 
 /**
@@ -311,6 +347,11 @@ export async function setActiveServer(config: ServerConfig): Promise<void> {
     notifyServerChange();
     return;
   }
+
+  // First, before anything awaits: draft writes for the outgoing server that
+  // are still in flight see the switch and are dropped, so none recreates a
+  // draft after `clearServerScopedState` sweeps them.
+  serverScope.bump();
 
   await endSessionOnOutgoingClient();
 

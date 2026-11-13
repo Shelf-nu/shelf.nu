@@ -65,6 +65,9 @@ const OPENED_BY_SWITCH = [
   "routes/api+/mobile+/kits.bulk-actions.ts",
   "routes/api+/mobile+/qr.claim.ts",
   "routes/api+/mobile+/qr.link-asset.ts",
+  // Managers who may edit assets with the switch on also get the asset model
+  // defaults the asset form pre-fills from (`withDefaults`).
+  "routes/api+/model-filters.ts",
   "routes/qr+/_private+/$qrId_.claim.tsx",
   "routes/qr+/_private+/$qrId_.link.asset.tsx",
   "routes/qr+/_private+/$qrId_.link.kit.tsx",

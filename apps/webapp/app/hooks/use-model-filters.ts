@@ -1,5 +1,5 @@
 import type { ChangeEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
@@ -34,6 +34,14 @@ export type ModelFilterProps = {
 };
 
 const GET_ALL_KEY = "getAll";
+
+/**
+ * How long typing in a filter's search box has to pause before the server is
+ * asked for matching options. The visible list filters as the user types; only
+ * the request for options not loaded yet waits, so a word is one request, not
+ * one per keystroke.
+ */
+export const MODEL_FILTER_SEARCH_DEBOUNCE_MS = 300;
 
 /**
  * Sends a filtered list back to its first page. A filter changes which rows
@@ -104,6 +112,23 @@ export function useModelFilters({
 
   const fetcher = useFetcherWithReset<typeof loader>();
   const totalItems = initialData[countKey];
+  /** The search request waiting for typing to pause, if any. */
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingSearch = () => {
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    }
+  };
+
+  // A search still waiting when the picker unmounts never runs.
+  useEffect(
+    () => () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    },
+    []
+  );
 
   // Track if all data is loaded
   const hasAllData = useMemo(
@@ -226,29 +251,36 @@ export function useModelFilters({
   const handleSearchQueryChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    if (!e.currentTarget.value) {
+    const queryValue = e.currentTarget.value;
+    cancelPendingSearch();
+    if (!queryValue) {
       clearFilters();
     } else {
-      setSearchQuery(e.currentTarget.value);
+      setSearchQuery(queryValue);
 
-      // Only fetch from server if we don't have all data
+      // Only fetch from server if we don't have all data, and only once
+      // typing pauses.
       if (!hasAllData) {
-        void fetcher.submit(
-          {
-            ...model,
-            queryValue: e.currentTarget.value,
-            selectedValues: selectedItems,
-          },
-          {
-            method: "GET",
-            action: "/api/model-filters",
-          }
-        );
+        searchTimerRef.current = setTimeout(() => {
+          searchTimerRef.current = null;
+          void fetcher.submit(
+            {
+              ...model,
+              queryValue,
+              selectedValues: selectedItems,
+            },
+            {
+              method: "GET",
+              action: "/api/model-filters",
+            }
+          );
+        }, MODEL_FILTER_SEARCH_DEBOUNCE_MS);
       }
     }
   };
 
   const resetModelFiltersFetcher = () => {
+    cancelPendingSearch();
     setSearchQuery("");
     fetcher.reset();
   };

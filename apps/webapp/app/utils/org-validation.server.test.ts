@@ -624,20 +624,24 @@ describe("single-entity guards reject foreign/missing with 400", () => {
     expect(err.status).toBe(400);
     expect(tx.teamMember.findFirst).toHaveBeenCalledWith({
       where: { id: "tm-foreign", organizationId: ORG },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
   });
 
-  it("assertTeamMemberBelongsToOrg resolves when the member is in the org", async () => {
+  it("assertTeamMemberBelongsToOrg returns the member with its linked user id", async () => {
     const tx = txWith({
-      teamMember: { findFirst: vitest.fn().mockResolvedValue({ id: "tm-1" }) },
+      teamMember: {
+        findFirst: vitest
+          .fn()
+          .mockResolvedValue({ id: "tm-1", userId: "user-1" }),
+      },
     });
     await expect(
       assertTeamMemberBelongsToOrg(
         { teamMemberId: "tm-1", organizationId: ORG },
         tx
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ id: "tm-1", userId: "user-1" });
   });
 
   it("assertCategoryBelongsToOrg throws 400 when foreign/missing", async () => {

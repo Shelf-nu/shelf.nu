@@ -46,7 +46,9 @@ const NRM_BASE_SCOPE = {
   deletedAt: null,
   organizationId: ORG,
   userId: null,
-  receivedInvites: { none: { status: InviteStatuses.PENDING } },
+  receivedInvites: {
+    none: { status: InviteStatuses.PENDING, organizationId: ORG },
+  },
 };
 
 beforeEach(() => {
@@ -194,7 +196,7 @@ describe("deleteNRM", () => {
 
     const { where } = dbMocks.updateMany.mock.calls[0][0];
     expect(where.receivedInvites).toEqual({
-      none: { status: InviteStatuses.PENDING },
+      none: { status: InviteStatuses.PENDING, organizationId: ORG },
     });
   });
 

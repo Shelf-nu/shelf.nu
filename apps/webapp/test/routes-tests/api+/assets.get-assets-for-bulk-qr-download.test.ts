@@ -78,11 +78,13 @@ vi.mock("~/modules/team-member/service.server", () => ({
 // why: the query COUNT is the assertion, so the delegates have to be
 // observable — `qr.findMany` is the batched read under test, `findFirst` and
 // `$queryRaw` belong to the locked create that only a missing code should reach.
+// The lock answers with a row because every asset here is already filtered to
+// the caller's workspace, which is what the workspace-scoped lock checks.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findMany: vi.fn() },
     qr: { findMany: vi.fn(), findFirst: vi.fn() },
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "asset-0" }]),
     $transaction: vi.fn(),
   },
 }));
@@ -141,6 +143,12 @@ describe("bulk QR download", () => {
     // that threw after the reads.
     expect(response.data.error).toBeFalsy();
     expect(db.qr.findMany).toHaveBeenCalledTimes(1);
+    // Codes claimed by another workspace are left out of the prefetch.
+    expect(db.qr.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [{ organizationId: null }, { organizationId: expect.any(String) }],
+      }),
+    });
     // The per-asset lookup inside `generateQrObj` must not be reached, and no
     // asset here is missing a code, so nothing should be created either.
     expect(qrMocks.getQrByAssetId).not.toHaveBeenCalled();
@@ -264,7 +272,10 @@ describe("bulk QR download select-all", () => {
     // The helper refuses a `custody` filter unless told "all"; an empty list
     // would turn an admin's valid filtered download into an empty one.
     expect(bulkMocks.resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
-      expect.objectContaining({ allowedTeamMemberIds: "all" })
+      expect.objectContaining({
+        allowedTeamMemberIds: "all",
+        custodySearchScope: "all",
+      })
     );
   });
 
@@ -292,6 +303,8 @@ describe("bulk QR download select-all", () => {
         allowedTeamMemberIds: [],
         // Nor codes for assets outside the list it was shown.
         bookableScope: { holderUserId: "user-1" },
+        // A custodian-name search matches only the caller's own custody.
+        custodySearchScope: { userId: "user-1" },
       })
     );
   });

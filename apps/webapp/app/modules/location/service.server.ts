@@ -2142,6 +2142,9 @@ export async function updateLocationAssets({
         organizationId,
         currentSearchParams: searchParams.toString(),
         allowedTeamMemberIds: [],
+        // Updating a location's assets needs `location: update`, which only roles
+        // that see all custody hold, so the search matches every custodian.
+        custodySearchScope: "all",
         bookableScope: null,
         locationIdsOverride: undefined,
         honorArchivedView: false,

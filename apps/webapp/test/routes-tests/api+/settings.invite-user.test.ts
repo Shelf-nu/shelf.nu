@@ -32,11 +32,10 @@ vi.mock("~/utils/subscription.server", () => ({
 // lives in the service test file, so here only the arguments it receives matter
 vi.mock("~/modules/invite/service.server", () => ({ createInvite: vi.fn() }));
 
-// why: the route looks up pending invites before inviting
+// why: the route looks up the team member it links the invite to
 vi.mock("~/database/db.server", () => ({
   db: {
     teamMember: { findUnique: vi.fn().mockResolvedValue(null) },
-    invite: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -81,7 +80,6 @@ describe("settings.invite-user", () => {
       createActionArgs({ context, request: inviteRequest("ADMIN"), params: {} })
     ) as unknown as Promise<Response>);
 
-    expect(db.invite.findMany).toHaveBeenCalled();
     expect(createInvite).toHaveBeenCalledWith(
       expect.objectContaining({
         actorOwnsWorkspace: owns,

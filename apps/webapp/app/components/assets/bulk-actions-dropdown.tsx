@@ -357,7 +357,6 @@ function ConditionalDropdown() {
       >
         <DropdownMenuTrigger
           className="actions-dropdown hidden font-medium md:flex"
-          onClick={() => setOpen(!open)}
           asChild
           disabled={disabled}
         >

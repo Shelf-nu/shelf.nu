@@ -6,11 +6,11 @@
 # EXPO_PUBLIC_API_URL.
 #
 # Verifies rule 2 of lib/scan-location.ts: the OS permission prompt appears
-# ONCE on first scanner focus (primeScanLocation), and after granting, a QR
-# resolve carries latitude/longitude (camera can't scan in the simulator, so
-# the deep link exercises the same resolve path per .maestro/LESSONS.md; the
-# deep-link resolver attaches coordinates opportunistically from the warmed
-# fix). DB + Metro-log assertions happen outside Maestro.
+# ONCE on first scanner focus (primeScanLocation). The camera can't scan in
+# the simulator, and a QR deep link resolves WITHOUT recording a scan or a
+# position, so the final step only proves the link opens the asset. Check a
+# recorded position with the scanner's manual code entry instead. DB +
+# Metro-log assertions happen outside Maestro.
 appId: com.shelf.companion.carlos
 ---
 # Wait for the app shell before tapping (a tap during boot is swallowed)
@@ -40,7 +40,7 @@ appId: com.shelf.companion.carlos
     visible: ".*Scan.*"
     timeout: 5000
 
-# Same-path substitute for a camera scan: resolve a known asset-linked QR
+# Resolve a known asset-linked QR through a link (records nothing)
 - openLink: shelf://qr/c3phv1e1cc
 - extendedWaitUntil:
     visible: ".*Laerdal SimMan 3G.*"

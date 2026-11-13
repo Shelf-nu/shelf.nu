@@ -159,7 +159,83 @@ describe("DynamicSelect", () => {
       await waitFor(() => {
         expect(trigger).toHaveTextContent("Item 2");
       });
-      expect(onChange).toHaveBeenCalledWith("item-2");
+      expect(onChange).toHaveBeenCalledWith(
+        "item-2",
+        expect.objectContaining({ id: "item-2" })
+      );
+    });
+
+    it("passes a search result's own columns to onChange", async () => {
+      // A row from /api/model-filters search results: not in the seeded list,
+      // with the record's columns at the top level.
+      const searchResult = {
+        id: "m-old",
+        name: "ZZ Test Model",
+        metadata: {},
+        defaultValuation: 199,
+      } as ModelFilterItem;
+      const onChange = vi.fn();
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn([searchResult], { searchQuery: "ZZ" })
+      );
+
+      render(
+        <DynamicSelect
+          model={{ name: "assetModel" as const, queryKey: "name" }}
+          initialDataKey="assetModels"
+          countKey="totalAssetModels"
+          contentLabel="Asset Models"
+          onChange={onChange}
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await act(async () => {
+        await user.click(await screen.findByText("ZZ Test Model"));
+      });
+
+      expect(onChange).toHaveBeenCalledWith(
+        "m-old",
+        expect.objectContaining({ defaultValuation: 199 })
+      );
+    });
+
+    it("passes no item when the pick is cleared", async () => {
+      const items = createTestItems(3);
+      const onChange = vi.fn();
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items)
+      );
+
+      render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          defaultValue="item-2"
+          allowClear
+          onChange={onChange}
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      // Picking the selected item again clears it. The trigger shows "Item 2"
+      // too, so take the row in the open list (the last match).
+      await waitFor(() => {
+        expect(screen.getAllByText("Item 2").length).toBeGreaterThan(1);
+      });
+      await act(async () => {
+        await user.click(screen.getAllByText("Item 2").at(-1)!);
+      });
+
+      expect(onChange).toHaveBeenCalledWith(undefined, undefined);
     });
 
     it("shows placeholder when nothing is selected", () => {
@@ -376,7 +452,10 @@ describe("DynamicSelect", () => {
 
       // Wait for the click to be processed
       await waitFor(() => {
-        expect(onChange).toHaveBeenCalledWith("uncategorized");
+        expect(onChange).toHaveBeenCalledWith(
+          "uncategorized",
+          expect.objectContaining({ id: "uncategorized" })
+        );
       });
     });
 
@@ -674,7 +753,10 @@ describe("DynamicSelect", () => {
 
       // Should now show the regular item
       expect(screen.getByRole("button")).toHaveTextContent("Item 1");
-      expect(onChange).toHaveBeenCalledWith("item-1");
+      expect(onChange).toHaveBeenCalledWith(
+        "item-1",
+        expect.objectContaining({ id: "item-1" })
+      );
     });
 
     it("can switch from regular item to withoutValueItem", async () => {
@@ -729,7 +811,10 @@ describe("DynamicSelect", () => {
 
       // Should now show withoutValueItem
       expect(screen.getByRole("button")).toHaveTextContent("Without custody");
-      expect(onChange).toHaveBeenCalledWith("without-custody");
+      expect(onChange).toHaveBeenCalledWith(
+        "without-custody",
+        expect.objectContaining({ id: "without-custody" })
+      );
     });
   });
 

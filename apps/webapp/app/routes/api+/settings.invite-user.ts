@@ -10,7 +10,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
-import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { createInvite } from "~/modules/invite/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -25,8 +24,9 @@ import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server
 /**
  * Sends a workspace invite to one email address.
  *
- * Refuses when the person already has a pending invite in this workspace,
- * whatever the letter case of the stored address.
+ * An earlier pending invite to the same address (in any letter case) does not
+ * block it: `createInvite` invalidates the earlier one, so only the newest
+ * invite can be accepted.
  *
  * @returns `{ success: true }` when an invite was sent, `null` payload when
  *   `createInvite` declined it (it notifies the sender why), or an error
@@ -72,25 +72,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
-    const existingInvites = await db.invite.findMany({
-      where: {
-        status: "PENDING",
-        inviteeEmail: caseInsensitiveEmailFilter(email),
-        organizationId,
-      },
-    });
-
-    if (existingInvites.length) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "User already has a pending invite. Either resend it or cancel it in order to be able to send a new one.",
-        additionalData: { email, organizationId },
-        label: "Invite",
-        shouldBeCaptured: false,
-      });
-    }
-
+    // An earlier pending invite to this email does not block a new one:
+    // createInvite invalidates it in the same transaction that creates this one.
     const invite = await createInvite({
       organizationId,
       inviteeEmail: email,

@@ -58,7 +58,10 @@ test("the declared values are exactly the list the server accepts", () => {
 // ---------------------------------------------------------------------------
 
 const APP_DIR = path.resolve(__dirname, "../app/(tabs)");
-const scannerSource = readFileSync(path.join(APP_DIR, "scanner.tsx"), "utf8");
+const scannerSource = readFileSync(
+  path.resolve(__dirname, "../components/scanner/scanner-screen.tsx"),
+  "utf8"
+);
 const bookingScreenSource = readFileSync(
   path.join(APP_DIR, "bookings/[id].tsx"),
   "utf8"
@@ -75,19 +78,19 @@ function callArguments(source: string, fn: string): string[] {
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }
 
-test("the Scan tab declares every booking check-in and check-out as scanned", () => {
+test("the booking scanner declares every booking check-in and check-out as scanned", () => {
   for (const fn of [
     "partialCheckinBooking",
     "partialCheckoutBooking",
     "fulfilAndCheckoutBooking",
   ]) {
     const calls = callArguments(scannerSource, fn);
-    assert.ok(calls.length > 0, `scanner.tsx calls api.${fn}`);
+    assert.ok(calls.length > 0, `scanner-screen.tsx calls api.${fn}`);
     for (const args of calls) {
       assert.match(
         args,
         /BOOKING_METHOD\.scanned/,
-        `scanner.tsx api.${fn} declares BOOKING_METHOD.scanned`
+        `scanner-screen.tsx api.${fn} declares BOOKING_METHOD.scanned`
       );
       assert.doesNotMatch(args, /BOOKING_METHOD\.selected/);
     }

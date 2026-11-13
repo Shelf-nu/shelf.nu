@@ -10,6 +10,10 @@
  * - Email letter case: invitee emails are stored lowercased, and every match
  *   against a stored email (invites, users, the signed-in user) ignores case,
  *   because stored rows can still hold capitals.
+ * - A new invite supersedes every earlier pending invite to the same person,
+ *   and reuses an earlier invite's team member only while it is unclaimed.
+ * - Acceptance links the team member only while it is unclaimed or already
+ *   the invitee's, and never accepts an invite that is no longer pending.
  *
  * @see {@link file://./service.server.ts}
  * @see {@link file://./helpers.ts}
@@ -21,6 +25,7 @@ import { InviteStatuses, OrganizationRoles } from "@prisma/client";
 import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Logger } from "~/utils/logger";
 import { caseInsensitiveEmailFilter, normalizeInviteEmail } from "./helpers";
 import { MAX_IMPORT_USERS_ROWS } from "./import-users-preflight.server";
 import {
@@ -47,10 +52,14 @@ const dbMock = vi.hoisted(() => ({
   user: { findFirst: vi.fn(), findMany: vi.fn() },
   teamMember: {
     update: vi.fn(),
+    updateMany: vi.fn(),
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     createMany: vi.fn(),
   },
+  booking: { updateMany: vi.fn() },
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
 }));
 
 // why: isolating the invite logic from the database
@@ -85,31 +94,69 @@ const ssoMock = vi.hoisted(() => ({
 // which is the input the invite guard branches on.
 vi.mock("~/utils/sso.server", () => ssoMock);
 
-/** Builds a PENDING invite row as `db.invite.findFirst` would return it */
+// why: a failed claim release is reported through Logger, which talks to
+// Sentry; the tests assert the report without sending it.
+vi.mock("~/utils/logger", () => ({
+  Logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
+}));
+
+/**
+ * Builds a PENDING invite row as `db.invite.findFirst` would return it.
+ *
+ * @param roles - The roles the invite grants
+ * @param inviteeEmail - The stored invitee address
+ * @param teamMemberUserId - The user already linked to the invite's team
+ *   member, or null while it is unclaimed
+ */
 function pendingInvite(
   roles: OrganizationRoles[],
-  inviteeEmail = "invitee@example.com"
+  inviteeEmail = "invitee@example.com",
+  teamMemberUserId: string | null = null
 ) {
   return {
     id: "invite-1",
     inviteeEmail,
     organizationId: "org-1",
+    teamMemberId: "tm-1",
     roles,
     status: InviteStatuses.PENDING,
     expiresAt: new Date(Date.now() + 86_400_000),
-    inviteeTeamMember: { id: "tm-1", name: "Invitee Person" },
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    inviteeTeamMember: {
+      id: "tm-1",
+      name: "Invitee Person",
+      organizationId: "org-1",
+      userId: teamMemberUserId,
+    },
   };
+}
+
+/** Accepts invite-1 with a password, as the accept-invite action does. */
+const acceptInvite = () =>
+  updateInviteStatus({
+    id: "invite-1",
+    status: InviteStatuses.ACCEPTED,
+    password: "hunter2hunter2",
+  });
+
+/** Default mocks for an acceptance that links an unclaimed team member. */
+function mockAcceptanceWrites() {
+  dbMock.invite.update.mockResolvedValue({ id: "invite-1" });
+  // The PENDING claim matches the one invite; the trailing invalidation of
+  // other pending invites reports the same count, which nothing reads.
+  dbMock.invite.updateMany.mockResolvedValue({ count: 1 });
+  dbMock.teamMember.updateMany.mockResolvedValue({ count: 1 });
+  dbMock.booking.updateMany.mockResolvedValue({ count: 0 });
+  dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
+  vi.mocked(createUserOrAttachOrg).mockResolvedValue({
+    id: "user-1",
+  } as Awaited<ReturnType<typeof createUserOrAttachOrg>>);
 }
 
 describe("updateInviteStatus — stored role validation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dbMock.invite.update.mockResolvedValue({ id: "invite-1" });
-    dbMock.invite.updateMany.mockResolvedValue({ count: 0 });
-    dbMock.teamMember.update.mockResolvedValue({ id: "tm-1" });
-    vi.mocked(createUserOrAttachOrg).mockResolvedValue({
-      id: "user-1",
-    } as Awaited<ReturnType<typeof createUserOrAttachOrg>>);
+    mockAcceptanceWrites();
   });
 
   it("refuses an invite that grants OWNER", async () => {
@@ -187,6 +234,276 @@ describe("updateInviteStatus — stored role validation", () => {
   });
 });
 
+describe("updateInviteStatus: claiming the invite", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAcceptanceWrites();
+  });
+
+  it("claims the invite with a conditional PENDING write before granting access", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+
+    await acceptInvite();
+
+    expect(dbMock.invite.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.PENDING,
+      },
+      data: { status: InviteStatuses.ACCEPTED },
+    });
+    expect(dbMock.invite.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(createUserOrAttachOrg).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("refuses with 400 and grants nothing when a newer invite replaced it first", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.ADMIN])
+    );
+    // The invite was invalidated between the read and the claim.
+    dbMock.invite.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({
+      status: 400,
+      title: "Invite is no longer valid",
+    });
+
+    expect(createUserOrAttachOrg).not.toHaveBeenCalled();
+    expect(dbMock.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim when granting access fails", async () => {
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.BASE]))
+      // The release finds no newer invite to the same person.
+      .mockResolvedValueOnce(null);
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    expect(dbMock.invite.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.ACCEPTED,
+      },
+      data: { status: InviteStatuses.PENDING },
+    });
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim when recording the invitee fails", async () => {
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.BASE]))
+      // The release finds no newer invite to the same person.
+      .mockResolvedValueOnce(null);
+    // The last write of the acceptance transaction fails.
+    dbMock.invite.update.mockRejectedValueOnce(new Error("write failed"));
+
+    await expect(acceptInvite()).rejects.toBeDefined();
+
+    expect(dbMock.invite.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.ACCEPTED,
+      },
+      data: { status: InviteStatuses.PENDING },
+    });
+  });
+
+  it("logs a failed release instead of hiding it", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+    // The claim succeeds, then the release write fails.
+    dbMock.invite.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockRejectedValueOnce(new Error("pool timeout"));
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects and closes the other pending invites in one transaction", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+
+    await updateInviteStatus({
+      id: "invite-1",
+      status: InviteStatuses.REJECTED,
+      password: "",
+    });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.invite.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.PENDING,
+      },
+      data: { status: InviteStatuses.REJECTED },
+    });
+    expect(dbMock.invite.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: { status: InviteStatuses.INVALIDATED },
+      })
+    );
+    expect(createUserOrAttachOrg).not.toHaveBeenCalled();
+  });
+
+  it("locks the person's invites before deciding how to release the claim", async () => {
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.BASE]))
+      .mockResolvedValueOnce(null);
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    const [strings] = dbMock.$queryRaw.mock.calls[0];
+    expect(String(strings)).toMatch(/pg_advisory_xact_lock/);
+    // The lock comes before the newer-invite lookup (the second findFirst).
+    expect(dbMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.invite.findFirst.mock.invocationCallOrder[1]
+    );
+  });
+
+  it("closes a claimed invite instead of reopening it when a newer invite replaced it", async () => {
+    dbMock.invite.findFirst
+      .mockResolvedValueOnce(pendingInvite([OrganizationRoles.ADMIN]))
+      // The release finds a newer invite to the same person.
+      .mockResolvedValueOnce({ id: "invite-2" });
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ status: 400 });
+
+    expect(dbMock.invite.findFirst).toHaveBeenLastCalledWith({
+      where: {
+        organizationId: "org-1",
+        inviteeEmail: expect.anything(),
+        id: { not: "invite-1" },
+        createdAt: { gt: new Date("2026-01-01T00:00:00Z") },
+      },
+      select: { id: true },
+    });
+    expect(dbMock.invite.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "invite-1",
+        organizationId: "org-1",
+        status: InviteStatuses.ACCEPTED,
+      },
+      data: { status: InviteStatuses.INVALIDATED },
+    });
+  });
+});
+
+describe("updateInviteStatus: linking the team member", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAcceptanceWrites();
+  });
+
+  it("links an unclaimed team member and its bookings to the new user", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+
+    await acceptInvite();
+
+    expect(dbMock.teamMember.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "tm-1",
+        organizationId: "org-1",
+        OR: [{ userId: null }, { userId: "user-1" }],
+      },
+      data: { deletedAt: null, userId: "user-1" },
+    });
+    expect(dbMock.booking.updateMany).toHaveBeenCalledWith({
+      where: { custodianTeamMemberId: "tm-1", organizationId: "org-1" },
+      data: { custodianUserId: "user-1" },
+    });
+    expect(dbMock.invite.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts when the team member is already linked to the invitee's own account", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE], "invitee@example.com", "user-1")
+    );
+    dbMock.user.findFirst.mockResolvedValue({ id: "user-1" });
+
+    await acceptInvite();
+
+    expect(dbMock.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "user-1",
+        email: { in: ["invitee@example.com"], mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    expect(createUserOrAttachOrg).toHaveBeenCalledTimes(1);
+    expect(dbMock.invite.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses with 400 before granting access when another user has claimed the team member", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE], "invitee@example.com", "user-x")
+    );
+    // The linked user is not the invitee.
+    dbMock.user.findFirst.mockResolvedValue(null);
+
+    await expect(acceptInvite()).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+      title: "Invite is no longer valid",
+    });
+
+    expect(createUserOrAttachOrg).not.toHaveBeenCalled();
+    expect(dbMock.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 400 when another acceptance claims the team member first", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE])
+    );
+    // The conditional link matches nothing: the member was claimed meanwhile.
+    dbMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(acceptInvite()).rejects.toMatchObject({
+      status: 400,
+      title: "Invite is no longer valid",
+    });
+
+    expect(dbMock.booking.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [InviteStatuses.ACCEPTED, "Invite already accepted"],
+    [InviteStatuses.INVALIDATED, "Invite is invalidated"],
+  ])("never accepts an invite that is %s", async (status, title) => {
+    dbMock.invite.findFirst.mockResolvedValue({
+      ...pendingInvite([OrganizationRoles.BASE]),
+      status,
+    });
+
+    await expect(acceptInvite()).rejects.toMatchObject({ title });
+
+    expect(createUserOrAttachOrg).not.toHaveBeenCalled();
+    expect(dbMock.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.invite.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("invite email helpers", () => {
   it("trims and lowercases an invitee email", () => {
     expect(normalizeInviteEmail("  First.Last@School.ORG ")).toBe(
@@ -245,6 +562,19 @@ describe(checkUserAndInviteMatch.name, () => {
   });
 });
 
+/** Mocks the transaction createInvite writes the new invite in. */
+function mockInviteTransaction() {
+  dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
+  dbMock.invite.updateMany.mockResolvedValue({ count: 0 });
+}
+
+/** The where clause that closes every pending invite to person@school.org */
+const supersedeWhere = {
+  organizationId: "org-1",
+  inviteeEmail: { in: ["person@school.org"], mode: "insensitive" },
+  status: InviteStatuses.PENDING,
+};
+
 describe("createInvite: earlier invites of the same person", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -253,6 +583,9 @@ describe("createInvite: earlier invites of the same person", () => {
       linkedOrganizations: [],
     });
     dbMock.user.findFirst.mockResolvedValue(null);
+    mockInviteTransaction();
+    // The earlier invite's team member is still unclaimed unless a case says otherwise.
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-earlier" });
     vi.mocked(createTeamMember).mockResolvedValue({
       id: "tm-new",
     } as Awaited<ReturnType<typeof createTeamMember>>);
@@ -296,6 +629,77 @@ describe("createInvite: earlier invites of the same person", () => {
     );
   });
 
+  it("checks the reused team member is an unclaimed member of this workspace, deleted or not", async () => {
+    dbMock.invite.findFirst.mockResolvedValue({ teamMemberId: "tm-earlier" });
+
+    await createInvite({
+      organizationId: "org-1",
+      inviteeEmail: "first.last@school.org",
+      inviterId: "user-1",
+      roles: [OrganizationRoles.BASE],
+      teamMemberName: "first.last",
+      userId: "user-1",
+      actorOwnsWorkspace: true,
+    });
+
+    // No deletedAt filter: acceptance restores a deleted team member.
+    expect(dbMock.teamMember.findFirst).toHaveBeenCalledWith({
+      where: { id: "tm-earlier", organizationId: "org-1", userId: null },
+      select: { id: true },
+    });
+  });
+
+  it("creates a fresh team member when the earlier one has been claimed or is gone", async () => {
+    dbMock.invite.findFirst.mockResolvedValue({ teamMemberId: "tm-claimed" });
+    // No row matches: the member belongs to a user now, or to another workspace.
+    dbMock.teamMember.findFirst.mockResolvedValue(null);
+
+    const invite = await createInvite({
+      organizationId: "org-1",
+      inviteeEmail: "first.last@school.org",
+      inviterId: "user-1",
+      roles: [OrganizationRoles.BASE],
+      teamMemberName: "First Last",
+      userId: "user-1",
+      actorOwnsWorkspace: true,
+    });
+
+    expect(invite).not.toBeNull();
+    expect(createTeamMember).toHaveBeenCalledWith({
+      name: "First Last",
+      organizationId: "org-1",
+    });
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeTeamMember: { connect: { id: "tm-new" } },
+        }),
+      })
+    );
+  });
+
+  it("invalidates every earlier pending invite to the person before creating the new one", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(null);
+
+    await createInvite({
+      organizationId: "org-1",
+      inviteeEmail: "Person@School.org",
+      inviterId: "user-1",
+      roles: [OrganizationRoles.BASE],
+      teamMemberName: "Person",
+      userId: "user-1",
+      actorOwnsWorkspace: true,
+    });
+
+    expect(dbMock.invite.updateMany).toHaveBeenCalledWith({
+      where: supersedeWhere,
+      data: { status: InviteStatuses.INVALIDATED },
+    });
+    expect(dbMock.invite.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.invite.create.mock.invocationCallOrder[0]
+    );
+  });
+
   it("stores the email lowercased", async () => {
     dbMock.invite.findFirst.mockResolvedValue(null);
 
@@ -314,6 +718,122 @@ describe("createInvite: earlier invites of the same person", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           inviteeEmail: "first.last@school.org",
+        }),
+      })
+    );
+  });
+});
+
+describe("createInvite: linking an existing team member", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+    });
+    dbMock.user.findFirst.mockResolvedValue(null);
+    dbMock.invite.findFirst.mockResolvedValue(null);
+    mockInviteTransaction();
+    dbMock.invite.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: "invite-new",
+        inviteeEmail: data.inviteeEmail,
+        organization: { name: "Workspace", customEmailFooter: null },
+        inviter: { firstName: "Owner", lastName: "Person", displayName: null },
+      })
+    );
+  });
+
+  /** A createInvite payload that links the given team member. */
+  const linkPayload = (teamMemberId: string) => ({
+    organizationId: "org-1",
+    inviteeEmail: "person@school.org",
+    inviterId: "user-1",
+    roles: [OrganizationRoles.BASE],
+    teamMemberName: "Person",
+    teamMemberId,
+    userId: "user-1",
+    actorOwnsWorkspace: true,
+  });
+
+  it("looks the team member up as a live, unclaimed member of the workspace", async () => {
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
+
+    await createInvite(linkPayload("tm-own"));
+
+    expect(dbMock.teamMember.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "tm-own",
+        organizationId: "org-1",
+        deletedAt: null,
+        userId: null,
+      },
+      select: { id: true },
+    });
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeTeamMember: { connect: { id: "tm-own" } },
+        }),
+      })
+    );
+  });
+
+  it("refuses with 400 and writes no invite when the team member is not a live, unclaimed member of the workspace", async () => {
+    // No row matches the workspace-scoped lookup: another workspace's member,
+    // a deleted one, or one already linked to a user.
+    dbMock.teamMember.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createInvite(linkPayload("tm-other-org"))
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+    expect(dbMock.invite.create).not.toHaveBeenCalled();
+  });
+
+  it("locks the workspace and address before superseding earlier invites", async () => {
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
+    dbMock.invite.findFirst.mockResolvedValue(null);
+
+    await createInvite(linkPayload("tm-own"));
+
+    expect(dbMock.$queryRaw).toHaveBeenCalledTimes(1);
+    const [strings, ...values] = dbMock.$queryRaw.mock.calls[0];
+    expect(String(strings)).toMatch(/pg_advisory_xact_lock/);
+    expect(values).toEqual(["org-1", expect.any(String)]);
+    // The lock is taken before the earlier invites are closed.
+    expect(dbMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.invite.updateMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("supersedes an earlier pending invite for the same team member", async () => {
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
+    dbMock.invite.findFirst.mockResolvedValue({ teamMemberId: "tm-own" });
+
+    await createInvite(linkPayload("tm-own"));
+
+    expect(dbMock.invite.updateMany).toHaveBeenCalledWith({
+      where: supersedeWhere,
+      data: { status: InviteStatuses.INVALIDATED },
+    });
+    expect(dbMock.invite.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("supersedes a live invite linked to a different team member", async () => {
+    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-own" });
+    dbMock.invite.findFirst.mockResolvedValue({ teamMemberId: "tm-other" });
+
+    await createInvite(linkPayload("tm-own"));
+
+    expect(dbMock.invite.updateMany).toHaveBeenCalledWith({
+      where: supersedeWhere,
+      data: { status: InviteStatuses.INVALIDATED },
+    });
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeTeamMember: { connect: { id: "tm-own" } },
         }),
       })
     );

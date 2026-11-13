@@ -31,6 +31,7 @@ import {
   bookableListScopeWhere,
   resolveBookableListScope,
 } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import {
   ASSET_IMAGE_RESIGN_LIMITS,
@@ -155,6 +156,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const searchWhere = await resolveMobileAssetSearchWhere({
       organizationId,
       search,
+      // A custodian's name matches only custody the viewer may see, the same
+      // rule that filters the custody holders in the response below.
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody: access.custody.seeAll,
+        userId: user.id,
+      }),
     });
 
     /** Fetches one page + total count for the given where clause. */

@@ -158,7 +158,11 @@ vitest.mock("~/utils/org-validation.server", () => ({
   assertAssetKitsBelongToOrg: vitest.fn().mockResolvedValue(new Map()),
   assertKitsBelongToOrg: vitest.fn().mockResolvedValue(undefined),
   assertTagsBelongToOrg: vitest.fn().mockResolvedValue(undefined),
-  assertTeamMemberBelongsToOrg: vitest.fn().mockResolvedValue(undefined),
+  // The custodian user is read from the team member row; this fixture's
+  // member has no user.
+  assertTeamMemberBelongsToOrg: vitest
+    .fn()
+    .mockResolvedValue({ id: "tm-1", userId: null }),
   assertUserBelongsToOrg: vitest.fn().mockResolvedValue(undefined),
   assertAssetsAreNotArchived: vitest.fn().mockResolvedValue(undefined),
 }));
@@ -184,7 +188,6 @@ const baseBooking = {
   name: "Autumn shoot",
   description: null,
   creatorId: "user-1",
-  custodianUserId: null,
   custodianTeamMemberId: "tm-1",
   organizationId: "org-1",
   from: new Date("2026-10-01T09:00:00.000Z"),

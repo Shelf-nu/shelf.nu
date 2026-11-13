@@ -71,7 +71,6 @@ function renderInForm(
         booking={pastEndBooking}
         formId="booking-form"
         label="Quick check-in"
-        variant="dropdown"
         {...props}
       />
     </form>

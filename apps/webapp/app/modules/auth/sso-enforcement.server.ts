@@ -58,7 +58,7 @@
 import { db } from "~/database/db.server";
 import {
   caseInsensitiveEmailFilter,
-  normalizeInviteEmail,
+  pickUserForEmail,
 } from "~/modules/invite/helpers";
 import { DISABLE_SSO } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -117,9 +117,8 @@ export async function userOwnsLinkedSsoWorkspace(
 
 /**
  * Finds the account an email address resolves to, whatever case it was stored
- * in. Mirrors `pickUserForEmail` in `~/modules/user/service.server`: the row
- * stored in lowercase wins, otherwise the oldest, so the same address always
- * resolves to the same account.
+ * in, using `pickUserForEmail` so the same address always resolves to the
+ * same account.
  *
  * @param email - the address as the person typed it
  * @returns the account's id and SSO flag, or null when there is none
@@ -133,11 +132,7 @@ async function findAccountForEmail(
     orderBy: { createdAt: "asc" },
   });
 
-  return (
-    users.find((user) => user.email === normalizeInviteEmail(email)) ??
-    users[0] ??
-    null
-  );
+  return pickUserForEmail(users, email);
 }
 
 /** The fields of a linked workspace that decide whether it enforces SSO. */
@@ -220,6 +215,46 @@ async function decideLegacyLogin(
 }
 
 /**
+ * Reads the domain part of an address, lowercased.
+ *
+ * @param email - any address
+ * @returns the domain, or an empty string when the address has none
+ */
+function emailDomain(email: string): string {
+  return email.split("@")[1]?.toLowerCase() ?? "";
+}
+
+/**
+ * Applies `decideLegacyLogin` to a signed-in account under both of its
+ * addresses: the session's authenticated address and the `User.email` stored
+ * in Shelf. The two can differ (the auth address and the Shelf row are
+ * written separately), and either one may sit on a domain that enforces SSO,
+ * so the account is refused when either decision refuses. The second decision
+ * runs only when the stored address is on another domain, since the domain is
+ * all the rules read from the address.
+ *
+ * @param sessionEmail - the session's authenticated address
+ * @param user - the signed-in account, with its stored email, or null
+ * @param options - passed through to `decideLegacyLogin`
+ * @returns the first refusal, or `{ allowed: true }` when both allow
+ */
+async function decideLegacyLoginForAccount(
+  sessionEmail: string,
+  user: { id: string; sso: boolean; email: string } | null,
+  options?: Parameters<typeof decideLegacyLogin>[2]
+): Promise<LegacyLoginDecision> {
+  const sessionDecision = await decideLegacyLogin(sessionEmail, user, options);
+  if (!sessionDecision.allowed) return sessionDecision;
+
+  const storedEmail = user?.email;
+  if (!storedEmail || emailDomain(storedEmail) === emailDomain(sessionEmail)) {
+    return sessionDecision;
+  }
+
+  return decideLegacyLogin(storedEmail, user, options);
+}
+
+/**
  * Decides whether an email address may sign in through a legacy path
  * (password, email OTP, password reset). See the file header for the rules.
  *
@@ -244,11 +279,11 @@ export async function getLegacyLoginDecision(
 /**
  * The same decision as `getLegacyLoginDecision`, for a caller that already
  * knows which account is signed in: the account is loaded by id, so it is
- * exactly the authenticated one. The domain rules read `email`.
+ * exactly the authenticated one. The domain rules read both `email` and the
+ * account's stored `User.email`; a refusal under either address refuses.
  *
  * @param args.userId - the Shelf `User.id` of the authenticated account
- * @param args.email - the account's address: the session's authenticated
- *   address, or the account's stored email when the caller loaded it
+ * @param args.email - the session's authenticated address
  * @returns `{ allowed: true }`, or `{ allowed: false, reason }` when the
  *   account must use SSO
  * @throws {ShelfError} If a lookup fails
@@ -264,10 +299,10 @@ export async function getLegacyLoginDecisionForUser({
 
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, sso: true },
+    select: { id: true, sso: true, email: true },
   });
 
-  return decideLegacyLogin(email, user);
+  return decideLegacyLoginForAccount(email, user);
 }
 
 /** The message a refused email change shows the person. */
@@ -280,7 +315,8 @@ export const SSO_EMAIL_CHANGE_REFUSED_MESSAGE =
  * otherwise turn the account back into one that may sign in with a password.
  *
  * Accounts converted to SSO are not checked here: their sign-in no longer
- * depends on the address.
+ * depends on the address. The decision reads both the session's address and
+ * the account's stored `User.email`, and refuses when either refuses.
  *
  * @param args.userId - the Shelf `User.id` of the signed-in account
  * @param args.email - the session's current authenticated address
@@ -297,11 +333,11 @@ export async function assertEmailChangeAllowed({
 
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, sso: true },
+    select: { id: true, sso: true, email: true },
   });
   if (user?.sso) return;
 
-  const decision = await decideLegacyLogin(email, user, {
+  const decision = await decideLegacyLoginForAccount(email, user, {
     honourRelaxation: false,
   });
   if (decision.allowed) return;

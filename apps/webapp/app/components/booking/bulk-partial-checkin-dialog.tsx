@@ -381,7 +381,6 @@ export default function BulkPartialCheckinDialog({
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkin-form"
                 intent="partial-checkin"
-                onClose={handleCloseDialog}
                 specificAssetIds={selectedAssetIds}
                 fullWidth
               />

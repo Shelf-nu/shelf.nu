@@ -9,7 +9,7 @@ import type {
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { parseFormData } from "@remix-run/form-data-parser";
-import { STOCK_STATUS_LABELS } from "@shelf/labels";
+import { STOCK_STATUS_LABELS, WITHHELD_CUSTODIAN_NAME } from "@shelf/labels";
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
@@ -51,6 +51,7 @@ import { getNrmSelectionWhere } from "~/modules/team-member/nrm-scope";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
+import { canSeeBookingCustodian } from "./booking-authorization.server";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
@@ -288,6 +289,9 @@ async function resolveExportAssets({
     // params), so the ids alone decide: an archived row the user ticked in
     // the Archived or All view is exported, not dropped by the Active default.
     archivedFilter: takeAll ? undefined : "all",
+    // `asset: export` is held only by roles that see all custody, so the
+    // search matches every custodian, as on the index the export came from.
+    custodySearchScope: "all",
   });
 
   return { assets };
@@ -1018,6 +1022,8 @@ async function buildExportCustodyScopeClause({
  *   boundary rather than a convenience filter.
  * @param bookingsIds - Selected booking IDs, or `[ALL_SELECTED_KEY]` for all
  * @param canSeeAllBookings - Whether the user may export bookings they don't own
+ * @param canSeeAllCustody - The user's `access.custody.seeAll`; decides whose
+ *   custodian is named in the Custodian column
  * @param organizationId - The active workspace; scopes every booking read
  * @param list - The list select-all stands for; `null` when the request named none
  * @returns The CSV body as a single CRLF-joined string
@@ -1029,6 +1035,7 @@ export async function exportBookingsFromIndexToCsv({
   userId,
   bookingsIds,
   canSeeAllBookings,
+  canSeeAllCustody,
   organizationId,
   list,
 }: {
@@ -1036,6 +1043,7 @@ export async function exportBookingsFromIndexToCsv({
   userId: string;
   bookingsIds: string[];
   canSeeAllBookings: boolean;
+  canSeeAllCustody: boolean;
   organizationId: string;
   list: BookingsList | null;
 }) {
@@ -1154,6 +1162,7 @@ export async function exportBookingsFromIndexToCsv({
     const csvData = buildCsvExportDataFromBookings(
       bookings as FlexibleBooking[],
       prefs,
+      { canSeeAllCustody, userId },
       checkinsByBooking
     );
 
@@ -1458,6 +1467,9 @@ async function buildBookingCheckinMap(
  *
  * @param bookings - Array of bookings to export
  * @param prefs - Acting user's resolved date/time preferences for humanized columns
+ * @param custodyVisibility - The acting user and their `access.custody.seeAll`.
+ *   A custodian the user may not see (`canSeeBookingCustodian`) is written as
+ *   {@link WITHHELD_CUSTODIAN_NAME} (the label the bookings list and calendar feed show), with no name or email.
  * @param checkinsByBooking - Per-booking partial check-in state, from
  *   {@link buildBookingCheckinMap}. Used to derive the per-asset check-in
  *   status/date columns and the booking-level checked-in rollup.
@@ -1489,6 +1501,7 @@ const formatBookingAssetForCsv = (ba: {
 export const buildCsvExportDataFromBookings = (
   bookings: FlexibleBooking[],
   prefs: ResolvedFormatPrefs,
+  custodyVisibility: { canSeeAllCustody: boolean; userId: string },
   checkinsByBooking: Map<string, BookingCheckinInfo> = new Map()
 ): string[][] => {
   if (!bookings.length) return [];
@@ -1639,6 +1652,21 @@ export const buildCsvExportDataFromBookings = (
               : "";
             break;
           case "custodian": {
+            const hasCustodian = Boolean(
+              booking.custodianTeamMember || booking.custodianUser
+            );
+            if (
+              hasCustodian &&
+              !canSeeBookingCustodian({
+                canSeeAllCustody: custodyVisibility.canSeeAllCustody,
+                booking,
+                userId: custodyVisibility.userId,
+              })
+            ) {
+              value = WITHHELD_CUSTODIAN_NAME;
+              break;
+            }
+
             const teamMember = {
               name: booking.custodianTeamMember?.name ?? "",
               user: booking?.custodianUser ?? null,

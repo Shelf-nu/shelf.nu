@@ -16,6 +16,7 @@ import {
 } from "~/modules/asset/last-audit-date-access";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getPaginatedAndFilterableAssets,
@@ -182,6 +183,10 @@ async function createAssetPageFetcher({
         timeZone,
         filters: withPage(advancedFilters, readPage(pageFilters)).slice(1),
         settings,
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
         bookableScope,
         honorArchivedView,
@@ -198,6 +203,10 @@ async function createAssetPageFetcher({
       canSeeAllCustody: access.custody.seeAll,
       honorArchivedView,
       honorLowStockFilter: true,
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       filters: pageFilters,
       bookableScope,
       userId,

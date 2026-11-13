@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import { isUnroutableSegment, mobilePaths } from "./paths";
 import { cachedApiFetch } from "./cache";
 import { scanContextHeaders, type ScanContext } from "../scan-context";
 import type {
@@ -56,9 +57,7 @@ export const assetsApi = {
    *   `apiFetch`'s envelope).
    */
   asset: (assetId: string, orgId: string) =>
-    apiFetch<{ asset: AssetDetail }>(
-      `/api/mobile/assets/${assetId}?orgId=${orgId}`
-    ),
+    apiFetch<{ asset: AssetDetail }>(mobilePaths.asset(assetId, orgId)),
 
   /**
    * Resolve a scanned code to an asset or kit, **recording** scan provenance
@@ -69,13 +68,14 @@ export const assetsApi = {
    * workspace, so callers pass `orgId` to scope SAM resolution (the server
    * ignores it on the QR path).
    *
-   * Recording is an endpoint property here, NOT a flag: use this from genuine
-   * field-scan contexts (scanner tab, deep links). To resolve a code WITHOUT
+   * Recording is an endpoint property here, NOT a flag: use this for scans
+   * (the scanner tab, and https QR links the OS delivers, which count as a
+   * scan like opening the web QR page). To resolve a code WITHOUT
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
    * Wire contract for coordinates (matches the route's Zod schema): optional
-   * `latitude`/`longitude` query params, decimal degrees, both or neither
-   * (lat −90..90, lng −180..180). They are best-effort provenance — the
+   * `X-Scan-Latitude` / `X-Scan-Longitude` headers, decimal degrees, both or
+   * neither (lat -90..90, lng -180..180). They are best-effort provenance: the
    * server silently ignores invalid values and a resolve NEVER fails because
    * of them, mirroring the web flow's non-fatal geolocation post.
    *
@@ -89,29 +89,23 @@ export const assetsApi = {
     orgId?: string,
     coordinates?: { latitude: number; longitude: number } | null
   ) => {
-    const searchParams = new URLSearchParams();
-    if (orgId) searchParams.set("orgId", orgId);
-    const query = searchParams.toString();
     // Coordinates ride as HEADERS, never query params: URLs are captured by
     // access logs and Sentry request breadcrumbs, and precise user GPS must
     // stay out of every URL-shaped capture surface.
-    return apiFetch<QrResponse>(
-      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`,
-      {
-        // why: this resolve RECORDS a scan server-side — a timed-out-but-
-        // landed request must not be auto-retried, or the same physical
-        // scan is recorded twice (same rule as the quantity mutations).
-        retry: false,
-        ...(coordinates
-          ? {
-              headers: {
-                "X-Scan-Latitude": String(coordinates.latitude),
-                "X-Scan-Longitude": String(coordinates.longitude),
-              },
-            }
-          : {}),
-      }
-    );
+    return apiFetch<QrResponse>(mobilePaths.qr(codeId, orgId), {
+      // why: this resolve RECORDS a scan server-side: a timed-out-but-
+      // landed request must not be auto-retried, or the same physical
+      // scan is recorded twice (same rule as the quantity mutations).
+      retry: false,
+      ...(coordinates
+        ? {
+            headers: {
+              "X-Scan-Latitude": String(coordinates.latitude),
+              "X-Scan-Longitude": String(coordinates.longitude),
+            },
+          }
+        : {}),
+    });
   },
 
   /**
@@ -128,11 +122,7 @@ export const assetsApi = {
    * @param orgId - Caller's current workspace id; required for SAM lookups.
    */
   getScannedItem: (codeId: string, orgId?: string) =>
-    apiFetch<QrResponse>(
-      `/api/mobile/get-scanned-item/${encodeURIComponent(codeId)}${
-        orgId ? `?orgId=${orgId}` : ""
-      }`
-    ),
+    apiFetch<QrResponse>(mobilePaths.scannedItem(codeId, orgId)),
 
   /**
    * Claim an unclaimed QR code into the caller's CURRENT organization
@@ -204,11 +194,21 @@ export const assetsApi = {
    *   as an audit scan with no Activity note (see `lib/scan-context.ts`); omit
    *   from the normal scanner.
    */
-  barcode: (value: string, orgId: string, context?: ScanContext) =>
-    apiFetch<BarcodeResponse>(
-      `/api/mobile/barcode/${encodeURIComponent(value)}?orgId=${orgId}`,
-      { headers: scanContextHeaders(context) }
-    ),
+  barcode: async (value: string, orgId: string, context?: ScanContext) => {
+    // A barcode can be any text, so no placeholder segment is safe for one
+    // that cannot be sent (`.`, `..`, empty): it is answered as not found
+    // without a request, the same answer the server gives.
+    if (isUnroutableSegment(value)) {
+      return {
+        data: null,
+        error: "This barcode was not found in your workspace.",
+        status: 404,
+      };
+    }
+    return apiFetch<BarcodeResponse>(mobilePaths.barcode(value, orgId), {
+      headers: scanContextHeaders(context),
+    });
+  },
 
   /** Get team members for an organization (for custody picker) */
   teamMembers: (
@@ -285,13 +285,8 @@ export const assetsApi = {
     orgId: string,
     params: { page?: number; perPage?: number; signal?: AbortSignal } = {}
   ) => {
-    const qs = new URLSearchParams({ orgId });
-    if (params.page) qs.set("page", String(params.page));
-    if (params.perPage) qs.set("perPage", String(params.perPage));
     return apiFetch<AssetBookingsResponse>(
-      `/api/mobile/assets/${encodeURIComponent(
-        assetId
-      )}/bookings?${qs.toString()}`,
+      mobilePaths.assetBookings(assetId, orgId, params),
       { signal: params.signal }
     );
   },

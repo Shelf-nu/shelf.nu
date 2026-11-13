@@ -4,6 +4,7 @@ import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custo
 import { db } from "~/database/db.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -142,6 +143,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
           ),
           bookableScope: resolveBookableListScope({ access, userId }),
           timeZone,
+          custodySearchScope: custodySearchScopeFor({
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+          }),
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
           // select-all custodian filter to the caller's own custody, otherwise a
           // self-service user could act on exactly the set a colleague holds.

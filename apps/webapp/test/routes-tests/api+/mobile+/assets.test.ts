@@ -19,6 +19,7 @@
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} for the helper + select
  */
 
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
@@ -536,6 +537,42 @@ describe("GET /api/mobile/assets — search", () => {
     expect(findManyMock).toHaveBeenCalledTimes(1);
     const where = findManyMock.mock.calls[0]![0]!.where!;
     expect(where).toMatchObject({ id: { in: [] } });
+  });
+
+  it("matches custodian names only on the viewer's own custody when they may not see all custody", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      access: accessFor(["BASE"]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/assets?search=alice"
+        ),
+      })
+    );
+
+    const sql = queryRawMock.mock.calls[0]![0] as unknown as Prisma.Sql;
+    expect(sql.sql).toContain('tm."userId" = ?');
+    expect(sql.values).toContain(FAKE_USER_ID);
+  });
+
+  it("matches every custodian's name for a viewer who sees all custody", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      access: accessFor(["ADMIN"]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/assets?search=alice"
+        ),
+      })
+    );
+
+    const sql = queryRawMock.mock.calls[0]![0] as unknown as Prisma.Sql;
+    expect(sql.sql).not.toContain('tm."userId" = ?');
+    expect(sql.values).not.toContain(FAKE_USER_ID);
   });
 
   it("pages deterministically with an id tiebreaker", async () => {

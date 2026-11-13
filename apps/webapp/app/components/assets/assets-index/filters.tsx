@@ -18,6 +18,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
@@ -73,18 +74,33 @@ export function AssetIndexFilters({
               />
               {/* Icon with the label only on wide screens: the toolbar shares
                   one row with the search box, which must keep its width on a
-                  laptop. The aria-label carries the name while the text is hidden. */}
+                  laptop. The aria-label carries the name while the text is hidden.
+                  `self-stretch` takes the row height from the sort and view
+                  controls beside it, and `font-normal` matches their type, so
+                  the button reads as one of them. On, it keeps the outline
+                  style with an orange border and orange text. */}
               <Button
                 type="button"
-                variant={lowStockActive ? "primary" : "secondary"}
+                variant="secondary"
                 aria-pressed={lowStockActive}
                 aria-label="Low stock only"
                 title="Low stock only"
-                className="shrink-0 whitespace-nowrap"
+                className={tw(
+                  "shrink-0 self-stretch whitespace-nowrap font-normal",
+                  lowStockActive
+                    ? "border-primary-500 text-primary-600"
+                    : "text-gray-600"
+                )}
                 onClick={() => setSearchParams(toggleLowStockParam)}
               >
                 <span className="flex items-center gap-1.5">
-                  <TriangleAlertIcon className="size-4" aria-hidden="true" />
+                  {/* strokeWidth 1.5 brings lucide's 2px stroke close to the
+                      hairline Radix icons of the view toggle beside it. */}
+                  <TriangleAlertIcon
+                    className="size-5"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  />
                   <span className="hidden 2xl:inline">Low stock only</span>
                 </span>
               </Button>

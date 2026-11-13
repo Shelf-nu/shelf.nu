@@ -176,3 +176,55 @@ export function buildSentryEnvelopeUrl(target: SentryIngestTarget): string {
   // the only way to obtain a target and it refuses anything but https.
   return `${target.origin}${target.pathPrefix}/api/${target.projectId}/envelope/`;
 }
+
+/**
+ * Read a request body, giving up as soon as it grows past `maxBytes`.
+ *
+ * The tunnel is public, so its body size is bounded here in the route itself,
+ * independent of any server middleware: a declared `Content-Length` above the
+ * cap is refused without reading, and a body without one (or with a false
+ * one) is streamed with a running count and abandoned the moment it crosses
+ * the cap, so at most `maxBytes` plus one chunk is ever held in memory.
+ *
+ * @param request - The incoming request
+ * @param maxBytes - The largest body accepted, in bytes
+ * @returns The body bytes, or `null` when the body is larger than `maxBytes`
+ */
+export async function readBodyWithinLimit(
+  request: Request,
+  maxBytes: number
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && Number(declared) > maxBytes) {
+    return null;
+  }
+
+  if (!request.body) {
+    return new Uint8Array(0);
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    received += value.byteLength;
+    if (received > maxBytes) {
+      // Stop the upload rather than draining the rest of it.
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}

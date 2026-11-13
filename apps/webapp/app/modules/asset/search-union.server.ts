@@ -22,6 +22,11 @@
  * trigram index and relies on org-scoping (`tm.organizationId` gates the scan
  * before the ILIKE, so it only touches the org's team members).
  *
+ * The custodian-name branch follows the viewer's custody visibility
+ * ({@link CustodySearchScope}): a viewer who may not see everyone's custody
+ * matches custodian names only on custody they hold themselves, so a search
+ * cannot reveal which assets a colleague holds.
+ *
  * The advanced index inlines this as `a.id IN (<union>)`; the simple index
  * executes it via `$queryRaw` and feeds the ids into its Prisma `where`.
  *
@@ -44,11 +49,54 @@ export { CUSTOM_FIELD_SEARCH_PATHS };
 export type AssetSearchIdRow = { id: string };
 
 /**
+ * Whose custody the custodian-name branch may match.
+ *
+ * `"all"`: the viewer may see everyone's custody (`access.custody.seeAll`), so
+ * a custodian's name matches any custody row in the workspace.
+ * `{ userId }`: the viewer may see only their own custody, so a custodian's
+ * name matches only custody held by a team member linked to that user.
+ *
+ * Build it with {@link custodySearchScopeFor}.
+ */
+export type CustodySearchScope = "all" | { userId: string };
+
+/**
+ * Resolves the {@link CustodySearchScope} for a viewer from their custody
+ * visibility, the same inputs `redactCustodianForViewer` takes.
+ *
+ * @param args.canSeeAllCustody - The viewer's `access.custody.seeAll`.
+ * @param args.userId - The viewer. An empty id matches no custody row, so a
+ *   restricted caller without a user id fails closed.
+ * @returns `"all"` for a viewer who sees all custody, otherwise `{ userId }`.
+ */
+export function custodySearchScopeFor({
+  canSeeAllCustody,
+  userId,
+}: {
+  canSeeAllCustody: boolean;
+  userId: string;
+}): CustodySearchScope {
+  return canSeeAllCustody ? "all" : { userId };
+}
+
+/**
  * Builds one term's OR-across-11-sources as a set of UNION-ed `SELECT id`
  * branches, each org-scoped with the LITERAL org id.
  */
-function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
+function branchesForTerm(
+  organizationId: string,
+  term: string,
+  custodySearchScope: CustodySearchScope
+): Prisma.Sql {
   const like = `%${term}%`;
+  // A viewer limited to their own custody matches custodian names only on
+  // custody rows whose team member is linked to them. TeamMember.userId has no
+  // @map, so the column name is the field name.
+  const custodyViewerPredicate =
+    custodySearchScope === "all"
+      ? Prisma.empty
+      : Prisma.sql`
+        AND tm."userId" = ${custodySearchScope.userId}`;
   const customFieldPredicate = Prisma.join(
     CUSTOM_FIELD_SEARCH_PATHS.map(
       (jsonPath) =>
@@ -125,7 +173,7 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
       JOIN public."Asset" a ON a."id" = cu."assetId"
       WHERE tm."organizationId" = ${organizationId}
         AND a."organizationId" = ${organizationId}
-        AND (tm."name" ILIKE ${like} OR u."firstName" ILIKE ${like} OR u."lastName" ILIKE ${like} OR u."displayName" ILIKE ${like})
+        AND (tm."name" ILIKE ${like} OR u."firstName" ILIKE ${like} OR u."lastName" ILIKE ${like} OR u."displayName" ILIKE ${like})${custodyViewerPredicate}
     UNION
     SELECT q."assetId" FROM public."Qr" q
       JOIN public."Asset" a ON a."id" = q."assetId"
@@ -149,15 +197,20 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
  *
  * @param organizationId - Tenant scope (bound as a LITERAL param in every branch).
  * @param terms - Non-empty list of already-trimmed, lowercased search terms.
+ * @param custodySearchScope - Whose custody the custodian-name branch may
+ *   match. Required so no caller can search other people's custody by name
+ *   without stating that the viewer may see it.
  * @returns A `Prisma.Sql` subquery: `(SELECT id ... UNION ...)`.
  * @throws {ShelfError} If `terms` is empty (caller must guard).
  */
 export function buildAssetSearchUnion({
   organizationId,
   terms,
+  custodySearchScope,
 }: {
   organizationId: string;
   terms: string[];
+  custodySearchScope: CustodySearchScope;
 }): Prisma.Sql {
   if (terms.length === 0) {
     throw new ShelfError({
@@ -168,6 +221,8 @@ export function buildAssetSearchUnion({
   }
 
   // OR-of-terms: union every term's branch group into one flat UNION.
-  const perTerm = terms.map((term) => branchesForTerm(organizationId, term));
+  const perTerm = terms.map((term) =>
+    branchesForTerm(organizationId, term, custodySearchScope)
+  );
   return Prisma.sql`(${Prisma.join(perTerm, "\n    UNION\n    ")})`;
 }

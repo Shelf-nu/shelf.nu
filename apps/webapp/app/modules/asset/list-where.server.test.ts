@@ -53,6 +53,7 @@ beforeEach(() => {
 describe("getAssetListWhereForSelectAll", () => {
   it("matches a search through the search id set, not the title alone", async () => {
     const where = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "s=SN-4471",
       ...pickerOptions,
@@ -64,6 +65,7 @@ describe("getAssetListWhereForSelectAll", () => {
 
   it("keeps the booking picker's availability rules", async () => {
     const where = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: new URLSearchParams({
         hideUnavailable: "true",
@@ -85,6 +87,7 @@ describe("getAssetListWhereForSelectAll", () => {
 
   it("keeps the kit picker's kit filter", async () => {
     const where = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "assetKitFilter=NOT_IN_KIT",
       ...pickerOptions,
@@ -96,6 +99,7 @@ describe("getAssetListWhereForSelectAll", () => {
   it("applies the list scope of a member who sees only bookable assets", async () => {
     const scope = { holderUserId: "user-1" };
     const where = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "",
       ...pickerOptions,
@@ -107,12 +111,14 @@ describe("getAssetListWhereForSelectAll", () => {
 
   it("follows the list on low stock: honoured on the index, ignored on a picker", async () => {
     const onIndex = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "lowStockOnly=true",
       ...pickerOptions,
       honorLowStockFilter: true,
     });
     const onPicker = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "lowStockOnly=true",
       ...pickerOptions,
@@ -124,6 +130,7 @@ describe("getAssetListWhereForSelectAll", () => {
 
   it("refuses a custodian filter on a picker, as its list does", async () => {
     const where = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "teamMember=tm-colleague",
       ...pickerOptions,
@@ -134,6 +141,7 @@ describe("getAssetListWhereForSelectAll", () => {
 
   it("ignores a status that is not a real asset status", async () => {
     const where = await getAssetListWhereForSelectAll({
+      custodySearchScope: "all",
       organizationId: ORG,
       currentSearchParams: "status=is:AVAILABLE",
       ...pickerOptions,

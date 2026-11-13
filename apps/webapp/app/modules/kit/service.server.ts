@@ -6255,6 +6255,9 @@ export async function updateKitAssets({
         organizationId,
         currentSearchParams: searchParams.toString(),
         allowedTeamMemberIds: [],
+        // Updating a kit's assets needs `kit: update`, which only roles
+        // that see all custody hold, so the search matches every custodian.
+        custodySearchScope: "all",
         bookableScope: null,
         locationIdsOverride: undefined,
         honorArchivedView: false,
@@ -7942,6 +7945,7 @@ export async function bulkRemoveAssetsFromKits({
       // Kit write permissions are ADMIN/OWNER-only, so the custodian filter
       // here can never come from a restricted viewer.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       lastAuditDateAccess,
       bookableScope,
     });
