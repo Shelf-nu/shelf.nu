@@ -80,9 +80,10 @@ export default function BulkListHeader({
   const selectionIsFormState = useAtomValue(selectionIsFormStateAtom);
 
   // "Select all" ticks every row matching the filters, on every page, while
-  // listing only the rows of the page it was clicked on. The header follows
-  // the rows (see BulkListItemCheckbox): ticked under the marker, except on
-  // manage-* screens, whose rows tick only when listed.
+  // listing only the rows of the page it was clicked on. Under the marker the
+  // header reads ticked, as the rows do (see BulkListItemCheckbox). On
+  // manage-* screens the rows tick only when listed, so there the header
+  // keeps the count rule below.
   const selectingAll =
     !selectionIsFormState && isSelectingAllItems(selectedBulkItems);
 

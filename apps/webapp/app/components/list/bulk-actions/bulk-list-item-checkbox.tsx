@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkSelectionKey,
+  clearSelectedBulkItemsAtom,
   disabledBulkItemsAtom,
   removeSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
@@ -68,7 +69,7 @@ export default function BulkListItemCheckbox({
   const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const removeSelectedBulkItems = useSetAtom(removeSelectedBulkItemsAtom);
-  const replaceSelectedBulkItems = useSetAtom(selectedBulkItemsAtom);
+  const clearSelectedBulkItems = useSetAtom(clearSelectedBulkItemsAtom);
   const showNotification = useSetAtom(showNotificationAtom);
   // On manage-* screens the selection is what gets saved: every attached item
   // left out of it is detached. There a row ticks only when listed, so no
@@ -109,17 +110,21 @@ export default function BulkListItemCheckbox({
       // a row leaves "Select all" and keeps what the reader sees ticked: this
       // page, minus the row and any disabled rows. The toast says so, because
       // the next bulk action now reaches this page only.
-      const leftOutKeys = new Set([
-        itemKey,
-        ...disabledBulkItems.map(bulkSelectionKey),
-      ]);
+      // setSelectedBulkItems leaves disabled rows out, as for any pick.
       const stillTicked = pageItems.filter(
-        (i) => !leftOutKeys.has(bulkSelectionKey(i))
+        (i) => bulkSelectionKey(i) !== itemKey
       );
-      replaceSelectedBulkItems(stillTicked);
+      clearSelectedBulkItems();
+      setSelectedBulkItems(stillTicked);
+      const ticked = stillTicked.filter(
+        (i) =>
+          !disabledBulkItems.some(
+            (d) => bulkSelectionKey(d) === bulkSelectionKey(i)
+          )
+      );
       showNotification({
         title: "Select all is off",
-        message: describeFallbackSelection(stillTicked.length),
+        message: describeFallbackSelection(ticked.length),
         icon: { name: "x", variant: "gray" },
         senderId: null,
       });
