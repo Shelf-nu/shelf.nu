@@ -357,6 +357,12 @@ export type BookingCustodianLinks = {
   custodianTeamMember?: { name: string; userId: string | null } | null;
 };
 
+/** The two custody links {@link canSeeBookingCustodian} compares, ids only. */
+export type BookingCustodianIds = {
+  custodianUser?: { id: string } | null;
+  custodianTeamMember?: { userId: string | null } | null;
+};
+
 /**
  * Whether this viewer may see WHO holds a booking.
  *
@@ -381,7 +387,7 @@ export function canSeeBookingCustodian({
   userId,
 }: {
   canSeeAllCustody: boolean;
-  booking: BookingCustodianLinks;
+  booking: BookingCustodianIds;
   userId: string;
 }): boolean {
   return (

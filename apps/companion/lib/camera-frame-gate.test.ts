@@ -65,18 +65,24 @@ test("the same gate calls whichever handler is current", () => {
 });
 
 /** Every .tsx file under app/, as [relative path, source]. */
+/** The main scanner screen, relative to the app root. */
+const MAIN_SCANNER = path.join("components", "scanner", "scanner-screen.tsx");
+
 function appScreens(): [string, string][] {
-  const appDir = path.resolve(__dirname, "../app");
+  // Screens live under app/ (routes) and components/ (screens a route
+  // renders, such as the main scanner); paths are relative to the app root.
+  const root = path.resolve(__dirname, "..");
   const out: [string, string][] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (entry.name.endsWith(".tsx"))
-        out.push([path.relative(appDir, full), readFileSync(full, "utf8")]);
+        out.push([path.relative(root, full), readFileSync(full, "utf8")]);
     }
   };
-  walk(appDir);
+  walk(path.join(root, "app"));
+  walk(path.join(root, "components"));
   return out;
 }
 
@@ -133,10 +139,7 @@ test("every camera keeps one stable onBarcodeScanned", () => {
     ...cameraSites(source),
   }));
   assert.ok(
-    screens.some(
-      (s) =>
-        s.file === path.join("(tabs)", "scanner.tsx") && s.cameras.length > 0
-    ),
+    screens.some((s) => s.file === MAIN_SCANNER && s.cameras.length > 0),
     "the main scanner must be found"
   );
   for (const { file, cameras } of screens) {
@@ -152,9 +155,7 @@ test("every camera keeps one stable onBarcodeScanned", () => {
 });
 
 test("the main scanner ignores frames while a View result card is up", () => {
-  const scanner = appScreens().find(
-    ([file]) => file === path.join("(tabs)", "scanner.tsx")
-  );
+  const scanner = appScreens().find(([file]) => file === MAIN_SCANNER);
   assert.ok(scanner, "the main scanner must be found");
   const { gateCalls } = cameraSites(scanner[1]);
   assert.deepEqual(gateCalls, [

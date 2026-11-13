@@ -145,7 +145,11 @@ export const SearchForm = ({ className }: { className?: string }) => {
   const isBusy = isDebouncePending || isSearching(navigation);
 
   return (
-    <div className={tw("flex w-full md:w-auto", className)}>
+    // `md:min-w-56 md:shrink-0`: the field is the main control of the row, so
+    // the toolbar around it wraps before the field gets narrower than this.
+    <div
+      className={tw("flex w-full md:w-auto md:min-w-56 md:shrink-0", className)}
+    >
       <div className="relative flex-1">
         <Input
           type="text"

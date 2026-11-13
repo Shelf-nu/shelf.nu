@@ -94,7 +94,7 @@ export const NOT_A_DETAIL: Record<
 > = {
   assets: ["new", "edit", "link-qr"],
   kits: [],
-  bookings: ["new", "edit", "add-assets"],
+  bookings: ["new", "edit", "add-assets", "scan"],
   audits: ["scan", "asset", "kit"],
 };
 
