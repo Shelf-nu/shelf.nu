@@ -469,6 +469,7 @@ vitest.mock("~/modules/qr/service.server", () => ({
 // why: testing booking workflows without creating actual asset notes
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn(),
+  createNotesPerAsset: vitest.fn(),
 }));
 
 // why: avoiding actual booking note creation during service tests
@@ -19413,6 +19414,124 @@ describe("getExistingBookingDetails — addable statuses", () => {
     await expect(
       getExistingBookingDetails("booking-1", "org-1")
     ).rejects.toThrow(/Draft, Reserved, Ongoing or Overdue/i);
+  });
+});
+
+describe("addScannedAssetsToBooking asset notes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * The asset notes are written after the save has committed, while the
+   * operator is still waiting on the response. One ownership check and one
+   * insert per scanned asset, awaited in sequence, makes that wait grow with
+   * the size of the scan. The whole batch goes out in a single call.
+   */
+  it("writes the asset notes for a whole scan in one call", async () => {
+    expect.assertions(6);
+
+    const looseIds = Array.from({ length: 12 }, (_, i) => `asset-loose-${i}`);
+
+    // why: `clearAllMocks` keeps implementations, so the overrides below
+    // would answer every later test in the file. Each goes back when this
+    // test finishes.
+    for (const mock of [
+      db.booking.findFirst,
+      db.asset.findMany,
+      db.bookingAsset.findMany,
+      db.booking.update,
+      db.kit.findMany,
+    ]) {
+      restoreMockImplementationAfterTest(mock);
+    }
+
+    // why: skips the overlap-conflict guard so the test can focus on the notes.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    // why: serves both the org-scope guard (only needs the returned count to
+    // match) and the scanned-asset metadata read (needs title/type).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: null,
+            unitOfMeasure: null,
+          }))
+        )
+    );
+
+    // why: nothing is on the booking yet, so every scan is an arrival.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([]);
+
+    // why: the write returns the booking the notes link to by id and name.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.RESERVED,
+    });
+
+    // why: the note builder reads the scanned kit's members to tell kit
+    // arrivals from standalone ones, and names the kit in a member's note.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-1",
+        name: "Kit One",
+        assetKits: [{ assetId: "asset-kit-member" }],
+      },
+    ]);
+
+    await addScannedAssetsToBooking({
+      assetIds: looseIds,
+      kitIds: ["kit-1"],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      kitSlices: [
+        { assetId: "asset-kit-member", assetKitId: "ak-1", kitId: "kit-1" },
+      ],
+    });
+
+    expect(noteService.createNotesPerAsset).toHaveBeenCalledTimes(1);
+    const [{ notes, ...attribution }] = (
+      noteService.createNotesPerAsset as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+
+    // Who wrote the notes, as what, and in which workspace.
+    expect(attribution).toEqual({
+      type: "UPDATE",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // What the notes say. A loose scan names the asset and the booking; a kit
+    // member also names the kit it arrived through.
+    const contentFor = (assetId: string) =>
+      notes.find(
+        (note: { assetId: string; content: string }) => note.assetId === assetId
+      )?.content;
+    expect(contentFor("asset-loose-0")).toContain(
+      'added {% link to="/assets/asset-loose-0" text="asset-loose-0" /%} to {% link to="/bookings/booking-scan" text="Scan Booking" /%}.'
+    );
+    expect(contentFor("asset-kit-member")).toContain(
+      'added {% link to="/assets/asset-kit-member" text="asset-kit-member" /%} via {% link to="/kits/kit-1" text="Kit One" /%} to {% link to="/bookings/booking-scan" text="Scan Booking" /%}.'
+    );
+
+    // One note per arrived asset: the twelve loose scans and the kit member.
+    expect(
+      notes.map((note: { assetId: string }) => note.assetId).sort()
+    ).toEqual([...looseIds, "asset-kit-member"].sort());
+    // And no per-asset call beside it.
+    expect(noteService.createNotes).not.toHaveBeenCalled();
   });
 });
 

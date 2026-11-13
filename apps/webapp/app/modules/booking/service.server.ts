@@ -308,7 +308,7 @@ import {
   createSystemBookingNote,
   createSystemBookingNotes,
 } from "../booking-note/service.server";
-import { createNotes } from "../note/service.server";
+import { createNotes, createNotesPerAsset } from "../note/service.server";
 
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -17987,7 +17987,11 @@ async function createNotesForScannedAssetsAndKits({
   const standaloneAssetIdsSet = new Set(standaloneAssetIds);
   const kitAssetIds = assetIds.filter((id) => !standaloneAssetIdsSet.has(id));
 
-  // Create notes for standalone assets — one per asset so qty-tracked
+  // One note per asset, collected here and written in a single insert below:
+  // the wording differs per asset, the round trips must not.
+  const assetNotes: Array<{ assetId: string; content: string }> = [];
+
+  // Notes for standalone assets: one per asset so qty-tracked
   // can carry its own unit count ("added 50 units of {asset} to
   // {booking}"). INDIVIDUAL renders the bare asset link, so the legacy
   // "added asset to {booking}" wording is preserved byte-for-byte.
@@ -18010,17 +18014,11 @@ async function createNotesForScannedAssetsAndKits({
           : `${wrapUserLinkForNote(
               userForNotes
             )} added asset to ${bookingLink}.`;
-      await createNotes({
-        content,
-        type: "UPDATE",
-        userId,
-        assetIds: [assetId],
-        organizationId,
-      });
+      assetNotes.push({ assetId, content });
     }
   }
 
-  // Create notes for assets added via kits (grouped by kit; one note per
+  // Notes for assets added via kits (grouped by kit; one note per
   // asset so qty-tracked rows can prefix their unit count).
   if (kitAssetIds.length > 0) {
     // Group asset IDs by kit name
@@ -18055,17 +18053,18 @@ async function createNotesForScannedAssetsAndKits({
               : `${wrapUserLinkForNote(
                   userForNotes
                 )} added asset via ${kitLink} to ${bookingLink}.`;
-          await createNotes({
-            content,
-            type: "UPDATE",
-            userId,
-            assetIds: [assetId],
-            organizationId,
-          });
+          assetNotes.push({ assetId, content });
         }
       }
     }
   }
+
+  await createNotesPerAsset({
+    notes: assetNotes,
+    type: "UPDATE",
+    userId,
+    organizationId,
+  });
 }
 
 /**
