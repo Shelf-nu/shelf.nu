@@ -260,7 +260,7 @@ describe("links the router leaves alone", () => {
         null,
         `${url} is the hook's`
       );
-      const action = routing.linkAction(url, deepLinks.parseDeepLink(url).type);
+      const action = routing.linkAction(url, deepLinks.parseDeepLink(url));
       assert.notEqual(action.kind, "none", `${url} opens something`);
     }
   });
@@ -322,6 +322,16 @@ describe("useDeepLinkHandler", () => {
       await settle();
       act(() => mock.timers.tick(500));
       assert.deepEqual(calls.routes, ["/audits/au_1"]);
+    });
+  });
+
+  it("keeps a different launch link closed when a newer link arrived before getInitialURL resolved", async () => {
+    await withHook(async (settle) => {
+      act(() => urlListener?.({ url: "shelf://bookings/bk_1" }));
+      resolveInitialUrl("shelf://audits/au_1");
+      await settle();
+      act(() => mock.timers.tick(500));
+      assert.deepEqual(calls.routes, ["/bookings/bk_1"]);
     });
   });
 

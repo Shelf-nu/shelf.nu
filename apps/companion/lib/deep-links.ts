@@ -256,12 +256,11 @@ export function useDeepLinkHandler() {
      * @param url - the raw URL the OS delivered
      */
     function openLink(url: string) {
-      const link = parseDeepLink(url);
-      const action = linkAction(url, link.type);
+      const action = linkAction(url, parseDeepLink(url));
       if (action.kind === "route") {
         openLinkedRoute(action.route);
-      } else if (action.kind === "qr" && link.type === "qr") {
-        void resolveQrAndNavigate(link.id, link.origin);
+      } else if (action.kind === "qr") {
+        void resolveQrAndNavigate(action.id, action.origin);
       }
     }
 

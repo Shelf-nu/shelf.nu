@@ -19,7 +19,11 @@
  * @see ../app/+native-intent.ts
  * @see ./navigation.ts `openLinkedRoute`
  */
-import { nativeRouteForLink } from "./resource-path";
+import {
+  classifyResourcePath,
+  nativeRouteForLink,
+  splitLinkUrl,
+} from "./resource-path";
 
 /** The link kinds `parseDeepLink` (`lib/deep-links.ts`) returns. */
 export type LinkKind =
@@ -31,6 +35,15 @@ export type LinkKind =
   | "scanner"
   | "unknown";
 
+/**
+ * The parts of `parseDeepLink`'s result (`ParsedLink` in `lib/deep-links.ts`)
+ * that `linkAction` reads: the kind, and for a QR link its id and the origin
+ * it came from.
+ */
+export type LinkRead =
+  | { type: "qr"; id: string; origin?: string }
+  | { type: Exclude<LinkKind, "qr"> };
+
 /** What `redirectSystemPath` in `app/+native-intent.ts` receives. */
 export type SystemPathInput = {
   /** The raw URL the OS delivered (scheme, host, path and query). */
@@ -40,14 +53,22 @@ export type SystemPathInput = {
 };
 
 /**
- * Whether the router must leave this link alone: it is on the claimed-path
- * allowlist. The hook then opens the screen it names (`linkAction`), or
- * nothing when it names none (an empty path, a refused id).
+ * Whether the router must leave this link alone. That is every link whose path
+ * names a resource on the claimed-path allowlist, in any of the shapes
+ * `splitLinkUrl` reads (`https://`, `shelf://` or a bare `/assets/:id` path),
+ * a refused id included. It is also every link `nativeRouteForLink` would send
+ * somewhere other than the link itself: an empty path, and a path whose query
+ * carries an id that is not a plain record id, which the router could
+ * otherwise match to a screen that reads that query.
+ *
+ * The hook then opens the screen the link names (`linkAction`), or nothing
+ * when it names none.
  *
  * @param url - the raw URL the OS delivered
  * @returns true when the link is the hook's, false when it is the router's
  */
 function isKeptFromRouter(url: string): boolean {
+  if (classifyResourcePath(splitLinkUrl(url).segments) !== null) return true;
   return nativeRouteForLink(url) !== url;
 }
 
@@ -80,12 +101,13 @@ export function systemPathFor({
  *   detail, a list, the scanner, the new-asset form) opens here, with nested
  *   kit ids and the query (`/assets/new?qrId=...`) kept, for `https://` and
  *   `shelf://` alike.
- * - `qr`: resolve the QR code through the API, then open what it names.
+ * - `qr`: resolve the QR code `id` through the API, then open what it names.
+ *   `origin` is the server an `https://` link came from, unset for `shelf://`.
  * - `none`: the link names nothing the app opens.
  */
 export type LinkAction =
   | { kind: "route"; route: string }
-  | { kind: "qr" }
+  | { kind: "qr"; id: string; origin?: string }
   | { kind: "none" };
 
 /**
@@ -93,12 +115,15 @@ export type LinkAction =
  * the result, so every link rule lives here, covered by `link-routing.test.ts`.
  *
  * @param url - the raw URL the OS delivered
- * @param linkType - the link kind `parseDeepLink` read from the URL
+ * @param link - what `parseDeepLink` read from the URL
  * @returns the action the hook takes
  */
-export function linkAction(url: string, linkType: LinkKind): LinkAction {
-  if (linkType === "qr") return { kind: "qr" };
+export function linkAction(url: string, link: LinkRead): LinkAction {
+  if (link.type === "qr") {
+    return { kind: "qr", id: link.id, origin: link.origin };
+  }
+  if (!isKeptFromRouter(url)) return { kind: "none" };
   const route = nativeRouteForLink(url);
-  if (route === "/" || route === url) return { kind: "none" };
+  if (route === "/") return { kind: "none" };
   return { kind: "route", route };
 }

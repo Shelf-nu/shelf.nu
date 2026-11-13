@@ -15,101 +15,112 @@ import {
   linkAction,
   systemPathFor,
   type LinkAction,
-  type LinkKind,
+  type LinkRead,
 } from "./link-routing";
 
 /**
- * One row per link kind the OS can deliver: the parsed kind, and what the
+ * One row per link kind the OS can deliver: what `parseDeepLink` reads, and what the
  * hook opens for it. `null` means the link names no screen of the app, so
  * the router keeps it.
  */
 const LINKS: Array<{
   url: string;
-  kind: LinkKind;
+  link: LinkRead;
   hookOpens: LinkAction | null;
 }> = [
   {
     url: "https://app.shelf.nu/assets/as_1/overview",
-    kind: "asset",
+    link: { type: "asset" },
     hookOpens: { kind: "route", route: "/assets/as_1" },
   },
   {
     url: "https://app.shelf.nu/assets/kits/kt_1",
-    kind: "kit",
+    link: { type: "kit" },
     hookOpens: { kind: "route", route: "/assets/kits/kt_1" },
   },
   {
     url: "https://app.shelf.nu/kits/kt_1",
-    kind: "kit",
+    link: { type: "kit" },
     hookOpens: { kind: "route", route: "/assets/kits/kt_1" },
   },
   {
     url: "https://app.shelf.nu/bookings/bk_1",
-    kind: "booking",
+    link: { type: "booking" },
     hookOpens: { kind: "route", route: "/bookings/bk_1" },
   },
   {
     url: "https://app.shelf.nu/audits/au_1",
-    kind: "audit",
+    link: { type: "audit" },
     hookOpens: { kind: "route", route: "/audits/au_1" },
   },
   {
     url: "https://app.shelf.nu/qr/qr_1",
-    kind: "qr",
-    hookOpens: { kind: "qr" },
+    link: { type: "qr", id: "qr_1", origin: "https://app.shelf.nu" },
+    hookOpens: { kind: "qr", id: "qr_1", origin: "https://app.shelf.nu" },
   },
   {
     url: "shelf://assets/as_1",
-    kind: "asset",
+    link: { type: "asset" },
     hookOpens: { kind: "route", route: "/assets/as_1" },
   },
   {
     url: "shelf://kits/kt_1",
-    kind: "kit",
+    link: { type: "kit" },
     hookOpens: { kind: "route", route: "/assets/kits/kt_1" },
   },
   {
     url: "shelf://bookings/bk_1",
-    kind: "booking",
+    link: { type: "booking" },
     hookOpens: { kind: "route", route: "/bookings/bk_1" },
   },
   {
     url: "shelf://audits/au_1",
-    kind: "audit",
+    link: { type: "audit" },
     hookOpens: { kind: "route", route: "/audits/au_1" },
   },
   {
     url: "shelf://scanner",
-    kind: "scanner",
+    link: { type: "scanner" },
     hookOpens: { kind: "route", route: "/scanner" },
   },
   {
     url: "shelf://qr/qr_1",
-    kind: "qr",
-    hookOpens: { kind: "qr" },
+    link: { type: "qr", id: "qr_1" },
+    hookOpens: { kind: "qr", id: "qr_1", origin: undefined },
   },
   // A link to a list names no id, so `parseDeepLink` reads it as unknown; the
   // hook still opens the list the route names.
   {
     url: "shelf://bookings",
-    kind: "unknown",
+    link: { type: "unknown" },
     hookOpens: { kind: "route", route: "/bookings" },
   },
   {
     url: "https://app.shelf.nu/assets/",
-    kind: "unknown",
+    link: { type: "unknown" },
     hookOpens: { kind: "route", route: "/assets" },
+  },
+  // A bare path, as `splitLinkUrl` also reads it, is the hook's too.
+  {
+    url: "/assets/as_1",
+    link: { type: "unknown" },
+    hookOpens: { kind: "route", route: "/assets/as_1" },
+  },
+  {
+    url: "/bookings/bk_1?tab=assets",
+    link: { type: "unknown" },
+    hookOpens: { kind: "route", route: "/bookings/bk_1?tab=assets" },
   },
   {
     url: "https://app.shelf.nu/assets/kits",
-    kind: "unknown",
+    link: { type: "unknown" },
     hookOpens: { kind: "route", route: "/assets/kits" },
   },
 ];
 
-for (const { url, kind, hookOpens } of LINKS) {
+for (const { url, link, hookOpens } of LINKS) {
   test(`the hook opens ${url}, anchored in its tab`, () => {
-    assert.deepEqual(linkAction(url, kind), hookOpens);
+    assert.deepEqual(linkAction(url, link), hookOpens);
   });
 
   test(`the router starts on the start screen when ${url} launches the app`, () => {
@@ -123,7 +134,7 @@ for (const { url, kind, hookOpens } of LINKS) {
 
 test("a link keeps its query, so a new asset keeps the QR it was opened from", () => {
   assert.deepEqual(
-    linkAction("https://app.shelf.nu/assets/new?qrId=qr_1", "asset"),
+    linkAction("https://app.shelf.nu/assets/new?qrId=qr_1", { type: "asset" }),
     { kind: "route", route: "/assets/new?qrId=qr_1" }
   );
 });
@@ -136,13 +147,20 @@ test("a link that names no screen of the app stays with the router", () => {
     for (const initial of [true, false]) {
       assert.equal(systemPathFor({ path: url, initial }), url);
     }
-    assert.deepEqual(linkAction(url, "unknown"), { kind: "none" });
+    assert.deepEqual(linkAction(url, { type: "unknown" }), { kind: "none" });
   }
+});
+
+test("an unknown path whose query carries a refused id is kept from the router and opens nothing", () => {
+  const url = "shelf://reports?orgId=bad%20id";
+  assert.equal(systemPathFor({ path: url, initial: true }), "/");
+  assert.equal(systemPathFor({ path: url, initial: false }), null);
+  assert.deepEqual(linkAction(url, { type: "unknown" }), { kind: "none" });
 });
 
 test("a link with a refused id opens nothing: the start screen at launch, no change later", () => {
   const url = "shelf://assets/bad%20id";
   assert.equal(systemPathFor({ path: url, initial: true }), "/");
   assert.equal(systemPathFor({ path: url, initial: false }), null);
-  assert.deepEqual(linkAction(url, "unknown"), { kind: "none" });
+  assert.deepEqual(linkAction(url, { type: "unknown" }), { kind: "none" });
 });
