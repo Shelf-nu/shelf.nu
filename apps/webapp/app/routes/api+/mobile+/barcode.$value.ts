@@ -117,10 +117,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!foundBarcode) {
       const memberships = await db.userOrganization.findMany({
         where: { userId: user.id, organizationId: { not: organizationId } },
-        // The owning workspace must hold the barcode capability itself:
-        // resolving through a sibling whose add-on lapsed would bypass its
-        // gate. Same canonical rule the /me serializer applies. The workspace
-        // gate's columns ride along, so each owner is decided from this row.
+        // An owner is a sibling that can use barcodes, active or not: a
+        // workspace without the barcode add-on is never searched, so it never
+        // owns a code, and resolving through one would bypass its gate. Same
+        // canonical rule the /me serializer applies. The workspace gate's
+        // columns ride along, so each owner is decided from this row.
         select: {
           organizationId: true,
           ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,

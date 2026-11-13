@@ -25,6 +25,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 import { loader } from "~/routes/api+/mobile+/barcode.$value";
 
@@ -283,6 +284,49 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
     expect(response.init?.status).toBe(409);
     expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
     expect(recordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("does not count a sibling without the barcode add-on as an owner, active or not", async () => {
+    // Only siblings that can use barcodes are searched; a workspace whose
+    // add-on is off is not an owner whether or not it is active, as on main.
+    // Here the add-on-less sibling is also admin-disabled, so the scan opens
+    // in the one barcode-enabled owner.
+    vi.mocked(getBarcodeByValue)
+      .mockResolvedValueOnce(null as never)
+      .mockResolvedValueOnce(barcodeRow() as never);
+    const disabledWithoutAddOn = mobileSiblingMembership("org-3", {
+      barcodesEnabled: false,
+    });
+    disabledWithoutAddOn.organization.workspaceDisabled = true;
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      mobileSiblingMembership("org-2"),
+      disabledWithoutAddOn,
+    ] as never);
+    vi.mocked(db.barcode.findMany).mockResolvedValue([
+      { organizationId: "org-2" },
+    ] as never);
+    // The add-on decides here, so the stub answers from the row as the real
+    // `canUseBarcodes` does with premium on.
+    vi.mocked(canUseBarcodes).mockImplementation(
+      (organization) => organization.barcodesEnabled
+    );
+
+    let barcode: Awaited<ReturnType<typeof get>>["barcode"];
+    try {
+      ({ barcode } = await get());
+    } finally {
+      vi.mocked(canUseBarcodes).mockImplementation(() => true);
+    }
+
+    // The barcode lookup was never asked about the add-on-less workspace.
+    expect(db.barcode.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: { in: ["org-2"] },
+        }),
+      })
+    );
+    expect(barcode.organizationId).toBe("org-2");
   });
 
   it("still answers 409 when two active siblings hold the barcode", async () => {
