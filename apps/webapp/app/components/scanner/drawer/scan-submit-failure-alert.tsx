@@ -30,6 +30,22 @@ const HEADLINES: Record<ScanSubmitFailureKind, string> = {
   timeout: "The save took too long to answer.",
   server: "The save could not be confirmed.",
   network: "The connection dropped during the save.",
+  rejected: "The save was not accepted.",
+};
+
+/**
+ * What to do about it. A save that got no answer may still have been carried
+ * out, so the operator is told to look first. One a gateway turned away was
+ * never carried out, and saying it "may have gone through" would be untrue.
+ */
+const UNCONFIRMED_ADVICE =
+  "Your scanned list is still here. The save may have gone through anyway, so check before you confirm again.";
+const ADVICE: Record<ScanSubmitFailureKind, string> = {
+  timeout: UNCONFIRMED_ADVICE,
+  server: UNCONFIRMED_ADVICE,
+  network: UNCONFIRMED_ADVICE,
+  rejected:
+    "Your scanned list is still here and nothing was saved. Wait a moment, then confirm again.",
 };
 
 /**
@@ -62,9 +78,8 @@ export function ScanSubmitFailureAlert({
     >
       <p className="font-semibold">{HEADLINES[failure.kind]}</p>
       <p>
-        Your scanned list is still here. The save may have gone through anyway,
-        so check before you confirm again.
-        {savedCheck ? (
+        {ADVICE[failure.kind]}
+        {savedCheck && failure.kind !== "rejected" ? (
           <>
             {" "}
             <Button

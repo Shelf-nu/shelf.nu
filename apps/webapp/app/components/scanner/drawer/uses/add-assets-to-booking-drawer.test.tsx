@@ -256,6 +256,22 @@ describe("AddAssetsToBookingDrawer after a save that got no answer", () => {
     expect(link.getAttribute("target")).toBe("_blank");
   });
 
+  /** The notice is about the list, so it goes with the list. */
+  it("drops the notice once the list is emptied", () => {
+    // why: as above, the failure arrives as the route's action data.
+    const actionData = vi.mocked(useActionData);
+    actionData.mockReturnValue({
+      scanSubmitFailure: { kind: "timeout", status: 524 },
+    });
+    onTestFinished(() => {
+      actionData.mockReturnValue(undefined);
+    });
+
+    renderDrawer();
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("shows no notice when the last save had an answer", () => {
     renderDrawer({ scannedAssets: { "qr-1": { id: "asset-1" } } });
 

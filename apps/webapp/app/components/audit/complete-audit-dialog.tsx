@@ -25,6 +25,16 @@ type CompleteAuditDialogProps = {
   auditName: string;
   /** Container for portal rendering */
   portalContainer?: HTMLElement;
+  /**
+   * Also put the intent in the form's action URL. Only the audit scanner sets
+   * this: its client action reads the intent from the URL, so it can tell a
+   * completion from a background save without parsing the photos in the
+   * multipart body. A search-only action resolves against the page the form is
+   * on, which on the scanner is the scan route itself. Other pages that show
+   * this dialog must leave it off and keep the default action, which posts to
+   * the route that renders the form whatever tab is open.
+   */
+  intentInActionUrl?: boolean;
   /** Stats for display in confirmation */
   stats: {
     expectedCount: number;
@@ -49,6 +59,7 @@ export default function CompleteAuditDialog({
   disabled,
   auditName,
   portalContainer,
+  intentInActionUrl = false,
   stats,
   units = null,
 }: CompleteAuditDialogProps) {
@@ -74,13 +85,10 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        {/* The intent is in the action URL as well as the body, so the scan
-            route's client action can tell a completion from a background
-            save without parsing the photos in the multipart body. */}
         <Form
           method="post"
           encType="multipart/form-data"
-          action="?intent=complete-audit"
+          action={intentInActionUrl ? "?intent=complete-audit" : undefined}
         >
           <input type="hidden" name="intent" value="complete-audit" />
 

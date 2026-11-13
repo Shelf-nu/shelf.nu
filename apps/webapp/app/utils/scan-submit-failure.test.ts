@@ -44,6 +44,18 @@ describe("classifyScanSubmitFailure", () => {
     });
   });
 
+  /**
+   * A gateway that turns the request away (too large, too many requests)
+   * answers with its own plain-text page. The page is kept, but as a refusal:
+   * nothing was saved.
+   */
+  it.each([413, 429])("reads a gateway's %i as a refusal", (status) => {
+    expect(classifyScanSubmitFailure(gatewayResponse(status))).toEqual({
+      kind: "rejected",
+      status,
+    });
+  });
+
   it("reads a rejected fetch as a network failure", () => {
     expect(classifyScanSubmitFailure(new TypeError("Failed to fetch"))).toEqual(
       { kind: "network", status: null }

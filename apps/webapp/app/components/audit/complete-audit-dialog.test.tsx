@@ -79,13 +79,32 @@ describe("CompleteAuditDialog", () => {
    * The scan route's client action reads the intent from the URL, so it does
    * not have to parse the photos in the multipart body to find it.
    */
-  it("puts the intent in the form's action URL", () => {
+  it("puts the intent in the form's action URL for the audit scanner", () => {
+    mockActionData.mockReturnValue(undefined);
+    render(
+      <CompleteAuditDialog
+        auditName="ZZ Test Audit"
+        stats={STATS}
+        intentInActionUrl
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Complete Audit" }));
+
+    const form = screen.getByRole("alertdialog").querySelector("form");
+    expect(form?.getAttribute("action")).toBe("?intent=complete-audit");
+  });
+
+  /**
+   * A search-only action resolves against the page the form is on. On the
+   * audit page that is whichever tab is open, and not every tab has an action
+   * that can complete the audit. Left off, the form keeps the default action:
+   * the route that renders it.
+   */
+  it("keeps the default form action everywhere else", () => {
     mockActionData.mockReturnValue(undefined);
 
     const dialog = openDialog();
 
-    expect(dialog.querySelector("form")?.getAttribute("action")).toBe(
-      "?intent=complete-audit"
-    );
+    expect(dialog.querySelector("form")?.hasAttribute("action")).toBe(false);
   });
 });

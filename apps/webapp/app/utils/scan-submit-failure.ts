@@ -28,7 +28,12 @@ export type ScanSubmitFailureKind =
   /** The server, or something in front of it, answered with a failure. */
   | "server"
   /** The request never completed: no connection, or it dropped mid-flight. */
-  | "network";
+  | "network"
+  /**
+   * A gateway turned the request away before the server saw it (too large,
+   * too many requests). Unlike the others, nothing was saved.
+   */
+  | "rejected";
 
 /** A scanner save whose outcome is unknown. */
 export type ScanSubmitFailure = {
@@ -50,6 +55,13 @@ export type ScanSubmitFailureData = {
 const TIMEOUT_STATUSES = new Set([408, 504, 522, 524]);
 
 /**
+ * Statuses a gateway answers with when it turns a request away itself: the
+ * body is too large for it, or there were too many requests. They only count
+ * when the body is the gateway's plain text, like every status here.
+ */
+const GATEWAY_REJECTION_STATUSES = new Set([413, 429]);
+
+/**
  * What browsers say when `fetch` cannot complete a request: "Failed to fetch"
  * (Chromium), "NetworkError when attempting to fetch resource." (Firefox),
  * "Load failed" (Safari).
@@ -69,8 +81,8 @@ const NO_RESPONSE_STATUS = 503;
  *
  * Only failures with no usable answer qualify: a 5xx (or 408) response that
  * did not come from this app (its body is a gateway's page, not the app's
- * error payload), a `fetch` that rejected, or a response body that could not
- * be decoded. Everything else is returned as `null` so the
+ * error payload), a gateway's own refusal (413, 429), a `fetch` that rejected,
+ * or a response body that could not be decoded. Everything else is returned as `null` so the
  * caller rethrows it: redirects, an aborted navigation, and 4xx responses,
  * which mean the session or the route is gone and the error page is the right
  * place to land.
@@ -90,6 +102,9 @@ export function classifyScanSubmitFailure(
     }
     if (TIMEOUT_STATUSES.has(thrown.status)) {
       return { kind: "timeout", status: thrown.status };
+    }
+    if (GATEWAY_REJECTION_STATUSES.has(thrown.status)) {
+      return { kind: "rejected", status: thrown.status };
     }
     if (thrown.status >= 500) {
       return { kind: "server", status: thrown.status };

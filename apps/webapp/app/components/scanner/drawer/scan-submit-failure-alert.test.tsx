@@ -80,6 +80,28 @@ describe("ScanSubmitFailureAlert", () => {
     expect(screen.getByRole("alert").textContent).toContain(headline);
   });
 
+  /**
+   * A gateway that turned the request away never passed it on, so the notice
+   * must not say the save may have gone through, and has nothing to check.
+   */
+  it("says nothing was saved when a gateway turned the request away", () => {
+    mockActionData.mockReturnValue({
+      scanSubmitFailure: { kind: "rejected", status: 413 },
+    });
+
+    render(
+      <ScanSubmitFailureAlert
+        savedCheck={{ to: "/bookings/booking-1", label: "Open the booking" }}
+      />
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("The save was not accepted.");
+    expect(alert.textContent).toContain("nothing was saved");
+    expect(alert.textContent).not.toContain("may have gone through");
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
   it("links to where the save can be checked, in a new tab", () => {
     mockActionData.mockReturnValue(TIMEOUT);
 

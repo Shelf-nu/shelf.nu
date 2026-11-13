@@ -169,8 +169,10 @@ export default function ConfigurableDrawer<T>({
       collapsedHeight={collapsedHeight}
       footer={(expanded) => (
         <>
-          {/* A save that got no answer: the list is intact, check first. */}
-          <ScanSubmitFailureAlert savedCheck={savedCheck} />
+          {/* A save that got no answer: the list is intact, check first.
+              The notice is about the list, so it goes once the list is
+              emptied. */}
+          {hasItems ? <ScanSubmitFailureAlert savedCheck={savedCheck} /> : null}
 
           {/* Why the action is disabled; the fixes are in the list's card. */}
           {Blockers ? Blockers({ variant: "note" }) : null}
