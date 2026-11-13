@@ -467,21 +467,26 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
 
     renderDialog();
 
-    const select = screen.getByLabelText(
-      "From location for Batteries"
-    ) as HTMLSelectElement;
-    expect(select.name).toBe("");
-    expect(select.value).toBe("loc-store");
-    expect([...select.options].map((option) => option.text)).toEqual([
-      "Store Room · 60 pcs",
-      "Studio · 40 pcs",
-    ]);
-    // Inside the dialog's form, so it posts with the check-out.
-    expect(select.form?.id).toBe("bulk-partial-checkout-form");
-    // Unchanged, it posts nothing and the server records its own default;
-    // once the operator picks, the answer is posted under the slice's key.
-    fireEvent.change(select, { target: { value: "loc-studio" } });
-    expect(select.name).toBe("sourceLocation.ba-standalone");
+    const picker = screen.getByRole("button", {
+      name: "From location for Batteries",
+    });
+    expect(picker).toHaveTextContent("Store Room · 60 pcs");
+    // Unchanged, it posts nothing and the server records its own default.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
+
+    fireEvent.click(picker);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent)
+    ).toEqual(["Store Room · 60 pcs", "Studio · 40 pcs"]);
+    fireEvent.click(screen.getByRole("option", { name: "Studio · 40 pcs" }));
+
+    // Once the operator picks, the answer is posted under the slice's key,
+    // inside the dialog's form so it posts with the check-out.
+    const answer = document.querySelector<HTMLInputElement>(
+      'input[name="sourceLocation.ba-standalone"]'
+    );
+    expect(answer?.value).toBe("loc-studio");
+    expect(answer?.form?.id).toBe("bulk-partial-checkout-form");
   });
 
   it("asks nothing for a pool the loader has no question for", () => {

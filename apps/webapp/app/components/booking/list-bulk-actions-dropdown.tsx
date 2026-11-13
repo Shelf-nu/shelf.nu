@@ -209,7 +209,6 @@ function ConditionalDropdown() {
       >
         <DropdownMenuTrigger
           className="actions-dropdown hidden md:flex"
-          onClick={() => setOpen(!open)}
           asChild
           disabled={actionsButtonDisabled}
         >

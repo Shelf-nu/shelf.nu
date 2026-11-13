@@ -4,6 +4,7 @@ paths:
   - "apps/webapp/app/components/scanner/**"
   - "apps/companion/lib/batch-blockers*"
   - "apps/companion/app/**/scan*"
+  - "apps/companion/components/scanner/**"
   - "apps/webapp/app/components/audit/**"
 ---
 

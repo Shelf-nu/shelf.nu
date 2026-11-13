@@ -731,7 +731,6 @@ const mockCreateBookingParams = {
   booking: {
     name: "Test Booking",
     description: "Test Description",
-    custodianUserId: "user-1",
     custodianTeamMemberId: "team-member-1",
     organizationId: "org-1",
     creatorId: "user-1",
@@ -743,9 +742,39 @@ const mockCreateBookingParams = {
   hints: mockClientHints,
 };
 
+/**
+ * Points the custodian guard (`teamMember.findFirst`) at fixed team member
+ * rows: each id maps to the user it is linked to, `null` for a non-registered
+ * member. The booking services read the custodian user from this row.
+ */
+function stubCustodianTeamMembers(
+  userIdByTeamMember: Record<string, string | null>
+) {
+  (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockImplementation(
+    ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      userId: userIdByTeamMember[where.id] ?? null,
+    })
+  );
+}
+
+/**
+ * Restores the module-level `teamMember.findFirst` default (echo the id).
+ * Implementations survive `clearAllMocks`, so a describe that stubs custodian
+ * rows restores this afterwards.
+ */
+function restoreTeamMemberFindFirst() {
+  (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockImplementation(
+    ({ where }: { where: { id: string } }) => ({ id: where.id })
+  );
+}
+
 describe("createBooking", () => {
+  afterEach(restoreTeamMemberFindFirst);
+
   beforeEach(() => {
     vitest.clearAllMocks();
+    stubCustodianTeamMembers({ "team-member-1": "user-1" });
 
     // why: createBooking now runs cross-org IDOR guards inside its
     // transaction. assertAssetsBelongToOrg / assertTagsBelongToOrg compare
@@ -919,8 +948,9 @@ describe("createBooking", () => {
     );
   });
 
-  it("should create a booking without custodian when custodianUserId is null", async () => {
+  it("creates a booking without a custodian user when the team member has no user", async () => {
     expect.assertions(1);
+    stubCustodianTeamMembers({ "team-member-1": null });
     const paramsWithoutCustodian = {
       ...mockCreateBookingParams,
       booking: {
@@ -975,6 +1005,34 @@ describe("createBooking", () => {
     await expect(createBooking(mockCreateBookingParams)).rejects.toThrow(
       ShelfError
     );
+  });
+
+  it("links the custodian user from the team member row", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+
+    await createBooking(mockCreateBookingParams);
+
+    expect(db.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          custodianUser: { connect: { id: "user-1" } },
+          custodianTeamMember: { connect: { id: "team-member-1" } },
+        }),
+      })
+    );
+  });
+
+  it("links no custodian user for a team member without one", async () => {
+    stubCustodianTeamMembers({ "team-member-1": null });
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+
+    await createBooking(mockCreateBookingParams);
+
+    const [{ data }] = (db.booking.create as ReturnType<typeof vitest.fn>).mock
+      .calls[0];
+    expect(data).not.toHaveProperty("custodianUser");
   });
 });
 
@@ -2316,8 +2374,14 @@ describe("getKitIdsToAcquire", () => {
 });
 
 describe("updateBasicBooking", () => {
+  afterEach(restoreTeamMemberFindFirst);
+
   beforeEach(() => {
     vitest.clearAllMocks();
+    stubCustodianTeamMembers({
+      "team-member-1": "user-1",
+      "team-member-2": "user-2",
+    });
   });
 
   const mockUpdateBookingParams = {
@@ -2327,7 +2391,6 @@ describe("updateBasicBooking", () => {
     description: "Updated Description",
     from: new Date("2024-02-01T09:00:00Z"),
     to: new Date("2024-02-01T17:00:00Z"),
-    custodianUserId: "user-2",
     custodianTeamMemberId: "team-member-2",
     tags: [{ id: "tag-1" }, { id: "tag-2" }],
   };
@@ -2465,6 +2528,58 @@ describe("updateBasicBooking", () => {
       },
     });
     expect(result).toEqual(updatedBooking);
+  });
+
+  it("links the custodian user from the team member row", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(mockBookingData);
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      custodianTeamMemberId: "team-member-2",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          custodianUser: { connect: { id: "user-2" } },
+          custodianTeamMember: { connect: { id: "team-member-2" } },
+        }),
+      })
+    );
+  });
+
+  it("unlinks the custodian user when the new team member has no user", async () => {
+    stubCustodianTeamMembers({ "team-member-2": null });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(mockBookingData);
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      custodianTeamMemberId: "team-member-2",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          custodianUser: { disconnect: true },
+        }),
+      })
+    );
   });
 
   it("should update only name and description when status is not DRAFT", async () => {
@@ -2745,6 +2860,7 @@ describe("updateBasicBooking", () => {
     //@ts-expect-error missing vitest type
     db.teamMember.findFirst.mockResolvedValue({
       id: "team-member-2",
+      userId: "user-2",
       name: "New TM",
       user: { id: "user-2", firstName: "New", lastName: "Custodian" },
     });
@@ -2794,7 +2910,6 @@ describe("updateBasicBooking", () => {
       description: "Same Description",
       from: newFrom,
       to: newTo,
-      custodianUserId: "user-1",
       custodianTeamMemberId: "team-member-1",
       tags: [],
       userId: "editor-1",
@@ -4089,12 +4204,14 @@ describe("reserveBooking", () => {
     db.bookingAsset.findFirst.mockResolvedValue(null);
     //@ts-expect-error missing vitest type
     db.bookingModelRequest.count.mockResolvedValue(1);
+    stubCustodianTeamMembers({ "team-1": "user-1" });
   });
 
   afterEach(() => {
     // Restore the module-level defaults: implementations set with
     // `mockResolvedValue` survive `clearAllMocks`, so without this the
     // reserve-friendly values above leak into every later describe.
+    restoreTeamMemberFindFirst();
     //@ts-expect-error missing vitest type
     db.bookingAsset.count.mockResolvedValue(0);
     //@ts-expect-error missing vitest type
@@ -4151,7 +4268,6 @@ describe("reserveBooking", () => {
     id: "booking-1",
     name: "Reserved Booking",
     organizationId: "org-1",
-    custodianUserId: "user-1",
     custodianTeamMemberId: "team-1",
     from: futureFromDate,
     to: futureToDate,
@@ -4358,6 +4474,34 @@ describe("reserveBooking", () => {
       })
     );
     expect(result).toEqual(reservedBooking);
+  });
+
+  it("links the custodian user from the team member row", async () => {
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      bookingAssets: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.RESERVED,
+    });
+
+    await reserveBooking(mockReserveParams);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          custodianUser: { connect: { id: "user-1" } },
+          custodianTeamMember: { connect: { id: "team-1" } },
+        }),
+      })
+    );
   });
 
   it("gives the reservation the long transaction budget", async () => {
@@ -14024,6 +14168,14 @@ describe("getSystemActionText", () => {
 // archiveBooking, revertBookingToDraft, and bulkCancelBookings/bulkArchiveBookings
 
 describe("getOngoingBookingForAsset", () => {
+  /** Only the fields the route needs to name the booking and gate it. */
+  const ONGOING_BOOKING_SELECT = {
+    id: true,
+    name: true,
+    custodianUserId: true,
+    custodianTeamMember: { select: { userId: true } },
+  };
+
   beforeEach(() => {
     vitest.clearAllMocks();
   });
@@ -14034,8 +14186,8 @@ describe("getOngoingBookingForAsset", () => {
     const mockBooking = {
       id: "booking-1",
       name: "Test Booking",
-      status: BookingStatus.ONGOING,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14053,6 +14205,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-1" } },
         partialCheckins: { none: { assetIds: { has: "asset-1" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toEqual(mockBooking);
   });
@@ -14063,8 +14216,8 @@ describe("getOngoingBookingForAsset", () => {
     const mockBooking = {
       id: "booking-2",
       name: "Overdue Booking",
-      status: BookingStatus.OVERDUE,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14082,6 +14235,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-2" } },
         partialCheckins: { none: { assetIds: { has: "asset-2" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toEqual(mockBooking);
   });
@@ -14106,6 +14260,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-3" } },
         partialCheckins: { none: { assetIds: { has: "asset-3" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toBeNull();
   });
@@ -14128,6 +14283,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-4" } },
         partialCheckins: { none: { assetIds: { has: "asset-4" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toBeNull();
   });
@@ -14151,6 +14307,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-5" } },
         partialCheckins: { none: { assetIds: { has: "asset-5" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
   });
 
@@ -14172,6 +14329,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-6" } },
         partialCheckins: { none: { assetIds: { has: "asset-6" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
   });
 
@@ -14198,8 +14356,8 @@ describe("getOngoingBookingForAsset", () => {
     const checkedOutBooking = {
       id: "booking-checked-out",
       name: "Checked Out Booking",
-      status: BookingStatus.ONGOING,
-      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMember: { userId: "user-2" },
     };
 
     //@ts-expect-error missing vitest type
@@ -14219,6 +14377,7 @@ describe("getOngoingBookingForAsset", () => {
         bookingAssets: { some: { assetId: "asset-8" } },
         partialCheckins: { none: { assetIds: { has: "asset-8" } } },
       },
+      select: ONGOING_BOOKING_SELECT,
     });
     expect(result).toEqual(checkedOutBooking);
   });
@@ -24454,7 +24613,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: "user-2",
       custodianTeamMemberId: "team-2",
       from: futureFromDate,
       to: futureToDate,
@@ -24828,7 +24986,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: "user-2",
       custodianTeamMemberId: "team-2",
       from: futureFromDate,
       to: futureToDate,
@@ -24924,7 +25081,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: newCustodian.id,
       custodianTeamMemberId: "team-4",
       from: new Date("2027-03-05T09:00:00.000Z"),
       to: new Date("2027-03-06T15:00:00.000Z"),
@@ -25004,7 +25160,6 @@ describe("booking emails name who acted", () => {
       id: "booking-1",
       name: "Test Booking",
       organizationId: "org-1",
-      custodianUserId: "user-2",
       custodianTeamMemberId: "team-2",
       from: futureFromDate,
       to: futureToDate,
@@ -25069,7 +25224,6 @@ describe("booking emails name who acted", () => {
         id: "booking-1",
         name: "Test Booking",
         organizationId: "org-1",
-        custodianUserId: "user-2",
         custodianTeamMemberId: "team-2",
         from: futureFromDate,
         to: futureToDate,

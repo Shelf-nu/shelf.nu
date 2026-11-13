@@ -16,10 +16,16 @@ import {
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
+  ASSET_MODEL_FORM_DEFAULTS_SELECT,
   getModelFilterConfig,
   isSearchableKey,
 } from "~/utils/model-filters-registry.server";
 import { resolveMembershipAccess } from "~/utils/permissions/membership-access";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { rolesWhere } from "~/utils/permissions/role-access";
 
 /**
@@ -120,6 +126,13 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
+    /**
+     * `"true"` asks for each model's defaults (category, value, custom field
+     * defaults) with the results, for the asset form's pre-fill. Granted only
+     * to callers who may create or edit assets; see
+     * `ASSET_MODEL_FORM_DEFAULTS_SELECT`.
+     */
+    withDefaults: z.literal("true").optional(),
   }),
   // No `asset` member: `Asset` has no `name` column (it has `title`), no call
   // site ever passed `name: "asset"`, and any such call would have thrown at
@@ -158,6 +171,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Validating parameters */
     const modelFilters = parseData(searchParams, ModelFiltersSchema);
+
+    /**
+     * The registry's select, plus the asset form's model defaults when the
+     * request asks for them and the caller may create or edit assets. The
+     * grant is resolved from the session's roles, never from a request param.
+     */
+    const resolveSelect = async (): Promise<{
+      select: Record<string, unknown>;
+      withModelDefaults: boolean;
+    }> => {
+      const base = getModelFilterConfig(modelFilters.name).select;
+      if (modelFilters.name !== "assetModel" || !modelFilters.withDefaults) {
+        return { select: base, withModelDefaults: false };
+      }
+      const roles = userOrganizations.find(
+        (o) => o.organization.id === organizationId
+      )?.roles;
+      const canEdit = (action: PermissionAction) =>
+        hasPermission({
+          organizationId,
+          userId,
+          roles,
+          workspace: currentOrganization,
+          entity: PermissionEntity.asset,
+          action,
+        });
+      const [canCreate, canUpdate] = await Promise.all([
+        canEdit(PermissionAction.create),
+        canEdit(PermissionAction.update),
+      ]);
+      return canCreate || canUpdate
+        ? {
+            select: { ...base, ...ASSET_MODEL_FORM_DEFAULTS_SELECT },
+            withModelDefaults: true,
+          }
+        : { select: base, withModelDefaults: false };
+    };
     const { name, queryKey, queryValue, selectedValues } = modelFilters;
 
     /**
@@ -365,7 +415,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // The registry — not this call site — decides what leaves the server.
     // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
     // spread below safe, instead of having to sanitise three separate paths.
-    const select = getModelFilterConfig(name).select;
+    const { select, withModelDefaults } = await resolveSelect();
 
     /**
      * Two queries rather than one capped `OR`.
@@ -396,6 +446,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy: { [queryKey]: "asc" },
       }),
     ])) as Array<Array<Record<string, string>>>;
+
+    if (withModelDefaults) {
+      await keepActiveFieldDefaults(
+        [...selectedRows, ...searchRows] as unknown as ModelRowWithDefaults[],
+        organizationId
+      );
+    }
 
     // Selected first, then search hits, de-duplicated: a selected row can also
     // match what the user typed.
@@ -438,5 +495,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
+  }
+}
+
+/** An asset model row carrying `ASSET_MODEL_FORM_DEFAULTS_SELECT`. */
+type ModelRowWithDefaults = {
+  customFieldDefaults: { customFieldId: string; value: unknown }[];
+};
+
+/**
+ * Drops, in place, the custom field defaults whose field is inactive, deleted
+ * or outside the workspace, the way the server fill reads them
+ * (`getModelDefaults`), so the form never pre-fills a field it does not show.
+ */
+async function keepActiveFieldDefaults(
+  rows: ModelRowWithDefaults[],
+  organizationId: string
+) {
+  const fieldIds = [
+    ...new Set(
+      rows.flatMap((row) => row.customFieldDefaults.map((d) => d.customFieldId))
+    ),
+  ];
+  if (fieldIds.length === 0) return;
+
+  const activeFields = await db.customField.findMany({
+    where: {
+      id: { in: fieldIds },
+      organizationId,
+      active: true,
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  const activeIds = new Set(activeFields.map((field) => field.id));
+  for (const row of rows) {
+    row.customFieldDefaults = row.customFieldDefaults.filter((d) =>
+      activeIds.has(d.customFieldId)
+    );
   }
 }

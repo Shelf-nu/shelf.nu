@@ -243,6 +243,7 @@ export async function bulkSetAssetCustomField({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       lastAuditDateAccess,
       bookableScope,
       timeZone,

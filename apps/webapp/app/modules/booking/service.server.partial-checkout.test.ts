@@ -2038,6 +2038,105 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
   });
 
+  it("counts every slice that moves the same units out in one statement", async () => {
+    expect.assertions(3);
+
+    // Two slices of one QUANTITY_TRACKED asset (standalone 10, kit-driven 20),
+    // each sending 4 units out in the same session.
+    const multiSliceBooking = {
+      ...qtyOnlyBooking,
+      status: BookingStatus.ONGOING,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-standalone",
+          quantity: 10,
+          asset: {
+            id: "asset-battery",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Batteries",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-kit",
+          quantity: 20,
+          asset: {
+            id: "asset-battery",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Batteries",
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-1" }],
+          },
+        },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(multiSliceBooking);
+
+    // why: fully-shaped BookingAsset pivot rows so the batched slice helper
+    // resolves each slice by id and pools claims across the two same-asset
+    // slices. Booked total across both = 10 + 20 = 30 (asset-level remaining).
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-standalone",
+        assetId: "asset-battery",
+        quantity: 10,
+        assetKitId: null,
+      },
+      {
+        id: "ba-kit",
+        assetId: "asset-battery",
+        quantity: 20,
+        assetKitId: "kit-1",
+      },
+    ]);
+    // why: the qty loop locks the asset per disposition; return the battery.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-battery",
+      title: "Batteries",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      quantity: 30,
+    });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: [
+        {
+          assetId: "asset-battery",
+          bookingAssetId: "ba-standalone",
+          quantity: 4,
+        },
+        { assetId: "asset-battery", bookingAssetId: "ba-kit", quantity: 4 },
+      ],
+    });
+
+    // Both slices move 4 units, so one write covers them both rather than
+    // one write per slice.
+    const counterWrites = (
+      db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .map(([args]) => args)
+      .filter((args) => args?.data?.checkedOutQuantity);
+    expect(counterWrites).toHaveLength(1);
+    expect(counterWrites[0].data).toEqual({
+      checkedOutQuantity: { increment: 4 },
+    });
+    expect([...counterWrites[0].where.id.in].sort()).toEqual([
+      "ba-kit",
+      "ba-standalone",
+    ]);
+  });
+
   it("records BOTH slices of a same-asset multi-slice checkout positionally (standalone + kit in one session)", async () => {
     expect.assertions(2);
 
@@ -3314,14 +3413,23 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       );
     }
 
-    /** Units this check-out added to a slice's checked-out count, by slice. */
+    /**
+     * Units this check-out added to a slice's checked-out count, one
+     * `[sliceId, units]` pair per slice. A write covers every slice that moves
+     * the same number of units, so each is expanded back to its slices.
+     */
     function checkedOutIncrements() {
       return (
         db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
       ).mock.calls
         .map(([args]) => args)
         .filter((args) => args?.data?.checkedOutQuantity)
-        .map((args) => [args.where.id, args.data.checkedOutQuantity.increment]);
+        .flatMap((args) =>
+          (args.where.id.in as string[]).map((sliceId) => [
+            sliceId,
+            args.data.checkedOutQuantity.increment,
+          ])
+        );
     }
 
     it("refuses a scan that sends out more units than the pool has free", async () => {

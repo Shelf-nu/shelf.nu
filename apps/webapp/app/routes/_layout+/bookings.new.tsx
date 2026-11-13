@@ -17,6 +17,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { resolveBookingCustodian } from "~/modules/booking/booking-custodian.server";
 import { DRAFT_CREATED_MESSAGE } from "~/modules/booking/constants";
 import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
@@ -32,7 +33,6 @@ import {
   getTagsForBookingTagsFilter,
 } from "~/modules/tag/service.server";
 import {
-  getTeamMember,
   getTeamMemberForForm,
   getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
@@ -218,33 +218,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
       endDate: to,
     } = payload;
 
-    // Validate that the custodian belongs to the same organization
-    const custodianFromDb = await getTeamMember({
-      id: custodian.id,
+    // The custodian is loaded from this workspace and the self-only rule is
+    // applied to it; the booking's user link comes from that row, never from
+    // the posted `custodian.userId`.
+    const custodianFromDb = await resolveBookingCustodian({
+      custodianTeamMemberId: custodian.id,
       organizationId,
-      select: { id: true, userId: true },
-    }).catch((cause) => {
-      throw new ShelfError({
-        cause,
-        title: "Team member not found",
-        message: "The selected team member could not be found.",
-        additionalData: { userId, custodian },
-        label: "Booking",
-        status: 404,
-      });
+      userId,
+      access,
     });
-
-    /**
-     * A member whose booking custodian is fixed to themself may only name
-     * themself as the custodian.
-     */
-    if (bookingCustodianIsSelf(access) && custodianFromDb.userId !== userId) {
-      throw new ShelfError({
-        cause: null,
-        message: "Self user can assign booking to themselves only.",
-        label: "Booking",
-      });
-    }
 
     // `BookingFormSchema` returns a union across its action branches, so the
     // coerced dates widen to `Date | undefined` even though the "new" branch
@@ -328,8 +310,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       booking: {
         from,
         to,
-        custodianTeamMemberId: custodian.id,
-        custodianUserId: custodian?.userId ?? null,
+        custodianTeamMemberId: custodianFromDb.id,
         name: name!,
         description: description ?? null,
         organizationId,

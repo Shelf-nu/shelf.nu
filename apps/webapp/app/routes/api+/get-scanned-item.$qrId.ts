@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
@@ -15,6 +14,7 @@ import {
   ScannerPickerContextSchema,
   type ScannerPickerMeta,
 } from "~/modules/scanner/picker-meta.server";
+import { redactScannedItemForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -28,10 +28,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import {
-  sanitizeAssetExtraInclude,
-  sanitizeKitExtraInclude,
-} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -71,9 +67,11 @@ type ScannedBarcodeMatch = {
  * manage-assets picker shows.
  *
  * Shared by all three lookups (SAM id, QR code, SAM-shaped barcode) so a
- * scanned asset carries identical fields whichever one matched.
+ * scanned asset carries identical fields whichever one matched. Custodians
+ * the viewer may not see are redacted (`redactScannedItemForViewer`).
  *
  * @param args.asset - The asset row, fetched with `ASSET_INCLUDE`.
+ * @param args.visibility - The viewer and their `access.custody.seeAll`.
  * @param args.organizationId - The caller's workspace, for the picker bound.
  * @param args.auditSessionId - Audit session to count notes and images against.
  * @param args.pickerContext - Destination the scanner is filling, if any.
@@ -86,8 +84,10 @@ async function serializeScannedAsset<
   organizationId,
   auditSessionId,
   pickerContext,
+  visibility,
 }: {
   asset: T;
+  visibility: { canSeeAllCustody: boolean; userId: string };
   organizationId: string;
   auditSessionId?: string;
   pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
@@ -122,7 +122,7 @@ async function serializeScannedAsset<
     : null;
 
   return {
-    ...serializeAssetImage(asset),
+    ...serializeAssetImage(redactScannedItemForViewer(asset, visibility)),
     auditAssetId,
     auditNotesCount,
     auditImagesCount,
@@ -152,12 +152,18 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
       action: PermissionAction.read,
     });
+
+    /** Whose custody this viewer may see named in the response. */
+    const visibility = {
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+    };
 
     const { qrId } = getParams(params, z.object({ qrId: z.string() }), {
       additionalData: {
@@ -165,37 +171,9 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
-    const {
-      assetExtraInclude,
-      kitExtraInclude,
-      auditSessionId,
-      pickerContext,
-      source,
-    } = parseData(
+    const { auditSessionId, pickerContext, source } = parseData(
       searchParams,
       z.object({
-        assetExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for assetExtraInclude");
-            }
-          }),
-        kitExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for kitExtraInclude");
-            }
-          }),
         auditSessionId: z.string().optional(),
         /** `scanner` from the web scanner's SAM "View asset"; see above. */
         source: z.string().optional(),
@@ -225,8 +203,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           }),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
       source?: string;
@@ -265,19 +241,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
     };
 
-    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
-    // user-controlled JSON. Allowlist them before merging into the Prisma
-    // include so relation traversal / deep nesting cannot be injected.
-    const assetInclude: Prisma.AssetInclude = {
-      ...ASSET_INCLUDE,
-      ...(sanitizeAssetExtraInclude(assetExtraInclude) ?? {}),
-    };
-
-    const kitInclude: Prisma.KitInclude = {
-      ...KIT_INCLUDE,
-      ...(sanitizeKitExtraInclude(kitExtraInclude) ?? {}),
-    };
-
     const sequentialId = parseSequentialId(qrId);
 
     if (sequentialId) {
@@ -287,7 +250,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           organizationId,
           sequentialId,
         },
-        include: assetInclude,
+        include: ASSET_INCLUDE,
       });
 
       if (asset) {
@@ -304,6 +267,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               }),
             },
           })
@@ -328,8 +292,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             value: qrId,
             organizationId,
             include: {
-              asset: { include: assetInclude },
-              kit: { include: kitInclude },
+              asset: { include: ASSET_INCLUDE },
+              kit: { include: KIT_INCLUDE },
             },
           })
         : null;
@@ -353,6 +317,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               }),
             },
           })
@@ -361,7 +326,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
       if (barcode?.kit) {
         return data(
-          payload({ qr: { type: "kit" as const, kit: barcode.kit } })
+          payload({
+            qr: {
+              type: "kit" as const,
+              kit: redactScannedItemForViewer(barcode.kit, visibility),
+            },
+          })
         );
       }
 
@@ -379,18 +349,19 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    const include = {
-      ...QR_INCLUDE,
-      asset: { include: assetInclude },
-      kit: { include: kitInclude },
-    };
-
     const qr = await getQr({
       id: qrId,
-      include,
+      include: QR_INCLUDE,
     });
 
-    if (qr.organizationId !== organizationId) {
+    // The code and the item it is linked to must both be in the caller's
+    // workspace: a code row carries its own organizationId, independent of
+    // the asset's or kit's.
+    if (
+      qr.organizationId !== organizationId ||
+      (qr.asset && qr.asset.organizationId !== organizationId) ||
+      (qr.kit && qr.kit.organizationId !== organizationId)
+    ) {
       throw new ShelfError({
         cause: null,
         message:
@@ -423,12 +394,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+          kit: qr.kit ? redactScannedItemForViewer(qr.kit, visibility) : qr.kit,
           asset: qr.asset
             ? await serializeScannedAsset({
                 asset: qr.asset,
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               })
             : undefined,
         },
