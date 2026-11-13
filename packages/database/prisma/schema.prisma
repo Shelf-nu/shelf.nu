@@ -1963,6 +1963,18 @@ model BookingAsset {
   // read the id and look the location up themselves.
   sourceLocationId String?
 
+  // How this slice's units are attributed to source locations. Every slice of
+  // one (booking, asset) group is either all LEGACY or none: LEGACY slices
+  // have no `BookingAssetSource` rows and no `BookingDispositionShare` rows,
+  // KIT is a live kit slice with exactly one KIT source row, and AUTO /
+  // MANUAL are standalone slices whose units sit on loose source rows. A
+  // slice never returns to LEGACY once converted.
+  sourceAllocation BookingSourceAllocation @default(LEGACY)
+
+  // When this slice left LEGACY. Informational only: no check or reader
+  // depends on it beyond being set on every non-LEGACY slice.
+  sourcesConvertedAt DateTime? @db.Timestamptz(3)
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):
@@ -1975,6 +1987,122 @@ model BookingAsset {
   @@index([assetKitId])
   @@index([sourceKitId])
   @@index([sourceLocationId])
+}
+
+/// How a booking slice's units are attributed to source locations.
+enum BookingSourceAllocation {
+  /// Unconverted group: no source rows, no disposition shares.
+  LEGACY
+  /// Live kit slice of a converted group: exactly one KIT source row.
+  KIT
+  /// Standalone slice whose sources the server picked.
+  AUTO
+  /// Standalone slice whose sources a user picked.
+  MANUAL
+}
+
+/// Where a `BookingAssetSource` row's units come from.
+enum BookingSourceKind {
+  /// A manual placement (`locationId` set).
+  LOCATION
+  /// The pool's unplaced units.
+  UNPLACED
+  /// Units out whose origin is not a loose source, or history whose source is gone.
+  UNKNOWN
+  /// Planned units with no source yet. Never out, never history.
+  UNASSIGNED
+  /// The plan state of a live kit slice, tied to no loose source.
+  KIT
+}
+
+/// How a `BookingDispositionShare` row was made. Audit only.
+enum DispositionShareOrigin {
+  /// Written when a group converted from LEGACY.
+  SEEDED
+  /// Written by a check-in or other disposition writer.
+  RECORDED
+  /// Conversion quantity that fitted no slice (orphaned at birth).
+  OVERFLOW
+}
+
+/**
+ * One source of a converted booking slice: how many of the slice's units are
+ * planned from, out from and released from one source (a location, the
+ * unplaced units, an unknown origin, no source yet, or the slice's kit).
+ * Kind rules: `locationId` is set if and only if `kind` is LOCATION. Counters
+ * are never negative and `outQuantity + releasedQuantity <= quantity`.
+ * Derived values: pending = `quantity - releasedQuantity - outQuantity`,
+ * history = `dispatchedTotal - outQuantity` = the shares on this row.
+ * Every column is a plain scalar with no Prisma `@relation`, because one more
+ * relation on `BookingAsset` (its grandparent `Booking` is a hub) or a
+ * back-relation on `Location` / `Organization` pushes the extended client's
+ * generics past TypeScript's recursion limit (TS2321). The migration SQL
+ * creates the foreign keys (`bookingAssetId` CASCADE, `locationId` RESTRICT,
+ * `organizationId` CASCADE), the CHECK constraints and the unique key
+ * `BookingAssetSource_slice_kind_location_key` on
+ * `(bookingAssetId, kind, locationId) NULLS NOT DISTINCT`, which Prisma
+ * cannot express. All are registered in `src/protected-indexes.ts`.
+ */
+model BookingAssetSource {
+  id               String            @id @default(cuid())
+  organizationId   String
+  bookingAssetId   String
+  kind             BookingSourceKind
+  // Set if and only if `kind` is LOCATION. RESTRICT: a location with source
+  // rows must be evacuated before it can be deleted.
+  locationId       String?
+  // Planned units on this row (its share of the slice's booked quantity).
+  quantity         Int
+  // Units from this row physically out right now.
+  outQuantity      Int               @default(0)
+  // Planned units that came back or were used up and are no longer protected.
+  releasedQuantity Int               @default(0)
+  // Lifetime units sent out from this row, for reconciliation only.
+  dispatchedTotal  Int               @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([locationId])
+  @@index([organizationId, locationId])
+}
+
+/**
+ * Quantity-level attribution of a disposition log in a converted
+ * (booking, asset) group: `quantity` units of `consumptionLogId` count against
+ * slice `bookingAssetId` and its source row `bookingAssetSourceId`.
+ * Every disposition log of a converted group is fully shared (the shares sum
+ * to the log's quantity). `bookingAssetId` NULL is an orphaned share: its
+ * slice was removed, or at conversion the quantity fitted no slice. It counts
+ * against nobody and is never redistributed. Several rows may carry the same
+ * (log, slice, source) tuple, so there is deliberately no uniqueness on it.
+ * Plain scalar columns with no Prisma `@relation`, for the same TS2321 reason
+ * as `BookingAssetSource`. The migration SQL creates the foreign keys
+ * (`consumptionLogId`, `bookingId`, `assetId`, `organizationId` CASCADE;
+ * `bookingAssetId`, `bookingAssetSourceId` SET NULL) and the `quantity > 0`
+ * CHECK; the foreign keys are registered in `src/protected-indexes.ts`.
+ */
+model BookingDispositionShare {
+  id                   String                 @id @default(cuid())
+  organizationId       String
+  consumptionLogId     String
+  // The share's group: always equal to its log's booking and asset.
+  bookingId            String
+  assetId              String
+  // NULL = orphaned (the slice was removed or nothing fitted at conversion).
+  bookingAssetId       String?
+  bookingAssetSourceId String?
+  quantity             Int
+  origin               DispositionShareOrigin
+
+  createdAt DateTime @default(now())
+
+  @@index([consumptionLogId])
+  @@index([bookingAssetSourceId])
+  @@index([bookingAssetId])
+  @@index([bookingId, assetId])
+  @@index([assetId])
+  @@index([organizationId])
 }
 
 model Booking {

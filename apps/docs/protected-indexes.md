@@ -14,6 +14,8 @@ newest migration and prints what it kept.
 ## Protected indexes
 
 - `_AssetToTag_asset_idx`: optimizes asset filtering by tags
+- `BookingAssetSource_slice_kind_location_key`: one source row per booking
+  slice, kind and location, `NULLS NOT DISTINCT` (Prisma cannot express it)
 
 ## Protected foreign keys
 
@@ -22,14 +24,23 @@ extended client's generics past TypeScript's instantiation limit (TS2321). The
 migration that adds each column creates its foreign key by hand, so the database
 keeps the `ON DELETE` behaviour while Prisma does not know the key exists.
 
-| Foreign key                                       | On delete of the target                     |
-| ------------------------------------------------- | ------------------------------------------- |
-| `AssetModelCustomFieldDefault_customFieldId_fkey` | `CASCADE`: the model's default goes with it |
-| `BookingAsset_assetKitId_fkey`                    | `SET NULL`                                  |
-| `BookingAsset_bookingModelRequestId_fkey`         | `SET NULL`                                  |
-| `BookingAsset_sourceKitId_fkey`                   | `SET NULL`                                  |
-| `BookingAsset_sourceLocationId_fkey`              | `SET NULL`                                  |
-| `ConsumptionLog_bookingAssetId_fkey`              | `SET NULL`                                  |
+| Foreign key                                         | On delete of the target                                     |
+| --------------------------------------------------- | ----------------------------------------------------------- |
+| `AssetModelCustomFieldDefault_customFieldId_fkey`   | `CASCADE`: the model's default goes with it                 |
+| `BookingAsset_assetKitId_fkey`                      | `SET NULL`                                                  |
+| `BookingAsset_bookingModelRequestId_fkey`           | `SET NULL`                                                  |
+| `BookingAsset_sourceKitId_fkey`                     | `SET NULL`                                                  |
+| `BookingAsset_sourceLocationId_fkey`                | `SET NULL`                                                  |
+| `ConsumptionLog_bookingAssetId_fkey`                | `SET NULL`                                                  |
+| `BookingAssetSource_bookingAssetId_fkey`            | `CASCADE`                                                   |
+| `BookingAssetSource_locationId_fkey`                | `RESTRICT`: evacuate source rows before deleting a location |
+| `BookingAssetSource_organizationId_fkey`            | `CASCADE`                                                   |
+| `BookingDispositionShare_consumptionLogId_fkey`     | `CASCADE`                                                   |
+| `BookingDispositionShare_bookingId_fkey`            | `CASCADE`                                                   |
+| `BookingDispositionShare_assetId_fkey`              | `CASCADE`                                                   |
+| `BookingDispositionShare_bookingAssetId_fkey`       | `SET NULL`: the share becomes orphaned                      |
+| `BookingDispositionShare_bookingAssetSourceId_fkey` | `SET NULL`                                                  |
+| `BookingDispositionShare_organizationId_fkey`       | `CASCADE`                                                   |
 
 ## Adding a new one
 

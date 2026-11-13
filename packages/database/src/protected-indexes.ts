@@ -26,6 +26,8 @@ import { fileURLToPath } from "url";
  *
  * _AssetToTag_asset_idx: Optimizes tag filtering operations
  * PdfTemplate_*: partial and expression unique indexes Prisma cannot model
+ * BookingAssetSource_slice_kind_location_key: a NULLS NOT DISTINCT unique
+ * index Prisma cannot model
  */
 export const PROTECTED_INDEXES = [
   "_AssetToTag_asset_idx", // Critical for tag filtering performance
@@ -33,6 +35,9 @@ export const PROTECTED_INDEXES = [
   "PdfTemplate_one_default_per_organization_kind",
   // Template names unique per workspace and kind, ignoring case (lower(name)).
   "PdfTemplate_organizationId_kind_lower_name_key",
+  // One source row per (slice, kind, location), NULLS NOT DISTINCT. Also the
+  // index for BookingAssetSource_bookingAssetId_fkey.
+  "BookingAssetSource_slice_kind_location_key",
 ] as const;
 
 /**
@@ -53,6 +58,19 @@ export const PROTECTED_FOREIGN_KEYS = [
   "BookingAsset_sourceLocationId_fkey",
   // Which booking slice a consumption log row is attributed to (SET NULL).
   "ConsumptionLog_bookingAssetId_fkey",
+  // Booking slice source rows: removed with their slice and workspace; a
+  // location with source rows cannot be deleted (RESTRICT).
+  "BookingAssetSource_bookingAssetId_fkey",
+  "BookingAssetSource_locationId_fkey",
+  "BookingAssetSource_organizationId_fkey",
+  // Disposition shares: removed with their log, booking, asset and workspace;
+  // orphaned (SET NULL) when their slice or source row is removed.
+  "BookingDispositionShare_consumptionLogId_fkey",
+  "BookingDispositionShare_bookingId_fkey",
+  "BookingDispositionShare_assetId_fkey",
+  "BookingDispositionShare_bookingAssetId_fkey",
+  "BookingDispositionShare_bookingAssetSourceId_fkey",
+  "BookingDispositionShare_organizationId_fkey",
 ] as const;
 
 /** Escapes a database object name for use inside a regular expression. */
