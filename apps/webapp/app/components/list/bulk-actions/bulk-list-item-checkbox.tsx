@@ -15,7 +15,7 @@ import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Td } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import type { ListItemData } from "../list-item";
 
@@ -34,6 +34,18 @@ type BulkListItemCheckboxProps = {
   pageItems?: ListItemData[];
   className?: string;
 };
+
+/**
+ * The toast line shown when unticking a row turns "Select all" off.
+ *
+ * @param count - Rows on the page that stay ticked
+ * @returns What the selection holds now, in plain words
+ */
+function describeFallbackSelection(count: number): string {
+  if (count === 0) return "Nothing is selected now.";
+  if (count === 1) return "Only the 1 ticked row on this page is selected now.";
+  return `Only the ${count} ticked rows on this page are selected now.`;
+}
 
 export default function BulkListItemCheckbox({
   item,
@@ -81,21 +93,20 @@ export default function BulkListItemCheckbox({
     if (selectingAll && pageItems) {
       // The selection cannot say "every match except this row", so unticking
       // a row leaves "Select all" and keeps what the reader sees ticked: this
-      // page, minus the row (and, for a kit row, its assets). The toast says
-      // so, because the next bulk action now reaches this page only.
+      // page, minus the row and any disabled rows. The toast says so, because
+      // the next bulk action now reaches this page only.
       const leftOutKeys = new Set([
-        ...[item, ...(bulkItems ?? [])].map(bulkSelectionKey),
+        itemKey,
         ...disabledBulkItems.map(bulkSelectionKey),
       ]);
       const stillTicked = pageItems.filter(
-        (i) =>
-          i.id !== ALL_SELECTED_KEY && !leftOutKeys.has(bulkSelectionKey(i))
+        (i) => !leftOutKeys.has(bulkSelectionKey(i))
       );
       replaceSelectedBulkItems(stillTicked);
       showNotification({
         title: "Select all is off",
-        message: `Only the ${stillTicked.length} ticked rows on this page are selected now.`,
-        icon: { name: "check", variant: "gray" },
+        message: describeFallbackSelection(stillTicked.length),
+        icon: { name: "x", variant: "gray" },
         senderId: null,
       });
       return;

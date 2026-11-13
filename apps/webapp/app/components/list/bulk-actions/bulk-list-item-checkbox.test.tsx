@@ -135,7 +135,29 @@ describe("BulkListItemCheckbox with every result selected", () => {
     expect(store.get(notificationAtom)).toMatchObject({
       open: true,
       title: "Select all is off",
+      message: "Only the 2 ticked rows on this page are selected now.",
+      icon: { name: "x", variant: "gray" },
     });
+  });
+
+  it.each([
+    {
+      disabled: [{ id: "p2-a" }],
+      message: "Only the 1 ticked row on this page is selected now.",
+    },
+    {
+      disabled: [{ id: "p2-a" }, { id: "p2-c" }],
+      message: "Nothing is selected now.",
+    },
+  ])("words the fallback for $message", ({ disabled, message }) => {
+    const store = renderPageTwo({
+      selected: SELECTED_ALL_FROM_PAGE_ONE,
+      disabled,
+    });
+
+    fireEvent.click(screen.getByTestId("row-p2-b").querySelector("td")!);
+
+    expect(store.get(notificationAtom).message).toBe(message);
   });
 
   it("keeps listed-only ticks on a screen whose selection is saved", () => {

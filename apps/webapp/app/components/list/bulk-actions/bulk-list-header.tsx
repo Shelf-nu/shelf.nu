@@ -3,7 +3,9 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import {
   clearSelectedBulkItemsAtom,
+  selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
+  selectionIsFormStateAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
@@ -12,6 +14,7 @@ import { PartialCheckboxIcon } from "~/components/icons/library";
 import { Th } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import type { ListItemData } from "../list-item";
 
@@ -63,11 +66,19 @@ export default function BulkListHeader({
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const totalItemsSelected = useAtomValue(selectedBulkItemsCountAtom);
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const selectionIsFormState = useAtomValue(selectionIsFormStateAtom);
 
-  const partialItemsSelected =
-    totalItemsSelected > 0 && totalItemsSelected < items.length;
+  // "Select all" ticks every row matching the filters, on every page, while
+  // listing only the rows of the page it was clicked on. The header follows
+  // the rows (see BulkListItemCheckbox): ticked under the marker, except on
+  // manage-* screens, whose rows tick only when listed.
+  const selectingAll =
+    !selectionIsFormState && isSelectingAllItems(selectedBulkItems);
 
-  const allItemsSelected = totalItemsSelected >= items.length;
+  const allItemsSelected = selectingAll || totalItemsSelected >= items.length;
+
+  const partialItemsSelected = !allItemsSelected && totalItemsSelected > 0;
 
   const clearSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
 
