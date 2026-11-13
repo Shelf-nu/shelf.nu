@@ -101,14 +101,14 @@ beforeEach(() => {
 });
 
 describe("requireOrganizationAccess workspace lapse gate", () => {
-  it("allows an active TEAM workspace with one query: the membership read", async () => {
+  it("allows an active TEAM workspace with one Prisma read: the membership", async () => {
     givenMembership(membershipRow({ ownerTierLimitId: "tier_2" }));
 
     await expect(
       requireOrganizationAccess(mobileRequest(), CALLER_ID)
     ).resolves.toBe(ORG_ID);
-    // The owner's tier rides on the membership row, so the gate makes no
-    // query of its own on the hot path.
+    // The owner's tier rides on the membership read, so the gate makes no
+    // separate owner or tier-limit read on the hot path.
     expect(membershipFindUnique).toHaveBeenCalledTimes(1);
     expect(ownerFindUniqueOrThrow).not.toHaveBeenCalled();
     expect(customTierLimitFind).not.toHaveBeenCalled();

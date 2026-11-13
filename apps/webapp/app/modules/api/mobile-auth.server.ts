@@ -2,8 +2,8 @@ import { Roles } from "@prisma/client";
 import type {
   AssetType,
   ConsumptionType,
-  Organization,
   OrganizationRoles,
+  Prisma,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -276,9 +276,12 @@ export async function getUserOrganizations(userId: string) {
 }
 
 /**
- * What the mobile workspace gate reads from a membership row, in the same query
- * that proves the membership: the workspace's type and admin switch, its owner
- * and the owner's tier limit, and the caller's Shelf system roles. Spread it
+ * What the mobile workspace gate reads from a membership row, in the same
+ * Prisma read that proves the membership: the workspace's type and admin
+ * switch, its owner and the owner's tier limit, and the caller's Shelf system
+ * roles. Prisma loads each nested relation with its own statement, so the read
+ * runs a handful of small primary-key lookups; the gate adds no read of its
+ * own. Spread it
  * into any `userOrganization` select whose rows go to
  * {@link mobileWorkspaceAccessFromMembership}.
  */
@@ -295,12 +298,9 @@ export const MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT = {
 } as const;
 
 /** A membership row selected with {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}. */
-type MobileWorkspaceGateMembership = {
-  organization: Pick<Organization, "type" | "userId" | "workspaceDisabled"> & {
-    owner: { tier: { tierLimitId: string | null } };
-  };
-  user: { roles: { name: string }[] };
-};
+type MobileWorkspaceGateMembership = Prisma.UserOrganizationGetPayload<{
+  select: typeof MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT;
+}>;
 
 /**
  * Messages the companion shows when a workspace is inactive, by why it is
@@ -338,8 +338,8 @@ const CONTACT_SUPPORT_SUFFIX = "Contact Shelf support for more information.";
  *   `teamTierLimitHasLapsed` rule (false when premium features are off);
  * - Shelf admins pass through, as they do on web.
  *
- * Pure: it reads only the membership row, so the gate costs no query of its
- * own.
+ * Pure: it reads only the membership row, so the gate adds no database read
+ * beyond the membership read that proves access.
  *
  * @param membership - A row selected with
  *   {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}.
@@ -428,7 +428,7 @@ export function mobileWorkspaceAccessFromMembership({
 
 /**
  * Reads the caller's membership of one workspace, with what the lapse gate
- * needs, in a single query, and answers whether the caller may act there (see
+ * needs, in one Prisma read, and answers whether the caller may act there (see
  * {@link mobileWorkspaceAccessFromMembership}).
  *
  * @param args.userId - The signed-in caller.
