@@ -610,7 +610,7 @@ function BookingsListContent() {
           {teamOrgs.length > 0
             ? "Your personal workspace tracks your own gear. Switch to a team workspace to plan and reserve equipment."
             : hasInactiveTeam
-            ? "Your personal workspace tracks your own gear. Your team workspace is inactive; Settings shows why."
+            ? "Your personal workspace tracks your own gear. Your team workspace is inactive; the workspace list in Settings shows why."
             : "Your personal workspace tracks your own gear. Create a team workspace on the web to plan and reserve equipment."}
         </Text>
         {hasInactiveTeam ? (

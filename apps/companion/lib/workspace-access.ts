@@ -9,11 +9,11 @@
  * server without the fields reads every workspace as active, which is what
  * such a server does.
  *
- * MIRROR of `MOBILE_WORKSPACE_INACTIVE_REASON` in
- * apps/webapp/app/modules/api/mobile-auth.server.ts: the reason string and the
- * fallback message (used only when the server sends none) are copies, for
- * display only; the server refuses inactive workspaces on its own. Extraction
- * target: a pure `packages/*` mobile-contract module (none yet).
+ * `WORKSPACE_INACTIVE_REASON` is a MIRROR of `MOBILE_WORKSPACE_INACTIVE_REASON`
+ * in apps/webapp/app/modules/api/mobile-auth.server.ts, for display only; the
+ * server refuses inactive workspaces on its own. Extraction target: a pure
+ * `packages/*` mobile-contract module (none yet). The fallback texts here are
+ * the app's own words, used only when a server sends no message.
  *
  * @see apps/webapp/app/modules/api/mobile-auth.server.ts `getMobileWorkspaceStates`
  * @see components/inactive-workspace-screen.tsx

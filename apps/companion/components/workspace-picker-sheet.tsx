@@ -1,8 +1,8 @@
 /**
  * WorkspacePickerSheet: the list of the person's workspaces to switch between.
  *
- * Lists every workspace in a scrolling sheet, marks the open one and any
- * inactive one, and closes from its header. A sheet rather than a native
+ * Lists every workspace in a scrolling sheet, marks the open one, gives an
+ * inactive one its reason (the server's text), and closes from its header. A sheet rather than a native
  * alert: Android alerts keep only three buttons, so a longer list would lose
  * workspaces and its Cancel.
  *
@@ -24,6 +24,7 @@ import { createStyles } from "@/lib/create-styles";
 import { useTheme } from "@/lib/theme-context";
 import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 import {
+  inactiveWorkspaceMessage,
   isWorkspaceInactive,
   workspaceSwitchLabel,
 } from "@/lib/workspace-access";
@@ -99,7 +100,11 @@ export default function WorkspacePickerSheet({
                   <Text style={styles.rowName} numberOfLines={2}>
                     {org.name}
                   </Text>
-                  {inactive && <Text style={styles.rowHint}>Inactive</Text>}
+                  {inactive && (
+                    <Text style={styles.rowHint}>
+                      {`Inactive. ${inactiveWorkspaceMessage(org)}`}
+                    </Text>
+                  )}
                 </View>
                 {isCurrent && (
                   <Ionicons
