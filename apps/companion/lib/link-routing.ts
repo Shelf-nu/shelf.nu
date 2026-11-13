@@ -68,8 +68,20 @@ export type SystemPathInput = {
  * @returns true when the link is the hook's, false when it is the router's
  */
 function isKeptFromRouter(url: string): boolean {
-  if (classifyResourcePath(splitLinkUrl(url).segments) !== null) return true;
-  return nativeRouteForLink(url) !== url;
+  return readLink(url).kept;
+}
+
+/**
+ * Reads a link once for both questions: whether the router leaves it alone
+ * (`isKeptFromRouter`), and the route `nativeRouteForLink` maps it to.
+ *
+ * @param url - the raw URL the OS delivered
+ * @returns whether the link is the hook's, and its route
+ */
+function readLink(url: string): { kept: boolean; route: string } {
+  const route = nativeRouteForLink(url);
+  const named = classifyResourcePath(splitLinkUrl(url).segments) !== null;
+  return { kept: named || route !== url, route };
 }
 
 /**
@@ -122,8 +134,7 @@ export function linkAction(url: string, link: LinkRead): LinkAction {
   if (link.type === "qr") {
     return { kind: "qr", id: link.id, origin: link.origin };
   }
-  if (!isKeptFromRouter(url)) return { kind: "none" };
-  const route = nativeRouteForLink(url);
-  if (route === "/") return { kind: "none" };
+  const { kept, route } = readLink(url);
+  if (!kept || route === "/") return { kind: "none" };
   return { kind: "route", route };
 }

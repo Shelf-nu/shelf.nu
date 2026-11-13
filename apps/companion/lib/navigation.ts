@@ -32,8 +32,8 @@ export type TabRoot =
  * same-stack list→detail navigation.
  *
  * Every cross-surface navigation into a tab's nested route MUST go through
- * this helper, or through `openLinkedRoute` for a route a claimed web link
- * maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
+ * this helper, or through `openLinkedRoute` for the route an incoming link
+ * (`https://` or `shelf://`) maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
  * from outside that tab's own stack.
  *
  * @param tabRoot - the target tab's index route

@@ -151,6 +151,14 @@ test("a link that names no screen of the app stays with the router", () => {
   }
 });
 
+test("a link with an empty path opens nothing: the start screen at launch, no change later", () => {
+  for (const url of ["shelf://", "https://app.shelf.nu/"]) {
+    assert.equal(systemPathFor({ path: url, initial: true }), "/", url);
+    assert.equal(systemPathFor({ path: url, initial: false }), null, url);
+    assert.deepEqual(linkAction(url, { type: "unknown" }), { kind: "none" });
+  }
+});
+
 test("an unknown path whose query carries a refused id is kept from the router and opens nothing", () => {
   const url = "shelf://reports?orgId=bad%20id";
   assert.equal(systemPathFor({ path: url, initial: true }), "/");

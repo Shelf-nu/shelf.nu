@@ -131,6 +131,10 @@ export function parseDeepLink(url: string): ParsedLink {
             : undefined;
         return { type: "qr", id, origin };
       }
+      default:
+        // A resource the hook needs no API call for: `linkAction` opens the
+        // route `nativeRouteForLink` names, whatever kind is read here.
+        return { type: "unknown" };
     }
   } catch {
     return { type: "unknown" };
@@ -212,7 +216,9 @@ export function resolveTappedQr(
 
 /**
  * Handles incoming deep links and navigates to the appropriate screen.
- * Call this hook inside your authenticated layout so navigation is available.
+ * Mounted once in the root layout (`RootLayoutNav` in `app/_layout.tsx`),
+ * beside the navigator, so it listens on the sign-in screen as well as in the
+ * tabs.
  */
 export function useDeepLinkHandler() {
   useEffect(() => {

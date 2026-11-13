@@ -1,5 +1,5 @@
 ---
-description: Adding a Companion deep-linkable route (Universal Links / App Links) requires updating the allowlist in FOUR places that must stay in sync — plus the screen must exist. Never claim the whole domain, never hand a claimed path back to the OS via Linking.openURL, and every claimed prefix MUST have a +native-intent mapping or cold starts hang on the splash.
+description: Adding a Companion deep-linkable route (Universal Links / App Links) requires updating the allowlist in FOUR places that must stay in sync, plus the screen must exist. Never claim the whole domain, never hand a claimed path back to the OS via Linking.openURL, and every claimed prefix MUST be matched in resource-path.ts so the router keeps it off an unmatched route.
 paths:
   - "apps/webapp/app/routes/*well-known*"
   - "apps/companion/app.json"
@@ -51,13 +51,15 @@ binary → require a new app build + store submission (no OTA).
 
 ## Three hard rules — getting these wrong is a production incident
 
-❌ **Never claim an HTTPS prefix without a `+native-intent` mapping.** The OS
-delivers EVERY nested path under a claimed prefix (the canonical web asset URL
-is `/assets/:id/overview`). Without a rewrite the router lands on an unmatched
-route at cold start and the user hangs on the splash forever (the 1.1.0
-build-25 bug). Deeper-nested paths map to the resource DETAIL screen — that is
-what the tapper wants. `app/+not-found.tsx` redirects any remaining unmatched
-route to the start screen as a last-resort net.
+❌ **Never claim an HTTPS prefix without a `resource-path.ts` match (#3).** The
+OS delivers EVERY nested path under a claimed prefix (the canonical web asset
+URL is `/assets/:id/overview`). A prefix `matchResourcePath` does not know is
+handed to the router unchanged, which lands on an unmatched route at cold start
+and can leave the user on the splash screen. A matched prefix is kept from the
+router (`systemPathFor` returns the start screen at launch), and
+`nativeRouteForLink` maps deeper-nested paths to the resource DETAIL screen,
+which is what the tapper wants. `app/+not-found.tsx` redirects any remaining
+unmatched route to the start screen as a last-resort net.
 
 ❌ **Never claim the whole domain / never add an auth path.** Do not use a `/*`
 wildcard and never list `/login`, `/oauth*`, `/sso-login`, `/forgot-password`,
@@ -72,5 +74,5 @@ in-app browser) instead. Every web page the app opens goes through it,
 tapped links included (`openLink` in `lib/link-actions.ts`).
 
 ✅ Allowlist mirrors a real native screen, is path-scoped (trailing slash so
-index pages aren't claimed), has a `+native-intent` mapping for cold starts,
+index pages aren't claimed), is matched in `resource-path.ts` (#3),
 and web hand-offs go through `openShelfWebUrl`.
