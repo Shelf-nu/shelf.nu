@@ -19442,6 +19442,7 @@ describe("addScannedAssetsToBooking asset notes", () => {
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([]);
 
+    // why: the write returns the booking the notes link to by id and name.
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({
       id: "booking-scan",
@@ -19449,6 +19450,8 @@ describe("addScannedAssetsToBooking asset notes", () => {
       status: BookingStatus.RESERVED,
     });
 
+    // why: the note builder reads the scanned kit's members to tell kit
+    // arrivals from standalone ones, and names the kit in a member's note.
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue([
       {
