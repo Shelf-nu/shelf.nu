@@ -431,6 +431,8 @@ export default function EditAssetScreen() {
               onSelect={(loc) => form.setSelectedLocation(loc)}
               onClear={() => form.setSelectedLocation(null)}
               isLoading={form.isLocationsLoading}
+              notice={form.locationsNotice}
+              onRetry={form.retryLoadLocations}
               searchPlaceholder="Search locations..."
               renderItemIcon={() => (
                 <Ionicons

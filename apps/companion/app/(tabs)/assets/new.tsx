@@ -42,7 +42,12 @@ import {
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 import { valuationFromInput } from "@/lib/asset-valuation";
 import { useAllLocations } from "@/hooks/use-all-locations";
-import { moreRowsHint, visibleRows } from "@/lib/visible-rows";
+import {
+  incompleteListNotice,
+  moreRowsHint,
+  visibleRows,
+} from "@/lib/visible-rows";
+import { IncompleteListNotice } from "@/components/asset-edit/incomplete-list-notice";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -169,10 +174,20 @@ export default function CreateAssetScreen() {
       api.locations(orgId, undefined, { page, perPage }),
     []
   );
-  const { locations, isLocationsLoading, loadLocations } = useAllLocations(
-    currentOrg?.id,
-    fetchLocationsPage
-  );
+  const {
+    locations,
+    isLocationsLoading,
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loadLocations,
+  } = useAllLocations(currentOrg?.id, fetchLocationsPage);
+  // Set when the list is missing rows: a page failed, or the load hit its limit.
+  const locationsNotice = incompleteListNotice({
+    noun: "locations",
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loaded: locations.length,
+  });
 
   // ── Load tags ───────────────────────────────────
   // Guards against a stale response winning after an org switch: each call gets
@@ -318,8 +333,9 @@ export default function CreateAssetScreen() {
         l.name.toLowerCase().includes(locationSearch.toLowerCase())
       )
     : locations;
-  // Draw at most a page of rows; the search box reaches the rest.
-  const shownLocations = visibleRows(filteredLocations);
+  // Draw at most a page of rows, led by the selected one when it sorts after
+  // them; the search box reaches the rest.
+  const shownLocations = visibleRows(filteredLocations, selectedLocation?.id);
 
   // ── Image Picker ───────────────────────────────
   const pickImage = async (source: "camera" | "library") => {
@@ -860,52 +876,52 @@ export default function CreateAssetScreen() {
               ) : filteredLocations.length === 0 ? (
                 <Text style={styles.pickerEmpty}>No locations found</Text>
               ) : (
-                <>
-                  <ScrollView
-                    nestedScrollEnabled
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {shownLocations.rows.map((loc) => (
-                      <TouchableOpacity
-                        key={loc.id}
-                        style={[
-                          styles.pickerItem,
-                          selectedLocation?.id === loc.id &&
-                            styles.pickerItemSelected,
-                        ]}
-                        onPress={() => {
-                          setSelectedLocation(
-                            selectedLocation?.id === loc.id ? null : loc
-                          );
-                          setShowLocationPicker(false);
-                          setLocationSearch("");
-                        }}
-                      >
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {shownLocations.rows.map((loc) => (
+                    <TouchableOpacity
+                      key={loc.id}
+                      style={[
+                        styles.pickerItem,
+                        selectedLocation?.id === loc.id &&
+                          styles.pickerItemSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedLocation(
+                          selectedLocation?.id === loc.id ? null : loc
+                        );
+                        setShowLocationPicker(false);
+                        setLocationSearch("");
+                      }}
+                    >
+                      <Ionicons
+                        name="location-outline"
+                        size={16}
+                        color={colors.muted}
+                      />
+                      <Text style={styles.pickerItemText}>{loc.name}</Text>
+                      {selectedLocation?.id === loc.id && (
                         <Ionicons
-                          name="location-outline"
-                          size={16}
-                          color={colors.muted}
+                          name="checkmark"
+                          size={18}
+                          color={colors.iconActive}
                         />
-                        <Text style={styles.pickerItemText}>{loc.name}</Text>
-                        {selectedLocation?.id === loc.id && (
-                          <Ionicons
-                            name="checkmark"
-                            size={18}
-                            color={colors.iconActive}
-                          />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                  {/* Last row of the list, so it scrolls with the rows instead
+                      of taking fixed height from them. */}
                   {shownLocations.hiddenCount > 0 && (
-                    <Text style={styles.pickerEmpty}>
+                    <Text style={styles.pickerHint}>
                       {moreRowsHint(
                         shownLocations.rows.length,
                         filteredLocations.length
                       )}
                     </Text>
                   )}
-                </>
+                </ScrollView>
               )}
               {selectedLocation && (
                 <TouchableOpacity
@@ -920,6 +936,13 @@ export default function CreateAssetScreen() {
                 </TouchableOpacity>
               )}
             </View>
+          )}
+          {showLocationPicker && !isLocationsLoading && locationsNotice && (
+            <IncompleteListNotice
+              notice={locationsNotice}
+              onRetry={loadLocations}
+              retryLabel="Retry loading locations"
+            />
           )}
         </View>
 
@@ -1207,7 +1230,8 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.gray300,
     borderRadius: borderRadius.sm,
     marginTop: spacing.xs,
-    maxHeight: 220,
+    // Room for the search box, at least four rows and the clear row.
+    maxHeight: 280,
     ...shadows.md,
   },
   pickerSearch: {
@@ -1220,6 +1244,13 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   pickerLoading: {
     padding: spacing.lg,
+  },
+  pickerHint: {
+    paddingHorizontal: 14,
+    paddingVertical: spacing.sm,
+    textAlign: "center",
+    color: colors.mutedLight,
+    fontSize: fontSize.sm,
   },
   pickerEmpty: {
     padding: spacing.lg,

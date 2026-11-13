@@ -11,7 +11,12 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { moreRowsHint, visibleRows } from "@/lib/visible-rows";
+import {
+  moreRowsHint,
+  visibleRows,
+  type IncompleteListNotice as Notice,
+} from "@/lib/visible-rows";
+import { IncompleteListNotice } from "./incomplete-list-notice";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 
 type PickerItem = {
@@ -38,6 +43,10 @@ type PickerFieldProps<T extends PickerItem> = {
   clearLabel?: string;
   /** Called when the picker is toggled open/closed */
   onToggle?: (isOpen: boolean) => void;
+  /** Set when `items` is missing rows; shown under the open dropdown. */
+  notice?: Notice | null;
+  /** Loads the items again, from the notice's Retry button. */
+  onRetry?: () => void;
 };
 
 export function PickerField<T extends PickerItem>({
@@ -53,6 +62,8 @@ export function PickerField<T extends PickerItem>({
   placeholder = `No ${label.toLowerCase()}`,
   clearLabel = `Clear ${label.toLowerCase()}`,
   onToggle,
+  notice,
+  onRetry,
 }: PickerFieldProps<T>) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -66,8 +77,9 @@ export function PickerField<T extends PickerItem>({
         item.name.toLowerCase().includes(search.toLowerCase())
       )
     : items;
-  // Draw at most a page of rows; the search box reaches the rest.
-  const shownItems = visibleRows(filteredItems);
+  // Draw at most a page of rows, led by the selected one when it sorts after
+  // them; the search box reaches the rest.
+  const shownItems = visibleRows(filteredItems, selectedId);
 
   const toggleOpen = () => {
     const next = !isOpen;
@@ -141,38 +153,35 @@ export function PickerField<T extends PickerItem>({
               No {label.toLowerCase()} found
             </Text>
           ) : (
-            <>
-              <ScrollView
-                nestedScrollEnabled
-                keyboardShouldPersistTaps="handled"
-              >
-                {shownItems.rows.map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[
-                      styles.pickerItem,
-                      selectedId === item.id && styles.pickerItemSelected,
-                    ]}
-                    onPress={() => handleSelect(item)}
-                  >
-                    {renderItemIcon?.(item)}
-                    <Text style={styles.pickerItemText}>{item.name}</Text>
-                    {selectedId === item.id && (
-                      <Ionicons
-                        name="checkmark"
-                        size={18}
-                        color={colors.iconActive}
-                      />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              {shownItems.rows.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[
+                    styles.pickerItem,
+                    selectedId === item.id && styles.pickerItemSelected,
+                  ]}
+                  onPress={() => handleSelect(item)}
+                >
+                  {renderItemIcon?.(item)}
+                  <Text style={styles.pickerItemText}>{item.name}</Text>
+                  {selectedId === item.id && (
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={colors.iconActive}
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {/* Last row of the list, so it scrolls with the rows instead of
+                  taking fixed height from them. */}
               {shownItems.hiddenCount > 0 && (
-                <Text style={styles.pickerEmpty}>
+                <Text style={styles.pickerHint}>
                   {moreRowsHint(shownItems.rows.length, filteredItems.length)}
                 </Text>
               )}
-            </>
+            </ScrollView>
           )}
           {selectedId && (
             <TouchableOpacity style={styles.pickerClear} onPress={handleClear}>
@@ -180,6 +189,13 @@ export function PickerField<T extends PickerItem>({
             </TouchableOpacity>
           )}
         </View>
+      )}
+      {isOpen && !isLoading && notice && (
+        <IncompleteListNotice
+          notice={notice}
+          onRetry={onRetry}
+          retryLabel={`Retry loading ${label.toLowerCase()} list`}
+        />
       )}
     </View>
   );
@@ -227,7 +243,8 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.gray300,
     borderRadius: borderRadius.sm,
     marginTop: spacing.xs,
-    maxHeight: 220,
+    // Room for the search box, at least four rows and the clear row.
+    maxHeight: 280,
     ...shadows.md,
   },
   pickerSearch: {
@@ -246,6 +263,13 @@ const useStyles = createStyles((colors, shadows) => ({
     textAlign: "center",
     color: colors.mutedLight,
     fontSize: fontSize.base,
+  },
+  pickerHint: {
+    paddingHorizontal: 14,
+    paddingVertical: spacing.sm,
+    textAlign: "center",
+    color: colors.mutedLight,
+    fontSize: fontSize.sm,
   },
   pickerItem: {
     flexDirection: "row",

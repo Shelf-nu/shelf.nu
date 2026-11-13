@@ -26,6 +26,10 @@ import { Alert } from "react-native";
 import { valuationToInput } from "@/lib/asset-valuation";
 import { useAllLocations } from "@/hooks/use-all-locations";
 import {
+  incompleteListNotice,
+  type IncompleteListNotice,
+} from "@/lib/visible-rows";
+import {
   api,
   type AssetDetail,
   type Category,
@@ -151,6 +155,10 @@ export type EditAssetFormState = {
   tags: Tag[];
   isCategoriesLoading: boolean;
   isLocationsLoading: boolean;
+  /** Set when `locations` is missing rows (a page failed, or the limit hit). */
+  locationsNotice: IncompleteListNotice | null;
+  /** Loads the locations again, for the notice's Retry button. */
+  retryLoadLocations: () => void;
   isTagsLoading: boolean;
   /** Server-computed: caller may mint tags inline (admins/owners). */
   canCreateTag: boolean;
@@ -297,10 +305,19 @@ export function useEditAssetForm(
       api.locations(orgId, undefined, { page, perPage }),
     []
   );
-  const { locations, isLocationsLoading, loadLocations } = useAllLocations(
-    orgId,
-    fetchLocationsPage
-  );
+  const {
+    locations,
+    isLocationsLoading,
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loadLocations,
+  } = useAllLocations(orgId, fetchLocationsPage);
+  const locationsNotice = incompleteListNotice({
+    noun: "locations",
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loaded: locations.length,
+  });
 
   // Stale-response guard: if orgId changes mid-flight, only the latest fetch
   // commits its tag list. Unlike the create screen we intentionally do NOT prune
@@ -458,6 +475,8 @@ export function useEditAssetForm(
     tags,
     isCategoriesLoading,
     isLocationsLoading,
+    locationsNotice,
+    retryLoadLocations: loadLocations,
     isTagsLoading,
     canCreateTag,
     createTag,
