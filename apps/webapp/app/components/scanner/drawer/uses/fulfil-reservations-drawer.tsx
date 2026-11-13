@@ -1085,7 +1085,16 @@ function FulfilCheckoutForm({
         </Button>
 
         <CheckoutDialog
-          notice={<ScanSubmitFailureAlert />}
+          // The drawer's own notice is behind this dialog, so this one
+          // carries the same link to where the save can be checked.
+          notice={
+            <ScanSubmitFailureAlert
+              savedCheck={{
+                to: `/bookings/${booking.id}`,
+                label: "Open the booking",
+              }}
+            />
+          }
           booking={booking}
           disabled={disableSubmit || isLoading}
           portalContainer={formElement || undefined}

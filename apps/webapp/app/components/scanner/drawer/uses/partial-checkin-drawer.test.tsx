@@ -522,6 +522,10 @@ describe("PartialCheckinDrawer after a save that got no answer", () => {
     expect(within(dialog).getByRole("alert").textContent).toContain(
       "The save took too long to answer."
     );
+    // With the same link as the drawer's notice, to where the result shows.
+    const link = within(dialog).getByRole("link", { name: "Open the booking" });
+    expect(link.getAttribute("href")).toBe("/bookings/booking-1");
+    expect(link.getAttribute("target")).toBe("_blank");
   });
 });
 
