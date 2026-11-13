@@ -32,8 +32,8 @@ export type TabRoot =
  * same-stack list→detail navigation.
  *
  * Every cross-surface navigation into a tab's nested route MUST go through
- * this helper, or through `openLinkedRoute` for a route a claimed web link
- * maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
+ * this helper, or through `openLinkedRoute` for the route an incoming link
+ * (`https://` or `shelf://`) maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
  * from outside that tab's own stack.
  *
  * @param tabRoot - the target tab's index route
@@ -46,8 +46,9 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
 }
 
 /**
- * Open the in-app route a claimed web link maps to (`nativeRouteForLink`),
- * anchored the same way as `pushIntoTab` so "back" returns to that tab's list.
+ * Open the in-app route a link maps to (`nativeRouteForLink`, for `https://`
+ * and `shelf://` links alike), anchored the same way as `pushIntoTab` so
+ * "back" returns to that tab's list.
  *
  * @param route - an in-app path such as `/assets/as_1` or `/assets/new?qrId=q`
  */

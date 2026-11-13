@@ -17,24 +17,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
-  getMobileWorkspaceAccess,
   requireMobileAuth,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
-import { ShelfError } from "~/utils/error";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 import { loader } from "~/routes/api+/mobile+/barcode.$value";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileSiblingMembership } from "@mocks/mobile-workspace-access";
 
 // @vitest-environment node
 
 const INACTIVE_CODE_MESSAGE =
-  "The workspace this code belongs to is inactive because its subscription has expired.";
+  "The workspace this code belongs to is inactive because its subscription has expired. Contact the workspace owner for more information.";
 
 // why: db is the boundary for the workspace capability read and the
 // sibling-workspace lookup; each test states the rows it needs.
@@ -49,19 +50,20 @@ vi.mock("~/database/db.server", () => ({
 // why: JWT validation and org access are out of scope, and the real module
 // loads the Supabase admin client. The shared re-sign step has its own tests;
 // here it tags the row so the response shows the asset went through it.
-vi.mock("~/modules/api/mobile-auth.server", async () => ({
+vi.mock("~/modules/api/mobile-auth.server", async (importOriginal) => ({
   // The real error body, so a test pins what the scanner receives.
-  mobileScanErrorBody: (
-    await vi.importActual<typeof import("~/modules/api/mobile-auth.server")>(
-      "~/modules/api/mobile-auth.server"
-    )
-  ).mobileScanErrorBody,
+  mobileScanErrorBody: (await importOriginal<typeof MobileAuthServer>())
+    .mobileScanErrorBody,
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
-  // why: the workspace lapse gate has its own tests
-  // (mobile-auth.server.workspace-lapse.test.ts); here the sibling workspace
-  // is active unless a test says otherwise.
-  getMobileWorkspaceAccess: vi.fn(async () => ({ access: "active" })),
+  // The workspace gate stays real: it decides each owning sibling from the
+  // membership rows each test supplies.
+  MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT: (
+    await importOriginal<typeof MobileAuthServer>()
+  ).MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+  mobileWorkspaceAccessFromMembership: (
+    await importOriginal<typeof MobileAuthServer>()
+  ).mobileWorkspaceAccessFromMembership,
   // why: custody visibility is pinned in mobile.barcode.test.ts; here every
   // caller may see all custody, so the photo step is all that shapes the row.
   // An Administrator's context: sees every holder's custody.
@@ -139,9 +141,6 @@ beforeEach(() => {
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
-  vi.mocked(getMobileWorkspaceAccess).mockImplementation(async () => ({
-    access: "active",
-  }));
   vi.mocked(db.organization.findUnique).mockResolvedValue({
     barcodesEnabled: true,
   } as never);
@@ -163,7 +162,7 @@ describe("GET /api/mobile/barcode/:value: asset photo", () => {
       .mockResolvedValueOnce(null as never)
       .mockResolvedValueOnce(barcodeRow() as never);
     vi.mocked(db.userOrganization.findMany).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2"),
     ] as never);
     vi.mocked(db.barcode.findMany).mockResolvedValue([
       { organizationId: "org-2" },
@@ -221,7 +220,7 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
       .mockResolvedValueOnce(null as never)
       .mockResolvedValueOnce(barcodeRow() as never);
     vi.mocked(db.userOrganization.findMany).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2"),
     ] as never);
     vi.mocked(db.barcode.findMany).mockResolvedValue([
       { organizationId: "org-2" },
@@ -237,21 +236,11 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
   it("refuses a barcode owned by an inactive sibling workspace, reading and recording nothing", async () => {
     vi.mocked(getBarcodeByValue).mockResolvedValueOnce(null as never);
     vi.mocked(db.userOrganization.findMany).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2", { ownerTierLimitId: "free" }),
     ] as never);
     vi.mocked(db.barcode.findMany).mockResolvedValue([
       { organizationId: "org-2" },
     ] as never);
-    vi.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
-      access: "inactive",
-      error: new ShelfError({
-        cause: null,
-        title: "Workspace inactive",
-        message: INACTIVE_CODE_MESSAGE,
-        label: "Auth",
-        status: 403,
-      }),
-    });
 
     const response = await loader(
       createLoaderArgs({
@@ -268,60 +257,87 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
     expect(response.data).toEqual({
       error: { message: INACTIVE_CODE_MESSAGE, reason: "workspace_inactive" },
     });
-    expect(getMobileWorkspaceAccess).toHaveBeenCalledWith({
-      userId: "user-1",
-      organizationId: "org-2",
-      reason: "code",
-    });
     // Only the current-workspace lookup ran; the sibling's payload was never read.
     expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
     expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
-  it("opens the code in the one active sibling when another owner is inactive", async () => {
-    vi.mocked(getBarcodeByValue)
-      .mockResolvedValueOnce(null as never)
-      .mockResolvedValueOnce(barcodeRow() as never);
+  it("answers 409, not the active sibling's asset, when an active and an inactive sibling both hold the barcode", async () => {
+    vi.mocked(getBarcodeByValue).mockResolvedValueOnce(null as never);
     vi.mocked(db.userOrganization.findMany).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
-      { organizationId: "org-3", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2"),
+      mobileSiblingMembership("org-3", { ownerTierLimitId: "free" }),
     ] as never);
     vi.mocked(db.barcode.findMany).mockResolvedValue([
       { organizationId: "org-2" },
       { organizationId: "org-3" },
     ] as never);
-    vi.mocked(getMobileWorkspaceAccess).mockImplementation(
-      async ({ organizationId }) =>
-        organizationId === "org-3"
-          ? {
-              access: "inactive",
-              error: new ShelfError({
-                cause: null,
-                message: INACTIVE_CODE_MESSAGE,
-                label: "Auth",
-                status: 403,
-              }),
-            }
-          : { access: "active" }
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/barcode/TRIPOD01?orgId=org-1"
+        ),
+        params: { value: "TRIPOD01" },
+      })
     );
 
-    await get();
+    // The label may be the lapsed workspace's; opening the active sibling's
+    // namesake would show the wrong asset.
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(409);
+    expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
+  });
 
-    // The inactive owner can never open the code, so it does not make the
-    // scan ambiguous.
-    expect(getBarcodeByValue).toHaveBeenLastCalledWith(
-      expect.objectContaining({ organizationId: "org-2" })
+  it("does not count a sibling without the barcode add-on as an owner, active or not", async () => {
+    // Only siblings that can use barcodes are searched; a workspace whose
+    // add-on is off is not an owner whether or not it is active, as on main.
+    // Here the add-on-less sibling is also admin-disabled, so the scan opens
+    // in the one barcode-enabled owner.
+    vi.mocked(getBarcodeByValue)
+      .mockResolvedValueOnce(null as never)
+      .mockResolvedValueOnce(barcodeRow() as never);
+    const disabledWithoutAddOn = mobileSiblingMembership("org-3", {
+      barcodesEnabled: false,
+    });
+    disabledWithoutAddOn.organization.workspaceDisabled = true;
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
+      mobileSiblingMembership("org-2"),
+      disabledWithoutAddOn,
+    ] as never);
+    vi.mocked(db.barcode.findMany).mockResolvedValue([
+      { organizationId: "org-2" },
+    ] as never);
+    // The add-on decides here, so the stub answers from the row as the real
+    // `canUseBarcodes` does with premium on.
+    vi.mocked(canUseBarcodes).mockImplementation(
+      (organization) => organization.barcodesEnabled
     );
-    expect(recordScanNonFatal).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org-2" })
+
+    let barcode: Awaited<ReturnType<typeof get>>["barcode"];
+    try {
+      ({ barcode } = await get());
+    } finally {
+      vi.mocked(canUseBarcodes).mockImplementation(() => true);
+    }
+
+    // The barcode lookup was never asked about the add-on-less workspace.
+    expect(db.barcode.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: { in: ["org-2"] },
+        }),
+      })
     );
+    expect(barcode.organizationId).toBe("org-2");
   });
 
   it("still answers 409 when two active siblings hold the barcode", async () => {
     vi.mocked(getBarcodeByValue).mockResolvedValueOnce(null as never);
     vi.mocked(db.userOrganization.findMany).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
-      { organizationId: "org-3", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2"),
+      mobileSiblingMembership("org-3"),
     ] as never);
     vi.mocked(db.barcode.findMany).mockResolvedValue([
       { organizationId: "org-2" },
@@ -339,33 +355,6 @@ describe("GET /api/mobile/barcode/:value: scan record", () => {
 
     assertIsDataWithResponseInit(response);
     expect(response.init?.status).toBe(409);
-    expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
-    expect(recordScanNonFatal).not.toHaveBeenCalled();
-  });
-
-  it("answers 404 and reads nothing when the sibling membership is gone by the time it is checked", async () => {
-    vi.mocked(getBarcodeByValue).mockResolvedValueOnce(null as never);
-    vi.mocked(db.userOrganization.findMany).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
-    ] as never);
-    vi.mocked(db.barcode.findMany).mockResolvedValue([
-      { organizationId: "org-2" },
-    ] as never);
-    vi.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
-      access: "not-member",
-    });
-
-    const response = await loader(
-      createLoaderArgs({
-        request: new Request(
-          "http://localhost:3000/api/mobile/barcode/TRIPOD01?orgId=org-1"
-        ),
-        params: { value: "TRIPOD01" },
-      })
-    );
-
-    assertIsDataWithResponseInit(response);
-    expect(response.init?.status).toBe(404);
     expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
     expect(recordScanNonFatal).not.toHaveBeenCalled();
   });

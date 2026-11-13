@@ -55,19 +55,10 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     // (mobile-auth.server.workspace-lapse.test.ts); here it answers membership
     // from the mocked membership row, as the gate does for an active workspace.
     getMobileWorkspaceAccess: vitest.fn(
-      async ({
-        userId,
-        organizationId,
-      }: {
-        userId: string;
-        organizationId: string;
-      }) => {
-        const { db: mockedDb } = await import("~/database/db.server");
-        const row = await mockedDb.userOrganization.findUnique({
-          where: { userId_organizationId: { userId, organizationId } },
-        });
-        return { access: row ? "active" : "not-member" };
-      }
+      async (args: { userId: string; organizationId: string }) =>
+        (
+          await import("@mocks/mobile-workspace-access")
+        ).fakeMobileWorkspaceAccess(args)
     ),
   };
 });

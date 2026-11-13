@@ -19,7 +19,8 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
-  getMobileWorkspaceAccess,
+  MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+  mobileWorkspaceAccessFromMembership,
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
@@ -117,14 +118,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!foundBarcode) {
       const memberships = await db.userOrganization.findMany({
         where: { userId: user.id, organizationId: { not: organizationId } },
-        // The owning workspace must hold the barcode capability itself —
-        // resolving through a sibling whose add-on lapsed would bypass its
-        // gate. Same canonical rule the /me serializer applies.
+        // An owner is a sibling that can use barcodes, active or not: a
+        // workspace without the barcode add-on is never searched, so it never
+        // owns a code, and resolving through one would bypass its gate. Same
+        // canonical rule the /me serializer applies. The workspace gate's
+        // columns ride along, so each owner is decided from this row.
         select: {
           organizationId: true,
-          organization: { select: { barcodesEnabled: true } },
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+          organization: {
+            select: {
+              barcodesEnabled: true,
+              ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.organization.select,
+            },
+          },
         },
       });
+      const membershipByOrgId = new Map(
+        memberships.map((membership) => [membership.organizationId, membership])
+      );
       const eligibleOrgIds = memberships
         .filter((membership) => canUseBarcodes(membership.organization))
         .map((membership) => membership.organizationId);
@@ -149,28 +161,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           distinct: ["organizationId"],
         });
 
-        // The code opens in the workspace that owns it, so each owner must
-        // still have the caller as a member and be active. Inactive and
-        // no-longer-member workspaces drop out before the ambiguity check:
-        // they can never open the code, so they must not block one that can.
-        const owners = await Promise.all(
-          owningOrgIds.map(async ({ organizationId: ownerId }) => ({
-            organizationId: ownerId,
-            workspace: await getMobileWorkspaceAccess({
-              userId: user.id,
-              organizationId: ownerId,
-              reason: "code",
-            }),
-          }))
-        );
-        const activeOwnerIds = owners
-          .filter((owner) => owner.workspace.access === "active")
-          .map((owner) => owner.organizationId);
-
         // Barcode uniqueness is per-workspace, so the same value can exist in
         // several sibling workspaces. Only a UNIQUE match may drive the jump:
-        // picking one arbitrarily would open the wrong asset.
-        if (activeOwnerIds.length > 1) {
+        // the physical label belongs to exactly one of them, and picking one
+        // would open the wrong asset. Inactive owners count here too: a label
+        // from a lapsed workspace must not open a namesake in an active one.
+        if (owningOrgIds.length > 1) {
           return data(
             {
               error: {
@@ -184,32 +180,37 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           );
         }
 
-        if (activeOwnerIds.length === 1) {
-          // Phase 2: the full payload, once, for the winner. Routed back
-          // through `getBarcodeByValue` so the original-case-then-uppercase
-          // preference stays identical to the current-workspace path.
-          const candidate = await getBarcodeByValue({
-            value,
-            organizationId: activeOwnerIds[0],
-            include: {
-              asset: { select: MOBILE_ASSET_SELECT },
-              kit: { select: MOBILE_KIT_SELECT },
-            },
+        if (owningOrgIds.length === 1) {
+          const ownerId = owningOrgIds[0].organizationId;
+          // The code opens in the workspace that owns it, so that workspace
+          // must be active, decided from the membership row loaded above (no
+          // read of its own). An inactive one refuses with its 403, like a QR
+          // scan of one of its codes.
+          const owner = mobileWorkspaceAccessFromMembership({
+            userId: user.id,
+            organizationId: ownerId,
+            membership: membershipByOrgId.get(ownerId) ?? null,
+            reason: "code",
           });
+          if (owner.access === "inactive") throw owner.error;
 
-          if (candidate) {
-            foundOrganizationId = activeOwnerIds[0];
-            foundBarcode = candidate;
-          }
-        } else {
-          // No active owner. A code held only by inactive workspaces says so,
-          // like a QR scan of one; a membership gone since the list above
-          // falls through to the 404 below.
-          const inactiveOwner = owners.find(
-            (owner) => owner.workspace.access === "inactive"
-          );
-          if (inactiveOwner?.workspace.access === "inactive") {
-            throw inactiveOwner.workspace.error;
+          if (owner.access === "active") {
+            // Phase 2: the full payload, once, for the winner. Routed back
+            // through `getBarcodeByValue` so the original-case-then-uppercase
+            // preference stays identical to the current-workspace path.
+            const candidate = await getBarcodeByValue({
+              value,
+              organizationId: ownerId,
+              include: {
+                asset: { select: MOBILE_ASSET_SELECT },
+                kit: { select: MOBILE_KIT_SELECT },
+              },
+            });
+
+            if (candidate) {
+              foundOrganizationId = ownerId;
+              foundBarcode = candidate;
+            }
           }
         }
       }

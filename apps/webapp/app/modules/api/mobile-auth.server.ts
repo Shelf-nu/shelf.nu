@@ -2,8 +2,8 @@ import { Roles } from "@prisma/client";
 import type {
   AssetType,
   ConsumptionType,
-  Organization,
   OrganizationRoles,
+  Prisma,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -22,7 +22,6 @@ import {
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
 import { ShelfError } from "~/utils/error";
-import { Logger } from "~/utils/logger";
 import {
   type PermissionAction,
   type PermissionEntity,
@@ -30,7 +29,7 @@ import {
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
-import { disabledTeamOrg } from "~/utils/stripe.server";
+import { teamTierLimitHasLapsed } from "~/utils/stripe.server";
 import {
   assertCanUseBookings,
   canUseAudits,
@@ -276,15 +275,32 @@ export async function getUserOrganizations(userId: string) {
   };
 }
 
-/** The organization columns the mobile lapse gate reads. */
-const MOBILE_WORKSPACE_GATE_SELECT = {
-  id: true,
-  type: true,
-  name: true,
-  imageId: true,
-  userId: true,
-  workspaceDisabled: true,
+/**
+ * What the mobile workspace gate reads from a membership row, in the same
+ * Prisma read that proves the membership: the workspace's type and admin
+ * switch, its owner and the owner's tier limit, and the caller's Shelf system
+ * roles. Prisma loads each nested relation with its own statement, so the read
+ * runs a handful of small primary-key lookups; the gate adds no read of its
+ * own. Spread it
+ * into any `userOrganization` select whose rows go to
+ * {@link mobileWorkspaceAccessFromMembership}.
+ */
+export const MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT = {
+  organization: {
+    select: {
+      type: true,
+      userId: true,
+      workspaceDisabled: true,
+      owner: { select: { tier: { select: { tierLimitId: true } } } },
+    },
+  },
+  user: { select: { roles: { select: { name: true } } } },
 } as const;
+
+/** A membership row selected with {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}. */
+type MobileWorkspaceGateMembership = Prisma.UserOrganizationGetPayload<{
+  select: typeof MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT;
+}>;
 
 /**
  * Messages the companion shows when a workspace is inactive, by why it is
@@ -305,9 +321,12 @@ export const MOBILE_INACTIVE_MESSAGES = {
   },
 } as const;
 
-/** Added for anyone but the owner, who is the one who can act on it. */
+/** Lapsed plan, said to anyone but the owner, who is the one who can renew. */
 const CONTACT_OWNER_SUFFIX =
   "Contact the workspace owner for more information.";
+
+/** Disabled workspace, said to everyone: only Shelf staff can switch it back. */
+const CONTACT_SUPPORT_SUFFIX = "Contact Shelf support for more information.";
 
 /**
  * Title of the 403 an inactive workspace gets. Routes that answer with a
@@ -331,8 +350,8 @@ export type MobileWorkspaceInactiveReason = "disabled" | "lapsed";
  * @param args.inactiveReason - Why the workspace is inactive.
  * @param args.scope - `"workspace"` when the caller acts in it, `"code"` when
  *   they opened a scanned code it owns.
- * @param args.isOwner - Whether the caller owns the workspace. Anyone else is
- *   told to contact the owner, who is the one who can act on it.
+ * @param args.isOwner - Whether the caller owns the workspace. Only the owner
+ *   can renew a lapsed plan; nobody in the workspace can lift an admin switch.
  * @returns The message, without purchase wording.
  */
 function inactiveWorkspaceMessage({
@@ -345,7 +364,13 @@ function inactiveWorkspaceMessage({
   isOwner: boolean;
 }): string {
   const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][scope];
-  return isOwner ? base : `${base} ${CONTACT_OWNER_SUFFIX}`;
+  const suffix =
+    inactiveReason === "disabled"
+      ? CONTACT_SUPPORT_SUFFIX
+      : isOwner
+      ? null
+      : CONTACT_OWNER_SUFFIX;
+  return suffix ? `${base} ${suffix}` : base;
 }
 
 /**
@@ -362,49 +387,39 @@ export function isMobileWorkspaceInactiveError(error: ShelfError): boolean {
 }
 
 /**
- * Whether the web app shows a workspace as disabled. Mobile twin of the
- * `disabledTeamOrg` loader flag in `routes/_layout+/_layout.tsx`, with the same
- * three inputs:
+ * Why the web app shows a workspace as disabled, if it does. Mobile twin of
+ * the `disabledTeamOrg` loader flag in `routes/_layout+/_layout.tsx`, with the
+ * same three inputs:
  *
  * - `workspaceDisabled`, the switch a Shelf admin sets on the admin dashboard;
- * - a TEAM workspace whose owner's tier is `free` or `tier_1` (the paid Team
- *   plan has lapsed), decided by the shared `disabledTeamOrg`;
+ * - a TEAM workspace whose owner's tier limit has lapsed, by the shared
+ *   `teamTierLimitHasLapsed` rule (false when premium features are off);
  * - Shelf admins pass through, as they do on web.
  *
- * Personal workspaces are never refused for their tier. `disabledTeamOrg`
- * returns false when premium features are off (self-hosted).
+ * Pure: it reads only the membership row, so the gate adds no database read
+ * beyond the membership read that proves access.
  *
- * @param args.isShelfAdmin - Whether the caller holds the Shelf `ADMIN` role.
- * @param args.organization - The workspace to check.
- * @returns Why the workspace is inactive for this caller (`disabled` by a
- *   Shelf admin, or `lapsed` Team plan), or `null` when it is active.
+ * @param membership - A row selected with
+ *   {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}.
+ * @returns `"disabled"` by a Shelf admin, `"lapsed"` Team plan, or `null`
+ *   when the workspace is active for this caller.
  */
-async function getMobileWorkspaceInactiveReason({
-  isShelfAdmin,
-  organization,
-}: {
-  isShelfAdmin: boolean;
-  organization: Pick<
-    Organization,
-    "id" | "type" | "name" | "imageId" | "userId" | "workspaceDisabled"
-  >;
-}): Promise<MobileWorkspaceInactiveReason | null> {
-  if (isShelfAdmin) return null;
+function getMobileWorkspaceInactiveReason(
+  membership: MobileWorkspaceGateMembership
+): MobileWorkspaceInactiveReason | null {
+  // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
+  if (membership.user.roles.some((role) => role.name === Roles.ADMIN)) {
+    return null;
+  }
+  const { organization } = membership;
   if (organization.workspaceDisabled) return "disabled";
-  // Only a TEAM workspace depends on the owner's paid tier, so the tier lookup
-  // inside `disabledTeamOrg` runs for those alone.
-  if (organization.type !== "TEAM") return null;
-
-  const lapsed = await disabledTeamOrg({
-    currentOrganization: organization,
-    organizations: [organization],
-    // why: `disabledTeamOrg` exempts any URL containing "account-details", a
-    // web page that stays open in a lapsed workspace. The phone app has no
-    // such page, and a request URL is caller-controlled, so the gate never
-    // hands one over.
-    url: "",
-  });
-  return lapsed ? "lapsed" : null;
+  if (
+    organization.type === "TEAM" &&
+    teamTierLimitHasLapsed(organization.owner.tier.tierLimitId)
+  ) {
+    return "lapsed";
+  }
+  return null;
 }
 
 /** What the caller may do in a workspace, from {@link getMobileWorkspaceAccess}. */
@@ -414,16 +429,63 @@ export type MobileWorkspaceAccess =
   | { access: "inactive"; error: ShelfError };
 
 /**
- * Reads the caller's membership of a workspace together with what the lapse
- * gate needs, and answers whether the caller may act there. Never throws for
- * the answer itself: an inactive workspace comes back with the 403 to throw,
- * so a caller weighing several workspaces can skip the inactive ones.
+ * Answers whether the caller may act in a workspace, from a membership row the
+ * caller already loaded. Never throws for the answer itself: an inactive
+ * workspace comes back with the 403 to throw, so a caller weighing several
+ * workspaces can skip the inactive ones.
  *
  * @param args.userId - The signed-in caller.
- * @param args.organizationId - The workspace to check.
+ * @param args.organizationId - The workspace the row belongs to.
+ * @param args.membership - The caller's membership row, selected with
+ *   {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}; `null` when none.
  * @param args.reason - `"workspace"` when the request acts in this workspace,
  *   `"code"` when it opens a scanned code this workspace owns; picks the
  *   refusal message.
+ * @returns `not-member`, `active`, or `inactive` with its 403 `ShelfError`.
+ */
+export function mobileWorkspaceAccessFromMembership({
+  userId,
+  organizationId,
+  membership,
+  reason,
+}: {
+  userId: string;
+  organizationId: string;
+  membership: MobileWorkspaceGateMembership | null;
+  reason: "workspace" | "code";
+}): MobileWorkspaceAccess {
+  if (!membership) return { access: "not-member" };
+
+  const inactiveReason = getMobileWorkspaceInactiveReason(membership);
+  if (!inactiveReason) return { access: "active" };
+
+  return {
+    access: "inactive",
+    error: new ShelfError({
+      cause: null,
+      title: MOBILE_WORKSPACE_INACTIVE_TITLE,
+      message: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: reason,
+        // `organization.userId` is the workspace owner.
+        isOwner: membership.organization.userId === userId,
+      }),
+      additionalData: { userId, organizationId },
+      label: "Auth",
+      status: 403,
+      shouldBeCaptured: false,
+    }),
+  };
+}
+
+/**
+ * Reads the caller's membership of one workspace, with what the lapse gate
+ * needs, in one Prisma read, and answers whether the caller may act there (see
+ * {@link mobileWorkspaceAccessFromMembership}).
+ *
+ * @param args.userId - The signed-in caller.
+ * @param args.organizationId - The workspace to check.
+ * @param args.reason - `"workspace"` or `"code"`; picks the refusal message.
  * @returns `not-member`, `active`, or `inactive` with its 403 `ShelfError`.
  */
 export async function getMobileWorkspaceAccess({
@@ -437,43 +499,15 @@ export async function getMobileWorkspaceAccess({
 }): Promise<MobileWorkspaceAccess> {
   const membership = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
-    select: {
-      id: true,
-      organization: { select: MOBILE_WORKSPACE_GATE_SELECT },
-      user: { select: { roles: { select: { name: true } } } },
-    },
+    select: MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
   });
 
-  if (!membership) return { access: "not-member" };
-
-  const { organization } = membership;
-  const inactiveReason = await getMobileWorkspaceInactiveReason({
-    // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
-    isShelfAdmin: membership.user.roles.some(
-      (role) => role.name === Roles.ADMIN
-    ),
-    organization,
+  return mobileWorkspaceAccessFromMembership({
+    userId,
+    organizationId,
+    membership,
+    reason,
   });
-
-  if (!inactiveReason) return { access: "active" };
-
-  return {
-    access: "inactive",
-    error: new ShelfError({
-      cause: null,
-      title: MOBILE_WORKSPACE_INACTIVE_TITLE,
-      message: inactiveWorkspaceMessage({
-        inactiveReason,
-        scope: reason,
-        // `organization.userId` is the workspace owner.
-        isOwner: organization.userId === userId,
-      }),
-      additionalData: { userId, organizationId },
-      label: "Auth",
-      status: 403,
-      shouldBeCaptured: false,
-    }),
-  };
 }
 
 /** Whether one of the caller's workspaces is active, as `/api/mobile/me` reports it. */
@@ -488,13 +522,14 @@ export type MobileWorkspaceState = {
 
 /**
  * Reads, for each of the caller's workspaces, whether the mobile API refuses
- * requests there. Same rules as {@link getMobileWorkspaceAccess}, so the app
- * can mark an inactive workspace before any request in it fails.
+ * requests there. Same rules as {@link getMobileWorkspaceAccess}, from one
+ * membership read, so the app can mark an inactive workspace before any
+ * request in it fails.
  *
  * @param args.userId - The signed-in caller.
  * @param args.organizationIds - The caller's workspaces, as `/me` lists them.
  * @returns The state of each workspace, keyed by its id. An id the caller is
- *   not a member of, or whose state could not be read (logged), is left out.
+ *   not a member of is left out.
  */
 export async function getMobileWorkspaceStates({
   userId,
@@ -509,69 +544,26 @@ export async function getMobileWorkspaceStates({
   const memberships = await db.userOrganization.findMany({
     where: { userId, organizationId: { in: organizationIds } },
     select: {
-      organization: { select: MOBILE_WORKSPACE_GATE_SELECT },
-      user: { select: { roles: { select: { name: true } } } },
+      organizationId: true,
+      ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
     },
   });
 
-  // A TEAM workspace that is not switched off lapses with its owner's tier, so
-  // workspaces sharing an owner share one tier read.
-  const reasonByKey = new Map<
-    string,
-    Promise<MobileWorkspaceInactiveReason | null>
-  >();
-
-  await Promise.all(
-    memberships.map(async ({ organization, user }) => {
-      // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
-      const isShelfAdmin = user.roles.some((role) => role.name === Roles.ADMIN);
-      const key =
-        !isShelfAdmin &&
-        organization.type === "TEAM" &&
-        !organization.workspaceDisabled
-          ? `owner:${organization.userId}`
-          : `workspace:${organization.id}`;
-      let reason = reasonByKey.get(key);
-      if (!reason) {
-        reason = getMobileWorkspaceInactiveReason({
-          isShelfAdmin,
-          organization,
-        });
-        reasonByKey.set(key, reason);
-      }
-
-      // Each workspace is decided on its own: one failed read leaves that
-      // workspace out (the caller reports it active; every other route still
-      // refuses it), and the others keep their answer.
-      let inactiveReason: MobileWorkspaceInactiveReason | null;
-      try {
-        inactiveReason = await reason;
-      } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Failed to read whether a workspace is active",
-            additionalData: { userId, organizationId: organization.id },
-            label: "Auth",
+  for (const membership of memberships) {
+    const inactiveReason = getMobileWorkspaceInactiveReason(membership);
+    states.set(membership.organizationId, {
+      inactive: inactiveReason !== null,
+      inactiveReason,
+      inactiveMessage: inactiveReason
+        ? inactiveWorkspaceMessage({
+            inactiveReason,
+            scope: "workspace",
+            // `organization.userId` is the workspace owner.
+            isOwner: membership.organization.userId === userId,
           })
-        );
-        return;
-      }
-
-      states.set(organization.id, {
-        inactive: inactiveReason !== null,
-        inactiveReason,
-        inactiveMessage: inactiveReason
-          ? inactiveWorkspaceMessage({
-              inactiveReason,
-              scope: "workspace",
-              // `organization.userId` is the workspace owner.
-              isOwner: organization.userId === userId,
-            })
-          : null,
-      });
-    })
-  );
+        : null,
+    });
+  }
 
   return states;
 }

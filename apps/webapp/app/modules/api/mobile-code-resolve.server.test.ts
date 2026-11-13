@@ -56,19 +56,10 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   // from the mocked membership row, so the QR path's wrong-workspace branches
   // stay driven by `userOrganization.findUnique`.
   getMobileWorkspaceAccess: vi.fn(
-    async ({
-      userId,
-      organizationId,
-    }: {
-      userId: string;
-      organizationId: string;
-    }) => {
-      const { db: mockedDb } = await import("~/database/db.server");
-      const row = await mockedDb.userOrganization.findUnique({
-        where: { userId_organizationId: { userId, organizationId } },
-      });
-      return { access: row ? "active" : "not-member" };
-    }
+    async (args: { userId: string; organizationId: string }) =>
+      (
+        await import("@mocks/mobile-workspace-access")
+      ).fakeMobileWorkspaceAccess(args)
   ),
   // why: custody visibility is read per owning workspace; the route tests pin
   // the filtering itself, so here every caller may see all custody and the
