@@ -91,10 +91,9 @@ const STATUS_FILTERS: StatusFilter[] = [
     emptyTitle: "No active bookings",
     emptyHint: "Active bookings will appear here when created",
   },
-  // why: the four single-status chips below read from @shelf/labels rather
-  // than being hand-typed. The COMPLETE one is where that drifted visibly — it
-  // said "Completed" while the badge on the very same row said "Complete",
-  // because badges go through formatStatus and these did not.
+  // why: the four single-status chips below read from @shelf/labels, the
+  // same source the status badges use (through formatStatus), so a chip and
+  // the badge on its rows always name a status the same way.
   {
     label: BOOKING_STATUS_LABELS.RESERVED,
     value: "RESERVED",
@@ -196,10 +195,9 @@ function BookingsListContent() {
   /**
    * The lens switch lives in the header, not in the body.
    *
-   * why: it used to sit under the search box as a third stacked control row,
-   * which pushed the actual bookings down and read as clutter. It also changes
-   * the WHOLE screen, so it belongs with the title rather than among the
-   * filters it replaces. Both options stay visible, since a segmented control
+   * why: a third control row under the search box would push the bookings
+   * down and read as clutter, and the switch changes the WHOLE screen, so it
+   * belongs with the title rather than among the filters it replaces. Both options stay visible, since a segmented control
    * is discoverable in a way a single toggling icon is not, and this is a
    * feature nobody knows exists yet.
    */

@@ -764,16 +764,13 @@ export async function assertMobileCanUseBookings(organizationId: string) {
  * Shared Prisma select shape for asset data returned by mobile scanner endpoints.
  * Used by both QR and barcode resolution routes for consistent responses.
  *
- * NOTE: Post-Phase-4a/4b the `Asset` model no longer carries direct `kitId` or
- * `location` columns — kit linkage now lives on the `AssetKit` pivot
- * (`assetKits`) and location on the `AssetLocation` pivot (`assetLocations`).
- * Custody also became 1:many (`Custody[]`). The companion app currently in
- * App Store review (since 2026-05-20) consumes the legacy flat shape
- * (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody` as a single
- * object). To keep that live build working without a forced update, mobile
- * routes fetch this select and then call `shapeMobileAssetResponse` to
- * flatten the pivot rows into the legacy shape — mirroring the
- * `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below.
+ * NOTE: the `Asset` model holds kit linkage on the `AssetKit` pivot
+ * (`assetKits`), location on the `AssetLocation` pivot (`assetLocations`) and
+ * custody as a list (`Custody[]`), while companion builds in users' hands read
+ * a flat shape (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody`
+ * as a single object). So mobile routes fetch this select and then call
+ * `shapeMobileAssetResponse` to flatten the pivot rows into that shape, the
+ * same way the `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below does.
  */
 export const MOBILE_ASSET_SELECT = {
   id: true,
@@ -852,13 +849,11 @@ export const MOBILE_ASSET_SELECT = {
  * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
  * web scanner drawers.
  *
- * NOTE: `Kit` no longer exposes a direct `assets` relation — it is now joined
- * via the `AssetKit` pivot (`assetKits`). We still need to surface the
- * per-asset status/availableToBook to the companion app in the legacy flat
- * shape (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`)
- * so the existing mobile clients in the App Store don't break. Mobile
- * endpoints fetch this select shape and then call
- * `shapeMobileKitResponse` to flatten the pivot rows.
+ * NOTE: a `Kit` reaches its assets through the `AssetKit` pivot
+ * (`assetKits`), while companion builds in users' hands read a flat shape
+ * (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`). Mobile
+ * endpoints fetch this select shape and then call `shapeMobileKitResponse` to
+ * flatten the pivot rows into it.
  *
  * Every member is selected, archived ones included, with its `archivedAt`:
  * `shapeMobileKitResponse` splits them into the active members the phone
