@@ -593,6 +593,10 @@ export default function FulfilReservationsDrawer({
 
   return (
     <ConfigurableDrawer
+      savedCheck={{
+        to: `/bookings/${session.bookingId}`,
+        label: "Open the booking",
+      }}
       schema={fulfilAndCheckoutSchema}
       items={items}
       onClearItems={clearList}

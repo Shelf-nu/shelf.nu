@@ -493,6 +493,7 @@ export default function CheckoutAssetsFromBooking() {
    * different booking (or to check-in) doesn't see stale data.
    */
   useBookingCheckinSessionInitialization({
+    draftScope: "checkout",
     session: {
       bookingId: booking.id,
       bookingName: booking.name,

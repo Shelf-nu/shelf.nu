@@ -215,7 +215,46 @@ export function readScanDraft(key: string): ScanListItems | null {
 export function clearScanDraft(key: string): void {
   try {
     localStorage.removeItem(key);
+    localStorage.removeItem(contextKey(key));
   } catch {
     // See `saveScanDraft`.
+  }
+}
+
+/** Where a draft's context is kept: beside the draft, and removed with it. */
+function contextKey(key: string): string {
+  return `${key}:context`;
+}
+
+/**
+ * Remembers one piece of context for a draft: what the operator was doing
+ * with the list when it was parked (on the bulk scanner, which action).
+ *
+ * It lives and dies with the draft: {@link clearScanDraft} removes it, and
+ * {@link readScanDraftContext} is only worth calling for a draft that
+ * {@link readScanDraft} has just returned, which is what enforces the expiry.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @param context - The value to put back with the list.
+ */
+export function saveScanDraftContext(key: string, context: string): void {
+  try {
+    localStorage.setItem(contextKey(key), context);
+  } catch {
+    // See `saveScanDraft`.
+  }
+}
+
+/**
+ * Reads the context saved with a draft.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns The saved value, or `null` when none was saved
+ */
+export function readScanDraftContext(key: string): string | null {
+  try {
+    return localStorage.getItem(contextKey(key));
+  } catch {
+    return null;
   }
 }

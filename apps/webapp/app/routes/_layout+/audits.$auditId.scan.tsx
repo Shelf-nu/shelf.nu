@@ -78,8 +78,11 @@ export const links: LinksFunction = () => [
  * removal the server never made.
  */
 export async function clientAction(args: ClientActionFunctionArgs) {
-  const formData = await args.request.clone().formData();
-  if (formData.get("intent") !== "complete-audit") {
+  // Read from the URL, not the body: the completion form is multipart and
+  // carries photos, which would be parsed in full just to read one field.
+  // `CompleteAuditDialog` puts the intent in its form's action URL.
+  const intent = new URL(args.request.url).searchParams.get("intent");
+  if (intent !== "complete-audit") {
     return args.serverAction();
   }
   return keepScanListOnSubmitFailure(args);

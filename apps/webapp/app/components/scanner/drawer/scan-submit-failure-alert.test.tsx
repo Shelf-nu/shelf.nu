@@ -3,6 +3,7 @@
  *
  * @see {@link file://./scan-submit-failure-alert.tsx}
  */
+import type { ComponentProps } from "react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +22,7 @@ vi.mock("react-router", async () => {
     useNavigation: () => mockNavigation(),
     // why: the shared Button renders a router Link for `to`, which needs a
     // router context. A plain anchor keeps the href and target assertable.
-    Link: ({ to, children, ...rest }: any) => (
+    Link: ({ to, children, ...rest }: ComponentProps<"a"> & { to: string }) => (
       <a href={to} {...rest}>
         {children}
       </a>

@@ -59,3 +59,49 @@ describe("scanner routes keep their list when a save gets no answer", () => {
     );
   });
 });
+
+/**
+ * Every scanner whose list lives only in the page keeps a draft of it, so a
+ * reload, a closed tab or an error page brings the list back. The audit
+ * scanner is absent on purpose: it stores each scan on the server as it
+ * happens. The hook tests cover what a draft does; this pins that each route
+ * is wired to one, under its own scope, so two scanners never share a list.
+ */
+describe("scanner routes keep a draft of their list", () => {
+  const read = (relativePath: string) =>
+    readFileSync(path.resolve(ROUTES_DIR, relativePath), "utf8");
+
+  it.each([
+    [
+      "bookings.$bookingId.overview.scan-assets.tsx",
+      /useBookingAssignSessionInitialization\(/,
+    ],
+    [
+      "bookings.$bookingId.overview.fulfil-and-checkout.tsx",
+      /useBookingFulfilSessionInitialization\(/,
+    ],
+    [
+      "bookings.$bookingId.overview.checkout-assets.tsx",
+      /draftScope: "checkout"/,
+    ],
+    [
+      "bookings.$bookingId.overview.checkin-assets.tsx",
+      /draftScope: "checkin"/,
+    ],
+    ["kits.$kitId.scan-assets.tsx", /useScanDraftOnEntry\(\{ scope: "kit"/],
+    [
+      "locations.$locationId.scan-assets-kits.tsx",
+      /useScanDraftOnEntry\(\{ scope: "location"/,
+    ],
+    ["scanner.tsx", /useScanDraftOnEntry\(\{\s*scope: "bulk"/],
+  ])("%s", (file, wiring) => {
+    expect(read(file)).toMatch(wiring);
+  });
+
+  it.each([
+    ["../../hooks/use-booking-assign-session-initialization.ts", '"assign"'],
+    ["../../hooks/use-booking-fulfil-session-initialization.ts", '"fulfil"'],
+  ])("%s keeps its own scope", (file, scope) => {
+    expect(read(file)).toContain(`scope: ${scope}`);
+  });
+});

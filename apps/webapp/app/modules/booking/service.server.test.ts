@@ -19384,6 +19384,19 @@ describe("addScannedAssetsToBooking", () => {
   it("changes nothing when a save that already landed is submitted again", async () => {
     expect.assertions(4);
 
+    // why: `clearAllMocks` keeps implementations, so the overrides below
+    // would answer every later test in the file. Each goes back when this
+    // test finishes.
+    for (const mock of [
+      db.booking.findFirst,
+      db.asset.findMany,
+      db.bookingAsset.findMany,
+      db.booking.update,
+      db.kit.findMany,
+    ]) {
+      restoreMockImplementationAfterTest(mock);
+    }
+
     // why: skips the overlap-conflict guard so the test can focus on the
     // resubmission, matching the kit-slice rescan test above.
     //@ts-expect-error missing vitest type

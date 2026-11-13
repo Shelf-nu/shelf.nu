@@ -869,6 +869,10 @@ export default function PartialCheckoutDrawer({
   return (
     <CheckoutDispositionContext.Provider value={contextValue}>
       <ConfigurableDrawer
+        savedCheck={{
+          to: `/bookings/${booking.id}`,
+          label: "Open the booking",
+        }}
         schema={partialCheckoutAssetsSchema}
         items={items}
         onClearItems={clearList}

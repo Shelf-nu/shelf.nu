@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
@@ -14,6 +14,7 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import AddAssetsToKitDrawer from "~/components/scanner/drawer/uses/add-assets-to-kit-drawer";
 import { db } from "~/database/db.server";
 import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
+import { useScanDraftOnEntry } from "~/hooks/use-scan-draft";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -163,6 +164,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function ScanAssetsForKit() {
+  const { kit } = useLoaderData<typeof loader>();
+  // Keeps the scanned codes through a reload, a closed tab or an error page.
+  useScanDraftOnEntry({ scope: "kit", targetId: kit.id });
+
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);

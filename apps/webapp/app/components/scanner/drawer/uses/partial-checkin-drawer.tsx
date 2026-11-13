@@ -1419,6 +1419,10 @@ export default function PartialCheckinDrawer({
   return (
     <DispositionContext.Provider value={dispositionCtxValue}>
       <ConfigurableDrawer
+        savedCheck={{
+          to: `/bookings/${booking.id}`,
+          label: "Open the booking",
+        }}
         schema={partialCheckinAssetsSchema}
         items={items}
         onClearItems={clearList}

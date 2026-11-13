@@ -34,6 +34,7 @@ import {
   setBookingExpectedAssetsAtom,
   startBookingCheckinSessionAtom,
 } from "~/atoms/qr-scanner";
+import { useScanDraft } from "~/hooks/use-scan-draft";
 
 /**
  * Arguments for {@link useBookingCheckinSessionInitialization}.
@@ -54,6 +55,11 @@ type UseBookingCheckinSessionInitializationArgs = {
    * scanned, and already-reconciled buckets.
    */
   expectedAssets: BookingExpectedAsset[];
+  /**
+   * Which scanner this is. Check Out and Check In share this hook and can be
+   * open on the same booking, so each keeps its own draft of the scan list.
+   */
+  draftScope: "checkin" | "checkout";
 };
 
 /**
@@ -85,7 +91,7 @@ type UseBookingCheckinSessionInitializationArgs = {
 export function useBookingCheckinSessionInitialization(
   args: UseBookingCheckinSessionInitializationArgs
 ): void {
-  const { session, expectedAssets } = args;
+  const { session, expectedAssets, draftScope } = args;
 
   const startSession = useSetAtom(startBookingCheckinSessionAtom);
   const setExpectedAssets = useSetAtom(setBookingExpectedAssetsAtom);
@@ -96,6 +102,13 @@ export function useBookingCheckinSessionInitialization(
   // `scannedItemsAtom`) on every render that happens to have the same
   // booking.
   const initializedBookingIdRef = useRef<string | null>(null);
+
+  // Keeps the scanned codes through a reload, a closed tab or an error page.
+  const { restoreDraft } = useScanDraft({
+    scope: draftScope,
+    targetId: session.bookingId,
+    seededTargetIdRef: initializedBookingIdRef,
+  });
 
   /**
    * Stable signature of the fields that meaningfully affect the
@@ -141,7 +154,9 @@ export function useBookingCheckinSessionInitialization(
     }
     initializedBookingIdRef.current = session.bookingId;
     startSession(session);
-  }, [session, session.bookingId, session.status, startSession]);
+    // After the clear above, so a parked list is what the operator sees.
+    restoreDraft();
+  }, [session, session.bookingId, session.status, startSession, restoreDraft]);
 
   // Effect 2: seed expected assets. Runs on initial mount and again
   // whenever the signature changes (loader refresh after a submit).

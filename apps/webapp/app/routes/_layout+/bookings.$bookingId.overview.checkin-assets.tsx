@@ -523,6 +523,7 @@ export default function CheckinAssetsFromBooking() {
    * audits drawer pattern).
    */
   useBookingCheckinSessionInitialization({
+    draftScope: "checkin",
     session: {
       bookingId: booking.id,
       bookingName: booking.name,

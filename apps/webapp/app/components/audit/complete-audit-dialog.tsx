@@ -74,7 +74,14 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        <Form method="post" encType="multipart/form-data">
+        {/* The intent is in the action URL as well as the body, so the scan
+            route's client action can tell a completion from a background
+            save without parsing the photos in the multipart body. */}
+        <Form
+          method="post"
+          encType="multipart/form-data"
+          action="?intent=complete-audit"
+        >
           <input type="hidden" name="intent" value="complete-audit" />
 
           <AlertDialogHeader>

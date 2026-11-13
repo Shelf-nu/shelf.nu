@@ -15,6 +15,7 @@
  * @see {@link file://./../utils/scan-draft.ts} for what a draft holds.
  * @see {@link file://./use-booking-fulfil-session-initialization.ts}
  * @see {@link file://./use-booking-assign-session-initialization.ts}
+ * @see {@link file://./use-booking-checkin-session-initialization.ts}
  */
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -25,7 +26,9 @@ import { useUserData } from "~/hooks/use-user-data";
 import {
   clearScanDraft,
   readScanDraft,
+  readScanDraftContext,
   saveScanDraft,
+  saveScanDraftContext,
   scanDraftKey,
 } from "~/utils/scan-draft";
 
@@ -62,13 +65,18 @@ type UseScanDraftArgs = {
  *
  * @param args - See {@link UseScanDraftArgs}
  * @returns `restoreDraft`, to call once per target right after the session
- *   hook's entry clear. It puts a parked list back on `scannedItemsAtom`.
+ *   hook's entry clear. It puts a parked list back on `scannedItemsAtom` and
+ *   says whether there was one. `draftKey` is the storage key, or `null` when
+ *   no user is resolved.
  */
 export function useScanDraft({
   scope,
   targetId,
   seededTargetIdRef,
-}: UseScanDraftArgs): { restoreDraft: () => void } {
+}: UseScanDraftArgs): {
+  restoreDraft: () => boolean;
+  draftKey: string | null;
+} {
   const scannedItems = useAtomValue(scannedItemsAtom);
   const setScannedItems = useSetAtom(scannedItemsAtom);
   const store = useStore();
@@ -100,6 +108,7 @@ export function useScanDraft({
     if (draft) {
       setScannedItems(draft);
     }
+    return draft !== null;
   }, [draftKey, setScannedItems]);
 
   useEffect(() => {
@@ -139,5 +148,83 @@ export function useScanDraft({
     draftKey,
   ]);
 
-  return { restoreDraft };
+  return { restoreDraft, draftKey };
+}
+
+/**
+ * Keeps a draft for a scanner that has no session hook of its own.
+ *
+ * The kit, location and bulk-action scanners start from the empty list the
+ * layout's route-change reset leaves them, and seed nothing else. This hook is
+ * their whole session setup: once per target it puts a parked list back, and
+ * from then on {@link useScanDraft} mirrors the list and removes the draft on
+ * an accepted save or an emptied list.
+ *
+ * A scanner that shows its list only in one of several modes passes the
+ * current mode as `context`. It is remembered with the draft and handed back
+ * through `onRestore` when a parked list is put back, so the scanner can
+ * return to the mode the list was parked in. A list restored into a mode that
+ * does not show it would look lost.
+ *
+ * @param args.scope - The flow, distinct per scanner
+ * @param args.targetId - What is being scanned into
+ * @param args.context - What the operator is doing with the list right now,
+ *   or `null` when the current mode has no list to speak of
+ * @param args.onRestore - Called once, when a parked list is put back, with
+ *   the context it was parked in
+ */
+export function useScanDraftOnEntry({
+  scope,
+  targetId,
+  context = null,
+  onRestore,
+}: {
+  scope: string;
+  targetId: string;
+  context?: string | null;
+  onRestore?: (context: string | null) => void;
+}): void {
+  // The target the parked list was last put back for. Nothing is mirrored
+  // before that, so the list as it was on arrival cannot overwrite the draft.
+  const restoredTargetIdRef = useRef<string | null>(null);
+
+  const { restoreDraft, draftKey } = useScanDraft({
+    scope,
+    targetId,
+    seededTargetIdRef: restoredTargetIdRef,
+  });
+
+  // Read through a ref so a caller's inline callback does not re-run the
+  // once-per-target effect below.
+  const onRestoreRef = useRef(onRestore);
+  useEffect(() => {
+    onRestoreRef.current = onRestore;
+  }, [onRestore]);
+
+  useEffect(() => {
+    if (restoredTargetIdRef.current === targetId) {
+      return;
+    }
+    restoredTargetIdRef.current = targetId;
+    if (restoreDraft() && draftKey) {
+      onRestoreRef.current?.(readScanDraftContext(draftKey));
+    }
+  }, [targetId, restoreDraft, draftKey]);
+
+  // Remember the mode the list is being worked in, for as long as there is a
+  // list to come back to. A `null` context (a mode with no list) leaves the
+  // last one in place: that is the one to go back to. An emptied list takes
+  // its context with it, so this runs again when the first new scan lands.
+  const hasItems = Object.keys(useAtomValue(scannedItemsAtom)).length > 0;
+  useEffect(() => {
+    if (
+      restoredTargetIdRef.current !== targetId ||
+      !draftKey ||
+      !context ||
+      !hasItems
+    ) {
+      return;
+    }
+    saveScanDraftContext(draftKey, context);
+  }, [context, draftKey, targetId, hasItems]);
 }

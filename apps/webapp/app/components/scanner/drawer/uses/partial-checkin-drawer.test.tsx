@@ -30,8 +30,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
-import { useLoaderData, useRouteLoaderData } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useActionData, useLoaderData, useRouteLoaderData } from "react-router";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import {
   type BookingExpectedAsset,
@@ -470,6 +470,58 @@ describe("PartialCheckinDrawer", () => {
     // Substring match — the blocker copy may evolve. We key off the
     // stable phrase about "no quantity entered".
     expect(await screen.findByText(/no quantity entered/i)).toBeInTheDocument();
+  });
+});
+
+describe("PartialCheckinDrawer after a save that got no answer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useRouteLoaderDataMock.mockReturnValue({ minimizedSidebar: false });
+  });
+
+  /**
+   * An early final check-in submits from a dialog on top of the drawer, which
+   * covers the drawer's own notice. The dialog has to show it as well, or the
+   * operator confirms again without being told to check first.
+   */
+  it("shows the notice inside the early check-in dialog", async () => {
+    const assets: BookingExpectedAsset[] = [individual({ id: "asset-early" })];
+    const loaderData = makeLoaderData(assets);
+    // Two days before the end: checking everything in now is an early return.
+    loaderData.booking.to = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    useLoaderDataMock.mockReturnValue(loaderData);
+
+    // why: a transport failure reaches the drawer as the route's action data.
+    // Set for this test only, and put back so it cannot answer the others.
+    const actionData = vi.mocked(useActionData);
+    actionData.mockReturnValue({
+      scanSubmitFailure: { kind: "timeout", status: 524 },
+    });
+    onTestFinished(() => {
+      actionData.mockReturnValue(undefined);
+    });
+
+    const store = seedStore(assets, {
+      "qr-early": {
+        type: "asset",
+        codeType: "qr",
+        // Checked out, as an asset being checked back in is.
+        data: {
+          id: "asset-early",
+          title: "Camera",
+          status: AssetStatus.CHECKED_OUT,
+        },
+      },
+    });
+    renderDrawer(store);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Check in assets" }));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByRole("alert").textContent).toContain(
+      "The save took too long to answer."
+    );
   });
 });
 
