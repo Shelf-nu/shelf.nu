@@ -1,0 +1,199 @@
+/**
+ * Tests for collecting every page of a paginated list.
+ *
+ * These run under Node's test runner via tsx, so this file and the module it
+ * tests must not import React Native, Expo, or `@/`-aliased paths.
+ *
+ * @see ./fetch-all-pages.ts
+ */
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  ALL_PAGES_HARD_STOP,
+  ALL_PAGES_PAGE_SIZE,
+  fetchAllPages,
+} from "./fetch-all-pages";
+
+type Loc = { id: string };
+
+/** A fake list endpoint holding `total` rows, served `perPage` at a time. */
+// why: the real endpoint is the network; a fake with a known row count lets
+// each test check exactly which pages were asked for.
+function fakeEndpoint(total: number) {
+  const calls: { page: number; perPage: number }[] = [];
+  const fetchPage = async (page: number, perPage: number) => {
+    calls.push({ page, perPage });
+    const start = (page - 1) * perPage;
+    const locations: Loc[] = Array.from(
+      { length: Math.max(0, Math.min(perPage, total - start)) },
+      (_, i) => ({ id: `loc-${start + i + 1}` })
+    );
+    return {
+      data: { locations, totalPages: Math.max(1, Math.ceil(total / perPage)) },
+      error: null,
+    };
+  };
+  return { fetchPage, calls };
+}
+
+test("returns rows past the first page", async () => {
+  const { fetchPage, calls } = fakeEndpoint(260);
+
+  const { rows, error } = await fetchAllPages(fetchPage, (d) => d.locations);
+
+  assert.equal(error, null);
+  assert.equal(rows.length, 260);
+  assert.equal(rows[259].id, "loc-260");
+  assert.deepEqual(
+    calls.map((c) => c.page),
+    [1, 2, 3]
+  );
+  assert.ok(calls.every((c) => c.perPage === ALL_PAGES_PAGE_SIZE));
+});
+
+test("makes one request when everything fits on a page", async () => {
+  const { fetchPage, calls } = fakeEndpoint(12);
+
+  const { rows } = await fetchAllPages(fetchPage, (d) => d.locations);
+
+  assert.equal(rows.length, 12);
+  assert.equal(calls.length, 1);
+});
+
+test("stops at the hard stop", async () => {
+  const { fetchPage, calls } = fakeEndpoint(
+    (ALL_PAGES_HARD_STOP + 5) * ALL_PAGES_PAGE_SIZE
+  );
+
+  const { truncated, error } = await fetchAllPages(
+    fetchPage,
+    (d) => d.locations
+  );
+
+  assert.equal(calls.length, ALL_PAGES_HARD_STOP);
+  assert.equal(error, null);
+  // The caller is told the list is not complete.
+  assert.equal(truncated, true);
+});
+
+test("is not truncated when the last page is exactly the hard stop", async () => {
+  const { fetchPage, calls } = fakeEndpoint(
+    ALL_PAGES_HARD_STOP * ALL_PAGES_PAGE_SIZE
+  );
+
+  const { rows, truncated } = await fetchAllPages(
+    fetchPage,
+    (d) => d.locations
+  );
+
+  assert.equal(calls.length, ALL_PAGES_HARD_STOP);
+  assert.equal(rows.length, ALL_PAGES_HARD_STOP * ALL_PAGES_PAGE_SIZE);
+  assert.equal(truncated, false);
+});
+
+test("makes one request when the response names no page count", async () => {
+  let calls = 0;
+  const { rows, truncated } = await fetchAllPages(
+    async () => {
+      calls += 1;
+      return { data: { locations: [{ id: "a" }] }, error: null };
+    },
+    (d: { locations: Loc[] }) => d.locations
+  );
+
+  assert.equal(calls, 1);
+  assert.deepEqual(rows, [{ id: "a" }]);
+  assert.equal(truncated, false);
+});
+
+test("is not truncated when the last page is reached", async () => {
+  const { fetchPage } = fakeEndpoint(260);
+
+  const { truncated } = await fetchAllPages(fetchPage, (d) => d.locations);
+
+  assert.equal(truncated, false);
+});
+
+test("treats a page with neither data nor an error as a failure", async () => {
+  const fetchPage = async (page: number) =>
+    page === 1
+      ? { data: { locations: [{ id: "a" }], totalPages: 2 }, error: null }
+      : { data: null, error: null };
+
+  const { rows, error } = await fetchAllPages<{ locations: Loc[] }, Loc>(
+    fetchPage,
+    (d) => d.locations
+  );
+
+  assert.equal(error, "Failed to load");
+  assert.deepEqual(rows, [{ id: "a" }]);
+});
+
+test("reports the caller's own message for a page with neither data nor an error", async () => {
+  const { error } = await fetchAllPages<{ locations: Loc[] }, Loc>(
+    async () => ({ data: null, error: null }),
+    (d) => d.locations,
+    { fallbackError: "Failed to load locations" }
+  );
+
+  assert.equal(error, "Failed to load locations");
+});
+
+test("keeps a row once when two pages both return it", async () => {
+  // The list shifted between the two page requests, so "b" closes page 1 and
+  // opens page 2.
+  const fetchPage = async (page: number) =>
+    page === 1
+      ? {
+          data: { locations: [{ id: "a" }, { id: "b" }], totalPages: 2 },
+          error: null,
+        }
+      : {
+          data: { locations: [{ id: "b" }, { id: "c" }], totalPages: 2 },
+          error: null,
+        };
+
+  const { rows, error } = await fetchAllPages(fetchPage, (d) => d.locations);
+
+  assert.equal(error, null);
+  assert.deepEqual(rows, [{ id: "a" }, { id: "b" }, { id: "c" }]);
+});
+
+test("returns the error and the rows loaded so far when a page fails", async () => {
+  const fetchPage = async (page: number) =>
+    page === 1
+      ? { data: { locations: [{ id: "a" }], totalPages: 2 }, error: null }
+      : { error: "Network error" };
+
+  const { rows, error } = await fetchAllPages<{ locations: Loc[] }, Loc>(
+    fetchPage,
+    (d) => d.locations
+  );
+
+  assert.equal(error, "Network error");
+  assert.deepEqual(rows, [{ id: "a" }]);
+});
+
+test("stops after the page during which the walk became obsolete", async () => {
+  const { fetchPage, calls } = fakeEndpoint(1000);
+  let current = true;
+
+  const { rows, truncated, error } = await fetchAllPages(
+    async (page, perPage) => {
+      if (page === 2) current = false; // a newer search started meanwhile
+      return fetchPage(page, perPage);
+    },
+    (d) => d.locations,
+    { isCurrent: () => current }
+  );
+
+  assert.deepEqual(
+    calls.map((c) => c.page),
+    [1, 2]
+  );
+  // What it returns is marked incomplete, for the caller to drop.
+  assert.equal(rows.length, 2 * ALL_PAGES_PAGE_SIZE);
+  assert.equal(truncated, true);
+  assert.equal(error, null);
+});

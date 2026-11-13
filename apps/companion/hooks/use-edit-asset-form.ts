@@ -24,6 +24,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { valuationToInput } from "@/lib/asset-valuation";
+import { useAllLocations } from "@/hooks/use-all-locations";
+import {
+  incompleteListNotice,
+  type IncompleteListNotice,
+} from "@/lib/visible-rows";
 import {
   api,
   type AssetDetail,
@@ -150,6 +155,10 @@ export type EditAssetFormState = {
   tags: Tag[];
   isCategoriesLoading: boolean;
   isLocationsLoading: boolean;
+  /** Set when `locations` is missing rows (a page failed, or the limit hit). */
+  locationsNotice: IncompleteListNotice | null;
+  /** Loads the locations again, for the notice's Retry button. */
+  retryLoadLocations: () => void;
   isTagsLoading: boolean;
   /** Server-computed: caller may mint tags inline (admins/owners). */
   canCreateTag: boolean;
@@ -223,10 +232,8 @@ export function useEditAssetForm(
 
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
-  const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
   // Server-computed from GET /api/mobile/tags: whether the caller may mint
   // tags inline (admins/owners). Gates the picker's "create tag" row.
@@ -291,13 +298,26 @@ export function useEditAssetForm(
     setIsCategoriesLoading(false);
   }, [orgId]);
 
-  const loadLocations = useCallback(async () => {
-    if (!orgId) return;
-    setIsLocationsLoading(true);
-    const { data } = await api.locations(orgId);
-    if (data?.locations) setLocations(data.locations);
-    setIsLocationsLoading(false);
-  }, [orgId]);
+  // Every page of locations: the field searches only what it holds. See
+  // useAllLocations for how loads, workspace switches and failures are handled.
+  const fetchLocationsPage = useCallback(
+    (orgId: string, page: number, perPage: number) =>
+      api.locations(orgId, undefined, { page, perPage }),
+    []
+  );
+  const {
+    locations,
+    isLocationsLoading,
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loadLocations,
+  } = useAllLocations(orgId, fetchLocationsPage);
+  const locationsNotice = incompleteListNotice({
+    noun: "locations",
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loaded: locations.length,
+  });
 
   // Stale-response guard: if orgId changes mid-flight, only the latest fetch
   // commits its tag list. Unlike the create screen we intentionally do NOT prune
@@ -455,6 +475,8 @@ export function useEditAssetForm(
     tags,
     isCategoriesLoading,
     isLocationsLoading,
+    locationsNotice,
+    retryLoadLocations: loadLocations,
     isTagsLoading,
     canCreateTag,
     createTag,

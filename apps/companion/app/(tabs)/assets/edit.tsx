@@ -428,9 +428,12 @@ export default function EditAssetScreen() {
               label="Location"
               items={form.locations}
               selectedId={form.selectedLocation?.id ?? null}
+              selectedFallback={form.selectedLocation}
               onSelect={(loc) => form.setSelectedLocation(loc)}
               onClear={() => form.setSelectedLocation(null)}
               isLoading={form.isLocationsLoading}
+              notice={form.locationsNotice}
+              onRetry={form.retryLoadLocations}
               searchPlaceholder="Search locations..."
               renderItemIcon={() => (
                 <Ionicons
