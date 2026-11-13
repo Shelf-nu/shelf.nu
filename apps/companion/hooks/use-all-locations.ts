@@ -9,9 +9,11 @@
  *   replace the current list.
  * - With no workspace (signed out), the list is emptied and any load still in
  *   flight is dropped.
+ * - A load for another workspace empties the list first, so the previous
+ *   workspace's rows are never read as this one's.
  * - When a later page fails, a complete list this workspace already shows is
- *   kept. Without one, the pages that did load are shown, and never another
- *   workspace's list.
+ *   kept. Without one, the longer of the rows shown and the pages that did
+ *   load is kept, so a failed retry never shrinks the list.
  * - A list that is not whole says so: `error` when a page failed, `truncated`
  *   when the page walk hit its hard stop.
  *
@@ -20,6 +22,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageResult } from "../lib/fetch-all-pages";
 import { fetchAllPages } from "../lib/fetch-all-pages";
+
+/** Shown when a page of locations comes back with neither data nor an error. */
+export const LOCATIONS_LOAD_ERROR = "Failed to load locations";
 
 /** Fetches one page of a workspace's locations. */
 export type FetchLocationsPage<L> = (
@@ -71,6 +76,11 @@ export function useAllLocations<L extends { id: string }>(
   const latestRequestRef = useRef(0);
   /** The workspace whose complete list is shown, if any. */
   const completeOrgRef = useRef<string | null>(null);
+  /** The workspace the rows in `locations` belong to, and how many there are. */
+  const shownRef = useRef<{ orgId: string | null; count: number }>({
+    orgId: null,
+    count: 0,
+  });
 
   /** `fetchPage` may be a new function each render; keep the latest here. */
   const fetchPageRef = useRef(fetchPage);
@@ -91,6 +101,7 @@ export function useAllLocations<L extends { id: string }>(
     if (!orgId) {
       latestRequestRef.current += 1;
       completeOrgRef.current = null;
+      shownRef.current = { orgId: null, count: 0 };
       setLocations([]);
       setError(null);
       setTruncated(false);
@@ -99,18 +110,27 @@ export function useAllLocations<L extends { id: string }>(
     }
 
     const requestId = ++latestRequestRef.current;
+    if (shownRef.current.orgId !== orgId) {
+      // Another workspace's rows: drop them before this one's load starts.
+      completeOrgRef.current = null;
+      shownRef.current = { orgId, count: 0 };
+      setLocations([]);
+      setError(null);
+      setTruncated(false);
+    }
     setIsLocationsLoading(true);
     const result = await fetchAllPages(
       (page, perPage) => fetchPageRef.current(orgId, page, perPage),
       (data) => data.locations,
       {
         isCurrent: () => requestId === latestRequestRef.current,
-        fallbackError: "Failed to load locations",
+        fallbackError: LOCATIONS_LOAD_ERROR,
       }
     );
     if (requestId !== latestRequestRef.current) return;
 
     if (!result.error) {
+      shownRef.current = { orgId, count: result.rows.length };
       setLocations(result.rows);
       setError(null);
       setTruncated(result.truncated);
@@ -122,10 +142,14 @@ export function useAllLocations<L extends { id: string }>(
       setError(null);
       setTruncated(false);
     } else {
-      setLocations(result.rows);
+      // Keep whichever is longer: the rows already shown for this workspace
+      // or the pages this load got. A failed retry must not shrink the list.
+      if (result.rows.length >= shownRef.current.count) {
+        shownRef.current = { orgId, count: result.rows.length };
+        setLocations(result.rows);
+        setTruncated(false);
+      }
       setError(result.error);
-      setTruncated(false);
-      completeOrgRef.current = null;
     }
     setIsLocationsLoading(false);
   }, [orgId]);

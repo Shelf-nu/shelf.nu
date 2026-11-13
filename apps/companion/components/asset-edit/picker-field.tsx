@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import {
+  DROPDOWN_MAX_HEIGHT,
   moreRowsHint,
   visibleRows,
   type IncompleteListNotice as Notice,
@@ -29,6 +30,12 @@ type PickerFieldProps<T extends PickerItem> = {
   label: string;
   items: T[];
   selectedId: string | null;
+  /**
+   * The selected item as the form holds it. Shown on the button when `items`
+   * does not contain it (still loading, or a list that is missing rows), so a
+   * saved value is never displayed as "nothing selected".
+   */
+  selectedFallback?: T | null;
   onSelect: (item: T | null) => void;
   onClear: () => void;
   isLoading: boolean;
@@ -53,6 +60,7 @@ export function PickerField<T extends PickerItem>({
   label,
   items,
   selectedId,
+  selectedFallback,
   onSelect,
   onClear,
   isLoading,
@@ -70,7 +78,9 @@ export function PickerField<T extends PickerItem>({
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const selectedItem = items.find((item) => item.id === selectedId) ?? null;
+  const selectedItem =
+    items.find((item) => item.id === selectedId) ??
+    (selectedFallback?.id === selectedId ? selectedFallback : null);
 
   const filteredItems = search
     ? items.filter((item) =>
@@ -243,8 +253,7 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.gray300,
     borderRadius: borderRadius.sm,
     marginTop: spacing.xs,
-    // Room for the search box, at least four rows and the clear row.
-    maxHeight: 280,
+    maxHeight: DROPDOWN_MAX_HEIGHT,
     ...shadows.md,
   },
   pickerSearch: {

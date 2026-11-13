@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type Location } from "@/lib/api";
 import { fetchAllPages } from "@/lib/fetch-all-pages";
+import { LOCATIONS_LOAD_ERROR } from "@/hooks/use-all-locations";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -292,7 +293,7 @@ export function LocationPicker({
       {
         // Stop walking pages as soon as a newer search or workspace takes over.
         isCurrent: () => generation === requestGenerationRef.current,
-        fallbackError: "Failed to load locations",
+        fallbackError: LOCATIONS_LOAD_ERROR,
       }
     );
 

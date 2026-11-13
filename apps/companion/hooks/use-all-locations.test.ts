@@ -12,7 +12,7 @@ import { describe, it } from "node:test";
 import { act, createElement } from "react";
 import { create } from "react-test-renderer";
 import type { PageResult } from "../lib/fetch-all-pages";
-import { useAllLocations } from "./use-all-locations";
+import { LOCATIONS_LOAD_ERROR, useAllLocations } from "./use-all-locations";
 
 type Loc = { id: string };
 type Page = PageResult<{ locations: Loc[] }>;
@@ -161,6 +161,82 @@ describe("useAllLocations", () => {
     assert.equal(loader.result().error, null);
   });
 
+  it("keeps the newer result when two loads for one workspace overlap", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    const first = pending.shift()!;
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("A", 0, 3, 1));
+    await flush();
+
+    // The first load answers last, with a different list.
+    first.resolve(page("A", 10, 7, 1));
+    await flush();
+
+    assert.deepEqual(
+      loader.result().locations.map((l) => l.id),
+      ["A-0", "A-1", "A-2"]
+    );
+    assert.equal(loader.result().error, null);
+  });
+
+  it("does not shrink a partial list when the retry fails earlier", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    // Pages 1 and 2 of 3 load, page 3 fails.
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("A", 0, 100, 3));
+    await flush();
+    pending.shift()!.resolve(page("A", 100, 100, 3));
+    await flush();
+    pending.shift()!.resolve({ error: "Network error" });
+    await flush();
+    assert.equal(loader.result().locations.length, 200);
+
+    // The retry fails on page 1: the 200 rows stay, and so does the error.
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve({ error: "Network error" });
+    await flush();
+
+    assert.equal(loader.result().locations.length, 200);
+    assert.equal(loader.result().error, "Network error");
+    assert.equal(loader.result().isLocationsLoading, false);
+  });
+
+  it("empties the previous workspace's rows as soon as the next load starts", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve(page("A", 0, 10, 1));
+    await flush();
+
+    loader.setOrg("B");
+    act(() => void loader.result().loadLocations());
+
+    assert.deepEqual(loader.result().locations, []);
+    assert.equal(loader.result().isLocationsLoading, true);
+    pending.shift()!.resolve(page("B", 0, 2, 1));
+    await flush();
+    assert.equal(loader.result().isLocationsLoading, false);
+  });
+
+  it("reports a first page that fails, with its own message when the page has none", async () => {
+    const { fetchPage, pending } = fakeEndpoint();
+    const loader = renderLoader("A", fetchPage);
+
+    act(() => void loader.result().loadLocations());
+    pending.shift()!.resolve({ data: null, error: null });
+    await flush();
+
+    assert.deepEqual(loader.result().locations, []);
+    assert.equal(loader.result().error, LOCATIONS_LOAD_ERROR);
+    assert.equal(LOCATIONS_LOAD_ERROR, "Failed to load locations");
+  });
+
   it("reports a list cut off at the hard stop as truncated", async () => {
     const { fetchPage, pending } = fakeEndpoint();
     const loader = renderLoader("A", fetchPage);
@@ -196,7 +272,7 @@ describe("useAllLocations", () => {
     assert.equal(loader.result().error, null);
   });
 
-  it("does not keep a list cut off at the hard stop as complete", async () => {
+  it("reports a failed reload over a list cut off at the hard stop", async () => {
     const { fetchPage, pending } = fakeEndpoint();
     const loader = renderLoader("A", fetchPage);
 
@@ -208,14 +284,16 @@ describe("useAllLocations", () => {
     }
     assert.equal(loader.result().locations.length, 50);
 
-    // A reload that fails on page 2 shows what loaded, not the cut-off list.
+    // A reload that fails on page 2: the cut-off list is not treated as
+    // complete, so the failure is reported, and the longer list stays.
     act(() => void loader.result().loadLocations());
     pending.shift()!.resolve(page("A", 0, 1, 60));
     await flush();
     pending.shift()!.resolve({ error: "Network error" });
     await flush();
 
-    assert.equal(loader.result().locations.length, 1);
+    assert.equal(loader.result().locations.length, 50);
+    assert.equal(loader.result().error, "Network error");
   });
 
   it("shows another workspace's partial list rather than the old workspace's", async () => {

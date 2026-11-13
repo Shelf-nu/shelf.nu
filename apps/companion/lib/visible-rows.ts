@@ -13,6 +13,26 @@
 export const MAX_DROPDOWN_ROWS = 50;
 
 /**
+ * Tallest an inline dropdown grows, in points. Sized so that the search box,
+ * {@link MIN_VISIBLE_DROPDOWN_ROWS} rows and the clear row all fit at once.
+ */
+export const DROPDOWN_MAX_HEIGHT = 280;
+
+/** Rows an open inline dropdown must show without scrolling. */
+export const MIN_VISIBLE_DROPDOWN_ROWS = 4;
+
+/**
+ * Heights, in points, of the fixed parts of an inline dropdown as the asset
+ * forms style them (14pt text, 12pt row padding, 10pt search and clear
+ * padding), rounded up.
+ */
+export const DROPDOWN_PART_HEIGHTS = { search: 44, row: 44, clear: 42 };
+
+/**
+ * Picks the rows an inline dropdown draws: the first
+ * {@link MAX_DROPDOWN_ROWS}, led by the selected row when it sorts after
+ * them.
+ *
  * @param items - The rows that match the current search.
  * @param selectedId - The selected row, if any. When it matches the search
  *   but sorts after the cap it is drawn first, so the dropdown opens on the
@@ -31,7 +51,13 @@ export function visibleRows<T extends { id: string }>(
   return { rows, hiddenCount: items.length - rows.length };
 }
 
-/** The hint under a capped dropdown, worded like the web pickers. */
+/**
+ * The hint under a capped dropdown, worded like the web pickers.
+ *
+ * @param shown - How many rows the dropdown draws.
+ * @param total - How many rows match the current search.
+ * @returns The hint text.
+ */
 export function moreRowsHint(shown: number, total: number) {
   return `Showing ${shown} out of ${total}, type to search for more`;
 }

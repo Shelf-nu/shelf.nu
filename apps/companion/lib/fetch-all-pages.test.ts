@@ -77,6 +77,36 @@ test("stops at the hard stop", async () => {
   assert.equal(truncated, true);
 });
 
+test("is not truncated when the last page is exactly the hard stop", async () => {
+  const { fetchPage, calls } = fakeEndpoint(
+    ALL_PAGES_HARD_STOP * ALL_PAGES_PAGE_SIZE
+  );
+
+  const { rows, truncated } = await fetchAllPages(
+    fetchPage,
+    (d) => d.locations
+  );
+
+  assert.equal(calls.length, ALL_PAGES_HARD_STOP);
+  assert.equal(rows.length, ALL_PAGES_HARD_STOP * ALL_PAGES_PAGE_SIZE);
+  assert.equal(truncated, false);
+});
+
+test("makes one request when the response names no page count", async () => {
+  let calls = 0;
+  const { rows, truncated } = await fetchAllPages(
+    async () => {
+      calls += 1;
+      return { data: { locations: [{ id: "a" }] }, error: null };
+    },
+    (d: { locations: Loc[] }) => d.locations
+  );
+
+  assert.equal(calls, 1);
+  assert.deepEqual(rows, [{ id: "a" }]);
+  assert.equal(truncated, false);
+});
+
 test("is not truncated when the last page is reached", async () => {
   const { fetchPage } = fakeEndpoint(260);
 
@@ -149,7 +179,7 @@ test("stops after the page during which the walk became obsolete", async () => {
   const { fetchPage, calls } = fakeEndpoint(1000);
   let current = true;
 
-  await fetchAllPages(
+  const { rows, truncated, error } = await fetchAllPages(
     async (page, perPage) => {
       if (page === 2) current = false; // a newer search started meanwhile
       return fetchPage(page, perPage);
@@ -162,4 +192,8 @@ test("stops after the page during which the walk became obsolete", async () => {
     calls.map((c) => c.page),
     [1, 2]
   );
+  // What it returns is marked incomplete, for the caller to drop.
+  assert.equal(rows.length, 2 * ALL_PAGES_PAGE_SIZE);
+  assert.equal(truncated, true);
+  assert.equal(error, null);
 });

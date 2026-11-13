@@ -43,6 +43,7 @@ import { ValuationField } from "@/components/asset-edit/valuation-field";
 import { valuationFromInput } from "@/lib/asset-valuation";
 import { useAllLocations } from "@/hooks/use-all-locations";
 import {
+  DROPDOWN_MAX_HEIGHT,
   incompleteListNotice,
   moreRowsHint,
   visibleRows,
@@ -1230,8 +1231,7 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.gray300,
     borderRadius: borderRadius.sm,
     marginTop: spacing.xs,
-    // Room for the search box, at least four rows and the clear row.
-    maxHeight: 280,
+    maxHeight: DROPDOWN_MAX_HEIGHT,
     ...shadows.md,
   },
   pickerSearch: {

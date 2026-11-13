@@ -10,7 +10,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  DROPDOWN_MAX_HEIGHT,
+  DROPDOWN_PART_HEIGHTS,
   MAX_DROPDOWN_ROWS,
+  MIN_VISIBLE_DROPDOWN_ROWS,
   incompleteListNotice,
   moreRowsHint,
   visibleRows,
@@ -56,6 +59,32 @@ test("does not repeat a selected row that is already drawn", () => {
   assert.equal(rows.filter((row) => row.id === "row-3").length, 1);
 });
 
+test("draws a selected row just past the cap first", () => {
+  const items = rowsOf(MAX_DROPDOWN_ROWS + 1);
+
+  const { rows, hiddenCount } = visibleRows(items, `row-${MAX_DROPDOWN_ROWS}`);
+
+  assert.equal(rows[0].id, `row-${MAX_DROPDOWN_ROWS}`);
+  assert.equal(rows.length, MAX_DROPDOWN_ROWS + 1);
+  assert.equal(hiddenCount, 0);
+});
+
+test("hides nothing when the rows exactly fill the cap", () => {
+  const { rows, hiddenCount } = visibleRows(rowsOf(MAX_DROPDOWN_ROWS), null);
+
+  assert.equal(rows.length, MAX_DROPDOWN_ROWS);
+  assert.equal(hiddenCount, 0);
+});
+
+test("is tall enough for the search box, four rows and the clear row", () => {
+  const { search, row, clear } = DROPDOWN_PART_HEIGHTS;
+
+  assert.ok(MIN_VISIBLE_DROPDOWN_ROWS >= 4);
+  assert.ok(
+    DROPDOWN_MAX_HEIGHT >= search + MIN_VISIBLE_DROPDOWN_ROWS * row + clear
+  );
+});
+
 test("leaves out a selected row the search does not match", () => {
   // The caller passes only the rows that match the search.
   const matches = rowsOf(60);
@@ -90,6 +119,18 @@ test("offers a retry when a page failed to load", () => {
       noun: "locations",
       error: "Network error",
       truncated: false,
+      loaded: 100,
+    }),
+    { message: "Couldn't load all locations.", canRetry: true }
+  );
+});
+
+test("offers the retry when a list both failed and was cut off", () => {
+  assert.deepEqual(
+    incompleteListNotice({
+      noun: "locations",
+      error: "Network error",
+      truncated: true,
       loaded: 100,
     }),
     { message: "Couldn't load all locations.", canRetry: true }
