@@ -32,6 +32,7 @@ import {
 } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import type { StockState } from "~/modules/consumption-log/stock-ledger";
 import {
   readStockState,
   recordStockChanges,
@@ -91,6 +92,7 @@ import {
   uploadDuplicateAssetMainImage,
   bulkUpdateAssetMinQuantity,
 } from "./service.server";
+import type { UpdateAssetPayload } from "./types";
 import { buildLowStockWhere } from "./utils.server";
 
 // why: isolating asset service logic from actual database operations
@@ -3642,6 +3644,164 @@ describe("updateAsset location activity", () => {
       ],
       ["loc-old", `${john} removed 6 pcs of ${penLink} from ${oldLoc}.`],
     ]);
+  });
+});
+
+describe("updateAsset multi-placement location guard (issue #3345)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // `clearAllMocks` only resets call history, not queued `*Once`
+    // values. Reset the findUnique mock so any leftover queue from a
+    // prior test can't bleed into the kit-guard fetch here.
+    vi.mocked(db.asset.findUnique).mockReset();
+    vi.mocked(db.asset.findUnique).mockResolvedValue(null);
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "pool-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      assetLocations: [],
+    });
+    // The post-transaction re-read feeds the location-change notes, which
+    // render the asset's title — a bare `{}` would crash the markdoc
+    // wrappers instead of exercising the placement path.
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      title: "Pool",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      unitOfMeasure: "units",
+      assetLocations: [],
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+  });
+
+  /**
+   * Typed payload factory for the guard tests: the location fields an
+   * edit-form style submission carries, plus the fields
+   * `UpdateAssetPayload` requires. Building payloads through the type
+   * keeps the fixtures honest when the contract changes, instead of
+   * opting out of it with an untyped assertion.
+   */
+  function poolLocationPayload(
+    overrides: Partial<UpdateAssetPayload> = {}
+  ): UpdateAssetPayload {
+    return {
+      id: "pool-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      newLocationId: "loc-d",
+      currentLocationId: "loc-a",
+      request: new Request("http://localhost/assets/pool-1/edit"),
+      ...overrides,
+    };
+  }
+
+  /** Typed stock state for the 14-unit pool, placed as given. */
+  function poolStockState(placed: [string, number][]): StockState {
+    return {
+      total: 14,
+      placed: new Map(placed),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    };
+  }
+
+  /** Kit-guard fetch result for a 14-unit pool placed 5 / 5 / 4. */
+  function mockMultiPlacedPool() {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      {
+        type: "QUANTITY_TRACKED",
+        quantity: 14,
+        assetKits: [],
+        assetLocations: [
+          { id: "placement-a" },
+          { id: "placement-b" },
+          { id: "placement-c" },
+        ],
+      }
+    );
+  }
+
+  it("refuses a quantity-less location change for a pool placed at multiple locations", async () => {
+    // The asset edit form (and the companion edit screen) submit only
+    // `newLocationId` / `currentLocationId` — no per-location quantity
+    // and no warning. The placement rewrite would delete every manual
+    // placement and put all 14 units at the new location.
+    mockMultiPlacedPool();
+
+    await expect(updateAsset(poolLocationPayload())).rejects.toMatchObject({
+      status: 400,
+      title: "Asset is placed at multiple locations",
+    });
+
+    // The refusal fires before the transaction, so nothing is written.
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("still allows the update-location dialog path, which warns and submits an explicit quantity", async () => {
+    mockMultiPlacedPool();
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-d",
+      name: "Storage D",
+    });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      organizationId: "org-A",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      title: "Pool",
+      unitOfMeasure: "units",
+    });
+    vi.mocked(readStockState).mockResolvedValueOnce(
+      poolStockState([
+        ["loc-a", 5],
+        ["loc-b", 5],
+        ["loc-c", 4],
+      ])
+    );
+
+    await updateAsset(poolLocationPayload({ newLocationQuantity: 14 }));
+
+    expect(db.asset.update).toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).toHaveBeenCalled();
+  });
+
+  it("still allows a quantity-less location change for a pool placed at a single location", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      {
+        type: "QUANTITY_TRACKED",
+        quantity: 14,
+        assetKits: [],
+        assetLocations: [{ id: "placement-a" }],
+      }
+    );
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-d",
+      name: "Storage D",
+    });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      organizationId: "org-A",
+      type: "QUANTITY_TRACKED",
+      quantity: 14,
+      title: "Pool",
+      unitOfMeasure: "units",
+    });
+    vi.mocked(readStockState).mockResolvedValueOnce(
+      poolStockState([["loc-a", 14]])
+    );
+
+    await updateAsset(poolLocationPayload());
+
+    expect(db.asset.update).toHaveBeenCalled();
   });
 });
 
