@@ -32,6 +32,7 @@ import {
 } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import type { StockState } from "~/modules/consumption-log/stock-ledger";
 import {
   readStockState,
   recordStockChanges,
@@ -91,6 +92,7 @@ import {
   uploadDuplicateAssetMainImage,
   bulkUpdateAssetMinQuantity,
 } from "./service.server";
+import type { UpdateAssetPayload } from "./types";
 import { buildLowStockWhere } from "./utils.server";
 
 // why: isolating asset service logic from actual database operations
@@ -3677,6 +3679,36 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
     ).mockResolvedValue([]);
   });
 
+  /**
+   * Typed payload factory for the guard tests: the location fields an
+   * edit-form style submission carries, plus the fields
+   * `UpdateAssetPayload` requires. Building payloads through the type
+   * keeps the fixtures honest when the contract changes, instead of
+   * opting out of it with an untyped assertion.
+   */
+  function poolLocationPayload(
+    overrides: Partial<UpdateAssetPayload> = {}
+  ): UpdateAssetPayload {
+    return {
+      id: "pool-1",
+      userId: "user-1",
+      organizationId: "org-A",
+      newLocationId: "loc-d",
+      currentLocationId: "loc-a",
+      request: new Request("http://localhost/assets/pool-1/edit"),
+      ...overrides,
+    };
+  }
+
+  /** Typed stock state for the 14-unit pool, placed as given. */
+  function poolStockState(placed: [string, number][]): StockState {
+    return {
+      total: 14,
+      placed: new Map(placed),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    };
+  }
+
   /** Kit-guard fetch result for a 14-unit pool placed 5 / 5 / 4. */
   function mockMultiPlacedPool() {
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
@@ -3700,15 +3732,7 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
     // placement and put all 14 units at the new location.
     mockMultiPlacedPool();
 
-    await expect(
-      updateAsset({
-        id: "pool-1",
-        userId: "user-1",
-        organizationId: "org-A",
-        newLocationId: "loc-d",
-        currentLocationId: "loc-a",
-      } as any)
-    ).rejects.toMatchObject({
+    await expect(updateAsset(poolLocationPayload())).rejects.toMatchObject({
       status: 400,
       title: "Asset is placed at multiple locations",
     });
@@ -3734,24 +3758,15 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
       title: "Pool",
       unitOfMeasure: "units",
     });
-    vi.mocked(readStockState).mockResolvedValueOnce({
-      total: 14,
-      placed: new Map([
+    vi.mocked(readStockState).mockResolvedValueOnce(
+      poolStockState([
         ["loc-a", 5],
         ["loc-b", 5],
         ["loc-c", 4],
-      ]),
-      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
-    } as any);
+      ])
+    );
 
-    await updateAsset({
-      id: "pool-1",
-      userId: "user-1",
-      organizationId: "org-A",
-      newLocationId: "loc-d",
-      currentLocationId: "loc-a",
-      newLocationQuantity: 14,
-    } as any);
+    await updateAsset(poolLocationPayload({ newLocationQuantity: 14 }));
 
     expect(db.asset.update).toHaveBeenCalled();
     expect(db.assetLocation.deleteMany).toHaveBeenCalled();
@@ -3780,19 +3795,11 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
       title: "Pool",
       unitOfMeasure: "units",
     });
-    vi.mocked(readStockState).mockResolvedValueOnce({
-      total: 14,
-      placed: new Map([["loc-a", 14]]),
-      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
-    } as any);
+    vi.mocked(readStockState).mockResolvedValueOnce(
+      poolStockState([["loc-a", 14]])
+    );
 
-    await updateAsset({
-      id: "pool-1",
-      userId: "user-1",
-      organizationId: "org-A",
-      newLocationId: "loc-d",
-      currentLocationId: "loc-a",
-    } as any);
+    await updateAsset(poolLocationPayload());
 
     expect(db.asset.update).toHaveBeenCalled();
   });
