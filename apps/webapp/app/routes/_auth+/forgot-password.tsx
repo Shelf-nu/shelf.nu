@@ -11,6 +11,7 @@ import Input from "~/components/forms/input";
 import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -78,6 +79,11 @@ export function loader({ context, request }: LoaderFunctionArgs) {
 
   if (context.isAuthenticated) {
     return redirect("/");
+  }
+
+  // There is no password to reset while email login is off.
+  if (config.disableEmailLogin) {
+    return redirect("/login");
   }
 
   return data(payload({ title, subHeading }));

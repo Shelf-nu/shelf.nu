@@ -263,6 +263,7 @@ export default createHonoServer<ServerEnv>({
           "/join",
           "/login",
           "/sso-login",
+          "/oidc-login", // Custom OIDC login start: redirects to the identity provider
           "/oauth/callback",
           "/oauth/callback/mobile", // Native-app SSO callback (web-delegated)
           "/logout",

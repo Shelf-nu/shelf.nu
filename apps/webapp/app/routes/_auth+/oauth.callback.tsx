@@ -9,11 +9,14 @@ import { data, redirect, useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  completeSsoCallback,
+  isAnySsoEnabled,
+} from "~/modules/auth/sso-callback.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
   getUserOrganizations,
@@ -31,17 +34,12 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
-import {
-  assertSsoAuthenticatedSession,
-  getSsoClaimsForAuthUser,
-  isSsoAccountLinkedError,
-  resolveUserAndOrgForSsoCallback,
-} from "~/utils/sso.server";
+import { isSsoAccountLinkedError } from "~/utils/sso.server";
 
 /**
  * The fields the browser posts after an SSO sign-in: only the refresh token and
  * where to land. Every claim the action acts on (groups, names, contact info)
- * is read server-side with `getSsoClaimsForAuthUser`, never from the form.
+ * is read server-side by `completeSsoCallback`, never from the form.
  */
 const CallbackSchema = z.object({
   refreshToken: z.string().min(1),
@@ -49,13 +47,13 @@ const CallbackSchema = z.object({
 });
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const { disableSSO } = config;
   try {
     /**
-     * Currently the only reason to use oauth/callback is for SSO reasons.
+     * Currently the only reason to use oauth/callback is for SSO reasons
+     * (SAML SSO and the custom OIDC login).
      * Once we start adding social login providers, this will need to be adjusted
      */
-    if (disableSSO) {
+    if (!isAnySsoEnabled()) {
       throw new ShelfError({
         cause: null,
         title: "SSO is disabled",
@@ -79,34 +77,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
         // We should not trust what is sent from the client
         // https://github.com/rphlmr/supa-fly-stack/issues/45
         const authSession = await refreshAccessToken(refreshToken);
-        // Any Supabase refresh token refreshes, so refuse a session that was
-        // not obtained through SSO before anything is provisioned or synced.
-        await assertSsoAuthenticatedSession(authSession);
-        const { groups, firstName, lastName, contactInfo } =
-          await getSsoClaimsForAuthUser({
-            authUserId: authSession.userId,
-            email: authSession.email,
-          });
 
-        /**
-         * This resolves the correct org we should redirect the user to
-         * Also it handles:
-         * - Creating a new user if the user doesn't exist
-         * - Throwing an error if the user is already connected to an email account
-         * - Linking the user to the correct org if SCIM is configured
-         */
         // Detect the caller's date/time/week/timezone prefs from browser hints;
         // only the new-user branch of the resolver consumes them. timeZone is
-        // null when the CH-time-zone cookie is absent — common on SSO/OAuth
-        // callbacks, which don't render ClientHintCheck first — so the "UTC"
+        // null when the CH-time-zone cookie is absent (common on SSO/OAuth
+        // callbacks, which don't render ClientHintCheck first), so the "UTC"
         // fallback is never stamped permanently (the lazy backfill fills it).
         const formatPrefs = detectFormatPrefsForPersistence(request);
-        const { org } = await resolveUserAndOrgForSsoCallback({
+
+        // Refuses a session that was not obtained through SSO, then reads the
+        // claims server-side and provisions the user and their workspaces.
+        const { org } = await completeSsoCallback({
           authSession,
-          firstName,
-          lastName,
-          groups,
-          contactInfo,
           formatPrefs,
         });
 

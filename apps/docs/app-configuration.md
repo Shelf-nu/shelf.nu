@@ -124,6 +124,27 @@ Disables Single Sign-On functionality even if SSO providers are configured.
 disableSSO: true;
 ```
 
+### oidc
+
+Custom OIDC login: a single "Log in with ..." button that signs users in
+through a custom OAuth/OIDC provider registered in Supabase Auth. Enabled by
+setting `OIDC_PROVIDER`. See [Custom OIDC Login](./sso/custom-oidc.md) for the
+setup and the group to workspace mapping.
+
+**Default value:** disabled  
+**Environment variables:** `OIDC_PROVIDER`, `OIDC_BUTTON_LABEL`, `OIDC_SCOPES`,
+`OIDC_GROUPS_CLAIM`, `OIDC_WORKSPACE_MAPPINGS`
+
+### disableEmailLogin
+
+Hides password and one-time code login and refuses them, which leaves single
+sign-on as the only way in. It only takes effect while a single sign-on method
+(SAML SSO or the custom OIDC login) is enabled, so the login page is never left
+without a method.
+
+**Default value:** `false`  
+**Environment variable:** `DISABLE_EMAIL_LOGIN`
+
 ### enableScim
 
 Enables SCIM 2.0 user provisioning, so an identity provider (Microsoft Entra ID,

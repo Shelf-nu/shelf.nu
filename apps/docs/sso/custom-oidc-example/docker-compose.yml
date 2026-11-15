@@ -1,0 +1,284 @@
+# Runnable example of Shelf's custom OIDC login: Shelf, the two Supabase
+# services it needs (Auth and Storage), PostgreSQL, and Keycloak as the
+# identity provider with a few test users.
+#
+#   echo '127.0.0.1 keycloak.shelf.internal' | sudo tee -a /etc/hosts   # once
+#   docker compose up --build
+#
+# Then open http://localhost:3000. The walkthrough is in ../custom-oidc.md.
+#
+#   http://localhost:3000                 Shelf
+#   http://localhost:8000                 Supabase API (Auth under /auth/v1, Storage under /storage/v1)
+#   https://keycloak.shelf.internal:8443  Keycloak (admin / admin)
+#   http://localhost:8025                 Mailpit (catches every email)
+#
+# This is a demo for a developer machine, not a production setup: every secret
+# below is public, and nothing is backed up.
+
+name: shelf-oidc-example
+
+# Test-only values, published with this file. Never use them anywhere else.
+x-test-secrets:
+  # Supabase JWT secret and the two API keys signed with it (HS256, role claim
+  # `anon` / `service_role`). The three belong together.
+  jwt-secret: &jwt-secret "bc66fe439b32e19a77294f1cdf1a907e16b0f6221f84bd05e4af77bd6e608c6b"
+  anon-key: &anon-key "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzk0Nzg2MjYwLCJleHAiOjIxMTAxNDYyNjB9.54evbOBxZZL5wk98c29IIqQdrxxM2B3uuk_2PmpywO0"
+  service-role-key: &service-role-key "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3OTQ3ODYyNjAsImV4cCI6MjExMDE0NjI2MH0.EpV2hldHqon3_69JzFCkGRX5i8PXagtdMM1Wjl35IBU"
+  session-secret: &session-secret "3abbac0a19db73e3e950246cf494d55b3297d3539763bc388b5d4333941c2b19"
+  invite-token-secret: &invite-token-secret "8426917fbaca48cc9988bee46fe292c0da81e82a82d3535a2693ba2a08e0a727"
+  # Secret of the Keycloak client `shelf`, as in keycloak/shelf-realm.json.
+  oidc-client-secret: &oidc-client-secret "d32afecfd27887beb89b879a8995b4aea069e90a83bdb546"
+
+networks:
+  # Supabase Auth refuses a custom OIDC issuer that resolves to a private
+  # address (SSRF protection, no switch to turn it off). This network uses the
+  # documentation range TEST-NET-3 (RFC 5737), which is never routed but does
+  # not count as private, so the gateway's address passes that check.
+  default:
+    ipam:
+      config:
+        - subnet: 203.0.113.0/24
+  # Keycloak sits on an ordinary private network, reached through the gateway.
+  idp: {}
+
+volumes:
+  db_data:
+  storage_data:
+  # Caddy's state, including the CA of its internal TLS certificates.
+  caddy_data:
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # Over TCP: during first-time initialisation the server only listens on
+      # its socket, and must not count as ready before init.sql has run.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # Routes http://localhost:8000 to Auth and Storage, and serves Keycloak over
+  # HTTPS. See gateway/Caddyfile.
+  gateway:
+    image: caddy:2-alpine
+    volumes:
+      - ./gateway:/etc/caddy:ro
+      - caddy_data:/data
+    networks:
+      default:
+        aliases:
+          - keycloak.shelf.internal
+      idp: {}
+    ports:
+      - "8000:8000"
+      # Keycloak over HTTPS, for the browser.
+      - "8443:8443"
+      # Shelf shares this container's network (see below), so its port is
+      # published here.
+      - "3000:3000"
+    healthcheck:
+      # The CA that the auth container has to trust exists once Caddy is up.
+      test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_ENABLED: "true"
+      # The one URL Keycloak is reached under, by the browser and by Supabase
+      # Auth alike, through the gateway. It is also the issuer of its tokens.
+      KC_HOSTNAME: https://keycloak.shelf.internal:8443
+      KC_PROXY_HEADERS: xforwarded
+    volumes:
+      - ./keycloak/shelf-realm.json:/opt/keycloak/data/import/shelf-realm.json:ro
+    networks:
+      - idp
+
+  # Supabase Auth (GoTrue). Needs >= v2.192.0 for `custom_claims_allowlist`.
+  auth:
+    image: supabase/gotrue:v2.197.0
+    # Root only to read Caddy's CA certificate from the shared volume.
+    user: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/caddy-data:ro
+    environment:
+      # Trust the gateway's CA for https://keycloak.shelf.internal:8443.
+      SSL_CERT_FILE: /caddy-data/caddy/pki/authorities/local/root.crt
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      # Public URL of this service. The redirect URI registered at the
+      # identity provider is this URL plus "/callback".
+      API_EXTERNAL_URL: http://localhost:8000/auth/v1
+      GOTRUE_JWT_ISSUER: http://localhost:8000/auth/v1
+      GOTRUE_SITE_URL: http://localhost:3000
+      # Where a finished login may be sent: Shelf's two callbacks.
+      GOTRUE_URI_ALLOW_LIST: http://localhost:3000/oauth/callback,http://localhost:3000/oauth/callback/mobile
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:postgres@db:5432/postgres?sslmode=disable
+      GOTRUE_JWT_SECRET: *jwt-secret
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      # A first OIDC login creates the account, so signups stay open.
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      # Keycloak sends `email_verified: true`, so confirmations can stay on.
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_HOST: mailpit
+      GOTRUE_SMTP_PORT: "1025"
+      GOTRUE_SMTP_ADMIN_EMAIL: auth@shelf.test
+      GOTRUE_SMTP_SENDER_NAME: Shelf example
+      GOTRUE_CUSTOM_OAUTH_ENABLED: "true"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9999/health",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # Supabase Storage, keeping files in a volume. Not involved in the login.
+  storage:
+    image: supabase/storage-api:v1.95.0
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - storage_data:/var/lib/storage
+    environment:
+      SERVER_PORT: "5000"
+      ANON_KEY: *anon-key
+      SERVICE_KEY: *service-role-key
+      AUTH_JWT_SECRET: *jwt-secret
+      PGRST_JWT_SECRET: *jwt-secret
+      DATABASE_URL: postgres://supabase_storage_admin:postgres@db:5432/postgres
+      DB_INSTALL_ROLES: "true"
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: shelf
+      REGION: local
+      GLOBAL_S3_BUCKET: shelf
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      S3_PROTOCOL_ENABLED: "false"
+
+  # Catches the emails of Shelf and Supabase Auth: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+
+  # Registers Keycloak as the custom OIDC provider `custom:keycloak` in
+  # Supabase Auth and creates the storage buckets, then exits. It retries
+  # until Keycloak has started.
+  setup:
+    image: node:24-alpine
+    command: ["node", "/setup/setup.mjs"]
+    depends_on:
+      auth:
+        condition: service_healthy
+      storage:
+        condition: service_started
+    volumes:
+      - ./setup:/setup:ro
+    environment:
+      AUTH_URL: http://auth:9999
+      STORAGE_URL: http://storage:5000
+      SERVICE_ROLE_KEY: *service-role-key
+      OIDC_PROVIDER: custom:keycloak
+      OIDC_NAME: Keycloak
+      OIDC_ISSUER: https://keycloak.shelf.internal:8443/realms/shelf
+      OIDC_CLIENT_ID: shelf
+      OIDC_CLIENT_SECRET: *oidc-client-secret
+      OIDC_SCOPES: openid profile email
+      OIDC_GROUPS_CLAIM: groups
+
+  # Shelf, built from this checkout.
+  shelf:
+    build:
+      context: ../../../..
+      dockerfile: apps/webapp/Dockerfile.image
+    # Shares the gateway's network, so that http://localhost:8000 is the
+    # Supabase API for Shelf's server exactly as it is for the browser.
+    # Shelf's own port 3000 is published by the gateway.
+    network_mode: service:gateway
+    depends_on:
+      db:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    environment:
+      PORT: "3000"
+      SERVER_URL: http://localhost:3000
+      SUPABASE_URL: http://localhost:8000
+      SUPABASE_ANON_PUBLIC: *anon-key
+      SUPABASE_SERVICE_ROLE: *service-role-key
+      # No connection pooler in between, so both URLs are the same database.
+      DATABASE_URL: postgres://postgres:postgres@db:5432/postgres?connection_limit=10
+      DIRECT_URL: postgres://postgres:postgres@db:5432/postgres
+      SESSION_SECRET: *session-secret
+      INVITE_TOKEN_SECRET: *invite-token-secret
+      MAPTILER_TOKEN: unused
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_USER: ""
+      SMTP_PWD: ""
+      SMTP_FROM: '"Shelf example" <shelf@shelf.test>'
+      ENABLE_PREMIUM_FEATURES: "false"
+
+      # --- The custom OIDC login (../custom-oidc.md) ---
+      OIDC_PROVIDER: custom:keycloak
+      OIDC_BUTTON_LABEL: Log in with Keycloak
+      # OIDC_SCOPES and OIDC_GROUPS_CLAIM are left at their defaults: the
+      # scopes stored on the provider, and the claim `groups`.
+      OIDC_WORKSPACE_MAPPINGS: >-
+        [
+          {
+            "key": "main",
+            "name": "Main Workspace",
+            "currency": "EUR",
+            "roles": {
+              "ADMIN": ["shelf-admins"],
+              "MANAGER": ["shelf-managers"],
+              "SELF_SERVICE": ["shelf-staff"]
+            }
+          },
+          {
+            "key": "warehouse",
+            "name": "Warehouse",
+            "roles": {
+              "ADMIN": ["warehouse-admins"],
+              "BASE": ["shelf-staff"]
+            }
+          }
+        ]
+      # Override on the command line to see the other login page variants,
+      # for example: DISABLE_EMAIL_LOGIN=true docker compose up -d shelf
+      DISABLE_SSO: ${DISABLE_SSO:-true}
+      DISABLE_EMAIL_LOGIN: ${DISABLE_EMAIL_LOGIN:-false}

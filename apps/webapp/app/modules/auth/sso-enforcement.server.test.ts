@@ -11,15 +11,19 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// why: DISABLE_SSO is read from the environment once at import time; the
-// getter lets each test switch it without re-importing the module.
-const env = vi.hoisted(() => ({ disableSso: false }));
+// why: DISABLE_SSO and OIDC_PROVIDER are read from the environment once at
+// import time; the getters let each test switch them without re-importing the
+// module.
+const env = vi.hoisted(() => ({ disableSso: false, oidcProvider: "" }));
 vi.mock("~/utils/env", async (importOriginal) => {
   const actual = await importOriginal<typeof EnvModule>();
   return {
     ...actual,
     get DISABLE_SSO() {
       return env.disableSso;
+    },
+    get OIDC_PROVIDER() {
+      return env.oidcProvider;
     },
   };
 });
@@ -168,6 +172,7 @@ function givenOwnership({
 beforeEach(() => {
   vi.resetAllMocks();
   env.disableSso = false;
+  env.oidcProvider = "";
   givenUsers([]);
   givenUserById(null);
   givenDomainIsSso(false);
@@ -184,6 +189,30 @@ describe("getLegacyLoginDecision", () => {
       allowed: true,
     });
     expect(db.user.findMany).not.toHaveBeenCalled();
+    expect(checkDomainSSOStatus).not.toHaveBeenCalled();
+  });
+
+  it("with SSO disabled and the custom OIDC login on, refuses only an SSO account", async () => {
+    env.disableSso = true;
+    env.oidcProvider = "custom:acme";
+    givenDomainIsSso(true);
+
+    givenUsers([{ ...standardUser, sso: true }]);
+    await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+      allowed: false,
+      reason: "sso_account",
+    });
+
+    givenUsers([standardUser]);
+    await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+      allowed: true,
+    });
+
+    givenUsers([]);
+    await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+      allowed: true,
+    });
+    // No domain is federated while SAML SSO is off.
     expect(checkDomainSSOStatus).not.toHaveBeenCalled();
   });
 
@@ -514,6 +543,23 @@ describe("getLegacyLoginDecisionForUser", () => {
       getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
     ).resolves.toEqual({ allowed: true });
     expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("with SSO disabled and the custom OIDC login on, refuses only an SSO account", async () => {
+    env.disableSso = true;
+    env.oidcProvider = "custom:acme";
+    givenDomainIsSso(true);
+
+    givenUserById({ id: "user-1", sso: true });
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: false, reason: "sso_account" });
+
+    givenUserById({ id: "user-1", sso: false });
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: true });
+    expect(checkDomainSSOStatus).not.toHaveBeenCalled();
   });
 
   it("refuses when the stored email is on an enforcing SSO domain and the session email is not", async () => {

@@ -26,7 +26,10 @@ vi.mock("~/database/db.server", () => ({ db: {} }));
 // why: pin the SSO kill-switch so the assertions do not depend on DISABLE_SSO
 // in the local environment.
 vi.mock("~/config/shelf.config", () => ({
-  config: { disableSSO: false },
+  config: {
+    disableSSO: false,
+    oidc: { enabled: false, buttonLabel: "Log in with SSO" },
+  },
 }));
 
 // why: refreshAccessToken exchanges the refresh token with Supabase, and

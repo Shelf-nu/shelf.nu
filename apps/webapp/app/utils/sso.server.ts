@@ -221,8 +221,9 @@ function createEmailAccountExistsError() {
  * The `amr` method GoTrue records for a sign-in completed through a SAML IdP.
  * It is carried by every access token refreshed from that session.
  *
- * Only SAML SSO is supported today. Supporting OIDC SSO means accepting its
- * `amr` method here too, or every OIDC sign-in is refused at the callback.
+ * A sign-in through the custom OIDC provider records a different method and is
+ * recognised by `isOidcAuthenticatedSession`; the callback routes tell the two
+ * apart in `completeSsoCallback`.
  */
 const SSO_SAML_AMR_METHOD = "sso/saml";
 
@@ -237,7 +238,7 @@ const SSO_SAML_AMR_METHOD = "sso/saml";
  * @param accessToken - a JWT issued by GoTrue
  * @returns the method names, or an empty list when the token cannot be read
  */
-function readAmrMethods(accessToken: string): string[] {
+export function readAmrMethods(accessToken: string): string[] {
   const [, payloadSegment] = accessToken.split(".");
   if (!payloadSegment) return [];
   try {

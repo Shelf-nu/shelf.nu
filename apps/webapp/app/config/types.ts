@@ -43,8 +43,33 @@ export interface Config {
 
   /**
    * Disable SSO
+   *
+   * Turns off the domain-based SAML SSO. The custom OIDC login (`oidc`) is
+   * configured on its own and is not affected.
    */
   disableSSO: boolean;
+
+  /**
+   * Custom OIDC login: one "Log in with ..." button that signs in through a
+   * custom OAuth/OIDC provider registered in Supabase Auth, without asking for
+   * a company domain. Safe to send to the browser: it holds no identifier of
+   * the provider and no secret.
+   */
+  oidc: {
+    /** True when `OIDC_PROVIDER` is set. */
+    enabled: boolean;
+    /** Text of the login button. */
+    buttonLabel: string;
+  };
+
+  /**
+   * Disable signing in with an email address: the password form, the one-time
+   * code and the password reset are hidden and refused, which leaves single
+   * sign-on as the only way in. True only when `DISABLE_EMAIL_LOGIN="true"`
+   * AND a single sign-on method (SAML SSO or the custom OIDC login) is
+   * enabled, so the login page is never left without a method.
+   */
+  disableEmailLogin: boolean;
 
   /**
    * Enable SCIM user provisioning (RFC 7643/7644).

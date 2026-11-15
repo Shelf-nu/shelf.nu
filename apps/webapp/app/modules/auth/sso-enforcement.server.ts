@@ -17,7 +17,11 @@
  * or an SSO domain's password owner.
  *
  * The rules, in order:
- *   1. With SSO disabled for the deployment, everything is allowed.
+ *   1. With SSO disabled for the deployment, everything is allowed. The one
+ *      exception: while the custom OIDC login is configured (`OIDC_PROVIDER`),
+ *      an SSO account (`User.sso`) is still refused, as in rule 2. It signs in
+ *      through the identity provider, which is also where its workspace roles
+ *      are synced.
  *   2. An account converted to SSO (`User.sso`) is refused on any domain.
  *   3. A domain not configured for SSO is allowed.
  *   4. On an SSO domain, an address with no account is refused (signup is
@@ -60,7 +64,7 @@ import {
   caseInsensitiveEmailFilter,
   pickUserForEmail,
 } from "~/modules/invite/helpers";
-import { DISABLE_SSO } from "~/utils/env";
+import { DISABLE_SSO, OIDC_PROVIDER } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { rolesWhere } from "~/utils/permissions/role-access";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
@@ -215,6 +219,21 @@ async function decideLegacyLogin(
 }
 
 /**
+ * The decision while SAML SSO is disabled and the custom OIDC login is on: no
+ * domain is federated, so only the account's own SSO flag can refuse it.
+ *
+ * @param user - the account behind the address, or null when there is none
+ * @returns a refusal for an SSO account, otherwise `{ allowed: true }`
+ */
+function decideLegacyLoginWithoutSaml(
+  user: { sso: boolean } | null
+): LegacyLoginDecision {
+  return user?.sso
+    ? { allowed: false, reason: "sso_account" }
+    : { allowed: true };
+}
+
+/**
  * Reads the domain part of an address, lowercased.
  *
  * @param email - any address
@@ -271,7 +290,10 @@ async function decideLegacyLoginForAccount(
 export async function getLegacyLoginDecision(
   email: string
 ): Promise<LegacyLoginDecision> {
-  if (DISABLE_SSO) return { allowed: true };
+  if (DISABLE_SSO) {
+    if (!OIDC_PROVIDER) return { allowed: true };
+    return decideLegacyLoginWithoutSaml(await findAccountForEmail(email));
+  }
 
   return decideLegacyLogin(email, await findAccountForEmail(email));
 }
@@ -295,12 +317,14 @@ export async function getLegacyLoginDecisionForUser({
   userId: string;
   email: string;
 }): Promise<LegacyLoginDecision> {
-  if (DISABLE_SSO) return { allowed: true };
+  if (DISABLE_SSO && !OIDC_PROVIDER) return { allowed: true };
 
   const user = await db.user.findUnique({
     where: { id: userId },
     select: { id: true, sso: true, email: true },
   });
+
+  if (DISABLE_SSO) return decideLegacyLoginWithoutSaml(user);
 
   return decideLegacyLoginForAccount(email, user);
 }
