@@ -53,11 +53,6 @@ function slice(id: string, from: string, to: string, quantity = 1) {
   return { quantity, booking: { id, from: new Date(from), to: new Date(to) } };
 }
 
-/** A stock-ledger entry projected by `consumptionLogs`. */
-function ledgerChange(createdAt: string, stockChange: number) {
-  return { createdAt: new Date(createdAt), stockChange };
-}
-
 /** Build a QUANTITY_TRACKED asset pool. */
 function quantityAsset(
   id: string,
@@ -172,9 +167,7 @@ describe("assetUtilizationReport", () => {
   });
 
   it("does not query ledger rows when all assets are individual", async () => {
-    vi.mocked(db.asset.findMany).mockResolvedValue([
-      asset("ind-1", []),
-    ] as any);
+    vi.mocked(db.asset.findMany).mockResolvedValue([asset("ind-1", [])] as any);
 
     await assetUtilizationReport({
       organizationId: "org-1",
@@ -472,7 +465,11 @@ describe("assetUtilizationReport", () => {
     expect(result.rows[0].daysInUse).toBe(30);
   });
 
-  it("matches utilization rounding between a 1-unit quantity pool and an individual asset", async () => {
+  it("keeps the booked unit count for bookings shorter than a day", async () => {
+    // One-day period on two 14-unit pools, each booked for 12 hours: one
+    // pool for 1 unit, the other for all 14. Exact unit-time gives
+    // 12 / (14 * 24) = 4% and 168 / 336 = 50%; rounding each side up to
+    // whole unit-days would report 7% for both.
     const oneDayWindow: ResolvedTimeframe = {
       preset: "custom",
       label: "Apr 10",
@@ -480,11 +477,11 @@ describe("assetUtilizationReport", () => {
       to: new Date("2026-04-11T00:00:00Z"),
     };
     vi.mocked(db.asset.findMany).mockResolvedValue([
-      asset("ind-1", [
-        slice("b-1", "2026-04-10T09:00:00Z", "2026-04-10T10:00:00Z", 1),
+      quantityAsset("pool-one-unit", 14, [
+        slice("b-1", "2026-04-10T06:00:00Z", "2026-04-10T18:00:00Z", 1),
       ]),
-      quantityAsset("pool-1", 1, [
-        slice("b-2", "2026-04-10T09:00:00Z", "2026-04-10T10:00:00Z", 1),
+      quantityAsset("pool-all-units", 14, [
+        slice("b-2", "2026-04-10T06:00:00Z", "2026-04-10T18:00:00Z", 14),
       ]),
     ] as any);
 
@@ -493,11 +490,13 @@ describe("assetUtilizationReport", () => {
       timeframe: oneDayWindow,
     });
 
-    const ind = result.rows.find((r) => r.assetId === "ind-1")!;
-    const pool = result.rows.find((r) => r.assetId === "pool-1")!;
-    expect(pool.daysInUse).toBe(ind.daysInUse);
-    expect(pool.utilizationRate).toBe(ind.utilizationRate);
-    expect(pool.utilizationRate).toBe(100);
+    const oneUnit = result.rows.find((r) => r.assetId === "pool-one-unit")!;
+    const allUnits = result.rows.find((r) => r.assetId === "pool-all-units")!;
+    expect(oneUnit.utilizationRate).toBe(4);
+    expect(allUnits.utilizationRate).toBe(50);
+    // Booked time rounds up to whole days, whatever the unit count.
+    expect(oneUnit.daysInUse).toBe(1);
+    expect(allUnits.daysInUse).toBe(1);
   });
 
   it("clamps totalDays and daysInUse to zero when custom timeframe is reversed", async () => {
@@ -551,28 +550,24 @@ describe("computeQuantityUtilization", () => {
           },
         },
       ],
-      ledger: [
-        {
-          createdAt: new Date("2026-05-05T00:00:00Z"),
-          stockChange: 5,
-        },
-      ],
+      ledger: { inPeriodLogs: [], postPeriodStockChange: 5 },
     });
 
     expect(result.daysInUse).toBe(30);
     expect(result.utilizationRate).toBe(50);
   });
 
-  it("ignores a ledger row at or before the period start", () => {
-    // Live quantity 10. A row at or before period start (e.g. Mar 31) should be ignored.
-    // 5 units booked for 30 days = 150 / 300 = 50%
+  it("rebuilds stock before an in-period change from the live quantity", () => {
+    // Live quantity 20 after a +10 restock on Apr 16, so stock was 10 for the
+    // first 15 days and 20 for the last 15. 10 units booked all period:
+    // 300 unit-days used of 15 * 10 + 15 * 20 = 450 available -> 67%.
     const result = computeQuantityUtilization({
       windowStart,
       windowEnd,
-      liveQuantity: 10,
+      liveQuantity: 20,
       slices: [
         {
-          quantity: 5,
+          quantity: 10,
           booking: {
             id: "b-1",
             from: new Date("2026-04-01T00:00:00Z"),
@@ -580,20 +575,16 @@ describe("computeQuantityUtilization", () => {
           },
         },
       ],
-      ledger: [
-        {
-          createdAt: new Date("2026-03-31T23:59:59Z"),
-          stockChange: 5,
-        },
-        {
-          createdAt: new Date("2026-04-01T00:00:00Z"),
-          stockChange: 3,
-        },
-      ],
+      ledger: {
+        inPeriodLogs: [
+          { createdAt: new Date("2026-04-16T00:00:00Z"), stockChange: 10 },
+        ],
+        postPeriodStockChange: 0,
+      },
     });
 
     expect(result.daysInUse).toBe(30);
-    expect(result.utilizationRate).toBe(50);
+    expect(result.utilizationRate).toBe(67);
   });
 
   it("calculates daysInUse while leaving utilizationRate 0 for zero stock pool", () => {

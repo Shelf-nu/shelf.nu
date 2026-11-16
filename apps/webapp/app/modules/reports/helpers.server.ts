@@ -4254,8 +4254,9 @@ export interface QuantityBookingSlice {
 }
 
 /**
- * Minimal ledger event representing an in-period stock change for capacity reconstruction.
- * Excludes non-stock categories (`MOVE`, `OPENING_BALANCE`) and zero-change records.
+ * One stock change from the pool's ledger, used to rebuild its stock over time.
+ * Callers pass only rows that change the pool total: no `MOVE` or
+ * `OPENING_BALANCE` rows, and no zero changes.
  */
 export interface QuantityLedgerRow {
   createdAt: Date;
@@ -4263,12 +4264,16 @@ export interface QuantityLedgerRow {
 }
 
 /**
- * Ledger snapshot inputs for historical capacity reconstruction.
- * `inPeriodLogs` captures non-move stock changes strictly within `(windowStart, windowEnd)`.
- * `postPeriodStockChange` is the net stock change occurring at or after `windowEnd`.
+ * The pool's stock history, split around the report period.
+ *
+ * Both parts are needed to rebuild the stock at the period start from the live
+ * quantity: the live quantity includes every change up to now, so changes after
+ * the period must be subtracted too, not only the ones inside it.
  */
 export interface QuantityUtilizationLedger {
+  /** Stock changes strictly inside `(windowStart, windowEnd)`, oldest first. */
   inPeriodLogs?: QuantityLedgerRow[];
+  /** Net stock change of every row at or after `windowEnd`. */
   postPeriodStockChange?: number;
 }
 
@@ -4278,14 +4283,14 @@ export interface QuantityUtilizationLedger {
  * @property windowEnd - Millisecond epoch timestamp for the period end.
  * @property liveQuantity - Current live stock of the asset pool.
  * @property slices - Booking slices clamped and swept over the timeline.
- * @property ledger - In-period stock delta events and post-period aggregate change.
+ * @property ledger - Stock changes inside the period and the net change after it.
  */
 export interface ComputeQuantityUtilizationArgs {
   windowStart: number;
   windowEnd: number;
   liveQuantity: number | null | undefined;
   slices: QuantityBookingSlice[];
-  ledger?: QuantityUtilizationLedger | QuantityLedgerRow[];
+  ledger?: QuantityUtilizationLedger;
 }
 
 /**
@@ -4341,25 +4346,8 @@ export function computeQuantityUtilization({
     }
   }
 
-  const inPeriodLogs: QuantityLedgerRow[] = [];
-  let postPeriodStockChange = 0;
-
-  if (Array.isArray(ledger)) {
-    for (const log of ledger) {
-      const logTime = log.createdAt.getTime();
-      if (logTime <= windowStart) {
-        continue;
-      }
-      if (logTime >= windowEnd) {
-        postPeriodStockChange += log.stockChange;
-      } else {
-        inPeriodLogs.push(log);
-      }
-    }
-  } else if (ledger) {
-    if (ledger.inPeriodLogs) inPeriodLogs.push(...ledger.inPeriodLogs);
-    postPeriodStockChange = ledger.postPeriodStockChange ?? 0;
-  }
+  const inPeriodLogs = ledger?.inPeriodLogs ?? [];
+  const postPeriodStockChange = ledger?.postPeriodStockChange ?? 0;
 
   let totalUnitMsAvailable = 0;
   let totalUnitMsInUse = 0;
@@ -4424,14 +4412,14 @@ export function computeQuantityUtilization({
     sumMergedIntervalsMs([...bookingQuantities.values()]) / dayMs
   );
 
-  const unitDaysAvailable = Math.ceil(totalUnitMsAvailable / dayMs);
-  const unitDaysInUse = Math.min(
-    unitDaysAvailable,
-    Math.ceil(totalUnitMsInUse / dayMs)
-  );
+  // The rate divides exact unit-time, with no rounding to whole days first:
+  // rounding both sides up to unit-days hides how many units a short booking
+  // took (1 unit and 14 units booked for an hour would both read as one
+  // unit-day). In-use time is capped at stock on every step of the sweep, so
+  // the rate stays within 0-100.
   const utilizationRate =
-    unitDaysAvailable > 0
-      ? Math.round((unitDaysInUse / unitDaysAvailable) * 100)
+    totalUnitMsAvailable > 0
+      ? Math.round((totalUnitMsInUse / totalUnitMsAvailable) * 100)
       : 0;
 
   return {
