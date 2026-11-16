@@ -11,13 +11,14 @@ import { fontSize } from "@/lib/constants";
 export const unstable_settings = { initialRouteName: "index" };
 
 /**
- * Booking screens sit in the content column on wide windows. On iOS the
- * Add-to-Booking modal is left alone: an iPad presents it as a sheet the system
- * sizes for the screen, so it needs no column of its own. Android presents it
- * full screen, so it takes the column like the rest.
+ * Booking screens sit in the content column on wide windows, except the
+ * scanner, whose camera uses the whole window. On iOS the Add-to-Booking modal
+ * is left alone too: an iPad presents it as a sheet the system sizes for the
+ * screen, so it needs no column of its own. Android presents it full screen,
+ * so it takes the column like the rest.
  */
 const BOOKINGS_SCREEN_LAYOUT = contentColumnLayout({
-  except: Platform.OS === "ios" ? ["add-assets"] : [],
+  except: Platform.OS === "ios" ? ["scan", "add-assets"] : ["scan"],
 });
 
 export default function BookingsLayout() {
@@ -43,6 +44,10 @@ export default function BookingsLayout() {
       <Stack.Screen name="[id]" options={{ title: "Booking Details" }} />
       <Stack.Screen name="new" options={{ title: "New Booking" }} />
       <Stack.Screen name="edit" options={{ title: "Edit Booking" }} />
+      <Stack.Screen
+        name="scan"
+        options={{ title: "Booking Scanner", headerShown: false }}
+      />
       <Stack.Screen
         name="add-assets"
         options={{ title: "Add to Booking", presentation: "modal" }}

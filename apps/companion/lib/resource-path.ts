@@ -2,9 +2,10 @@
  * The app's resource path allowlist: which web paths name something the app
  * can open natively.
  *
- * Two callers turn a path into a screen. `redirectSystemPath` in
- * `app/+native-intent.ts` rewrites every link the OS delivers (universal
- * links, App Links and `shelf://` links), and `resolvePushRoute` in
+ * Two callers turn a path into a screen. `lib/link-routing.ts` reads
+ * {@link nativeRouteForLink} for every link the OS delivers (universal links,
+ * App Links and `shelf://` links): the deep-link hook opens the route, and
+ * `redirectSystemPath` keeps the router away from it. `resolvePushRoute` in
  * `lib/push/routing.ts` opens the screen a tapped push is about. Both match
  * through {@link matchResourcePath}, so a resource that gains a native screen
  * is added here once and reaches both.
@@ -201,19 +202,18 @@ function matchSegments(segments: readonly string[]): ResourcePath | null {
 }
 
 /**
- * The in-app route for a link the OS delivered, as `redirectSystemPath` in
- * `app/+native-intent.ts` returns it.
+ * The in-app route a link the OS delivered names, which the deep-link hook
+ * opens (`linkAction` in `lib/link-routing.ts`).
  *
- * Every matched resource maps to a real native screen, so a cold start never
- * lands on an unmatched route. The query is re-attached, because some routes
- * read it (`/assets/new?qrId=...`); routes that ignore it are unaffected.
+ * Every matched resource maps to a real native screen. The query is
+ * re-attached, because some routes read it (`/assets/new?qrId=...`); routes
+ * that ignore it are unaffected.
  *
  * - `assets/:id` and deeper open the asset (`assets/new` the create screen)
  * - `kits/:id` and `assets/kits/:id` open the kit, `kits` the kits list
  * - `bookings` and `audits` open the detail or the list
- * - `qr/:id` lands on the start screen: only an API call can tell an asset
- *   from a kit, and `useDeepLinkHandler` (`lib/deep-links.ts`) finishes the
- *   job from the original URL
+ * - `qr/:id` maps to `/`: only an API call can tell an asset from a kit, so
+ *   `useDeepLinkHandler` (`lib/deep-links.ts`) resolves it from the URL
  * - `scanner` and `scan` open the scanner
  *
  * @param url - The raw URL the OS delivered (scheme, host, path and query)

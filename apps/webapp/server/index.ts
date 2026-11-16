@@ -12,6 +12,7 @@ import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { runWithTabId } from "~/utils/tab-id.server";
 
+import { BUILD_VERSION_PATH, buildVersion } from "./build-version";
 import { logger } from "./logger";
 import {
   applyForwardedProto,
@@ -136,6 +137,14 @@ export default createHonoServer<ServerEnv>({
 
       return next();
     });
+
+    /**
+     * Build id for open tabs checking whether a newer build is live. Before
+     * logger() so frequent polls stay out of the logs, and before
+     * session()/protect() since it needs neither a session nor the database.
+     * It answers without calling next(), so nothing after it runs.
+     */
+    server.get(BUILD_VERSION_PATH, buildVersion());
 
     /**
      * Add logger middleware

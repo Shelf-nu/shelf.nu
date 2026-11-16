@@ -24,7 +24,8 @@
     "es2022": true
   },
   "globals": {
-    "NodeJS": "readonly"
+    "NodeJS": "readonly",
+    "__SHELF_BUILD_ID__": "readonly"
   },
   "parserOptions": {
     "ecmaVersion": "latest",

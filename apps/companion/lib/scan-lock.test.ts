@@ -93,7 +93,10 @@ function statementsBeforeFirstAwait(relativePath: string): string[] {
   return found;
 }
 
-for (const screen of ["app/(tabs)/scanner.tsx", "app/(tabs)/audits/scan.tsx"]) {
+for (const screen of [
+  "components/scanner/scanner-screen.tsx",
+  "app/(tabs)/audits/scan.tsx",
+]) {
   test(`${screen} takes the scan lock before any lookup`, () => {
     // The camera handler never turns off during a lookup (that would switch
     // the iOS torch off), so this check is the only guard against a second

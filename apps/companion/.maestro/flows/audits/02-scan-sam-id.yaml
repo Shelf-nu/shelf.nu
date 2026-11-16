@@ -25,7 +25,7 @@ appId: com.shelf.companion.carlos
 - waitForAnimationToEnd
 
 # ── Open the audit session and start scanning ──
-# Audits isn't a bottom tab (href: null) — it's a Home quick-action.
+# Audits has no tab-bar button; it opens from the Home tile.
 - tapOn: "Home"
 - tapOn: "Audits"
 - scrollUntilVisible:
