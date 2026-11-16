@@ -47,7 +47,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
   kitsWithoutActiveAssetsRefusal,
 } from "@shelf/labels";
-import { ROLE_POLICIES, type RolePolicy } from "@shelf/permissions";
+import type { RolePolicy } from "@shelf/permissions";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
@@ -200,7 +200,11 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
-import type { RoleAccess } from "~/utils/permissions/role-access";
+import {
+  ROLE_POLICIES,
+  resolveRole,
+  type RoleAccess,
+} from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
@@ -3255,7 +3259,9 @@ async function recordApprovalOnCheckout(
 
 /**
  * Whether the acting user's own reservation in this workspace would be a
- * request, read from their roles in the database rather than from the caller.
+ * request, read from their membership in the database rather than from the
+ * caller. Decided by the effective role (`resolveRole`), the same role whose
+ * policy `access.policy` carries.
  *
  * @param args.actorUserId - The acting user
  * @param args.organizationId - The workspace
@@ -3279,12 +3285,15 @@ async function actorReservesAsRequest({
     where: { userId_organizationId: { userId: actorUserId, organizationId } },
     select: { roles: true },
   });
-  return (membership?.roles ?? []).some((role) =>
-    roleReservesAsRequest({
-      approvalSetting: ROLE_POLICIES[role].bookings.approvalSetting,
-      settings,
-    })
-  );
+  if (!membership) return false;
+  // The membership's effective role decides, as it does for
+  // `access.policy` and so for `reserveBooking`: a Self service + Base
+  // membership reserves as Self service.
+  return roleReservesAsRequest({
+    approvalSetting:
+      ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
+    settings,
+  });
 }
 
 /** What {@link approvalOnCheckout} resolved for the acting user. */

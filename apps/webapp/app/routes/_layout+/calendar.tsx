@@ -33,6 +33,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
+import { redirectFromStalePendingApprovalFilter } from "~/modules/booking/stale-pending-filter.server";
 import { getMemberCalendarFeedUrl } from "~/modules/calendar-subscription/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
@@ -153,6 +154,17 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     };
 
     const searchParams = getCurrentSearchParams(request);
+
+    // A "Pending approval" filter left over from before approval was turned
+    // off shows every booking instead of a blank calendar.
+    const stalePendingRedirect = await redirectFromStalePendingApprovalFilter({
+      request,
+      organizationId,
+      searchParams,
+      pathname: "/calendar",
+    });
+    if (stalePendingRedirect) return stalePendingRedirect;
+
     const { teamMemberIds } = getParamsValues(searchParams);
     const [
       teamMembersData,

@@ -5544,6 +5544,62 @@ describe("checkoutBooking", () => {
     );
   });
 
+  it("judges a multi-role membership by its effective role at draft check-out", async () => {
+    // why: Self service + Base resolves to Self service, as access.policy and
+    // reserveBooking do; with only Base approval on, that member's reservation
+    // is final, so a straight draft check-out is not refused.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: ["BASE", "SELF_SERVICE"],
+    });
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-draft-multi",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await checkoutBooking({ ...mockCheckoutParams, userId: "user-1" });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
   it("lets a member check a draft out when their own role's switch is off", async () => {
     // why: the draft gate reads the actor's switch, not "any switch on"; a
     // Base member in a workspace that only gates Self service is not refused.
