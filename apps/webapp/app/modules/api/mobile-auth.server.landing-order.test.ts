@@ -41,7 +41,7 @@ function row(
 ) {
   return {
     roles: ["ADMIN"],
-    user,
+    user: { ...user, roles: [] },
     organization: {
       id,
       name: id,
@@ -49,6 +49,10 @@ function row(
       imageId: null,
       barcodesEnabled: false,
       auditsEnabled: false,
+      // What the workspace gate reads: an active workspace.
+      userId: "owner-1",
+      workspaceDisabled: false,
+      owner: { tier: { tierLimitId: "tier_2" } },
     },
   };
 }

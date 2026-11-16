@@ -22,6 +22,7 @@ import {
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   type PermissionAction,
   type PermissionEntity,
@@ -192,6 +193,9 @@ export async function requireMobileAuth(request: Request) {
  * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
  * switch `managersCanEditAssets`, so the companion can resolve the same
  * `RoleAccess` and the same matrix answers the server does for that workspace.
+ * It also carries `inactive`, `inactiveReason` and `inactiveMessage`: whether
+ * every other mobile route refuses requests there (see
+ * `mobileWorkspaceStateFor`), from the same read.
  *
  * @param userId - the authenticated user
  * @returns organizations in landing order, plus the explicit last-selected id
@@ -207,9 +211,20 @@ export async function getUserOrganizations(userId: string) {
     ],
     select: {
       roles: true,
-      user: { select: { sso: true, lastSelectedOrganizationId: true } },
+      user: {
+        select: {
+          sso: true,
+          lastSelectedOrganizationId: true,
+          // The gate reads the caller's Shelf system roles (Shelf admins
+          // pass), so the inactive state below comes from this one read.
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.user.select,
+        },
+      },
       organization: {
         select: {
+          // What the gate reads (type, owner and owner tier, admin switch),
+          // so `/me` marks each workspace inactive without a second read.
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.organization.select,
           id: true,
           name: true,
           type: true,
@@ -265,12 +280,23 @@ export async function getUserOrganizations(userId: string) {
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
   return {
-    organizations: ordered.map((uo) => ({
-      ...uo.organization,
-      barcodesEnabled: canUseBarcodes(uo.organization),
-      auditsEnabled: canUseAudits(uo.organization),
-      roles: uo.roles,
-    })),
+    organizations: ordered.map((uo) => {
+      // The gate-only columns (owner, owner tier, admin switch) decide the
+      // inactive state and stay out of the response.
+      const {
+        userId: _ownerId,
+        workspaceDisabled: _workspaceDisabled,
+        owner: _owner,
+        ...organization
+      } = uo.organization;
+      return {
+        ...organization,
+        barcodesEnabled: canUseBarcodes(uo.organization),
+        auditsEnabled: canUseAudits(uo.organization),
+        roles: uo.roles,
+        ...mobileWorkspaceStateFor(uo, userId),
+      };
+    }),
     lastSelectedOrganizationId,
   };
 }
@@ -328,6 +354,64 @@ const CONTACT_OWNER_SUFFIX =
 /** Disabled workspace, said to everyone: only Shelf staff can switch it back. */
 const CONTACT_SUPPORT_SUFFIX = "Contact Shelf support for more information.";
 
+/** Title of the 403 an inactive workspace gets. */
+const MOBILE_WORKSPACE_INACTIVE_TITLE = "Workspace inactive";
+
+/**
+ * Marks an inactive-workspace refusal: carried on the 403's `additionalData`
+ * (which `makeShelfError` keeps through every wrap), and sent by the scan
+ * lookups as the error `reason`, so the companion can title the answer
+ * without reading the message text.
+ */
+export const MOBILE_WORKSPACE_INACTIVE_REASON = "workspace_inactive";
+
+/** Why a workspace is inactive: switched off by a Shelf admin, or a lapsed Team plan. */
+export type MobileWorkspaceInactiveReason = "disabled" | "lapsed";
+
+/**
+ * The message for an inactive workspace, as the caller sees it.
+ *
+ * @param args.inactiveReason - Why the workspace is inactive.
+ * @param args.scope - `"workspace"` when the caller acts in it, `"code"` when
+ *   they opened a scanned code it owns.
+ * @param args.isOwner - Whether the caller owns the workspace. Only the owner
+ *   can renew a lapsed plan; nobody in the workspace can lift an admin switch.
+ * @returns The message, without purchase wording.
+ */
+function inactiveWorkspaceMessage({
+  inactiveReason,
+  scope,
+  isOwner,
+}: {
+  inactiveReason: MobileWorkspaceInactiveReason;
+  scope: "workspace" | "code";
+  isOwner: boolean;
+}): string {
+  const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][scope];
+  const suffix =
+    inactiveReason === "disabled"
+      ? CONTACT_SUPPORT_SUFFIX
+      : isOwner
+      ? null
+      : CONTACT_OWNER_SUFFIX;
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+/**
+ * Whether an error is the 403 an inactive workspace gets from
+ * {@link getMobileWorkspaceAccess}, wrapped or not. Reads the structured
+ * marker on `additionalData`, never the title or message.
+ *
+ * @param error - Any error, usually the result of `makeShelfError`.
+ * @returns `true` for the inactive-workspace refusal.
+ */
+export function isMobileWorkspaceInactiveError(error: ShelfError): boolean {
+  return (
+    error.status === 403 &&
+    error.additionalData?.reason === MOBILE_WORKSPACE_INACTIVE_REASON
+  );
+}
+
 /**
  * Why the web app shows a workspace as disabled, if it does. Mobile twin of
  * the `disabledTeamOrg` loader flag in `routes/_layout+/_layout.tsx`, with the
@@ -348,7 +432,7 @@ const CONTACT_SUPPORT_SUFFIX = "Contact Shelf support for more information.";
  */
 function getMobileWorkspaceInactiveReason(
   membership: MobileWorkspaceGateMembership
-): "disabled" | "lapsed" | null {
+): MobileWorkspaceInactiveReason | null {
   // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
   if (membership.user.roles.some((role) => role.name === Roles.ADMIN)) {
     return null;
@@ -401,24 +485,22 @@ export function mobileWorkspaceAccessFromMembership({
   const inactiveReason = getMobileWorkspaceInactiveReason(membership);
   if (!inactiveReason) return { access: "active" };
 
-  const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][reason];
-  // `organization.userId` is the workspace owner. Only the owner can renew a
-  // lapsed plan; nobody in the workspace can lift an admin switch.
-  const isOwner = membership.organization.userId === userId;
-  const suffix =
-    inactiveReason === "disabled"
-      ? CONTACT_SUPPORT_SUFFIX
-      : isOwner
-      ? null
-      : CONTACT_OWNER_SUFFIX;
-
   return {
     access: "inactive",
     error: new ShelfError({
       cause: null,
-      title: "Workspace inactive",
-      message: suffix ? `${base} ${suffix}` : base,
-      additionalData: { userId, organizationId },
+      title: MOBILE_WORKSPACE_INACTIVE_TITLE,
+      message: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: reason,
+        // `organization.userId` is the workspace owner.
+        isOwner: membership.organization.userId === userId,
+      }),
+      additionalData: {
+        userId,
+        organizationId,
+        reason: MOBILE_WORKSPACE_INACTIVE_REASON,
+      },
       label: "Auth",
       status: 403,
       shouldBeCaptured: false,
@@ -456,6 +538,64 @@ export async function getMobileWorkspaceAccess({
     membership,
     reason,
   });
+}
+
+/** Whether one of the caller's workspaces is active, as `/api/mobile/me` reports it. */
+export type MobileWorkspaceState = {
+  /** `true` when the mobile API refuses requests in this workspace. */
+  inactive: boolean;
+  /** Why it is inactive, or `null` when it is active. */
+  inactiveReason: MobileWorkspaceInactiveReason | null;
+  /** What the app shows for it, or `null` when it is active. */
+  inactiveMessage: string | null;
+};
+
+/** An active workspace, as `/api/mobile/me` reports it. */
+const ACTIVE_WORKSPACE_STATE: MobileWorkspaceState = {
+  inactive: false,
+  inactiveReason: null,
+  inactiveMessage: null,
+};
+
+/**
+ * Whether the mobile API refuses requests in one of the caller's workspaces,
+ * by the same rule as {@link getMobileWorkspaceAccess}, from a membership row
+ * that carries {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}. The state is
+ * extra information on `/me`: if it cannot be worked out, the workspace is
+ * reported active (logged), and every other route still refuses it.
+ *
+ * @param membership - The caller's membership row.
+ * @param userId - The signed-in caller.
+ * @returns The workspace's state for the app.
+ */
+function mobileWorkspaceStateFor(
+  membership: MobileWorkspaceGateMembership,
+  userId: string
+): MobileWorkspaceState {
+  try {
+    const inactiveReason = getMobileWorkspaceInactiveReason(membership);
+    if (!inactiveReason) return ACTIVE_WORKSPACE_STATE;
+    return {
+      inactive: true,
+      inactiveReason,
+      inactiveMessage: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: "workspace",
+        // `organization.userId` is the workspace owner.
+        isOwner: membership.organization.userId === userId,
+      }),
+    };
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to work out whether a workspace is active",
+        additionalData: { userId },
+        label: "Auth",
+      })
+    );
+    return ACTIVE_WORKSPACE_STATE;
+  }
 }
 
 /**
@@ -654,16 +794,13 @@ export async function assertMobileCanUseBookings(organizationId: string) {
  * Shared Prisma select shape for asset data returned by mobile scanner endpoints.
  * Used by both QR and barcode resolution routes for consistent responses.
  *
- * NOTE: Post-Phase-4a/4b the `Asset` model no longer carries direct `kitId` or
- * `location` columns — kit linkage now lives on the `AssetKit` pivot
- * (`assetKits`) and location on the `AssetLocation` pivot (`assetLocations`).
- * Custody also became 1:many (`Custody[]`). The companion app currently in
- * App Store review (since 2026-05-20) consumes the legacy flat shape
- * (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody` as a single
- * object). To keep that live build working without a forced update, mobile
- * routes fetch this select and then call `shapeMobileAssetResponse` to
- * flatten the pivot rows into the legacy shape — mirroring the
- * `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below.
+ * NOTE: the `Asset` model holds kit linkage on the `AssetKit` pivot
+ * (`assetKits`), location on the `AssetLocation` pivot (`assetLocations`) and
+ * custody as a list (`Custody[]`), while companion builds in users' hands read
+ * a flat shape (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody`
+ * as a single object). So mobile routes fetch this select and then call
+ * `shapeMobileAssetResponse` to flatten the pivot rows into that shape, the
+ * same way the `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below does.
  */
 export const MOBILE_ASSET_SELECT = {
   id: true,
@@ -742,13 +879,11 @@ export const MOBILE_ASSET_SELECT = {
  * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
  * web scanner drawers.
  *
- * NOTE: `Kit` no longer exposes a direct `assets` relation — it is now joined
- * via the `AssetKit` pivot (`assetKits`). We still need to surface the
- * per-asset status/availableToBook to the companion app in the legacy flat
- * shape (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`)
- * so the existing mobile clients in the App Store don't break. Mobile
- * endpoints fetch this select shape and then call
- * `shapeMobileKitResponse` to flatten the pivot rows.
+ * NOTE: a `Kit` reaches its assets through the `AssetKit` pivot
+ * (`assetKits`), while companion builds in users' hands read a flat shape
+ * (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`). Mobile
+ * endpoints fetch this select shape and then call `shapeMobileKitResponse` to
+ * flatten the pivot rows into it.
  *
  * Every member is selected, archived ones included, with its `archivedAt`:
  * `shapeMobileKitResponse` splits them into the active members the phone
@@ -1115,4 +1250,22 @@ export async function getMobileAssetForViewer({
     viewerUserId,
     canSeeAllCustody,
   });
+}
+
+/**
+ * The `{ error }` body a scan lookup sends for a thrown error. An
+ * inactive-workspace refusal carries `reason: "workspace_inactive"`, so the
+ * companion scanner can title it as such; any other error carries the message
+ * alone, as every mobile route does.
+ *
+ * @param error - The error, as `makeShelfError` returns it.
+ * @returns The value for the response's `error` field.
+ */
+export function mobileScanErrorBody(error: ShelfError): {
+  message: string;
+  reason?: typeof MOBILE_WORKSPACE_INACTIVE_REASON;
+} {
+  return isMobileWorkspaceInactiveError(error)
+    ? { message: error.message, reason: MOBILE_WORKSPACE_INACTIVE_REASON }
+    : { message: error.message };
 }
