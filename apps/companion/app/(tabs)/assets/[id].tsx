@@ -82,7 +82,9 @@ import {
   canOfferArchive,
   moreMenuActions,
   runArchive,
-  settleArchiveChange,
+  captureRequestScope,
+  landArchiveChange,
+  type RequestScope,
 } from "@/lib/asset-archive";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
@@ -163,10 +165,14 @@ export default function AssetDetailScreen() {
     onRefresh,
   } = useAssetData(id, currentOrg?.id);
 
-  // The active workspace, read after an await: a request's own closure still
-  // holds the workspace it started in.
-  const workspaceIdRef = useRef(currentOrg?.id);
-  workspaceIdRef.current = currentOrg?.id;
+  // What this screen shows now, read after an await: a request's own closure
+  // still holds the workspace and asset it started on. A deep link can reuse
+  // this screen for another asset while a request runs.
+  const shownScopeRef = useRef<RequestScope>({
+    workspaceId: currentOrg?.id,
+    assetId: id,
+  });
+  shownScopeRef.current = { workspaceId: currentOrg?.id, assetId: id };
 
   // Custody actions
   const {
@@ -485,29 +491,36 @@ export default function AssetDetailScreen() {
 
   const performReinstate = async () => {
     if (!currentOrg || !asset) return;
+    const assetId = asset.id;
+    const isStillHere = captureRequestScope(() => shownScopeRef.current);
     setIsReinstating(true);
-    const startedIn = currentOrg.id;
-    const { error: err } = await api.reinstateAsset(currentOrg.id, asset.id);
-    if (err) {
+    try {
+      const { error: err } = await api.reinstateAsset(currentOrg.id, assetId);
+      // A failed reload keeps the reinstated screen, not the error state.
+      await landArchiveChange(
+        err
+          ? { kind: "failed", message: err }
+          : { kind: "changed", archivedAt: null },
+        {
+          assetId,
+          isStillHere,
+          showRefusal: (message) => Alert.alert("Couldn't reinstate", message),
+          apply: (archivedAt) => applyArchivedAt(assetId, archivedAt),
+          refetch: reloadAsset,
+          onChanged: () =>
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+        }
+      );
+    } finally {
       setIsReinstating(false);
-      Alert.alert("Couldn't reinstate", err);
-      return;
     }
-    // A failed reload keeps the reinstated screen, not the error state.
-    await settleArchiveChange({
-      assetId: asset.id,
-      archivedAt: null,
-      apply: applyArchivedAt,
-      refetch: reloadAsset,
-      isStillCurrent: () => workspaceIdRef.current === startedIn,
-    });
-    setIsReinstating(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  /** Puts the server's archive state on the asset shown on this screen. */
-  const applyArchivedAt = (archivedAt: string | null) =>
-    setAsset((current) => (current ? { ...current, archivedAt } : current));
+  /** Puts the server's archive state on `assetId`, if that asset is shown. */
+  const applyArchivedAt = (assetId: string, archivedAt: string | null) =>
+    setAsset((current) =>
+      current && current.id === assetId ? { ...current, archivedAt } : current
+    );
 
   // ── Archive (active assets) ───────────────────────
 
@@ -553,38 +566,41 @@ export default function AssetDetailScreen() {
     if (!currentOrg || !asset || archiveInFlight.current) return;
     archiveInFlight.current = true;
     setIsActionLoading(true);
-    const startedIn = currentOrg.id;
-    const isStillCurrent = () => workspaceIdRef.current === startedIn;
+    const assetId = asset.id;
+    const isStillHere = captureRequestScope(() => shownScopeRef.current);
     try {
       const outcome = await runArchive({
         send: (confirmModelShortfall) =>
-          api.archiveAsset(currentOrg.id, asset.id, { confirmModelShortfall }),
+          api.archiveAsset(currentOrg.id, assetId, { confirmModelShortfall }),
         confirmShortfall: confirmArchiveAnyway,
+        isStillHere,
       });
-      if (outcome.kind === "failed") {
-        Alert.alert("Couldn't archive", outcome.message);
-        // A refusal often means the asset changed elsewhere (custody, a
-        // booking): reload it so the screen and the pre-tap check catch up.
-        if (isStillCurrent()) await reloadAsset();
-        return;
-      }
-      if (outcome.kind === "cancelled") return;
-
-      // The archive landed: the answer marks it archived on screen, and a
-      // failed reload keeps that, not the error state.
-      await settleArchiveChange({
-        assetId: asset.id,
-        archivedAt: outcome.data.asset.archivedAt,
-        apply: applyArchivedAt,
-        refetch: reloadAsset,
-        isStillCurrent,
-      });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      // The archived badge and notice say the rest; a draft still holding the
-      // asset is news the screen does not show.
-      if (outcome.data.draftBookings.length > 0) {
-        Alert.alert("Asset archived", outcome.data.message);
-      }
+      // A refusal often means the asset changed elsewhere (custody, a
+      // booking): it is reloaded so the screen and the pre-tap check catch
+      // up. A success shows from the answer, so a failed reload keeps it.
+      await landArchiveChange(
+        outcome.kind === "archived"
+          ? { kind: "changed", archivedAt: outcome.data.asset.archivedAt }
+          : outcome,
+        {
+          assetId,
+          isStillHere,
+          showRefusal: (message) => Alert.alert("Couldn't archive", message),
+          apply: (archivedAt) => applyArchivedAt(assetId, archivedAt),
+          refetch: reloadAsset,
+          onChanged: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // The archived badge and notice say the rest; a draft still
+            // holding the asset is news the screen does not show.
+            if (
+              outcome.kind === "archived" &&
+              outcome.data.draftBookings.length > 0
+            ) {
+              Alert.alert("Asset archived", outcome.data.message);
+            }
+          },
+        }
+      );
     } finally {
       archiveInFlight.current = false;
       setIsActionLoading(false);

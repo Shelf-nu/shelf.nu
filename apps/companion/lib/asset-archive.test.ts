@@ -17,7 +17,9 @@ import {
   canOfferArchive,
   moreMenuActions,
   runArchive,
-  settleArchiveChange,
+  captureRequestScope,
+  landArchiveChange,
+  type ArchiveChangeResult,
   type ArchiveAnswer,
 } from "./asset-archive";
 import { assetChangeVersion } from "./asset-refresh";
@@ -243,6 +245,7 @@ test("archives on the first request when nothing falls short", async () => {
 
   const outcome = await runArchive({
     send,
+    isStillHere: () => true,
     confirmShortfall: async () => {
       asked = true;
       return true;
@@ -260,6 +263,7 @@ test("on the shortfall warning, asks with the server's words and resends confirm
 
   const outcome = await runArchive({
     send,
+    isStillHere: () => true,
     confirmShortfall: async (message) => {
       shown = message;
       return true;
@@ -276,6 +280,7 @@ test("declining 'Archive anyway' sends nothing more", async () => {
 
   const outcome = await runArchive({
     send,
+    isStillHere: () => true,
     confirmShortfall: async () => false,
   });
 
@@ -291,6 +296,7 @@ test("a shortfall-shaped message without the reason is a plain refusal", async (
 
   const outcome = await runArchive({
     send,
+    isStillHere: () => true,
     confirmShortfall: async () => true,
   });
 
@@ -313,6 +319,7 @@ test("a refusal of the confirmed resend is shown as is", async () => {
 
   const outcome = await runArchive({
     send,
+    isStillHere: () => true,
     confirmShortfall: async () => true,
   });
 
@@ -321,90 +328,198 @@ test("a refusal of the confirmed resend is shown as is", async () => {
 
 // ── After the change lands ───────────────────────────────
 
+test("the screen moved before the shortfall prompt: no prompt, nothing resent", async () => {
+  const { send, sent } = sender([shortfall]);
+  let asked = false;
+
+  const outcome = await runArchive({
+    send,
+    isStillHere: () => false,
+    confirmShortfall: async () => {
+      asked = true;
+      return true;
+    },
+  });
+
+  assert.deepEqual(outcome, { kind: "cancelled" });
+  assert.equal(asked, false);
+  assert.deepEqual(sent, [false]);
+});
+
+// ── Is this still the screen the request started on? ─────
+
+test("the request scope holds while the workspace and asset are unchanged", () => {
+  let now = { workspaceId: "ws-1", assetId: "asset-1" };
+  const isStillHere = captureRequestScope(() => now);
+
+  assert.equal(isStillHere(), true);
+
+  now = { workspaceId: "ws-2", assetId: "asset-1" };
+  assert.equal(isStillHere(), false, "workspace switched");
+
+  now = { workspaceId: "ws-1", assetId: "asset-2" };
+  assert.equal(isStillHere(), false, "screen reused for another asset");
+});
+
+// ── Landing the answer ───────────────────────────────────
+
 /**
- * Runs `settleArchiveChange` against a fake screen whose asset starts in the
- * state before the change (`before`) and returns what the screen shows after.
+ * Lands a result on a fake screen whose asset starts in `before`, and records
+ * every effect that reached it.
  */
-async function settle({
-  assetId,
-  archivedAt,
-  before,
-  current = true,
-  reloadFails = false,
-}: {
-  assetId: string;
-  archivedAt: string | null;
-  before: string | null;
-  current?: boolean;
-  reloadFails?: boolean;
-}) {
-  let shown = before;
-  let refetched = 0;
-  await settleArchiveChange({
+async function land(
+  result: ArchiveChangeResult,
+  {
     assetId,
-    archivedAt,
+    before = null,
+    here = () => true,
+    reloadFails = false,
+  }: {
+    assetId: string;
+    before?: string | null;
+    here?: () => boolean;
+    reloadFails?: boolean;
+  }
+) {
+  let shown = before;
+  const refusals: string[] = [];
+  let refetched = 0;
+  let changed = 0;
+  await landArchiveChange(result, {
+    assetId,
+    isStillHere: here,
+    showRefusal: (message) => refusals.push(message),
     apply: (value) => {
       shown = value;
     },
     refetch: async () => {
       refetched += 1;
       // The screen's quiet reload keeps the asset it has when the GET fails.
-      if (!reloadFails) shown = archivedAt;
+      if (!reloadFails && result.kind === "changed") shown = result.archivedAt;
     },
-    isStillCurrent: () => current,
+    onChanged: () => {
+      changed += 1;
+    },
   });
-  return { shown, refetched };
+  return { shown, refusals, refetched, changed };
 }
 
-test("an archive or reinstate tells the list and other stacks, then reloads", async () => {
-  const before = assetChangeVersion("asset-settle");
+const ARCHIVED_AT = "2026-11-16T10:00:00.000Z";
 
-  const { refetched } = await settle({
-    assetId: "asset-settle",
-    archivedAt: "2026-11-16T10:00:00.000Z",
-    before: null,
-  });
+test("an archive tells the list and other stacks, shows it, reloads and confirms", async () => {
+  const before = assetChangeVersion("asset-land");
+
+  const result = await land(
+    { kind: "changed", archivedAt: ARCHIVED_AT },
+    { assetId: "asset-land" }
+  );
 
   // The assets list refetches on its next focus instead of showing the old row.
-  assert.notEqual(assetChangeVersion("asset-settle"), before);
-  assert.equal(refetched, 1);
+  assert.notEqual(assetChangeVersion("asset-land"), before);
+  assert.equal(result.shown, ARCHIVED_AT);
+  assert.equal(result.refetched, 1);
+  assert.equal(result.changed, 1);
 });
 
 test("a successful archive shows as archived even when the reload fails", async () => {
-  const { shown } = await settle({
-    assetId: "asset-archived",
-    archivedAt: "2026-11-16T10:00:00.000Z",
-    before: null,
-    reloadFails: true,
-  });
+  const { shown } = await land(
+    { kind: "changed", archivedAt: ARCHIVED_AT },
+    { assetId: "asset-archived", reloadFails: true }
+  );
 
   // From the archive answer, not from the failed GET.
-  assert.equal(shown, "2026-11-16T10:00:00.000Z");
+  assert.equal(shown, ARCHIVED_AT);
 });
 
 test("a successful reinstate shows as active even when the reload fails", async () => {
-  const { shown } = await settle({
-    assetId: "asset-reinstated",
-    archivedAt: null,
-    before: "2026-11-01T10:00:00.000Z",
-    reloadFails: true,
-  });
+  const { shown } = await land(
+    { kind: "changed", archivedAt: null },
+    { assetId: "asset-reinstated", before: ARCHIVED_AT, reloadFails: true }
+  );
 
   assert.equal(shown, null);
 });
 
-test("after a workspace switch mid-request, nothing lands on the screen", async () => {
-  const before = assetChangeVersion("asset-switched");
+test("a refusal shows its message and reloads the asset", async () => {
+  const result = await land(
+    { kind: "failed", message: "Refused" },
+    { assetId: "asset-refused" }
+  );
 
-  const { shown, refetched } = await settle({
-    assetId: "asset-switched",
-    archivedAt: "2026-11-16T10:00:00.000Z",
-    before: null,
-    current: false,
+  assert.deepEqual(result.refusals, ["Refused"]);
+  assert.equal(result.refetched, 1);
+});
+
+/**
+ * A request scope captured on "asset-1" in "ws-1", then moved the way the
+ * screen moves while the request runs.
+ */
+function movedScope(moved: { workspaceId: string; assetId: string }) {
+  let now = { workspaceId: "ws-1", assetId: "asset-1" };
+  const isStillHere = captureRequestScope(() => now);
+  now = moved;
+  return isStillHere;
+}
+
+for (const [why, here] of [
+  [
+    "the workspace switched",
+    movedScope({ workspaceId: "ws-2", assetId: "asset-1" }),
+  ],
+  [
+    "the screen now shows another asset",
+    movedScope({ workspaceId: "ws-1", assetId: "asset-2" }),
+  ],
+] as const) {
+  test(`after a change, nothing lands when ${why}`, async () => {
+    const before = assetChangeVersion("asset-moved");
+
+    const result = await land(
+      { kind: "changed", archivedAt: ARCHIVED_AT },
+      { assetId: "asset-moved", here }
+    );
+
+    // Nothing reaches what the screen shows now...
+    assert.equal(result.shown, null);
+    assert.equal(result.refetched, 0);
+    assert.equal(result.changed, 0);
+    // ...but the changed asset's list row still refreshes.
+    assert.notEqual(assetChangeVersion("asset-moved"), before);
   });
 
-  // The old workspace's answer must not replace the new workspace's asset.
-  assert.equal(shown, null);
-  assert.equal(refetched, 0);
-  assert.notEqual(assetChangeVersion("asset-switched"), before);
+  test(`a refusal lands nothing when ${why}`, async () => {
+    const result = await land(
+      { kind: "failed", message: "Refused" },
+      { assetId: "asset-moved-refused", here }
+    );
+
+    assert.deepEqual(result.refusals, []);
+    assert.equal(result.refetched, 0);
+  });
+}
+
+test("a screen that moves during the reload gets no success note", async () => {
+  let reloads = 0;
+  let here = true;
+  let changed = 0;
+
+  await landArchiveChange(
+    { kind: "changed", archivedAt: ARCHIVED_AT },
+    {
+      assetId: "asset-moved-late",
+      isStillHere: () => here,
+      showRefusal: () => {},
+      apply: () => {},
+      refetch: async () => {
+        reloads += 1;
+        here = false; // a deep link opened another asset meanwhile
+      },
+      onChanged: () => {
+        changed += 1;
+      },
+    }
+  );
+
+  assert.equal(reloads, 1);
+  assert.equal(changed, 0);
 });

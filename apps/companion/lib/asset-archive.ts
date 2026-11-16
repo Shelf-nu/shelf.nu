@@ -175,14 +175,18 @@ export function archiveFailureMessage(answer: ArchiveAnswer<unknown>): string {
  *
  * @param options.send - posts the archive; `true` confirms the shortfall
  * @param options.confirmShortfall - asks the user, with the server's message
+ * @param options.isStillHere - from {@link captureRequestScope}: the screen
+ *   still shows the workspace and asset the request was sent for
  * @returns the outcome; never throws for a refusal
  */
 export async function runArchive<T>({
   send,
   confirmShortfall,
+  isStillHere,
 }: {
   send: (confirmModelShortfall: boolean) => Promise<ArchiveAnswer<T>>;
   confirmShortfall: (message: string) => Promise<boolean>;
+  isStillHere: () => boolean;
 }): Promise<ArchiveOutcome<T>> {
   const first = await send(false);
   if (first.data) return { kind: "archived", data: first.data };
@@ -190,6 +194,11 @@ export async function runArchive<T>({
   if (first.errorDetails?.reason !== MODEL_SHORTFALL_REASON) {
     return { kind: "failed", message: archiveFailureMessage(first) };
   }
+
+  // The warning is about the asset the request was sent for. Asked on a
+  // screen that now shows another asset or workspace, "Archive anyway" would
+  // read as applying to what is shown; the refused archive changed nothing.
+  if (!isStillHere()) return { kind: "cancelled" };
 
   const goAhead = await confirmShortfall(first.errorDetails.message);
   if (!goAhead) return { kind: "cancelled" };
@@ -200,39 +209,96 @@ export async function runArchive<T>({
 }
 
 /**
- * After an archive or a reinstate lands: tells every screen holding the asset
- * (the assets list skips refetches for a while, a second stack may show the
- * same detail) that it changed, shows the new state from the server's answer,
- * then reloads this screen's copy.
- *
- * The answer's `archivedAt` is applied before the reload, so the screen shows
- * the archived (or reinstated) state even when the reload fails. Both steps
- * are skipped when the member switched workspace while the request ran: they
- * belong to the workspace the request started in.
- *
- * @param options.assetId - the asset archived or reinstated
- * @param options.archivedAt - from the server's answer: the archive time, or
- *   `null` after a reinstate
- * @param options.apply - puts `archivedAt` on the asset shown on this screen
- * @param options.refetch - reloads the asset on the current screen
- * @param options.isStillCurrent - whether the workspace the request started
- *   in is still the active one
+ * What an archive or reinstate request was about: the active workspace and
+ * the asset on screen when it was sent.
  */
-export async function settleArchiveChange({
-  assetId,
-  archivedAt,
-  apply,
-  refetch,
-  isStillCurrent,
-}: {
+export type RequestScope = {
+  workspaceId: string | undefined;
   assetId: string;
-  archivedAt: string | null;
-  apply: (archivedAt: string | null) => void;
-  refetch: () => Promise<unknown>;
-  isStillCurrent: () => boolean;
-}): Promise<void> {
+};
+
+/**
+ * Captures the scope a request starts in and returns the one check every
+ * answer goes through before it lands: does the screen still show that
+ * workspace and that asset? A member can switch workspace, or a deep link can
+ * reuse the asset screen for another asset, while a request runs; its answer
+ * then belongs to a screen that no longer exists.
+ *
+ * @param read - reads the scope the screen shows now (from a ref updated on
+ *   every render, not from the request's closure)
+ * @returns a check that is `true` while the screen still shows the scope the
+ *   request started in
+ */
+export function captureRequestScope(read: () => RequestScope): () => boolean {
+  const started = read();
+  return () => {
+    const now = read();
+    return (
+      now.workspaceId === started.workspaceId && now.assetId === started.assetId
+    );
+  };
+}
+
+/** How an archive or reinstate request ended, for {@link landArchiveChange}. */
+export type ArchiveChangeResult =
+  | { kind: "failed"; message: string }
+  /** Nothing was changed on the server (a declined "Archive anyway"). */
+  | { kind: "cancelled" }
+  /** The server changed the asset; `archivedAt` is `null` after a reinstate. */
+  | { kind: "changed"; archivedAt: string | null };
+
+/**
+ * Lands the answer to an archive or reinstate on the screen.
+ *
+ * Every step that touches the screen runs only while `isStillHere` holds, and
+ * is checked again after each await:
+ * - a refusal shows the server's message, then reloads the asset, which has
+ *   usually changed elsewhere;
+ * - a change applies the answer's `archivedAt` before the quiet reload, so a
+ *   failed reload still shows the new state, then calls `onChanged` (the
+ *   success haptic and any note).
+ *
+ * The list marker is set for the changed asset whatever the screen shows: it
+ * is keyed by that asset, so the assets list refetches its row on next focus.
+ *
+ * @param result - how the request ended
+ * @param options.assetId - the asset the request was sent for
+ * @param options.isStillHere - from {@link captureRequestScope}
+ * @param options.showRefusal - shows a refusal message
+ * @param options.apply - puts `archivedAt` on the asset shown on this screen
+ * @param options.refetch - reloads that asset quietly
+ * @param options.onChanged - runs after a change has landed on this screen
+ */
+export async function landArchiveChange(
+  result: ArchiveChangeResult,
+  {
+    assetId,
+    isStillHere,
+    showRefusal,
+    apply,
+    refetch,
+    onChanged,
+  }: {
+    assetId: string;
+    isStillHere: () => boolean;
+    showRefusal: (message: string) => void;
+    apply: (archivedAt: string | null) => void;
+    refetch: () => Promise<unknown>;
+    onChanged: () => void;
+  }
+): Promise<void> {
+  if (result.kind === "cancelled") return;
+
+  if (result.kind === "failed") {
+    if (!isStillHere()) return;
+    showRefusal(result.message);
+    await refetch();
+    return;
+  }
+
   markAssetChanged(assetId);
-  if (!isStillCurrent()) return;
-  apply(archivedAt);
+  if (!isStillHere()) return;
+  apply(result.archivedAt);
   await refetch();
+  if (isStillHere()) onChanged();
 }
