@@ -80,15 +80,15 @@ verified (`email_verified: true`), or when email confirmations are turned off
 
 ## 2. Configure Shelf
 
-| Variable                  | Purpose                                                                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `OIDC_PROVIDER`           | The provider's identifier, for example `custom:my-idp`. Setting it turns the login on.                                                     |
-| `OIDC_BUTTON_LABEL`       | Text of the login button. Defaults to "Log in with SSO".                                                                                   |
-| `OIDC_SCOPES`             | Optional. Space-separated scopes to request. When empty, the scopes stored on the provider in Supabase are used.                           |
-| `OIDC_GROUPS_CLAIM`       | Name of the claim that carries the user's groups. Defaults to `groups`. It must be listed in the provider's `custom_claims_allowlist`.     |
-| `OIDC_WORKSPACE_MAPPINGS` | Optional. JSON that maps groups to workspace roles, see below.                                                                             |
-| `DISABLE_SSO`             | Set to `true` to hide the domain-based SAML SSO if you only use the custom OIDC login.                                                     |
-| `DISABLE_EMAIL_LOGIN`     | Set to `true` to turn off password login, one-time codes, password reset and email signup, which leaves single sign-on as the only way in. |
+| Variable                  | Purpose                                                                                                                                                                                                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OIDC_PROVIDER`           | The provider's identifier, for example `custom:my-idp`. Setting it turns the login on.                                                                                                                                                                            |
+| `OIDC_BUTTON_LABEL`       | Text of the login button. Defaults to "Log in with SSO".                                                                                                                                                                                                          |
+| `OIDC_SCOPES`             | Optional. Space-separated scopes to request. When empty, the scopes stored on the provider in Supabase are used.                                                                                                                                                  |
+| `OIDC_GROUPS_CLAIM`       | Name of the claim that carries the user's groups. Defaults to `groups`. It must be listed in the provider's `custom_claims_allowlist`.                                                                                                                            |
+| `OIDC_WORKSPACE_MAPPINGS` | Optional. JSON that maps groups to workspace roles, see below.                                                                                                                                                                                                    |
+| `DISABLE_SSO`             | Set to `true` to hide the domain-based SAML SSO if you only use the custom OIDC login.                                                                                                                                                                            |
+| `DISABLE_EMAIL_LOGIN`     | Set to `true` to turn off password login, one-time codes, password reset and email signup, which leaves single sign-on as the only way in. Ignored while neither `OIDC_PROVIDER` is set nor SAML SSO is enabled. Test the single sign-on login before you set it. |
 
 ## 3. Map groups to workspaces
 

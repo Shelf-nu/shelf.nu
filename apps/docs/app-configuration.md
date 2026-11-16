@@ -114,7 +114,9 @@ disableSignup: true;
 
 ### disableSSO
 
-Disables Single Sign-On functionality even if SSO providers are configured.
+Disables the domain-based SAML Single Sign-On, even if SSO providers are
+configured. The custom OIDC login (`oidc`, below) is configured on its own and
+stays enabled while `OIDC_PROVIDER` is set.
 
 **Default value:** `false`  
 **Environment variable:** `DISABLE_SSO`
@@ -139,9 +141,17 @@ setup and the group to workspace mapping.
 
 Hides password and one-time code login and refuses them, which leaves single
 sign-on as the only way in. Password reset and signing up with an email
-address are refused as well, because both end in an email login. It only takes effect while a single sign-on method
-(SAML SSO or the custom OIDC login) is enabled, so the login page is never left
-without a method.
+address are refused as well, because both end in an email login.
+
+It only takes effect while a single sign-on method is switched on: SAML SSO
+(`DISABLE_SSO` is not `true`) or the custom OIDC login (`OIDC_PROVIDER` is
+set). With neither, the setting is ignored and email login stays available.
+Shelf does not check that the method works, so set up and test your SAML or
+OIDC provider before you turn email login off.
+
+Invitation links follow the same rule: someone who is not signed in is asked
+to log in with single sign-on first and then open the link again, instead of
+getting an email account created for them.
 
 The companion app is covered too: its API accepts only sessions that were
 obtained through single sign-on, and signs out a session obtained with a

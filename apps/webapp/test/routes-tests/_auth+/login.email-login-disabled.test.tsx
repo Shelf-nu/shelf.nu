@@ -1,12 +1,13 @@
 /**
  * Route tests for a deployment that turned email login off
  * (`DISABLE_EMAIL_LOGIN`): the login page shows only single sign-on, and the
- * password form, every one-time code and the password reset are refused when
- * posted anyway.
+ * password form, every one-time code, the password reset and the password
+ * signup are refused when posted anyway.
  *
  * @see apps/webapp/app/routes/_auth+/login.tsx
  * @see apps/webapp/app/routes/_auth+/send-otp.tsx
  * @see apps/webapp/app/routes/_auth+/forgot-password.tsx
+ * @see apps/webapp/app/routes/_auth+/join.tsx
  * @see apps/webapp/app/modules/auth/email-login.server.ts
  */
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
@@ -35,16 +36,19 @@ vi.mock("~/modules/auth/service.server", () => ({
   sendOTP: vi.fn(),
   sendResetPasswordLink: vi.fn(),
   updateAccountPassword: vi.fn(),
+  signUpWithEmailPass: vi.fn(),
 }));
 
 const loginRoute = await import("~/routes/_auth+/login");
 const sendOtpRoute = await import("~/routes/_auth+/send-otp");
 const forgotPasswordRoute = await import("~/routes/_auth+/forgot-password");
+const joinRoute = await import("~/routes/_auth+/join");
 const {
   signInWithEmail,
   sendOTP,
   sendResetPasswordLink,
   updateAccountPassword,
+  signUpWithEmailPass,
 } = await import("~/modules/auth/service.server");
 
 /**
@@ -83,6 +87,7 @@ function renderLogin() {
 beforeEach(() => {
   vi.clearAllMocks();
   loginConfig.disableEmailLogin = true;
+  loginConfig.disableSignup = true;
 });
 
 describe("login page", () => {
@@ -199,5 +204,25 @@ describe("POST /forgot-password", () => {
     assertIsDataWithResponseInit(result);
     expect(result.init?.status).toBe(403);
     expect(updateAccountPassword).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /join", () => {
+  it("refuses a password signup while email login is off, even with signup open", async () => {
+    loginConfig.disableSignup = false;
+
+    const result = await joinRoute.action(
+      createActionArgs({
+        request: formPost("/join", {
+          email: "jane@example.com",
+          password: "correct horse battery",
+          confirmPassword: "correct horse battery",
+        }),
+      })
+    );
+
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(403);
+    expect(signUpWithEmailPass).not.toHaveBeenCalled();
   });
 });

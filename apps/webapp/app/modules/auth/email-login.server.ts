@@ -4,7 +4,8 @@
  * The one place that refuses a sign-in with an email address while the
  * deployment has switched email login off (`DISABLE_EMAIL_LOGIN`, see
  * `config.disableEmailLogin`). "Email login" is every way in that needs only
- * an address: password, one-time code, and password reset.
+ * an address: password, one-time code, password reset, and signing up with
+ * either.
  *
  * The switch is the same for every address, so refusing here tells a caller
  * nothing about any account. That is why these refusals may be explicit, while
@@ -12,7 +13,8 @@
  * before authentication.
  *
  * Every entry point asks {@link assertEmailLoginEnabled}:
- * - the login and password reset actions, before anything is read or sent;
+ * - the login, signup and password reset actions, before anything is read or
+ *   sent;
  * - `sendOTP` and `verifyOtpAndSignin`, which covers every route that sends or
  *   redeems a code, including a code sent before the switch was turned on;
  * - the mobile API guard, for a session the companion app opened directly

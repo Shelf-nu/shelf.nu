@@ -22,6 +22,7 @@ import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
+import { assertEmailLoginEnabled } from "~/modules/auth/email-login.server";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { assertSignupEnabled } from "~/modules/auth/signup-gate.server";
 import {
@@ -61,6 +62,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     assertSignupEnabled();
+    // Signing up with an email address ends in an email login.
+    assertEmailLoginEnabled();
     if (context.isAuthenticated) {
       return redirect("/");
     }
@@ -121,6 +124,7 @@ export async function action({ request }: ActionFunctionArgs) {
       case "POST": {
         // The page refuses too, but a POST does not need the page first.
         assertSignupEnabled();
+        assertEmailLoginEnabled();
 
         const { email, password } = parseData(
           await request.formData(),
