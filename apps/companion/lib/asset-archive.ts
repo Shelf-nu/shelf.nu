@@ -195,13 +195,15 @@ export async function runArchive<T>({
     return { kind: "failed", message: archiveFailureMessage(first) };
   }
 
-  // The warning is about the asset the request was sent for. Asked on a
-  // screen that now shows another asset or workspace, "Archive anyway" would
-  // read as applying to what is shown; the refused archive changed nothing.
+  // The warning names bookings and models, not the asset. On a screen that
+  // now shows another asset or workspace, "Archive anyway" cannot be taken
+  // to mean the asset the request was sent for, so it is not asked, and a
+  // confirm given after the screen moved sends nothing. The refused archive
+  // changed nothing; the cost is one retry.
   if (!isStillHere()) return { kind: "cancelled" };
 
   const goAhead = await confirmShortfall(first.errorDetails.message);
-  if (!goAhead) return { kind: "cancelled" };
+  if (!goAhead || !isStillHere()) return { kind: "cancelled" };
 
   const confirmed = await send(true);
   if (confirmed.data) return { kind: "archived", data: confirmed.data };

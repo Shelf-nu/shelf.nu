@@ -346,6 +346,23 @@ test("the screen moved before the shortfall prompt: no prompt, nothing resent", 
   assert.deepEqual(sent, [false]);
 });
 
+test("the screen moved while the prompt was open: a confirm sends nothing", async () => {
+  const { send, sent } = sender([shortfall, archived]);
+  let here = true;
+
+  const outcome = await runArchive({
+    send,
+    isStillHere: () => here,
+    confirmShortfall: async () => {
+      here = false; // a deep link opened another asset behind the prompt
+      return true;
+    },
+  });
+
+  assert.deepEqual(outcome, { kind: "cancelled" });
+  assert.deepEqual(sent, [false]);
+});
+
 // ── Is this still the screen the request started on? ─────
 
 test("the request scope holds while the workspace and asset are unchanged", () => {
