@@ -58,6 +58,7 @@ import {
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
@@ -124,7 +125,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -187,6 +188,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Ignores the custodian-filter seed — scope it rather than fetch a
         // roster nobody renders.
         canSeeAllCustody: false,
+        // The search matches custodian names only on custody the caller may see.
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
       }),
     ]);
 
@@ -1094,14 +1100,19 @@ const RowComponent = ({
       {/* Location */}
       <Td className={allowCursor}>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          // Clicks on the badge or its hierarchy hover card (portalled, but React
+          // events still bubble through it) must not toggle the row's
+          // selection: the row's click handler selects the asset.
+          <span role="presentation" onClick={(e) => e.stopPropagation()}>
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+          </span>
         ) : null}
       </Td>
     </>

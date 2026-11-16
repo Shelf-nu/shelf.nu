@@ -2,11 +2,12 @@
  * Bookings bulk actions: each intent is gated on its own permission, through
  * the real matrix, and the services receive the caller's access.
  *
- * Archive and cancel need `booking:archive` / `booking:cancel`, which BASE does
- * not hold, so BASE is refused both. Check-out and check-in need
- * `booking:checkout` / `booking:checkin`, the grants the booking page's
- * one-click buttons ask for. Delete passes the caller's access to
- * `bulkDeleteBookings`, which applies the drafts-only rule.
+ * Archive and cancel need `booking:archive` / `booking:cancel`. BASE holds
+ * archive but not cancel, and neither BASE nor SELF_SERVICE holds
+ * `booking:delete`, so both are refused bulk delete outright. Check-out and check-in need `booking:checkout` /
+ * `booking:checkin`, the grants the booking page's one-click buttons ask for.
+ * Delete and archive pass the caller's access to their service, which scopes
+ * them (drafts-only delete, own bookings only).
  *
  * The dialogs also post which bookings list they were opened on (a kit's or an
  * asset's Bookings tab, or the index), which a "Select all" stands for. The
@@ -110,7 +111,7 @@ describe("POST /api/bookings/bulk-actions", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it.each([
-    ["bulk-archive", bulkArchiveBookings],
+    ["bulk-delete", bulkDeleteBookings],
     ["bulk-cancel", bulkCancelBookings],
     ["bulk-checkout", bulkCheckoutBookings],
     ["bulk-checkin", bulkCheckinBookings],
@@ -196,10 +197,27 @@ describe("POST /api/bookings/bulk-actions", () => {
     );
   });
 
-  it("passes access to bulk delete, which applies the draft rule", async () => {
-    asRole(OrganizationRoles.BASE);
+  it("refuses SELF_SERVICE bulk delete, which it holds no grant for", async () => {
+    asRole(OrganizationRoles.SELF_SERVICE);
+    const response = await post("bulk-delete");
+    expect(response.status).toBe(403);
+    expect(bulkDeleteBookings).not.toHaveBeenCalled();
+  });
+
+  it("passes access to bulk delete", async () => {
+    asRole(OrganizationRoles.MANAGER);
     await post("bulk-delete");
     expect(bulkDeleteBookings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({ role: "MANAGER" }),
+      })
+    );
+  });
+
+  it("lets BASE bulk archive, scoped by the caller's access", async () => {
+    asRole(OrganizationRoles.BASE);
+    await post("bulk-archive");
+    expect(bulkArchiveBookings).toHaveBeenCalledWith(
       expect.objectContaining({
         access: expect.objectContaining({ role: "BASE" }),
       })

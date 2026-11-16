@@ -282,6 +282,36 @@ describe("useControlledDropdownMenu", () => {
       });
       expect(result.current.open).toBe(false);
     });
+
+    it("opens and closes on desktop when Radix asks (keyboard, Escape, outside click)", () => {
+      setViewportWidth(1024);
+
+      const { result } = renderHook(() => useControlledDropdownMenu());
+
+      // Enter, Space or ArrowDown on the trigger reach the hook this way
+      act(() => {
+        result.current.onOpenChange(true);
+      });
+      expect(result.current.open).toBe(true);
+
+      // Escape, Tab-out or an item select
+      act(() => {
+        result.current.onOpenChange(false);
+      });
+      expect(result.current.open).toBe(false);
+    });
+
+    it("ignores Radix on a phone-width sheet without a QR-scan auto-open", () => {
+      setViewportWidth(640);
+
+      const { result } = renderHook(() => useControlledDropdownMenu());
+
+      // The sheet is opened by the mobile button and closed by the overlay
+      act(() => {
+        result.current.onOpenChange(true);
+      });
+      expect(result.current.open).toBe(false);
+    });
   });
 
   describe("auto-open behavior", () => {

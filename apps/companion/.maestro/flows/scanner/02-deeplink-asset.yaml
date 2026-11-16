@@ -5,9 +5,10 @@ tags:
   - smoke
 
 ---
-# Test: Simulated QR scan via deep link
-# Uses shelf://qr/{id} to trigger the same code path as a real camera scan
-# This exercises: deep link parsing → resolveQrAndNavigate() → api.qr() → asset detail
+# Test: QR deep link opens the asset
+# shelf://qr/{id} resolves the code WITHOUT recording a scan (a link from
+# outside the app is not a camera scan) and opens the asset detail.
+# This exercises: deep link parsing -> resolveQrAndNavigate() -> api.getScannedItem() -> asset detail
 
 - runFlow: ../../shared/login.yaml
 

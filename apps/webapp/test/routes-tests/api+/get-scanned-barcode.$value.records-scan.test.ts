@@ -44,6 +44,7 @@ vi.mock("~/modules/scan/service.server", () => ({
 }));
 
 import { loader } from "~/routes/api+/get-scanned-barcode.$value";
+import { accessFor } from "@helpers/role-access";
 
 /** Resolves one barcode value, optionally for an audit. */
 async function resolve(value: string, search = "") {
@@ -65,6 +66,7 @@ beforeEach(() => {
   mockRequirePermission.mockResolvedValue({
     organizationId: "org-1",
     canUseBarcodes: true,
+    access: accessFor(["ADMIN"]),
   });
   mockGetBarcodeByValue.mockResolvedValue({
     id: "barcode-1",

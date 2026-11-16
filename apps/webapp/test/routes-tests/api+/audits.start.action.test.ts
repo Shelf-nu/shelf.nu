@@ -28,10 +28,12 @@ import { action } from "~/routes/api+/audits.start";
 const {
   createAuditSession,
   resolveAssetIdsForAudit,
+  resolveAssetIdsForLocationSelection,
   resolveUserFormatPrefsById,
 } = vi.hoisted(() => ({
   createAuditSession: vi.fn(),
   resolveAssetIdsForAudit: vi.fn(),
+  resolveAssetIdsForLocationSelection: vi.fn(),
   resolveUserFormatPrefsById: vi.fn(),
 }));
 
@@ -60,9 +62,11 @@ vi.mock("~/utils/date-format.server", () => ({
 
 // why: asset resolution is orthogonal to the date parse under test.
 vi.mock("~/modules/audit/context-helpers.server", () => ({
+  // why: the resolvers read assets and their scope from the database; each
+  // case sets the assets and the scope it needs.
   resolveAssetIdsForAudit,
+  resolveAssetIdsForLocationSelection,
   resolveAssetIdsForKitSelection: vi.fn(),
-  resolveAssetIdsForLocationSelection: vi.fn(),
 }));
 
 // why: capture the persisted dueDate; return a session with a null dueDate so
@@ -113,7 +117,10 @@ function buildArgs(dueDate: string) {
 describe("start-audit action — dueDate timezone round-trip", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resolveAssetIdsForAudit.mockResolvedValue(["asset-1"]);
+    resolveAssetIdsForAudit.mockResolvedValue({
+      assetIds: ["asset-1"],
+      unitScope: null,
+    });
     createAuditSession.mockResolvedValue({
       session: { id: "session-1", dueDate: null },
     });
@@ -140,6 +147,91 @@ describe("start-audit action — dueDate timezone round-trip", () => {
     expect(resolveUserFormatPrefsById).toHaveBeenCalledWith(
       "user-1",
       expect.objectContaining({ timeZone: "Europe/Moscow" })
+    );
+  });
+});
+
+describe("start-audit action, location scope", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveAssetIdsForAudit.mockResolvedValue({
+      assetIds: ["asset-1"],
+      unitScope: null,
+    });
+    createAuditSession.mockResolvedValue({
+      session: { id: "session-1", dueDate: null },
+    });
+  });
+
+  /** A start request from one location page. */
+  function locationPageArgs() {
+    const formData = new FormData();
+    formData.set("name", "Camera Room check");
+    formData.set("contextType", "location");
+    formData.set("contextId", "loc-1");
+    formData.set("contextName", "Camera Room");
+    const request = new Request("https://app.shelf.nu/api/audits/start", {
+      method: "POST",
+      body: formData,
+    });
+    const context = { getSession: () => ({ userId: "user-1" }) };
+    return { request, context } as unknown as Parameters<typeof action>[0];
+  }
+
+  it("hands the audited locations to the new audit", async () => {
+    resolveAssetIdsForAudit.mockResolvedValue({
+      assetIds: ["asset-1"],
+      unitScope: { locationIds: ["loc-1"] },
+    });
+
+    await action(locationPageArgs());
+
+    expect(resolveAssetIdsForAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        contextType: "location",
+        contextId: "loc-1",
+      })
+    );
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeMeta: { locationIds: ["loc-1"] } })
+    );
+  });
+
+  it("keeps the locations the selection resolver found, with no second lookup", async () => {
+    resolveAssetIdsForLocationSelection.mockResolvedValue({
+      assetIds: ["asset-1", "asset-2"],
+      locationIds: ["loc-1"],
+    });
+    const formData = new FormData();
+    formData.set("name", "Selected locations check");
+    formData.set("contextType", "location");
+    formData.set("locationIds[0]", "loc-1");
+    formData.set("locationIds[1]", "loc-empty");
+    const request = new Request("https://app.shelf.nu/api/audits/start", {
+      method: "POST",
+      body: formData,
+    });
+    const context = { getSession: () => ({ userId: "user-1" }) };
+
+    await action({ request, context } as unknown as Parameters<
+      typeof action
+    >[0]);
+
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["asset-1", "asset-2"],
+        scopeMeta: { locationIds: ["loc-1"] },
+      })
+    );
+    expect(resolveAssetIdsForAudit).not.toHaveBeenCalled();
+  });
+
+  it("starts an audit without a location scope as unscoped", async () => {
+    await action(buildArgs("2099-07-20T15:48"));
+
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeMeta: null })
     );
   });
 });

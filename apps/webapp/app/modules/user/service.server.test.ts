@@ -19,7 +19,6 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "@mocks/user";
-import { config } from "~/config/shelf.config";
 import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 
@@ -34,7 +33,6 @@ import {
 } from "./service.server";
 import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
-import { pdfDocumentsForNewWorkspace } from "../pdf-document/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -288,13 +286,6 @@ describe(createUserAccountForTesting.name, () => {
                   user: { connect: { id: USER_ID } },
                 },
               },
-              ...pdfDocumentsForNewWorkspace({
-                canCustomize: !config.enablePremiumFeatures,
-              }),
-              // Stamped at creation when the plan includes PDF documents.
-              paidPdfDocumentsSeededAt: config.enablePremiumFeatures
-                ? null
-                : expect.any(Date),
               assetIndexSettings: {
                 create: {
                   mode: AssetIndexMode.ADVANCED,
@@ -328,6 +319,27 @@ describe(createUserAccountForTesting.name, () => {
     expect(result).toEqual(authSession);
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     expect(fetchAuthTokenAPI.size).toEqual(1);
+  });
+
+  it("creates a personal workspace without PDF templates", async () => {
+    //@ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue({
+      id: USER_ID,
+      email: USER_EMAIL,
+      username,
+      organizations: [{ id: "org-id" }],
+    });
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementationOnce((callback) => callback(db));
+
+    await createUserAccountForTesting(USER_EMAIL, USER_PASSWORD, username);
+
+    const { data } = vi.mocked(db.user.create).mock.calls.at(-1)![0];
+    const [personal] = (
+      data.organizations as { create: Record<string, unknown>[] }
+    ).create;
+    expect(personal.name).toBe("Personal");
+    expect(personal).not.toHaveProperty("pdfTemplates");
   });
 });
 

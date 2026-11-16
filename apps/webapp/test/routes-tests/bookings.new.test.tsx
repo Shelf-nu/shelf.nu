@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
 import { permissionContext } from "@helpers/role-access";
 
 import {
@@ -185,7 +186,16 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Custodian not found due to org filter
-    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
+    // getTeamMember reports a missing member as an uncaptured 404.
+    mockGetTeamMember.mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Team member not found",
+        label: "Team Member",
+        status: 404,
+        shouldBeCaptured: false,
+      })
+    );
 
     const formData = new FormData();
     formData.set("name", "Test Booking");
@@ -325,7 +335,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect((response as Response).status).toBe(500); // ShelfError defaults to 500
+    expect((response as Response).status).toBe(403);
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
   });
@@ -395,9 +405,96 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect((response as Response).status).toBe(500); // ShelfError for self-assignment restriction
+    expect((response as Response).status).toBe(403);
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("bookings/new - custodian comes from the team member row", () => {
+  /** Posts a booking naming `custodian` as the caller holding `role`. */
+  async function postBooking(
+    role: OrganizationRoles,
+    custodian: { id: string; name: string; userId?: string }
+  ) {
+    requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [role] }),
+      organizationId: "org-1",
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    const formData = new FormData();
+    formData.set("name", "Test Booking");
+    formData.set("startDate", "2024-01-01T10:00");
+    formData.set("endDate", "2024-01-02T10:00");
+    formData.set("custodian", JSON.stringify(custodian));
+
+    return (await action(
+      createActionArgs({
+        request: new Request("https://example.com/bookings/new", {
+          method: "POST",
+          body: formData,
+        }),
+      })
+    )) as Response;
+  }
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s naming another member while posting its own user id",
+    async (role) => {
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-456",
+        userId: "other-user-456",
+      });
+
+      const response = await postBooking(role, {
+        id: "team-member-456",
+        name: "Other Team Member",
+        userId: "user-123",
+      });
+
+      expect(response.status).toBe(403);
+      expect(vi.mocked(createBooking)).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "books the resolved team member, never the posted user id, for %s booking for themself",
+    async (role) => {
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-123",
+        userId: "user-123",
+      });
+
+      const response = await postBooking(role, {
+        id: "team-member-123",
+        name: "Self User",
+        userId: "other-user-456",
+      });
+
+      expect(response.status).toBe(302);
+      const [{ booking }] = vi.mocked(createBooking).mock.calls[0];
+      expect(booking.custodianTeamMemberId).toBe("team-member-123");
+      // The custodian user is read from the team member row by the service.
+      expect(booking).not.toHaveProperty("custodianUserId");
+    }
+  );
+
+  it("books a member without a user, whatever user id is posted", async () => {
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-nrm",
+      userId: null,
+    });
+
+    const response = await postBooking(OrganizationRoles.ADMIN, {
+      id: "team-member-nrm",
+      name: "NRM",
+      userId: "other-user-456",
+    });
+
+    expect(response.status).toBe(302);
+    const [{ booking }] = vi.mocked(createBooking).mock.calls[0];
+    expect(booking.custodianTeamMemberId).toBe("team-member-nrm");
+    expect(booking).not.toHaveProperty("custodianUserId");
   });
 });
 

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   MODEL_FILTER_REGISTRY,
   getModelFilterConfig,
+  ASSET_MODEL_FORM_DEFAULTS_SELECT,
   isSearchableKey,
   type RegisteredModelName,
 } from "./model-filters-registry.server";
@@ -27,12 +28,34 @@ const AUDITED_FIELDS: Array<[RegisteredModelName, string[]]> = [
   ["category", ["id", "name", "color"]],
   ["location", ["id", "name", "thumbnailUrl"]],
   ["kit", ["id", "name", "status"]],
-  ["assetModel", ["id", "name", "image"]],
+  ["assetModel", ["id", "name", "image", "thumbnailImage"]],
   ["booking", ["id", "name", "status", "from", "to"]],
   ["teamMember", ["id", "name", "userId"]],
 ];
 
 describe("MODEL_FILTER_REGISTRY", () => {
+  it("keeps asset model defaults out of the plain search select", () => {
+    // The defaults are added per request by the route, for asset editors who
+    // ask for them (ASSET_MODEL_FORM_DEFAULTS_SELECT).
+    const select = getModelFilterConfig("assetModel").select as Record<
+      string,
+      unknown
+    >;
+
+    expect(select).not.toHaveProperty("defaultValuation");
+    expect(select).not.toHaveProperty("customFieldDefaults");
+  });
+
+  it("selects the asset form's defaults as plain columns", () => {
+    // A default holds a plain customFieldId (no relation), so the route
+    // filters inactive fields in a second query, not in this select.
+    expect(ASSET_MODEL_FORM_DEFAULTS_SELECT).toEqual({
+      defaultCategoryId: true,
+      defaultValuation: true,
+      customFieldDefaults: { select: { customFieldId: true, value: true } },
+    });
+  });
+
   it.each(AUDITED_FIELDS)(
     "%s selects every field its consumers read",
     (model, fields) => {

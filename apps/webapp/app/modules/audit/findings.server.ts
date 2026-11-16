@@ -31,6 +31,11 @@ const FINDING_IMAGE_SELECT = {
   imageUrl: true,
   thumbnailUrl: true,
   description: true,
+  /** When and how the photo was taken, and when it was uploaded: what the
+   * photo's caption and "Old photo" flag are read from. */
+  capturedAt: true,
+  captureSource: true,
+  createdAt: true,
 } as const satisfies Prisma.AuditImageSelect;
 
 /**

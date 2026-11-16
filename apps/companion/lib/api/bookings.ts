@@ -1,6 +1,7 @@
 import type { BookingMethod } from "../booking-method";
 import { withBookingMethod } from "../booking-method";
 import { apiFetch } from "./client";
+import { mobilePaths } from "./paths";
 import type {
   BookingsResponse,
   BookingDetailResponse,
@@ -68,9 +69,7 @@ export const bookingsApi = {
 
   /** Get full booking details with assets */
   booking: (bookingId: string, orgId: string) =>
-    apiFetch<BookingDetailResponse>(
-      `/api/mobile/bookings/${bookingId}?orgId=${orgId}`
-    ),
+    apiFetch<BookingDetailResponse>(mobilePaths.booking(bookingId, orgId)),
 
   /**
    * Add scanned assets and/or kits to a booking (scan-to-build flow).
@@ -379,7 +378,10 @@ export const bookingsApi = {
       }
     ),
 
-  /** Archive a COMPLETE booking (-> ARCHIVED). COMPLETE-only, enforced server-side. */
+  /**
+   * Archive a finished booking (-> ARCHIVED): COMPLETE, or RESERVED past its
+   * end. The status rule is enforced server-side.
+   */
   archiveBooking: (orgId: string, bookingId: string) =>
     apiFetch<BookingMutationResponse>(
       `/api/mobile/bookings/archive?orgId=${orgId}`,
@@ -390,8 +392,25 @@ export const bookingsApi = {
     ),
 
   /**
-   * Permanently delete a booking (ownership + BASE-only-DRAFT enforced
-   * server-side). `confirmation` is the name the user typed in the delete
+   * Discard a draft: archive a DRAFT booking (-> ARCHIVED). The record stays
+   * in the workspace history; the server refuses any other status.
+   */
+  discardDraftBooking: (orgId: string, bookingId: string) =>
+    apiFetch<BookingMutationResponse>(
+      `/api/mobile/bookings/archive?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, discardDraft: true }),
+        // why: non-idempotent; a timed-out-but-landed discard re-sent finds
+        // the booking ARCHIVED and is refused. The screen reconciles instead.
+        retry: false,
+      }
+    ),
+
+  /**
+   * Permanently delete a booking. The server requires `booking:delete` (Base
+   * and Self Service hold none; they use `discardDraftBooking` for drafts) and
+   * ownership. `confirmation` is the name the user typed in the delete
    * sheet; the server checks it once every supported build sends it (#3175).
    */
   deleteBooking: (orgId: string, bookingId: string, confirmation: string) =>
@@ -516,7 +535,7 @@ export const bookingsApi = {
     quantity: number
   ) =>
     apiFetch<ModelRequestMutationResponse>(
-      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      mobilePaths.bookingModelRequests(bookingId, orgId),
       {
         method: "POST",
         body: JSON.stringify({ assetModelId, quantity }),
@@ -534,7 +553,7 @@ export const bookingsApi = {
     assetModelId: string
   ) =>
     apiFetch<ModelRequestMutationResponse>(
-      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      mobilePaths.bookingModelRequests(bookingId, orgId),
       {
         method: "DELETE",
         body: JSON.stringify({ assetModelId }),

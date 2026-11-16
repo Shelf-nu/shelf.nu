@@ -10,9 +10,12 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useFetcher } from "react-router";
 import { z } from "zod";
 import {
+  auditCountPromptAtom,
+  auditCountsAtom,
   auditSessionAtom,
   clearScannedItemsAtom,
   auditAssetMetaAtom,
+  mergeAuditCountsAtom,
   lastDuplicateScanAtom,
   removeMultipleScannedItemsAtom,
   removeScannedItemAtom,
@@ -22,6 +25,10 @@ import {
   type ScanListItems,
 } from "~/atoms/qr-scanner";
 import { buildAuditBlockers } from "~/components/audit/audit-blockers";
+import {
+  hasUnsavedCounts,
+  recountPromptFor,
+} from "~/components/audit/audit-count-flow";
 import {
   getPendingAuditAssets,
   renderAuditPendingRows,
@@ -37,6 +44,8 @@ import { ScanItemGroup } from "~/components/scanner/drawer/scan-item-group";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
+import type { AuditUnitTotals } from "~/modules/audit/quantity";
+import { totalAuditUnits } from "~/modules/audit/quantity";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import {
   countDeletedExpectedScans,
@@ -98,6 +107,7 @@ function AuditDrawerFooter({
   auditName,
   portalContainer,
   stats,
+  units,
   expanded,
 }: {
   disabled: boolean;
@@ -109,6 +119,8 @@ function AuditDrawerFooter({
     missingCount: number;
     unexpectedCount: number;
   };
+  /** Unit totals for the summary; null when the audit has no quantity rows. */
+  units: AuditUnitTotals | null;
   expanded: boolean;
 }) {
   return (
@@ -128,6 +140,7 @@ function AuditDrawerFooter({
         auditName={auditName}
         portalContainer={portalContainer}
         stats={stats}
+        units={units}
       />
     </div>
   );
@@ -145,6 +158,8 @@ type AuditDrawerTitleProps = {
   unexpectedCount: number;
   /** Count of resolved scans still being persisted to the database. */
   pendingScanCount: number;
+  /** Unit totals of the expected quantity-tracked assets, null when there are none. */
+  units: AuditUnitTotals | null;
 };
 
 /**
@@ -161,6 +176,7 @@ function AuditDrawerTitle({
   totalExpected,
   unexpectedCount,
   pendingScanCount,
+  units,
 }: AuditDrawerTitleProps) {
   return (
     <div className="text-right">
@@ -168,6 +184,19 @@ function AuditDrawerTitle({
         Audit: {contextName} • {foundCount}/{totalExpected} found
         {unexpectedCount > 0 && ` • ${unexpectedCount} unexpected`}
       </span>
+      {units ? (
+        <span className="block text-xs text-gray-500">
+          Units counted:{" "}
+          {units.quantityRows > 0
+            ? `${units.foundUnits}/${units.expectedUnits}`
+            : null}
+          {units.uncountedRows > 0 && ` • ${units.uncountedRows} not counted`}
+          {units.unexpectedRows > 0 &&
+            `${units.quantityRows > 0 ? " • " : ""}${
+              units.unexpectedUnits
+            } not on the list`}
+        </span>
+      ) : null}
       {pendingScanCount > 0 ? (
         <span className="flex items-center gap-1.5 text-xs text-gray-500">
           Saving scans: {pendingScanCount} remaining
@@ -338,6 +367,9 @@ export default function AuditDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duplicateScan]);
   const auditAssetMeta = useAtomValue(auditAssetMetaAtom);
+  const auditCounts = useAtomValue(auditCountsAtom);
+  const mergeAuditCounts = useSetAtom(mergeAuditCountsAtom);
+  const setCountPrompt = useSetAtom(auditCountPromptAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
@@ -428,6 +460,54 @@ export default function AuditDrawer({
     ]
   );
 
+  // Units across the expected quantity-tracked assets. A row counts as found
+  // only once scanned here, so a count left from a removed scan is ignored.
+  const units = useMemo(
+    () =>
+      totalAuditUnits([
+        ...expectedAssets.map((asset) => ({
+          expected: true,
+          // A finished audit's unscanned row counts 0 found, not "not counted".
+          status: asset.rowStatus,
+          expectedQuantity: auditCounts[asset.id]?.expectedQuantity ?? null,
+          // A row scanned here, or saved by another auditor (the loader's
+          // FOUND), carries its count; a removed scan's count is ignored.
+          foundQuantity:
+            scannedAssetIds.has(asset.id) || asset.rowStatus === "FOUND"
+              ? auditCounts[asset.id]?.foundQuantity ?? null
+              : null,
+        })),
+        // Scanned pools that are not on the list, as the overview and the
+        // receipt count them.
+        ...[...scannedAssetIds]
+          .filter((assetId) => !expectedAssetIds.has(assetId))
+          .map((assetId) => ({
+            expected: false,
+            expectedQuantity: auditCounts[assetId]?.expectedQuantity ?? null,
+            foundQuantity: auditCounts[assetId]?.foundQuantity ?? null,
+          })),
+      ]),
+    [expectedAssets, expectedAssetIds, auditCounts, scannedAssetIds]
+  );
+
+  /** Opens the count dialog to correct a scanned quantity-tracked row. */
+  const handleEditCount = useCallback(
+    (qrId: string) => {
+      const data = items[qrId]?.data;
+      const assetId = data?.id;
+      if (!assetId) return;
+      const prompt = recountPromptFor({
+        assetId,
+        qrId,
+        assetTitle: data && "title" in data ? data.title : "Asset",
+        auditCounts,
+        expectedAssetIds,
+      });
+      if (prompt) setCountPrompt(prompt);
+    },
+    [items, auditCounts, expectedAssetIds, setCountPrompt]
+  );
+
   const formData = useMemo(() => {
     if (!auditSession) return {};
     return {
@@ -450,6 +530,7 @@ export default function AuditDrawer({
         totalExpected={stats.totalExpected}
         unexpectedCount={stats.unexpectedCount}
         pendingScanCount={pendingScanCount}
+        units={units}
       />
     );
   }, [
@@ -457,6 +538,7 @@ export default function AuditDrawer({
     contextName,
     auditSession,
     pendingScanCount,
+    units,
     stats.foundCount,
     stats.totalExpected,
     stats.unexpectedCount,
@@ -518,11 +600,31 @@ export default function AuditDrawer({
         });
 
         onScanRemoved?.(scannedItem.data.id);
+
+        // The server clears the row's count with the scan.
+        const count = auditCounts[scannedItem.data.id];
+        if (count) {
+          mergeAuditCounts({
+            [scannedItem.data.id]: {
+              ...count,
+              foundQuantity: null,
+              unsaved: false,
+            },
+          });
+        }
       }
 
       removeItem(qrId);
     },
-    [auditSession, items, onScanRemoved, removeItem, removeScanFetcher]
+    [
+      auditSession,
+      auditCounts,
+      items,
+      mergeAuditCounts,
+      onScanRemoved,
+      removeItem,
+      removeScanFetcher,
+    ]
   );
 
   /**
@@ -542,6 +644,8 @@ export default function AuditDrawer({
       expectedAssetIds,
       auditAssetMeta,
       showLocation,
+      auditCounts,
+      onEditCount: handleEditCount,
     };
     const scannedCount = Object.keys(items).length;
     const pendingCount = getPendingAuditAssets({
@@ -570,10 +674,16 @@ export default function AuditDrawer({
     );
   };
 
-  // Completing with nothing scanned is legal — it marks every expected asset
+  // Completing with nothing scanned is legal: it marks every expected asset
   // missing. The CompleteAuditDialog this drawer submits through states that
   // outcome before anything is committed, so the button itself stays enabled.
-  const shouldDisableSubmit = hasBlockers || !auditSession;
+  //
+  // A count the auditor entered but the server has not saved yet also holds
+  // completion: completing first would print the previous count.
+  const shouldDisableSubmit =
+    hasBlockers ||
+    !auditSession ||
+    hasUnsavedCounts(auditCounts, scannedAssetIds);
 
   return (
     <ConfigurableDrawer
@@ -615,6 +725,7 @@ export default function AuditDrawer({
             missingCount: stats.missingCount,
             unexpectedCount: stats.unexpectedCount,
           }}
+          units={units}
           expanded={expanded}
         />
       )}

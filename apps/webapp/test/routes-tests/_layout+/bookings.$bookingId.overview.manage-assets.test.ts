@@ -1342,13 +1342,16 @@ describe("manage-assets loader — Models tab payload", () => {
     totalLocations: 0,
   };
 
-  /** Known `getBookingModelTabData` output — the five keys F2 is about. */
+  /** Known `getBookingModelTabData` output, as the Models tab consumes it. */
   const mockModelTabData = {
     showModelsTab: true,
     assetModels: [
       {
         id: "model1",
         name: "Dell XPS",
+        image: null,
+        thumbnailImage: null,
+        defaultCategory: null,
         total: 5,
         available: 3,
         reservedConcrete: 1,
@@ -1356,21 +1359,10 @@ describe("manage-assets loader — Models tab payload", () => {
         inCustody: 0,
       },
     ],
-    initialAssetModels: [
-      {
-        id: "model1",
-        name: "Dell XPS",
-        metadata: {
-          total: 5,
-          available: 3,
-          reservedConcrete: 1,
-          reservedViaRequest: 1,
-          inCustody: 0,
-        },
-      },
-    ],
-    totalAssetModels: 1,
+    totalAssetModels: 3,
     matchedAssetModels: 1,
+    modelsPage: 1,
+    modelsPerPage: 50,
     modelRequests: [
       {
         assetModelId: "model1",
@@ -1423,17 +1415,54 @@ describe("manage-assets loader — Models tab payload", () => {
     expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
       organizationId: "org123",
       booking: mockLoaderBooking,
+      // Models without assets are hidden unless the URL turns them on.
+      showModelsWithoutAssets: false,
+      clampPageToResults: true,
+      pinReservedModels: true,
     });
 
-    // Byte-identical parity check: same five keys, same values, nothing
+    // Parity check: same keys, same values, nothing
     // dropped or reshaped on the way from helper → payload.
     expect(result).toMatchObject({
       showModelsTab: mockModelTabData.showModelsTab,
       assetModels: mockModelTabData.assetModels,
-      initialAssetModels: mockModelTabData.initialAssetModels,
+      modelsPage: mockModelTabData.modelsPage,
+      modelsPerPage: mockModelTabData.modelsPerPage,
       totalAssetModels: mockModelTabData.totalAssetModels,
-      matchedAssetModels: mockModelTabData.totalAssetModels,
+      matchedAssetModels: mockModelTabData.matchedAssetModels,
       modelRequests: mockModelTabData.modelRequests,
+    });
+  });
+
+  it("forwards the Models tab search and page from the URL", async () => {
+    // why: this file stubs the URL reader to an empty set; this test needs the
+    // Models tab keys beside the asset list's own `s`. Restored after, because
+    // clearAllMocks keeps implementations.
+    vi.mocked(httpServer.getCurrentSearchParams).mockImplementation(
+      () =>
+        new URLSearchParams(
+          "s=laptop&modelSearch=dell&modelPage=2&showEmptyModels=true"
+        )
+    );
+    try {
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+    } finally {
+      vi.mocked(httpServer.getCurrentSearchParams).mockImplementation(
+        () => new URLSearchParams()
+      );
+    }
+
+    // The asset list's `s` never reaches the model lookup.
+    expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
+      organizationId: "org123",
+      booking: mockLoaderBooking,
+      search: "dell",
+      page: 2,
+      showModelsWithoutAssets: true,
+      clampPageToResults: true,
+      pinReservedModels: true,
     });
   });
 
@@ -1441,7 +1470,8 @@ describe("manage-assets loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1454,7 +1484,8 @@ describe("manage-assets loader — Models tab payload", () => {
     expect(result).toMatchObject({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1515,6 +1546,45 @@ describe("manage-assets loader — Models tab payload", () => {
     // The custody row survives: the availability label tests it for presence,
     // so dropping it would change which assets read as available.
     expect(result.items[0].custody).toHaveLength(1);
+  });
+
+  it("hands each picker row its placements from the shared ordered include", async () => {
+    const warehouse = {
+      id: "loc-warehouse",
+      name: "Warehouse",
+      parentId: null,
+      _count: { children: 2 },
+    };
+    const placements = [
+      { quantity: 1, assetKitId: null, assetKit: null, location: warehouse },
+    ];
+    // why: the list query is a DB read; the fixture mirrors the
+    // `assetLocations` shape `assetIndexFields()` selects (oldest first).
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
+      ...mockPaginatedAssets,
+      assets: [
+        {
+          id: "placed",
+          title: "Camera",
+          type: "INDIVIDUAL",
+          custody: [],
+          assetLocations: placements,
+        },
+      ],
+    } as any);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The Location column reads `getPrimaryLocation(item)`, the first of
+    // these placements, so the rows must arrive with them untouched.
+    expect(result.items[0].assetLocations).toEqual(placements);
+    // The shared include orders `assetLocations` oldest first, so the column
+    // matches the assets index. Overriding it here would drop that ordering.
+    expect(
+      vi.mocked(assetService.getPaginatedAndFilterableAssets).mock.calls[0][0]
+    ).not.toHaveProperty("extraInclude");
   });
 });
 
@@ -1684,7 +1754,8 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: true,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 1,
       matchedAssetModels: 1,
       modelRequests: [],
@@ -1928,7 +1999,8 @@ describe("manage-assets loader: ownership gate", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -2089,7 +2161,8 @@ describe("manage-assets: include assets from child locations", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -2226,6 +2299,8 @@ describe("manage-assets: include assets from child locations", () => {
       locationIdsOverride: undefined,
       // The picker list refuses every custodian filter.
       allowedTeamMemberIds: [],
+      // An ADMIN sees all custody, so the search matches every custodian.
+      custodySearchScope: "all",
       bookableScope: null,
       honorArchivedView: false,
       honorLowStockFilter: false,

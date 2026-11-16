@@ -1,6 +1,6 @@
 /**
- * Tests for the Archive and Duplicate booking actions: both address the
- * booking by its own id, so they work from any page.
+ * Tests for the Archive (and Discard draft) and Duplicate booking actions: all
+ * address the booking by its own id, so they work from any page.
  *
  * @see {@link file://./archive-booking-action.tsx}
  * @see {@link file://./duplicate-booking-action.tsx}
@@ -37,6 +37,16 @@ describe("ArchiveBookingAction", () => {
 
     expect(submit).toHaveBeenCalledWith(
       { intent: "archive" },
+      { method: "post", action: "/bookings/b1/overview" }
+    );
+  });
+
+  it("submits intent=discard-draft to /bookings/b1/overview as Discard draft", () => {
+    render(<ArchiveBookingAction booking={{ id: "b1" }} discardDraft />);
+    fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+
+    expect(submit).toHaveBeenCalledWith(
+      { intent: "discard-draft" },
       { method: "post", action: "/bookings/b1/overview" }
     );
   });

@@ -5,7 +5,8 @@
  * with, and guards leaving the page while it does.
  *
  * Dirty state is a diff of two `FormData` snapshots: a baseline read one
- * frame after mount (and again after a successful save or a Discard), and
+ * frame after mount (and again after a successful save, a Discard, or a
+ * navigation that leaves the form showing another record), and
  * the current values, re-read after any input/change/click/keyup and on a
  * one-second interval. Widgets that submit through hidden inputs are
  * covered without per-input wiring. Comparisons pause while a navigation
@@ -16,6 +17,8 @@
  * form's page (its resolved `action` pathname) or one of its child routes,
  * such as a booking's manage-assets modal. This form's own submission is
  * never blocked, and closing or reloading the tab shows the browser prompt.
+ * While dirty, the form also counts itself in `dirtyFormCountAtom`, so UI
+ * outside it (the new-version reload button) can warn before a reload.
  *
  * Every mounted instance registers a `useBlocker`, and React Router honours
  * only the most recently registered one. Mount the hook only where tracking
@@ -24,6 +27,7 @@
  *
  * @see {@link file://./../components/forms/unsaved-changes-bar.tsx}
  * @see {@link file://./use-discard-remount.ts}
+ * @see {@link file://./../atoms/unsaved-changes.ts}
  */
 import {
   useCallback,
@@ -34,7 +38,9 @@ import {
   useState,
 } from "react";
 import type { RefCallback, RefObject } from "react";
+import { useSetAtom } from "jotai";
 import { useBlocker, useNavigation } from "react-router";
+import { dirtyFormCountAtom } from "~/atoms/unsaved-changes";
 
 /**
  * Where a form stands relative to what was loaded.
@@ -222,6 +228,15 @@ export function useUnsavedChanges({
   /** Set when a re-baseline is asked for mid-navigation; runs on idle. */
   const pendingCleanRef = useRef(false);
 
+  /**
+   * The form's page (see `formPagePathname`) when the baseline was read.
+   * React Router keeps a route component mounted when only its params
+   * change, so the same form element can go on to show another record (the
+   * next booking, or the copy a duplicate redirects to). The baseline
+   * belongs to the page it was read on.
+   */
+  const baselinePageRef = useRef<string | null>(null);
+
   const markClean = useCallback(() => {
     setIsDirty(false);
     // why: inputs are disabled until the navigation settles, so a baseline
@@ -232,6 +247,7 @@ export function useUnsavedChanges({
     }
     const form = formRef.current;
     baselineRef.current = form ? serializeFormSnapshot(form, ignored) : null;
+    baselinePageRef.current = formPagePathname(form, "");
   }, [formRef, ignored]);
 
   useEffect(() => {
@@ -279,13 +295,28 @@ export function useUnsavedChanges({
   useLayoutEffect(() => {
     navigatingRef.current = navigation.state !== "idle";
     if (navigatingRef.current) return;
+    if (
+      baselinePageRef.current !== null &&
+      formPagePathname(formRef.current, "") !== baselinePageRef.current
+    ) {
+      // why: the form now shows another record. A navigation away from a
+      // dirty form is blocked, so reaching here means its changes were
+      // left behind. Pause comparisons and re-read one frame later, as on
+      // mount, so widgets that rewrite hidden values on mount have run.
+      baselineRef.current = null;
+      baselinePageRef.current = null;
+      pendingCleanRef.current = false;
+      setIsDirty(false);
+      requestAnimationFrame(markClean);
+      return;
+    }
     if (pendingCleanRef.current) {
       pendingCleanRef.current = false;
       markClean();
     } else {
       check();
     }
-  }, [navigation.state, check, markClean]);
+  }, [navigation.state, check, markClean, formRef]);
 
   /**
    * What this form held when it last fired `submit`. A navigation is this
@@ -378,6 +409,15 @@ export function useUnsavedChanges({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [shouldGuard]);
+
+  const setDirtyFormCount = useSetAtom(dirtyFormCountAtom);
+  // why: keyed on `isDirty`, not `shouldGuard`, so the form still counts
+  // while its save is in flight and has not settled yet
+  useEffect(() => {
+    if (!isDirty) return;
+    setDirtyFormCount((count) => count + 1);
+    return () => setDirtyFormCount((count) => Math.max(0, count - 1));
+  }, [isDirty, setDirtyFormCount]);
 
   let state: UnsavedChangesState;
   if (blocker.state === "blocked") {

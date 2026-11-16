@@ -220,6 +220,56 @@ export function auditAssetStatusLabel(status, isAuditCompleted) {
   return AUDIT_ASSET_STATUS_LABELS[status];
 }
 
+/**
+ * The unit count of one audit row of a quantity-tracked asset, as every
+ * surface in both apps prints it (scan lists, the audit overview, the receipt).
+ *
+ * A row of a quantity-tracked asset carries `expectedQuantity` (snapshotted
+ * when the row is created) and `foundQuantity` (what the auditor counted).
+ * Individual assets have neither, and get no label.
+ *
+ * - FOUND, counted: "8 of 14 pcs", or "16 of 14 pcs (+2)" for a surplus
+ * - UNEXPECTED, counted: "8 pcs counted"
+ * - FOUND or UNEXPECTED with no count (an app build without the count
+ *   prompt): "Not counted"
+ * - MISSING: "0 of 14 pcs"
+ * - PENDING (not scanned while the audit runs): "14 pcs expected"
+ *
+ * @param {{ status: string, expectedQuantity?: number | null, foundQuantity?: number | null }} row
+ * @param {string | null | undefined} [unit] - `Asset.unitOfMeasure`; the default
+ *   literal "units" is treated as no unit
+ * @returns {string | null} the label, or null for an individual asset
+ */
+export function auditCountLabel(row, unit) {
+  if (row.expectedQuantity === null || row.expectedQuantity === undefined) {
+    return null;
+  }
+  const named = unit && unit !== "units" ? unit : null;
+  const suffix = named ? ` ${named}` : "";
+  const unitWord = named ?? "units";
+  const expected = row.expectedQuantity;
+  const counted = row.foundQuantity !== null && row.foundQuantity !== undefined;
+
+  switch (row.status) {
+    case "FOUND": {
+      if (!counted) return "Not counted";
+      // A surplus is a finding too: say how many more than the record.
+      const surplus = row.foundQuantity - expected;
+      return `${row.foundQuantity} of ${expected}${suffix}${
+        surplus > 0 ? ` (+${surplus})` : ""
+      }`;
+    }
+    case "UNEXPECTED":
+      return counted
+        ? `${row.foundQuantity} ${unitWord} counted`
+        : "Not counted";
+    case "MISSING":
+      return `0 of ${expected}${suffix}`;
+    default:
+      return `${expected} ${unitWord} expected`;
+  }
+}
+
 // Why a booking cannot be reserved yet: the rules web's Reserve button
 // disables on, in one register for every surface that states them: the web
 // tooltip, the mobile route's 400, the in-transaction guard's 400 and the
@@ -843,3 +893,189 @@ export const DELETE_CONSEQUENCE_LABELS = Object.freeze({
   BOOKING:
     "This permanently deletes the booking with its notes, model reservations and check-in and check-out history. If it is ongoing or overdue, its assets become available. This cannot be undone.",
 });
+
+/**
+ * How an audit photo reached Shelf, as `AuditImage.captureSource` stores it.
+ * `CAMERA` is a photo the phone app reports it took with its own camera, which
+ * cannot hand back an old picture; `LIBRARY` was picked from the phone's photo
+ * library; `WEB_UPLOAD` came through the web app, which cannot tell a camera
+ * shot from a file; `PHONE` came from a version of the phone app that does
+ * not say which. Photos from before this field have none.
+ */
+export const AUDIT_PHOTO_SOURCE_LABELS = Object.freeze({
+  CAMERA: "Shelf app camera",
+  LIBRARY: "Photo library",
+  WEB_UPLOAD: "Web upload",
+  PHONE: "Phone app",
+});
+
+/** The date and time a photo tile shows, before the year is added. */
+const SHORT_DATE_TIME = Object.freeze({
+  day: "numeric",
+  month: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** The flags an audit photo can carry: the cases a reviewer should check. */
+export const AUDIT_PHOTO_FLAG_LABELS = Object.freeze({
+  OLD_PHOTO: "Old photo",
+  NO_DATE: "No date",
+});
+
+/**
+ * How much older than its upload a photo may be before it is flagged. A photo
+ * taken the evening before and added in the morning is normal; one taken days
+ * before is a picture that was not taken when it was added as evidence.
+ */
+export const AUDIT_PHOTO_OLD_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * One line that explains the icons and flags, for a printed receipt where
+ * nothing can be hovered.
+ */
+export const AUDIT_PHOTO_KEY =
+  "Each photo shows how it reached Shelf (Shelf app camera, photo library, web upload or phone app) and when it was taken. Old photo: taken more than a day before it was uploaded. No date: the photo carries no capture time.";
+
+/** A duration in the largest whole unit a reader would use. */
+function describeGap(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} days`;
+}
+
+/** Reads a date-ish value as epoch milliseconds, or null. */
+function toMs(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Everything both apps show for one audit photo, so the web, the receipt PDF
+ * and the companion read the same.
+ *
+ * Quiet when a photo is fine, a flag when it is not: a normal photo gets an
+ * icon and a short date and time; only an old photo or one with no date gets
+ * a flag. The full sentence is for the preview, where there is room.
+ *
+ * - "Old photo": taken more than {@link AUDIT_PHOTO_OLD_AFTER_MS} before it
+ *   was uploaded. That is the case audit photos exist to catch, a picture
+ *   that was not taken when it was added as evidence. The upload is the only
+ *   reference: an audit can run for days, so its start or a scan time would
+ *   flag photos taken during the audit.
+ * - "No date": the photo carries no capture time.
+ * - A photo uploaded before Shelf read capture times (no source, no date) is
+ *   shown by its upload time with no flag: its date was never looked for, so
+ *   calling it missing would flag every photo in every older audit.
+ * - A camera photo with no EXIF date shows its upload time, labelled as such
+ *   (a photo taken in the app is uploaded minutes later at most), and is still
+ *   flagged "No date": the official app sends the camera's date, so a camera
+ *   claim without one is not to be trusted quietly.
+ *
+ * @param {{
+ *   captureSource?: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null,
+ *   capturedAt?: string | Date | null,
+ *   createdAt?: string | Date | null,
+ * }} photo - the `AuditImage` fields
+ * @param {{
+ *   format: {
+ *     dateTime: (value: string | Date) => string,
+ *     custom: (value: string | Date, options: object) => string,
+ *   },
+ *   now?: Date,
+ * }} options - the viewer's own formatters, and the current time (a photo
+ *   from another year shows its year)
+ * @returns {{
+ *   source: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null,
+ *   sourceLabel: string | null,
+ *   short: string | null,
+ *   flag: "OLD_PHOTO" | "NO_DATE" | null,
+ *   flagLabel: string | null,
+ *   detail: string,
+ * }}
+ */
+export function describeAuditPhoto(photo, { format, now = new Date() }) {
+  const source = AUDIT_PHOTO_SOURCE_LABELS[photo.captureSource]
+    ? photo.captureSource
+    : null;
+  const sourceLabel = source ? AUDIT_PHOTO_SOURCE_LABELS[source] : null;
+
+  const capturedMs = toMs(photo.capturedAt);
+  const uploadedMs = toMs(photo.createdAt);
+  // The year shows only when it differs from the upload's, compared in the
+  // viewer's own zone so the server and the browser decide alike.
+  const yearOf = (value) => format.custom(value, { year: "numeric" });
+  const uploadYear = photo.createdAt ? yearOf(photo.createdAt) : null;
+  const thisYear = yearOf(now);
+  const short = (value) => {
+    const year = yearOf(value);
+    return format.custom(
+      value,
+      year !== thisYear || (uploadYear && year !== uploadYear)
+        ? { ...SHORT_DATE_TIME, year: "numeric" }
+        : SHORT_DATE_TIME
+    );
+  };
+
+  // Uploaded before Shelf read capture times: show it as it always was.
+  if (!source && capturedMs === null) {
+    return {
+      source: null,
+      sourceLabel: null,
+      short: uploadedMs !== null ? short(photo.createdAt) : null,
+      flag: null,
+      flagLabel: null,
+      detail:
+        uploadedMs !== null
+          ? `Uploaded ${format.dateTime(photo.createdAt)}`
+          : "Time taken unknown",
+    };
+  }
+
+  const usesUploadTime =
+    capturedMs === null && source === "CAMERA" && uploadedMs !== null;
+  const shownValue =
+    capturedMs !== null
+      ? photo.capturedAt
+      : usesUploadTime
+      ? photo.createdAt
+      : null;
+
+  // A photo with no capture time is flagged even when a camera photo shows its
+  // upload time: a camera claim with no date is exactly what a modified client
+  // would send with an old, stripped picture.
+  let flag = null;
+  if (capturedMs === null) flag = "NO_DATE";
+  else if (
+    uploadedMs !== null &&
+    uploadedMs - capturedMs > AUDIT_PHOTO_OLD_AFTER_MS
+  ) {
+    flag = "OLD_PHOTO";
+  }
+
+  let when;
+  if (!shownValue) when = "time taken unknown";
+  else if (usesUploadTime) when = `uploaded ${format.dateTime(shownValue)}`;
+  else if (source === "CAMERA") when = format.dateTime(shownValue);
+  else if (source) when = `file says ${format.dateTime(shownValue)}`;
+  else when = `taken ${format.dateTime(shownValue)}`;
+
+  let relation = null;
+  if (capturedMs !== null && uploadedMs !== null && uploadedMs >= capturedMs) {
+    relation = `${describeGap(uploadedMs - capturedMs)} before upload`;
+  }
+
+  const sentence = [sourceLabel, when, relation].filter(Boolean).join(" · ");
+  return {
+    source,
+    sourceLabel,
+    short: shownValue ? short(shownValue) : null,
+    flag,
+    flagLabel: flag ? AUDIT_PHOTO_FLAG_LABELS[flag] : null,
+    detail: sentence.charAt(0).toUpperCase() + sentence.slice(1),
+  };
+}

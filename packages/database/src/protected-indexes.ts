@@ -25,9 +25,14 @@ import { fileURLToPath } from "url";
  * Indexes created by hand-written migrations, kept for query performance.
  *
  * _AssetToTag_asset_idx: Optimizes tag filtering operations
+ * PdfTemplate_*: partial and expression unique indexes Prisma cannot model
  */
 export const PROTECTED_INDEXES = [
   "_AssetToTag_asset_idx", // Critical for tag filtering performance
+  // At most one default template per workspace and kind (partial unique).
+  "PdfTemplate_one_default_per_organization_kind",
+  // Template names unique per workspace and kind, ignoring case (lower(name)).
+  "PdfTemplate_organizationId_kind_lower_name_key",
 ] as const;
 
 /**

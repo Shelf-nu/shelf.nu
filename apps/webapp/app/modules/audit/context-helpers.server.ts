@@ -15,6 +15,23 @@ import {
 export type AuditContextType = "location" | "kit" | "user";
 
 /**
+ * The unit scope a new audit keeps in its `scopeMeta`, so a quantity-tracked
+ * asset expects only the units inside it (see `auditUnitScope` in
+ * `./quantity.ts`). Null for an audit of selected assets or of the index.
+ */
+export type AuditUnitScopeMeta =
+  | { locationIds: string[] }
+  | { kitIds: string[] }
+  | { custodianUserId: string }
+  | null;
+
+/** The assets an audit covers and the unit scope it keeps. */
+export type AuditAssetResolution = {
+  assetIds: string[];
+  unitScope: AuditUnitScopeMeta;
+};
+
+/**
  * Resolves asset IDs for audit creation from either direct input or context.
  * This is the main entry point used by the audit start API route.
  *
@@ -24,7 +41,8 @@ export type AuditContextType = "location" | "kit" | "user";
  * @param contextId - ID of the context entity
  * @param contextName - Display name for error messages
  * @param includeChildLocations - For locations, whether to include child locations
- * @returns Array of asset IDs to include in the audit
+ * @returns The asset IDs to include in the audit, and the unit scope the
+ *   context gives it (the location page's locations, the kit, the person)
  */
 export async function resolveAssetIdsForAudit({
   organizationId,
@@ -40,40 +58,50 @@ export async function resolveAssetIdsForAudit({
   contextId?: string;
   contextName?: string;
   includeChildLocations: boolean;
-}): Promise<string[]> {
+}): Promise<AuditAssetResolution> {
   // If direct asset IDs are provided, use them
   if (directAssetIds && directAssetIds.length > 0) {
-    return directAssetIds;
+    return { assetIds: directAssetIds, unitScope: null };
   }
 
-  // Otherwise, fetch assets based on context type
+  // Otherwise, fetch assets based on context type. The asset queries are
+  // org-scoped, so a foreign context id yields no assets and is refused below
+  // before its scope is ever stored.
   if (contextType && contextId) {
-    let assetIds: string[];
+    let resolution: AuditAssetResolution;
 
     switch (contextType) {
-      case "location":
-        assetIds = await getAssetsForLocationContext({
+      case "location": {
+        const { assetIds, locationIds } = await getAssetsForLocationContext({
           organizationId,
           locationId: contextId,
           includeChildLocations,
         });
+        resolution = { assetIds, unitScope: { locationIds } };
         break;
+      }
       case "kit":
-        assetIds = await getAssetsForKitContext({
-          organizationId,
-          kitId: contextId,
-        });
+        resolution = {
+          assetIds: await getAssetsForKitContext({
+            organizationId,
+            kitId: contextId,
+          }),
+          unitScope: { kitIds: [contextId] },
+        };
         break;
       case "user":
-        assetIds = await getAssetsForUserContext({
-          organizationId,
-          custodianUserId: contextId,
-        });
+        resolution = {
+          assetIds: await getAssetsForUserContext({
+            organizationId,
+            custodianUserId: contextId,
+          }),
+          unitScope: { custodianUserId: contextId },
+        };
         break;
     }
 
     // Ensure there are assets to audit
-    if (assetIds.length === 0) {
+    if (resolution.assetIds.length === 0) {
       throw new ShelfError({
         cause: null,
         message: `No assets found in ${contextType} "${
@@ -85,7 +113,7 @@ export async function resolveAssetIdsForAudit({
       });
     }
 
-    return assetIds;
+    return resolution;
   }
 
   // This shouldn't happen due to schema validation, but handle it anyway
@@ -98,6 +126,33 @@ export async function resolveAssetIdsForAudit({
 }
 
 /**
+ * The locations an audit started from one location page covers: that location,
+ * plus all its descendants when child locations are included. Shared by the
+ * asset selection and the expected-units scope so both cover the same places.
+ *
+ * @param organizationId - The organization ID to scope the descendant lookup
+ * @param locationId - The location the audit was started from
+ * @param includeChildLocations - Whether descendant locations are included
+ * @returns The location IDs, the starting location first
+ */
+async function locationPageScope({
+  organizationId,
+  locationId,
+  includeChildLocations,
+}: {
+  organizationId: string;
+  locationId: string;
+  includeChildLocations: boolean;
+}): Promise<string[]> {
+  if (!includeChildLocations) return [locationId];
+  return getLocationDescendantIds({
+    organizationId,
+    locationId,
+    includeSelf: true,
+  });
+}
+
+/**
  * Fetches all asset IDs for a given location context.
  * Used for starting audits from a location page where all assets
  * at that location (and optionally child locations) should be included.
@@ -105,7 +160,7 @@ export async function resolveAssetIdsForAudit({
  * @param organizationId - The organization ID to scope the query
  * @param locationId - The location ID to fetch assets from
  * @param includeChildLocations - Whether to include assets from all descendant locations
- * @returns Array of asset IDs at the specified location(s)
+ * @returns The asset IDs at the location(s), and the locations covered
  */
 export async function getAssetsForLocationContext({
   organizationId,
@@ -115,21 +170,12 @@ export async function getAssetsForLocationContext({
   organizationId: string;
   locationId: string;
   includeChildLocations: boolean;
-}): Promise<string[]> {
-  // Determine which location IDs to query based on includeChildLocations flag
-  let locationIds: string[];
-
-  if (includeChildLocations) {
-    // Get all descendant location IDs (including the parent location itself)
-    locationIds = await getLocationDescendantIds({
-      organizationId,
-      locationId,
-      includeSelf: true,
-    });
-  } else {
-    // Only query the single location
-    locationIds = [locationId];
-  }
+}): Promise<{ assetIds: string[]; locationIds: string[] }> {
+  const locationIds = await locationPageScope({
+    organizationId,
+    locationId,
+    includeChildLocations,
+  });
 
   // Fetch all assets at the specified location(s)
   const assets = await db.asset.findMany({
@@ -143,8 +189,7 @@ export async function getAssetsForLocationContext({
     },
   });
 
-  // Return just the asset IDs
-  return assets.map((asset) => asset.id);
+  return { assetIds: assets.map((asset) => asset.id), locationIds };
 }
 
 /**
@@ -236,7 +281,8 @@ export async function getAssetsForUserContext({
  * @param organizationId - The caller's (validated) organization ID
  * @param locationIds - Selected location IDs (may contain ALL_SELECTED_KEY)
  * @param currentSearchParams - Serialized Locations-list search params (for select-all)
- * @returns Asset IDs across the selected locations
+ * @returns Asset IDs across the selected locations, and the selected locations
+ *   that hold them (the audit's unit scope)
  * @throws {ShelfError} 400 if none of the selected locations contain assets
  */
 export async function resolveAssetIdsForLocationSelection({
@@ -247,43 +293,35 @@ export async function resolveAssetIdsForLocationSelection({
   organizationId: string;
   locationIds: string[];
   currentSearchParams?: string | null;
-}): Promise<string[]> {
-  // Build the org-scoped asset where-clause for the selected locations.
-  let assetWhere: Prisma.AssetWhereInput;
+}): Promise<{ assetIds: string[]; locationIds: string[] }> {
+  // The placement filter for the selected locations. It selects the assets
+  // and, applied to each asset's placements, names the selected locations that
+  // hold them: the audit's unit scope, with no second location lookup.
+  let placementWhere: Prisma.AssetLocationWhereInput;
 
   if (locationIds.includes(ALL_SELECTED_KEY)) {
     // "Select all" — match assets whose location satisfies the SAME filter the
     // user sees on the Locations list. Post-pivot, asset placement lives on the
     // `AssetLocation` pivot, so the relation filter goes through `assetLocations`
     // with a nested `location` where-clause.
-    assetWhere = {
-      organizationId,
-      assetLocations: {
-        some: {
-          location: getLocationsWhereInput({
-            organizationId,
-            currentSearchParams,
-          }),
-        },
-      },
+    placementWhere = {
+      location: getLocationsWhereInput({ organizationId, currentSearchParams }),
     };
   } else {
     // Explicit selection from request input — prove org ownership before use,
     // then scope by the deduped IDs (schema guarantees at least one). Asset →
     // location lookup goes via the `AssetLocation` pivot post-4b.
     await assertLocationsBelongToOrg({ locationIds, organizationId });
-    assetWhere = {
-      organizationId,
-      assetLocations: {
-        some: { locationId: { in: [...new Set(locationIds)] } },
-      },
-    };
+    placementWhere = { locationId: { in: [...new Set(locationIds)] } };
   }
 
-  // Asset→location is 1:1, so findMany already returns each asset once.
   const assets = await db.asset.findMany({
-    where: assetWhere,
-    select: { id: true },
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an audit of selected locations covers everything placed there; audits keep archived assets and badge them
+    where: { organizationId, assetLocations: { some: placementWhere } },
+    select: {
+      id: true,
+      assetLocations: { where: placementWhere, select: { locationId: true } },
+    },
   });
 
   if (assets.length === 0) {
@@ -297,7 +335,16 @@ export async function resolveAssetIdsForLocationSelection({
     });
   }
 
-  return assets.map((asset) => asset.id);
+  return {
+    assetIds: assets.map((asset) => asset.id),
+    locationIds: [
+      ...new Set(
+        assets.flatMap((asset) =>
+          asset.assetLocations.map((placement) => placement.locationId)
+        )
+      ),
+    ],
+  };
 }
 
 /**
@@ -319,7 +366,8 @@ export async function resolveAssetIdsForLocationSelection({
  * @param organizationId - The caller's (validated) organization ID
  * @param kitIds - Selected kit IDs (may contain ALL_SELECTED_KEY)
  * @param currentSearchParams - Serialized Kits-list search params (for select-all)
- * @returns Asset IDs across the selected kits
+ * @returns Asset IDs across the selected kits, and the selected kits that hold
+ *   them (the audit's unit scope)
  * @throws {ShelfError} 400 if none of the selected kits contain assets
  */
 export async function resolveAssetIdsForKitSelection({
@@ -330,48 +378,43 @@ export async function resolveAssetIdsForKitSelection({
   organizationId: string;
   kitIds: string[];
   currentSearchParams?: string | null;
-}): Promise<string[]> {
-  // Build the org-scoped asset where-clause for the selected kits.
-  let assetWhere: Prisma.AssetWhereInput;
+}): Promise<{ assetIds: string[]; kitIds: string[] }> {
+  // The membership filter for the selected kits. It selects the assets and,
+  // applied to each asset's kit memberships, names the selected kits that hold
+  // them: the audit's unit scope, with no second kit lookup.
+  let membershipWhere: Prisma.AssetKitWhereInput;
 
   if (kitIds.includes(ALL_SELECTED_KEY)) {
     // "Select all" — match assets whose kit satisfies the SAME filter the user
     // sees on the Kits list. Post-pivot, asset → kit lookup goes via the
     // `AssetKit` pivot; surface the kit filter through the pivot relation.
-    assetWhere = {
-      organizationId,
-      assetKits: {
-        some: {
-          kit: getKitsWhereInput({
-            organizationId,
-            currentSearchParams,
-            // Sole caller is `api+/audits.start`, gated on `audit: create`,
-            // which BASE and SELF_SERVICE do not hold — so `?teamMember=` here
-            // cannot come from a viewer restricted from seeing custody. Pass a
-            // narrowed allow-list instead if this is ever called from an
-            // `audit: read`/`update` route, which both restricted roles have.
-            allowedTeamMemberIds: "all",
-          }),
-        },
-      },
+    membershipWhere = {
+      kit: getKitsWhereInput({
+        organizationId,
+        currentSearchParams,
+        // Sole caller is `api+/audits.start`, gated on `audit: create`,
+        // which BASE and SELF_SERVICE do not hold, so `?teamMember=` here
+        // cannot come from a viewer restricted from seeing custody. Pass a
+        // narrowed allow-list instead if this is ever called from an
+        // `audit: read`/`update` route, which both restricted roles have.
+        allowedTeamMemberIds: "all",
+      }),
     };
   } else {
     // Explicit selection from request input — prove org ownership before use,
     // then scope by the deduped IDs (schema guarantees at least one). Post-pivot
     // the asset → kit join uses the `AssetKit` pivot.
     await assertKitsBelongToOrg({ kitIds, organizationId });
-    assetWhere = {
-      organizationId,
-      assetKits: {
-        some: { kitId: { in: [...new Set(kitIds)] } },
-      },
-    };
+    membershipWhere = { kitId: { in: [...new Set(kitIds)] } };
   }
 
-  // Asset→kit is 1:1, so findMany already returns each asset once.
   const assets = await db.asset.findMany({
-    where: assetWhere,
-    select: { id: true },
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an audit of selected kits covers every member, archived ones included (shown with a badge)
+    where: { organizationId, assetKits: { some: membershipWhere } },
+    select: {
+      id: true,
+      assetKits: { where: membershipWhere, select: { kitId: true } },
+    },
   });
 
   if (assets.length === 0) {
@@ -385,5 +428,14 @@ export async function resolveAssetIdsForKitSelection({
     });
   }
 
-  return assets.map((asset) => asset.id);
+  return {
+    assetIds: assets.map((asset) => asset.id),
+    kitIds: [
+      ...new Set(
+        assets.flatMap((asset) =>
+          asset.assetKits.map((membership) => membership.kitId)
+        )
+      ),
+    ],
+  };
 }

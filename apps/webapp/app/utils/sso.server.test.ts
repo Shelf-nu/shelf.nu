@@ -149,6 +149,29 @@ function givenSessionHoldsDomainIdentity(held: boolean) {
   ] as unknown as Awaited<ReturnType<typeof mockDb.db.$queryRaw>>);
 }
 
+/**
+ * Queues the answers of the callback's raw lookups, in the order it runs them.
+ *
+ * @param rows - one result row per lookup
+ */
+function givenRawLookups(...rows: Record<string, boolean>[]) {
+  const queryRaw = vi.mocked(mockDb.db.$queryRaw);
+  queryRaw.mockReset();
+  for (const row of rows) {
+    queryRaw.mockResolvedValueOnce([row] as unknown as Awaited<
+      ReturnType<typeof mockDb.db.$queryRaw>
+    >);
+  }
+}
+
+/** The SQL text (whitespace collapsed) and bound values of one raw lookup. */
+function rawLookup(index: number) {
+  const [strings, ...values] = vi.mocked(mockDb.db.$queryRaw).mock.calls[
+    index
+  ] as unknown as [TemplateStringsArray, ...unknown[]];
+  return { sql: strings.join("?").replace(/\s+/g, " "), values };
+}
+
 describe("resolveUserAndOrgForSsoCallback", () => {
   beforeEach(() => {
     givenSessionHoldsDomainIdentity(true);
@@ -354,6 +377,64 @@ describe("resolveUserAndOrgForSsoCallback", () => {
     });
   });
 
+  describe("duplicate merge onto an account bound to another provider", () => {
+    const approvedUser = { ...shelfUser, id: ORIGINAL_UUID, sso: true };
+
+    beforeEach(() => {
+      seedUsers(approvedUser);
+      // @ts-expect-error - vitest mock type
+      mockAuth.getAuthUserById.mockResolvedValue({
+        id: ORIGINAL_UUID,
+        app_metadata: { provider: "email" },
+      });
+      // @ts-expect-error - vitest mock type
+      mockConversion.reconcileDuplicateSsoLogin.mockResolvedValue(undefined);
+    });
+
+    it("refuses the merge when the account holds an SSO identity from a provider not registered for the domain", async () => {
+      givenRawLookups({ held: true }, { foreign: true });
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(ShelfError);
+      expect(error).toMatchObject({ status: 403 });
+      expect(isSsoAccountLinkedError(error)).toBe(false);
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+    });
+
+    it("counts only identities from a provider that is still registered", async () => {
+      givenRawLookups({ held: true }, { foreign: false });
+
+      await resolveUserAndOrgForSsoCallback(baseInput).catch(() => undefined);
+
+      // A re-registered IdP leaves identities from a provider id that no
+      // longer exists; the lookup must not treat those as another IdP's.
+      const { sql } = rawLookup(1);
+      expect(sql).toContain("FROM auth.sso_providers p");
+      expect(sql).toContain("i.provider = 'sso:' || p.id::text");
+    });
+
+    it("merges an account whose SSO identities all come from the domain's provider", async () => {
+      givenRawLookups({ held: true }, { foreign: false });
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(isSsoAccountLinkedError(error)).toBe(true);
+      expect(mockConversion.reconcileDuplicateSsoLogin).toHaveBeenCalledTimes(
+        1
+      );
+      const { sql, values } = rawLookup(1);
+      expect(sql).toContain("i.provider LIKE 'sso:%'");
+      expect(sql).toContain("AND NOT EXISTS");
+      expect(values).toEqual([ORIGINAL_UUID, "example.com"]);
+    });
+  });
+
   describe("deleted accounts", () => {
     it("refuses a login whose own account is soft-deleted", async () => {
       seedUsers({ ...shelfUser, deletedAt: new Date() });
@@ -542,7 +623,10 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       expect(sql).toContain("FROM auth.identities i");
       expect(sql).toContain("JOIN auth.sso_domains d");
       expect(sql).toContain("i.provider = 'sso:' || d.sso_provider_id::text");
-      expect(values).toEqual([SUPABASE_UUID, "example.com"]);
+      expect(sql).toContain(
+        'EXISTS ( SELECT 1 FROM auth.sso_domains d WHERE lower(d.domain) = ? ) AS "registered"'
+      );
+      expect(values).toEqual([SUPABASE_UUID, "example.com", "example.com"]);
       expect(mockUser.updateUserFromSSO).toHaveBeenCalledTimes(1);
     });
 
@@ -630,6 +714,53 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       );
       expect(mockAuth.deleteAuthAccount).not.toHaveBeenCalled();
       expect(result).toEqual(created);
+    });
+
+    it("refuses a new account on a domain with a registered provider when the session holds no identity from it", async () => {
+      seedUsers();
+      givenRawLookups({ held: false, registered: true });
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(ShelfError);
+      expect(error).toMatchObject({
+        status: 403,
+        message: "Please sign in with your organization's single sign-on.",
+      });
+      expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+      const { sql, values } = rawLookup(0);
+      expect(sql).toContain("FROM auth.identities i");
+      expect(values).toEqual([SUPABASE_UUID, "example.com", "example.com"]);
+    });
+
+    it("creates a new account on a domain with a registered provider when the session holds its identity", async () => {
+      seedUsers();
+      givenRawLookups({ held: true, registered: true });
+      // @ts-expect-error - vitest mock type
+      mockUser.createUserFromSSO.mockResolvedValue({
+        user: { id: SUPABASE_UUID },
+        org: null,
+      });
+
+      await resolveUserAndOrgForSsoCallback(baseInput);
+
+      expect(mockUser.createUserFromSSO).toHaveBeenCalledTimes(1);
+    });
+
+    it("creates a new account on a domain with no registered provider", async () => {
+      seedUsers();
+      givenRawLookups({ held: false, registered: false });
+      // @ts-expect-error - vitest mock type
+      mockUser.createUserFromSSO.mockResolvedValue({
+        user: { id: SUPABASE_UUID },
+        org: null,
+      });
+
+      await resolveUserAndOrgForSsoCallback(baseInput);
+
+      expect(mockUser.createUserFromSSO).toHaveBeenCalledTimes(1);
     });
 
     it("cleans up the Supabase auth account when new-user creation fails", async () => {

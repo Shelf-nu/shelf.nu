@@ -5,6 +5,7 @@ import { z } from "zod";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
@@ -101,6 +102,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         currentSearchParams,
         settings,
         timeZone,
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         // `audit: update` is held by BASE and SELF_SERVICE, and the resulting
         // audit lists the assets it resolved — so a custodian filter here has
         // to be narrowed to the caller's own custody.

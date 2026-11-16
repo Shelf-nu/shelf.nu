@@ -308,7 +308,7 @@ import {
   createSystemBookingNote,
   createSystemBookingNotes,
 } from "../booking-note/service.server";
-import { createNotes } from "../note/service.server";
+import { createNotes, createNotesPerAsset } from "../note/service.server";
 
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -658,6 +658,9 @@ export function getActionTextFromTransition(
     case "COMPLETE->ARCHIVED":
     case "RESERVED->ARCHIVED":
       return "archived the booking";
+    // "Discard draft": members who may not delete drop a draft by archiving it.
+    case "DRAFT->ARCHIVED":
+      return "discarded the draft";
     default:
       return "changed the booking status";
   }
@@ -1137,17 +1140,15 @@ export async function createBooking({
   hints,
 }: {
   /**
-   * Booking object that contains all the required fields to create a booking
+   * Booking object that contains all the required fields to create a booking.
+   *
+   * There is no custodian user field: the custodian user is always the user
+   * linked to `custodianTeamMemberId` in the database, so a request cannot
+   * pair one member with another member's user.
    */
   booking: Pick<
     Booking,
-    | "name"
-    | "description"
-    | "creatorId"
-    | "custodianUserId"
-    | "organizationId"
-    | "from"
-    | "to"
+    "name" | "description" | "creatorId" | "organizationId" | "from" | "to"
   > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
@@ -1308,12 +1309,6 @@ export async function createBooking({
       assetId: id,
     }));
 
-    if (booking.custodianUserId) {
-      dataToCreate.custodianUser = {
-        connect: { id: booking.custodianUserId },
-      };
-    }
-
     if (booking.tags.length > 0) {
       dataToCreate.tags = {
         connect: booking.tags,
@@ -1457,7 +1452,7 @@ export async function createBooking({
           );
         }
 
-        await assertTeamMemberBelongsToOrg(
+        const custodian = await assertTeamMemberBelongsToOrg(
           {
             teamMemberId: booking.custodianTeamMemberId,
             organizationId: booking.organizationId,
@@ -1465,16 +1460,21 @@ export async function createBooking({
           tx
         );
 
-        // SECURITY (cross-org IDOR): custodianUserId is also request input and a
-        // valid team member does not prove the paired user belongs to the org.
-        if (booking.custodianUserId) {
+        // The custodian user is the one linked to the team member row, never
+        // a request value. A member without a user (NRM) leaves it unset.
+        // The membership check keeps a member whose user has left the
+        // workspace from linking that user.
+        if (custodian.userId) {
           await assertUserBelongsToOrg(
             {
-              userId: booking.custodianUserId,
+              userId: custodian.userId,
               organizationId: booking.organizationId,
             },
             tx
           );
+          dataToCreate.custodianUser = {
+            connect: { id: custodian.userId },
+          };
         }
 
         const created = await tx.booking.create({
@@ -1645,6 +1645,9 @@ export async function createBooking({
  * Used when the user clicks the save booking to simply update the booking information
  * It only updates dates & custodian if the booking is in DRAFT state
  * In other ongoing states, it just updates name and description
+ *
+ * The custodian user is read from the `custodianTeamMemberId` row in this
+ * organization, never taken from the caller.
  */
 export async function updateBasicBooking({
   id,
@@ -1652,7 +1655,6 @@ export async function updateBasicBooking({
   from,
   to,
   custodianTeamMemberId,
-  custodianUserId,
   description,
   organizationId,
   tags,
@@ -1666,7 +1668,6 @@ export async function updateBasicBooking({
     | "from"
     | "to"
     | "custodianTeamMemberId"
-    | "custodianUserId"
     | "description"
     | "organizationId"
   >
@@ -1795,7 +1796,7 @@ export async function updateBasicBooking({
         // input. Prove the team member belongs to this booking's
         // organization before connecting it, so an attacker cannot assign a
         // foreign-org team member as the custodian.
-        await assertTeamMemberBelongsToOrg({
+        const custodian = await assertTeamMemberBelongsToOrg({
           teamMemberId: custodianTeamMemberId,
           organizationId,
         });
@@ -1805,18 +1806,19 @@ export async function updateBasicBooking({
         };
 
         /**
-         * If a userId is passed, meaning the team member is connected to a user, we connct to it.
-         * This will override the value if there were any previous custodians`
+         * The custodian user is the one linked to the team member row, never
+         * a request value, so a request cannot pair one member with another
+         * member's user. A member linked to a user connects it, replacing any
+         * previous custodian user.
          */
-        if (custodianUserId) {
-          // SECURITY (cross-org IDOR): custodianUserId is request input; a
-          // valid team member does not prove the paired user is in this org.
+        if (custodian.userId) {
+          // A member whose user has left the workspace must not link that user.
           await assertUserBelongsToOrg({
-            userId: custodianUserId,
+            userId: custodian.userId,
             organizationId,
           });
           dataToUpdate.custodianUser = {
-            connect: { id: custodianUserId },
+            connect: { id: custodian.userId },
           };
         } else if (booking.custodianUserId) {
           /**
@@ -2232,6 +2234,9 @@ async function assertKitsNotBookedElsewhere(
 
 /**
  * Changes the status of a booking to RESERVED
+ *
+ * The custodian user is read from the `custodianTeamMemberId` row in this
+ * organization, never taken from the caller.
  */
 export async function reserveBooking({
   id,
@@ -2239,7 +2244,6 @@ export async function reserveBooking({
   from,
   to,
   custodianTeamMemberId,
-  custodianUserId,
   description,
   organizationId,
   hints,
@@ -2255,7 +2259,6 @@ export async function reserveBooking({
     | "from"
     | "to"
     | "custodianTeamMemberId"
-    | "custodianUserId"
     | "description"
     | "organizationId"
   >
@@ -2463,7 +2466,7 @@ export async function reserveBooking({
       // SECURITY (cross-org IDOR): custodianTeamMemberId comes from form input.
       // Prove the team member belongs to this booking's organization before
       // connecting it, mirroring updateBasicBooking / createBooking.
-      await assertTeamMemberBelongsToOrg({
+      const custodian = await assertTeamMemberBelongsToOrg({
         teamMemberId: custodianTeamMemberId,
         organizationId,
       });
@@ -2473,18 +2476,19 @@ export async function reserveBooking({
       };
 
       /**
-       * If a userId is passed, meaning the team member is connected to a user, we connct to it.
-       * This will override the value if there were any previous custodians`
+       * The custodian user is the one linked to the team member row, never a
+       * request value, so a request cannot pair one member with another
+       * member's user. A member linked to a user connects it, replacing any
+       * previous custodian user.
        */
-      if (custodianUserId) {
-        // SECURITY (cross-org IDOR): custodianUserId is request input; a valid
-        // team member does not prove the paired user is in this org.
+      if (custodian.userId) {
+        // A member whose user has left the workspace must not link that user.
         await assertUserBelongsToOrg({
-          userId: custodianUserId,
+          userId: custodian.userId,
           organizationId,
         });
         dataToUpdate.custodianUser = {
-          connect: { id: custodianUserId },
+          connect: { id: custodian.userId },
         };
       } else if (bookingFound.custodianUserId) {
         /**
@@ -10596,6 +10600,33 @@ export async function partialCheckoutBooking({
 
     const result = await db.$transaction(
       async (tx) => {
+        // Authoritative status check, under a row lock held until this
+        // transaction commits. The status read above happens outside it, so a
+        // concurrent archive, cancellation or revert to draft could otherwise
+        // commit in between and this write would land assets out on a closed
+        // booking (or overwrite an ARCHIVED one back to ONGOING/OVERDUE).
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
+        assertBookingIsOpen({
+          status: lockedStatus,
+          operation: "check out",
+          bookingId: id,
+        });
+        if (lockedStatus === BookingStatus.DRAFT) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it out. Reload it and try again.",
+            additionalData: { bookingId: id },
+          });
+        }
+
         /**
          * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
          * row-lock pattern — lock → re-read remaining inside tx → enforce cap →
@@ -11323,11 +11354,25 @@ export async function partialCheckoutBooking({
           submission: sourceLocations,
         });
 
+        // Grouped by units for the same reason `checkoutBooking` groups its
+        // departures: `updateMany`'s `data` takes literals and cannot name a
+        // column, and a batch carries very few distinct counts (every
+        // INDIVIDUAL slice moves 1), so this is a handful of statements rather
+        // than one per scanned slice.
+        const sliceIdsByUnits = new Map<number, string[]>();
         for (const [sliceId, units] of unitsBySliceId) {
           if (units <= 0) continue;
+          const ids = sliceIdsByUnits.get(units);
+          if (ids) {
+            ids.push(sliceId);
+          } else {
+            sliceIdsByUnits.set(units, [sliceId]);
+          }
+        }
+        for (const [units, sliceIds] of sliceIdsByUnits) {
           await tx.bookingAsset.updateMany({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
-            where: { id: sliceId, bookingId: id },
+            where: { id: { in: sliceIds }, bookingId: id },
             data: { checkedOutQuantity: { increment: units } },
           });
         }
@@ -11447,8 +11492,10 @@ export async function partialCheckoutBooking({
         }
 
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
+        // Decided on the locked status: a concurrent first scan may already
+        // have moved it on.
         let bookingStatusChanged = false;
-        if (bookingFound.status === BookingStatus.RESERVED) {
+        if (lockedStatus === BookingStatus.RESERVED) {
           // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
           const transitionData: Prisma.BookingUpdateInput = {
             status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
@@ -12849,12 +12896,31 @@ export async function createKitBookingNote({
   }
 }
 
+/**
+ * Moves a booking to ARCHIVED.
+ *
+ * Two entry points share this write. A plain archive takes a booking that is
+ * done ({@link isBookingArchivable}). "Discard draft" (`discardDraft: true`)
+ * takes only a DRAFT: it is how members without `booking:delete` drop a draft
+ * from their list while the record stays in the workspace history. Either way
+ * the caller has already checked `booking:archive` and ownership.
+ *
+ * @param args.id - The booking to archive
+ * @param args.organizationId - The caller's workspace; the booking must be in it
+ * @param args.userId - The actor, for the activity note and event
+ * @param args.discardDraft - Accept a DRAFT and nothing else
+ * @returns The archived booking
+ * @throws {ShelfError} 404 when the booking is not in the workspace, 400 when
+ *   its status cannot be archived through this entry point
+ */
 export async function archiveBooking({
   id,
   organizationId,
   userId,
+  discardDraft = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId?: string;
+  discardDraft?: boolean;
 }) {
   try {
     const booking = await db.booking
@@ -12884,7 +12950,19 @@ export async function archiveBooking({
      * ONGOING/OVERDUE are rejected — their assets are still CHECKED_OUT.
      * @see {@link isBookingArchivable}
      */
-    if (!isBookingArchivable({ status: booking.status, to: booking.to })) {
+    if (discardDraft) {
+      if (booking.status !== BookingStatus.DRAFT) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          message: "Only draft bookings can be discarded.",
+        });
+      }
+    } else if (
+      !isBookingArchivable({ status: booking.status, to: booking.to })
+    ) {
       throw new ShelfError({
         cause: null,
         label,
@@ -12894,10 +12972,14 @@ export async function archiveBooking({
     }
 
     /**
-     * A booking archived straight from RESERVED was never checked in, so flag
-     * it: return-behaviour reports (Booking Compliance) exclude these.
+     * A booking archived before any check-out (a past-due RESERVED, or a
+     * discarded DRAFT) was never returned, so flag it: return-behaviour
+     * reports (Booking Compliance, returned-booking counts) and the lifecycle
+     * progress bar exclude these.
      */
-    const archivedWithoutCheckin = booking.status === BookingStatus.RESERVED;
+    const archivedWithoutCheckin =
+      booking.status === BookingStatus.RESERVED ||
+      booking.status === BookingStatus.DRAFT;
 
     /**
      * Guard the write on the status we just read. If a concurrent checkout
@@ -13216,14 +13298,37 @@ export async function revertBookingToDraft({
       });
     }
 
-    const draftBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
-      where: { id: booking.id },
-      data: { status: BookingStatus.DRAFT },
-      // The custodian (and other notification recipients) are emailed below,
-      // so pull the same payload the other lifecycle emails use.
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    });
+    /**
+     * Guard the write on the RESERVED status just read. If a concurrent archive
+     * or check-out moved the booking on in between, the update matches no row
+     * and the revert is refused, instead of pulling an archived or checked-out
+     * booking back to DRAFT (where its `archivedWithoutCheckin` flag would
+     * linger on a booking that later goes out).
+     */
+    const draftBooking = await db.booking
+      .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id, status: BookingStatus.RESERVED },
+        data: { status: BookingStatus.DRAFT },
+        // The custodian (and other notification recipients) are emailed below,
+        // so pull the same payload the other lifecycle emails use.
+        include: BOOKING_INCLUDE_FOR_EMAIL,
+      })
+      .catch((cause: unknown) => {
+        if (isNotFoundError(cause)) {
+          // `cause: null`: a not-found cause would set the status to 404.
+          throw new ShelfError({
+            cause: null,
+            label,
+            message:
+              "This booking's status changed before it could be reverted to draft. Please refresh and try again.",
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: { id, organizationId },
+          });
+        }
+        throw cause;
+      });
 
     // Add activity log for booking revert to draft
     if (userId) {
@@ -15528,21 +15633,15 @@ export async function assertBookingDeleteConfirmed({
  * @param booking - Org-scoped booking identifier
  * @param hints - Client hints used to format email subject lines and times
  * @param userId - Optional editor user id, used to skip notifying the actor
- * @param options.onlyIfDraft - The caller's policy allows deleting drafts only
- *          (`access.policy.bookings.deleteOnlyDrafts`). The delete then
- *          matches a DRAFT row only, so a booking reserved after the caller's
- *          check is refused instead of deleted.
  * @returns The deleted booking row (with the includes needed for email
  *          rendering and the post-tx caller).
- * @throws {ShelfError} 404 if the booking does not exist; 403 when
- *          `onlyIfDraft` is set and the booking is no longer a draft; otherwise
- *          wraps any underlying Prisma/email failure.
+ * @throws {ShelfError} 404 if the booking does not exist; otherwise wraps any
+ *          underlying Prisma/email failure.
  */
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint,
-  userId?: string,
-  options: { onlyIfDraft?: boolean } = {}
+  userId?: string
 ) {
   const { id, organizationId } = booking;
   const currentBooking = await db.booking.findUnique({
@@ -15607,41 +15706,18 @@ export async function deleteBooking(
      * atomicity rationale.
      */
     const b = await db.$transaction(async (tx) => {
-      const deleted = await tx.booking
-        .delete({
-          where: {
-            id,
-            organizationId,
-            ...(options.onlyIfDraft ? { status: BookingStatus.DRAFT } : {}),
-          },
-          include: {
-            ...BOOKING_COMMON_INCLUDE,
-            ...BOOKING_INCLUDE_FOR_EMAIL,
-            bookingAssets: {
-              include: {
-                asset: { select: { id: true } },
-              },
+      const deleted = await tx.booking.delete({
+        where: { id, organizationId },
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true } },
             },
           },
-        })
-        .catch((cause: unknown) => {
-          // With `onlyIfDraft`, no matching row means the booking stopped
-          // being a draft after the caller's check.
-          if (options.onlyIfDraft && isNotFoundError(cause)) {
-            // `cause: null`: a not-found cause would set the status to 404.
-            throw new ShelfError({
-              cause: null,
-              label,
-              message:
-                "You are not authorized to delete this booking. Only draft bookings can be deleted.",
-              status: 403,
-              shouldBeCaptured: false,
-              additionalData: { id, organizationId },
-            });
-          }
-          throw cause;
-        });
-
+        },
+      });
       /** Assets that were checked out on an ONGOING/OVERDUE booking need
        * terminal-status reconciliation, NOT a blanket flip to AVAILABLE.
        * The cascade above has already removed this booking's
@@ -16985,10 +17061,8 @@ export async function assertSelectAllWithinOwnership({
  *
  * The selection is the explicit ids, or with select-all every booking the
  * list shows for its filters, and in both cases only the bookings the caller
- * may act on (see {@link getBulkBookingsWhereInput}). Roles whose
- * policy limits delete to drafts are refused the whole
- * request when the selection contains any non-draft booking, the same rule
- * `assertCanDeleteBooking` applies to a single delete.
+ * may act on (see {@link getBulkBookingsWhereInput}). The route has already
+ * checked `booking:delete`, which only roles that may delete any status hold.
  *
  * @param params.bookingIds - Selected booking ids, or the select-all key
  * @param params.organizationId - The caller's workspace
@@ -17097,24 +17171,6 @@ export async function bulkDeleteBookings({
       label,
     });
 
-    // Roles whose policy limits delete to drafts may not delete a selection
-    // that contains anything else. The whole request is refused rather than
-    // silently deleting part of it.
-    if (
-      access.policy.bookings.deleteOnlyDrafts &&
-      bookings.some((booking) => booking.status !== BookingStatus.DRAFT)
-    ) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
-        status: 403,
-        shouldBeCaptured: false,
-        additionalData: { bookingIds, organizationId },
-      });
-    }
-
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
@@ -17126,36 +17182,13 @@ export async function bulkDeleteBookings({
     );
 
     await db.$transaction(async (tx) => {
-      /**
-       * Deleting all selected bookings. For a drafts-only role the write
-       * re-checks the status itself: a booking reserved after the read above
-       * matches nothing, and a short count refuses the whole request so the
-       * transaction rolls back before any note, reconciliation or email.
-       */
-      const { count } = await tx.booking.deleteMany({
+      /** Deleting all selected bookings */
+      await tx.booking.deleteMany({
         where: {
           id: { in: bookings.map((booking) => booking.id) },
           organizationId,
-          ...(access.policy.bookings.deleteOnlyDrafts
-            ? { status: BookingStatus.DRAFT }
-            : {}),
         },
       });
-
-      if (
-        access.policy.bookings.deleteOnlyDrafts &&
-        count !== bookings.length
-      ) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message:
-            "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
-          status: 403,
-          shouldBeCaptured: false,
-          additionalData: { bookingIds, organizationId },
-        });
-      }
 
       /** Making assets and kits available */
       if (overdueOrOngoingBookings.length > 0) {
@@ -17954,7 +17987,11 @@ async function createNotesForScannedAssetsAndKits({
   const standaloneAssetIdsSet = new Set(standaloneAssetIds);
   const kitAssetIds = assetIds.filter((id) => !standaloneAssetIdsSet.has(id));
 
-  // Create notes for standalone assets — one per asset so qty-tracked
+  // One note per asset, collected here and written in a single insert below:
+  // the wording differs per asset, the round trips must not.
+  const assetNotes: Array<{ assetId: string; content: string }> = [];
+
+  // Notes for standalone assets: one per asset so qty-tracked
   // can carry its own unit count ("added 50 units of {asset} to
   // {booking}"). INDIVIDUAL renders the bare asset link, so the legacy
   // "added asset to {booking}" wording is preserved byte-for-byte.
@@ -17977,17 +18014,11 @@ async function createNotesForScannedAssetsAndKits({
           : `${wrapUserLinkForNote(
               userForNotes
             )} added asset to ${bookingLink}.`;
-      await createNotes({
-        content,
-        type: "UPDATE",
-        userId,
-        assetIds: [assetId],
-        organizationId,
-      });
+      assetNotes.push({ assetId, content });
     }
   }
 
-  // Create notes for assets added via kits (grouped by kit; one note per
+  // Notes for assets added via kits (grouped by kit; one note per
   // asset so qty-tracked rows can prefix their unit count).
   if (kitAssetIds.length > 0) {
     // Group asset IDs by kit name
@@ -18022,17 +18053,18 @@ async function createNotesForScannedAssetsAndKits({
               : `${wrapUserLinkForNote(
                   userForNotes
                 )} added asset via ${kitLink} to ${bookingLink}.`;
-          await createNotes({
-            content,
-            type: "UPDATE",
-            userId,
-            assetIds: [assetId],
-            organizationId,
-          });
+          assetNotes.push({ assetId, content });
         }
       }
     }
   }
+
+  await createNotesPerAsset({
+    notes: assetNotes,
+    type: "UPDATE",
+    userId,
+    organizationId,
+  });
 }
 
 /**
@@ -21066,6 +21098,18 @@ export async function checkoutRemainingAssets({
   });
 }
 
+/**
+ * Finds the ONGOING or OVERDUE booking that currently holds an asset.
+ *
+ * Selects only the booking's id and name plus the two custody links a caller
+ * needs to decide whether the viewer may see the booking (`canSeeBooking`).
+ * Descriptions, dates and creator ids stay in the database.
+ *
+ * @param args.assetId - The checked-out asset.
+ * @param args.organizationId - The workspace the booking must belong to.
+ * @returns The booking, or `null` when no active booking holds the asset.
+ * @throws {ShelfError} If the query fails.
+ */
 export async function getOngoingBookingForAsset({
   assetId,
   organizationId,
@@ -21080,6 +21124,12 @@ export async function getOngoingBookingForAsset({
         organizationId,
         bookingAssets: { some: { assetId } },
         partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
+      },
+      select: {
+        id: true,
+        name: true,
+        custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
       },
     });
 

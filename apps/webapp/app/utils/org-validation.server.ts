@@ -84,8 +84,8 @@ export type OrgValidationTxClient = {
   teamMember: {
     findFirst: (args: {
       where: { id: string; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string } | null>;
+      select: { id: true; userId: true };
+    }) => Promise<{ id: string; userId: string | null } | null>;
     findMany: (args: {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };
@@ -615,9 +615,15 @@ export async function assertTagsAssignableToAssets(
 /**
  * Asserts that a single team member belongs to `organizationId`.
  *
+ * Returns the row's `userId` so a caller that links a user through the team
+ * member (a booking custodian, for instance) reads it from the database rather
+ * than from request input, which could pair the member with another user.
+ *
  * @param params.teamMemberId - Team member ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @returns The team member's id and its linked user id (`null` for a
+ *   non-registered member)
  * @throws {ShelfError} 400 if the team member is missing or in another org
  */
 export async function assertTeamMemberBelongsToOrg(
@@ -626,12 +632,12 @@ export async function assertTeamMemberBelongsToOrg(
     organizationId,
   }: { teamMemberId: TeamMember["id"]; organizationId: string },
   tx?: OrgValidationTxClient
-): Promise<void> {
+): Promise<Pick<TeamMember, "id" | "userId">> {
   const client = tx ?? db;
 
   const found = await client.teamMember.findFirst({
     where: { id: teamMemberId, organizationId },
-    select: { id: true },
+    select: { id: true, userId: true },
   });
 
   if (!found) {
@@ -645,6 +651,8 @@ export async function assertTeamMemberBelongsToOrg(
       additionalData: { organizationId, teamMemberId },
     });
   }
+
+  return found;
 }
 
 /**

@@ -396,8 +396,12 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 }));
 
 // why: location timeline notes are asserted through the mock, not stored.
-vi.mock("~/modules/location-note/service.server", () => ({
+vi.mock("~/modules/location-note/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createSystemLocationNote: vi.fn().mockResolvedValue({}),
+  // why: a move's "added / removed" lines have their own tests; these are
+  // about where custody goes.
+  createAssetLocationMoveNotes: vi.fn().mockResolvedValue(undefined),
 }));
 
 // why: asset notes are asserted through the mock, not stored.
@@ -1265,6 +1269,13 @@ describe("stock ledger", () => {
     ]);
     expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
       liveStock()
+    );
+    // The location's activity log gets its own "placed N at L" line.
+    expect(createSystemLocationNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationId: CAMERA_ROOM,
+        content: expect.stringContaining("placed 3 pcs of"),
+      })
     );
   });
 

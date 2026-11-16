@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatPersonName } from "@/lib/person-name";
 import { TagChip } from "@/components/tag-chip";
@@ -30,7 +30,6 @@ import {
   consumeBookingDirty,
   markBookingsListDirty,
 } from "@/lib/booking-refresh";
-import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   api,
@@ -74,8 +73,17 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  canOfferDiscardDraft,
+  discardOutcome,
+} from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
+import {
+  bookingScanHref,
+  takeScannerOpening,
+  type BookingScanAction,
+} from "@/lib/booking-scan-route";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
@@ -86,7 +94,7 @@ import {
 } from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
-import { ExpandableText } from "@/components/shared/expandable-text";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import {
   bookingRowKey,
   buildBookingRows,
@@ -198,6 +206,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   >({
     canCancel: false,
     canArchive: false,
+    canDiscardDraft: false,
     canDuplicate: false,
     canDelete: false,
   });
@@ -358,6 +367,26 @@ function BookingDetailScreen({ id }: { id: string }) {
       fetchBooking().finally(() => setIsLoading(false));
     }, [fetchBooking, booking, id])
   );
+
+  // True while a push to the booking scanner is in flight, so a second fast
+  // tap on a Scan button is ignored instead of stacking a second scanner.
+  // Cleared whenever this screen gains focus again.
+  const scannerOpening = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      scannerOpening.current = false;
+    }, [])
+  );
+  const openBookingScanner = (action: BookingScanAction) => {
+    if (!booking || !takeScannerOpening(scannerOpening)) return;
+    try {
+      router.push(bookingScanHref(booking, action));
+    } catch (error) {
+      // A push that never leaves this screen would never clear the gate.
+      scannerOpening.current = false;
+      throw error;
+    }
+  };
 
   const onRefresh = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -896,6 +925,54 @@ function BookingDetailScreen({ id }: { id: string }) {
     );
   };
 
+  // Discarding a draft archives it: it leaves the caller's list but stays in
+  // the workspace history, so a plain confirm is enough.
+  const handleDiscardDraft = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Discard Draft",
+      `Discard "${booking.name}"? It moves to your archived bookings.`,
+      [
+        { text: "Keep draft", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.discardDraftBooking(
+              currentOrg.id,
+              booking.id
+            );
+            // An error can still mean the discard landed (a timed-out
+            // response), so re-read the booking before reporting a failure.
+            const outcome = err
+              ? discardOutcome(
+                  (await api.booking(booking.id, currentOrg.id)).data
+                    ?.booking ?? null
+                )
+              : "landed";
+            setIsActioning(false);
+            // Either way the booking may have changed: refresh list and detail.
+            markBookingsListDirty();
+            fetchBooking();
+            if (outcome === "unknown") {
+              Alert.alert(
+                "Discard status unknown",
+                "We couldn't confirm whether the draft was discarded. Pull to refresh to check its status."
+              );
+              return;
+            }
+            if (outcome === "not-landed") {
+              Alert.alert("Couldn't discard", err ?? "Please try again.");
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  };
+
   // A permanent delete asks for the booking's name to be typed first, the
   // same rule as the webapp's delete dialog.
   const handleDelete = () => {
@@ -1020,6 +1097,14 @@ function BookingDetailScreen({ id }: { id: string }) {
       icon: "archive-outline",
       destructive: false,
       onPress: handleArchive,
+    });
+  if (canOfferDiscardDraft(bookingActions))
+    lifecycleActions.push({
+      key: "discardDraft",
+      label: "Discard draft",
+      icon: "archive-outline",
+      destructive: true,
+      onPress: handleDiscardDraft,
     });
   if (bookingActions.canCancel)
     lifecycleActions.push({
@@ -1810,7 +1895,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             <Text style={styles.searchEmpty}>
               No assets match &ldquo;{searchTerm.trim()}&rdquo;
             </Text>
-          ) : null
+          ) : undefined
         }
         ListHeaderComponent={
           <View style={styles.header}>
@@ -1839,11 +1924,10 @@ function BookingDetailScreen({ id }: { id: string }) {
               </View>
 
               {booking.description ? (
-                <ExpandableText
+                <LinkedParagraph
                   key={booking.id}
                   text={booking.description}
-                  label="description"
-                  numberOfLines={3}
+                  expandable={{ label: "description", numberOfLines: 3 }}
                   style={styles.description}
                   testID="booking-description"
                 />
@@ -2094,15 +2178,7 @@ function BookingDetailScreen({ id }: { id: string }) {
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&bookingAction=fulfil`
-                    )
-                  }
+                  onPress={() => openBookingScanner("fulfil")}
                   accessibilityLabel={`Scan to assign ${
                     booking.outstandingModelUnitCount
                   } reserved unit${
@@ -2158,13 +2234,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                   <>
                     <TouchableOpacity
                       style={styles.actionButtonOutline}
-                      onPress={() =>
-                        router.push(
-                          `/(tabs)/scanner?bookingId=${
-                            booking.id
-                          }&bookingName=${encodeURIComponent(booking.name)}`
-                        )
-                      }
+                      onPress={() => openBookingScanner("checkin")}
                       accessibilityLabel="Scan assets to check in"
                       accessibilityRole="button"
                     >
@@ -2231,15 +2301,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             {canUseProgressiveCheckout && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
-                onPress={() =>
-                  router.push(
-                    `/(tabs)/scanner?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&bookingAction=checkout`
-                  )
-                }
+                onPress={() => openBookingScanner("checkout")}
                 accessibilityLabel="Scan assets to check out"
                 accessibilityRole="button"
               >
@@ -2326,10 +2388,10 @@ function BookingDetailScreen({ id }: { id: string }) {
                       reserveBlockedReason ? styles.actionButtonDisabled : null,
                     ]}
                     // why: `disabled` is the real prop. Setting only
-                    // `accessibilityState={{ disabled }}` ALSO disables the
-                    // touchable — RN's `_createPressabilityConfig` falls back
-                    // to it — which silently made an onPress fallback here
-                    // unreachable. RN copies this prop back into
+                    // `accessibilityState={{ disabled }}` also disables the
+                    // touchable (RN's `_createPressabilityConfig` falls back
+                    // to it), so an onPress fallback here would never run.
+                    // RN copies this prop back into
                     // `accessibilityState`, so screen readers still announce
                     // the disabled state without setting it by hand.
                     disabled={!!reserveBlockedReason}
@@ -2350,8 +2412,8 @@ function BookingDetailScreen({ id }: { id: string }) {
             )}
 
             {/* More lifecycle actions (extend / duplicate / archive / cancel / delete).
-                Shows for ANY status — including closed ones (Archive on
-                COMPLETE, Duplicate always) — gated by server-computed flags. */}
+                Shows for any status, closed ones included (Archive on
+                COMPLETE, Duplicate always), gated by server-computed flags. */}
             {lifecycleActions.length > 0 && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
@@ -2371,15 +2433,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             {canAddItems && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
-                onPress={() =>
-                  router.push(
-                    `/(tabs)/scanner?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&bookingAction=add`
-                  )
-                }
+                onPress={() => openBookingScanner("add")}
                 accessibilityLabel="Scan assets or kits to add to this booking"
                 accessibilityRole="button"
               >
@@ -2924,7 +2978,7 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: spacing.md,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.overlayDark,
     justifyContent: "center",
     alignItems: "center",

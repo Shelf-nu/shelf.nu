@@ -127,7 +127,6 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
             "actions-dropdown hidden md:flex",
             fullWidth ? "w-full" : ""
           )}
-          onClick={() => setOpen(!open)}
           asChild
         >
           <Button

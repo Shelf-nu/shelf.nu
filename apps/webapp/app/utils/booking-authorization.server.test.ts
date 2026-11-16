@@ -14,7 +14,6 @@
  *
  * @see {@link file://./booking-authorization.server.ts}
  */
-import type { BookingStatus } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
@@ -354,28 +353,16 @@ describe("validateBookingOwnership", () => {
 });
 
 describe("assertCanDeleteBooking", () => {
-  const mine = (status: BookingStatus) => ({
-    creatorId: ME,
-    custodianUserId: null,
-    status,
+  it("lets a caller who does not write every booking delete only its own", () => {
+    // The route's `booking:delete` gate runs first; this guard adds ownership.
+    expect(() =>
+      assertCanDeleteBooking({
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        booking: { creatorId: ME, custodianUserId: null },
+        userId: ME,
+      })
+    ).not.toThrow();
   });
-
-  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
-    "holds %s to its own DRAFT bookings",
-    (role) => {
-      const access = accessFor([role]);
-      expect(() =>
-        assertCanDeleteBooking({ access, booking: mine("DRAFT"), userId: ME })
-      ).not.toThrow();
-      expect(() =>
-        assertCanDeleteBooking({
-          access,
-          booking: mine("RESERVED"),
-          userId: ME,
-        })
-      ).toThrow(expect.objectContaining({ status: 403 }));
-    }
-  );
 
   it("refuses a restricted role on someone else's draft", () => {
     expect(() =>
@@ -384,21 +371,19 @@ describe("assertCanDeleteBooking", () => {
         booking: {
           creatorId: SOMEONE_ELSE,
           custodianUserId: SOMEONE_ELSE,
-          status: "DRAFT",
         },
         userId: ME,
       })
     ).toThrow(expect.objectContaining({ status: 403 }));
   });
 
-  it("lets ADMIN delete any booking in any status", () => {
+  it("lets ADMIN delete anyone's booking", () => {
     expect(() =>
       assertCanDeleteBooking({
         access: accessFor([OrganizationRoles.ADMIN]),
         booking: {
           creatorId: SOMEONE_ELSE,
           custodianUserId: null,
-          status: "ONGOING",
         },
         userId: ME,
       })

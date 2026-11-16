@@ -250,7 +250,9 @@ export const AssetImage = ({
       dispatch({ type: "fetch_start" });
 
       try {
-        const params = new URLSearchParams({ assetId, mainImage });
+        // The server signs the image stored on the asset row, so only the id
+        // is sent.
+        const params = new URLSearchParams({ assetId });
         const response = await fetch(
           `/api/asset/refresh-main-image?${params.toString()}`,
           { signal }

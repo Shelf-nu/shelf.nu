@@ -10,6 +10,7 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { createNote } from "~/modules/note/service.server";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   PermissionAction,
   PermissionEntity,
@@ -36,7 +37,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const { assetId, content } = await parseMobileBody(
       z.object({
         assetId: z.string().min(1),
-        content: z.string().min(1).max(NOTE_MAX_CONTENT_LENGTH),
+        // Strip Markdoc delimiters so the comment renders as text, never as a
+        // live tag, matching the web note schema.
+        content: z
+          .string()
+          .max(NOTE_MAX_CONTENT_LENGTH)
+          .transform(stripMarkdocDelimiters)
+          .pipe(z.string().min(1)),
       }),
       request,
       "Assets"

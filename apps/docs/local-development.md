@@ -357,7 +357,8 @@ DIRECT_URL="your-supabase-direct-connection"
 ENABLE_PREMIUM_FEATURES="false"
 
 # Session security
-SESSION_SECRET="your-local-session-secret"
+# Production logs an INSECURE CONFIGURATION error for example values: generate one with openssl rand -hex 32
+SESSION_SECRET="generate-with-openssl-rand-hex-32"
 ```
 
 ---

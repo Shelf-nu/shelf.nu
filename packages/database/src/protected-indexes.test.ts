@@ -165,6 +165,10 @@ function foreignKeysCreatedByMigrations() {
 /**
  * Applies one migration's foreign key statements to `live`, a map of
  * foreign key name to the migration that created it.
+ *
+ * Dropping a table drops its foreign keys too. A key is matched to its table
+ * by name: Prisma names every foreign key `<Table>_<column>_fkey`, and the
+ * hand-written ones in `PROTECTED_FOREIGN_KEYS` follow the same convention.
  */
 function replayForeignKeyStatements(
   sql: string,
@@ -174,17 +178,26 @@ function replayForeignKeyStatements(
   // One pattern, applied in the order the statements appear: a migration that
   // drops a key and adds it again must leave it in place.
   const statements =
-    /ADD CONSTRAINT\s+"([^"]+)"\s+FOREIGN KEY|DROP CONSTRAINT\s+(?:IF EXISTS\s+)?"([^"]+)"|RENAME CONSTRAINT\s+"([^"]+)"\s+TO\s+"([^"]+)"/gi;
+    /ADD CONSTRAINT\s+"([^"]+)"\s+FOREIGN KEY|DROP CONSTRAINT\s+(?:IF EXISTS\s+)?"([^"]+)"|RENAME CONSTRAINT\s+"([^"]+)"\s+TO\s+"([^"]+)"|DROP TABLE\s+(?:IF EXISTS\s+)?(?:"[^"]+"\.)?"([^"]+)"/gi;
   // Hand-written migrations explain themselves in comments; a statement quoted
   // in one never ran.
   const code = sql.replace(/\/\*[\s\S]*?\*\/|--.*$/gm, "");
-  for (const [, added, dropped, renamedFrom, renamedTo] of code.matchAll(
-    statements
-  )) {
+  for (const [
+    ,
+    added,
+    dropped,
+    renamedFrom,
+    renamedTo,
+    droppedTable,
+  ] of code.matchAll(statements)) {
     if (added) {
       live.set(added, migration);
     } else if (dropped) {
       live.delete(dropped);
+    } else if (droppedTable) {
+      for (const name of [...live.keys()]) {
+        if (name.startsWith(`${droppedTable}_`)) live.delete(name);
+      }
     } else if (renamedFrom && renamedTo) {
       const createdIn = live.get(renamedFrom);
       if (createdIn) {
@@ -209,6 +222,17 @@ test("keeps a foreign key that a migration drops and adds again", () => {
   );
 
   assert.equal(live.get("Location_imageId_fkey"), "second");
+});
+
+test("forgets the foreign keys of a table a migration drops", () => {
+  const live = new Map<string, string>([
+    ["PdfDocument_organizationId_fkey", "first"],
+    ["PdfTemplate_organizationId_fkey", "first"],
+  ]);
+
+  replayForeignKeyStatements('DROP TABLE "PdfDocument";', "second", live);
+
+  assert.deepEqual([...live.keys()], ["PdfTemplate_organizationId_fkey"]);
 });
 
 test("ignores constraint statements inside SQL comments", () => {

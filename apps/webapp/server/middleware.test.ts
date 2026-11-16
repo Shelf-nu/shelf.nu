@@ -12,6 +12,8 @@
  * the login page through `logged_out=1` in the URL. A visitor who never had a
  * session is not.
  *
+ * The refresh token is checked against the user the same cookie names.
+ *
  * @see {@link file://./middleware.ts}
  */
 import { Hono } from "hono";
@@ -138,11 +140,28 @@ describe("protect: sending a signed-out request to login", () => {
   });
 
   it("lets a valid session through", async () => {
-    session.get.mockReturnValue({ refreshToken: "valid", expiresAt: FRESH });
+    session.get.mockReturnValue({
+      refreshToken: "valid",
+      userId: "user-1",
+      expiresAt: FRESH,
+    });
     vi.mocked(validateSession).mockResolvedValue(true);
 
     const res = await app().request("/kits.data");
 
     expect(res.status).toBe(200);
+  });
+
+  it("checks the refresh token against the user the cookie names", async () => {
+    session.get.mockReturnValue({
+      refreshToken: "valid",
+      userId: "user-1",
+      expiresAt: FRESH,
+    });
+    vi.mocked(validateSession).mockResolvedValue(true);
+
+    await app().request("/kits");
+
+    expect(validateSession).toHaveBeenCalledWith("valid", "user-1");
   });
 });

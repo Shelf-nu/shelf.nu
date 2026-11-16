@@ -420,3 +420,191 @@ describe("audit receipt PDF: layout", () => {
     expect(lensGroup).not.toBe(cameraGroup);
   });
 });
+
+describe("audit receipt PDF: when each audit photo was taken", () => {
+  const auditPhoto = (
+    id: string,
+    capturedAt: string | null,
+    auditAsset: unknown = null,
+    captureSource: string | null = null
+  ) => ({
+    id,
+    imageUrl: `https://storage.test/audits/${id}.webp`,
+    thumbnailUrl: `https://storage.test/audits/${id}-thumbnail.webp`,
+    description: null,
+    capturedAt,
+    captureSource,
+    createdAt: "2026-10-21T10:00:00.000Z",
+    auditAsset,
+  });
+
+  function renderWithPhotos() {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [auditPhoto("general-1", "2026-10-21T09:15:00.000Z")],
+      assetImages: [
+        auditPhoto("asset-photo-1", null, {
+          asset: { id: "asset-1", title: "Camera" },
+        }),
+      ],
+    } as unknown as AuditPdfDbResult;
+    return render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+  }
+
+  /** The text printed in the photo's own cell, under the thumbnail. */
+  function cellText(alt: string) {
+    return screen.getByAltText(alt).parentElement!.textContent;
+  }
+
+  it("prints the time a photo was taken under its thumbnail", () => {
+    renderWithPhotos();
+
+    expect(cellText("Audit image")).toMatch(/^Taken \S/);
+  });
+
+  it("explains the photo labels once, for a reader who cannot hover", () => {
+    renderWithPhotos();
+
+    expect(
+      screen.getByText(/^Each photo shows how it reached Shelf/)
+    ).toBeTruthy();
+  });
+
+  it("prints an older photo by its upload time, with no flag", () => {
+    // why: photos uploaded before capture times were read never had their
+    // date looked for, so they are not flagged as missing one.
+    renderWithPhotos();
+
+    expect(cellText("Photo of Camera")).toMatch(/^Uploaded 21\/10\/2026/);
+  });
+
+  it("prints the Old photo flag on a photo taken days before its upload", () => {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [],
+      assetImages: [
+        auditPhoto(
+          "asset-photo-1",
+          "2026-10-01T06:30:00.000Z",
+          { asset: { id: "asset-1", title: "Camera" } },
+          "LIBRARY"
+        ),
+      ],
+    } as unknown as AuditPdfDbResult;
+    render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+
+    expect(cellText("Photo of Camera")).toContain("20 days before upload");
+    expect(cellText("Photo of Camera")).toMatch(/Old photo$/);
+  });
+
+  it("prints thumbnails, not the full-size photos", () => {
+    renderWithPhotos();
+
+    expect(screen.getByAltText("Audit image")).toHaveAttribute(
+      "src",
+      "https://storage.test/audits/general-1-thumbnail.webp"
+    );
+  });
+});
+
+describe("audit receipt PDF: unit counts", () => {
+  /** The receipt with one quantity-tracked row (a 14-unit pool, 8 counted). */
+  function receiptWithPool() {
+    const pdfMeta = pdfMetaWith({ displayCode: SAM_CODE });
+    pdfMeta.assets = [
+      pdfMeta.assets[0],
+      {
+        ...pdfMeta.assets[0],
+        id: "pool-1",
+        title: "Sandbag",
+        unitOfMeasure: "pcs",
+        auditData: {
+          expected: true,
+          auditStatus: "FOUND",
+          expectedQuantity: 14,
+          foundQuantity: 8,
+        },
+      },
+    ];
+    return render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+  }
+
+  /** The text of a row's Quantity cell, found through the header's position. */
+  function quantityCell(title: string) {
+    const header = screen.getByRole("columnheader", { name: "Quantity" });
+    const index = [...header.parentElement!.children].indexOf(header);
+    const row = screen.getByText(title).closest("tr")!;
+    return row.children[index].textContent;
+  }
+
+  it("prints the count of a quantity-tracked row and nothing for an individual one", () => {
+    receiptWithPool();
+
+    expect(quantityCell("Sandbag")).toBe("8 of 14 pcs");
+    expect(quantityCell("Camera")).toBe("");
+  });
+
+  it("adds a units line to the statistics when a quantity-tracked asset is audited", () => {
+    receiptWithPool();
+
+    expect(
+      screen.getByText(/Units counted: 8 of 14 across 1 quantity-tracked asset/)
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the statistics and the table as they were for an audit of individual assets", () => {
+    renderReceipt({ displayCode: SAM_CODE });
+
+    expect(screen.queryByText(/Units counted/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Quantity" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("still fills the page width when the Quantity column is added", () => {
+    const { container } = receiptWithPool();
+
+    const table = container.querySelector("table.audit-assets-table")!;
+    const widths = [...table.querySelectorAll("col")].map((col) =>
+      parseFloat((col as HTMLElement).style.width)
+    );
+
+    expect(widths).toHaveLength(table.querySelectorAll("thead th").length);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
+  });
+
+  it("prints 0 of the expected units for a pool never found", () => {
+    const pdfMeta = pdfMetaWith({ displayCode: SAM_CODE });
+    pdfMeta.assets = [
+      {
+        ...pdfMeta.assets[0],
+        id: "pool-1",
+        title: "Sandbag",
+        unitOfMeasure: "pcs",
+        auditData: {
+          expected: true,
+          auditStatus: "MISSING",
+          expectedQuantity: 14,
+          foundQuantity: null,
+        },
+      },
+    ];
+    render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+
+    expect(quantityCell("Sandbag")).toBe("0 of 14 pcs");
+    // A missing pool is counted as zero found, not as "not counted".
+    expect(
+      screen.getByText(
+        /Units counted: 0 of 14 across 1 quantity-tracked asset\.$/
+      )
+    ).toBeInTheDocument();
+  });
+});

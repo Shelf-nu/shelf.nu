@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { api, type AssetDetail } from "@/lib/api";
 import { announce } from "@/lib/a11y";
 import { assetChangeVersion } from "@/lib/asset-refresh";

@@ -19,6 +19,10 @@ import {
   readStockState,
   recordStockChanges,
 } from "~/modules/consumption-log/stock-ledger.server";
+import {
+  createAssetLocationMoveNotes,
+  placementChangeMoves,
+} from "~/modules/location-note/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -177,6 +181,7 @@ export async function action({ request }: ActionFunctionArgs) {
       placedQuantity,
       previousLocation,
       previousQuantity,
+      placementsBefore,
       rehome,
     } = await db.$transaction(async (tx) => {
       /**
@@ -241,6 +246,8 @@ export async function action({ request }: ActionFunctionArgs) {
        */
       const placementsBefore = await tx.assetLocation.findMany({
         where: { assetId, assetKitId: null },
+        // Oldest first, so the primary and the pairing of moves are stable.
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           quantity: true,
           location: { select: { id: true, name: true } },
@@ -370,6 +377,7 @@ export async function action({ request }: ActionFunctionArgs) {
         placedQuantity: pivotQuantity,
         previousLocation: primaryBefore,
         previousQuantity: primaryQuantityBefore,
+        placementsBefore,
         rehome: rehomeResult,
       };
     });
@@ -392,6 +400,25 @@ export async function action({ request }: ActionFunctionArgs) {
       ...updatedAssetRest,
       location: getPrimaryLocation(refreshedAsset),
     };
+
+    /**
+     * The location activity log reads each location's amount before and after
+     * the replace, so it names only what really moved: units that went to the
+     * requested location, and units that became unplaced. Written before the
+     * asset note: it never throws, so a failing asset note cannot skip it.
+     */
+    await createAssetLocationMoveNotes({
+      moves: placementChangeMoves({
+        asset,
+        before: placementsBefore.flatMap((placement) =>
+          placement.location
+            ? [{ location: placement.location, quantity: placement.quantity }]
+            : []
+        ),
+        after: [{ location, quantity: placedQuantity }],
+      }),
+      actor: user,
+    });
 
     // Create activity note (matches webapp format)
     const actor = wrapUserLinkForNote({

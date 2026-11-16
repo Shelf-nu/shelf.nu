@@ -35,6 +35,9 @@ export interface AssetWithAuditStatus extends Asset {
   auditData: {
     expected: boolean;
     auditStatus: AuditAssetStatus | null;
+    /** Units expected and counted; both null for an individual asset. */
+    expectedQuantity: number | null;
+    foundQuantity: number | null;
   };
 }
 
@@ -225,6 +228,8 @@ export async function fetchAllAuditPdfRelatedData(
         assetId: true,
         expected: true,
         status: true,
+        expectedQuantity: true,
+        foundQuantity: true,
       },
     });
 
@@ -234,7 +239,12 @@ export async function fetchAllAuditPdfRelatedData(
     const auditStatusMap = new Map(
       auditAssets.map((aa) => [
         aa.assetId,
-        { expected: aa.expected, auditStatus: aa.status },
+        {
+          expected: aa.expected,
+          auditStatus: aa.status,
+          expectedQuantity: aa.expectedQuantity,
+          foundQuantity: aa.foundQuantity,
+        },
       ])
     );
 
@@ -393,6 +403,8 @@ export async function fetchAllAuditPdfRelatedData(
         auditData: auditStatusMap.get(raw.id) || {
           expected: false,
           auditStatus: null,
+          expectedQuantity: null,
+          foundQuantity: null,
         },
       };
     });

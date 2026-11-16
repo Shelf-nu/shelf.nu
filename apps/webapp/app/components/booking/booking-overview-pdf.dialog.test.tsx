@@ -1,6 +1,6 @@
 /**
  * The Generate PDF dialog against each answer its route gives: a workspace
- * with PDF documents, one without, and a refusal.
+ * with PDF templates, one without, and a refusal.
  *
  * The route's side of the same contract is pinned by
  * `test/routes-tests/api+/bookings.$bookingId.generate-pdf.test.ts`.
@@ -15,7 +15,7 @@ import { busyBookingPdfMeta } from "@factories";
 import {
   BOOKING_CHECKLIST_CONFIG,
   CHECKOUT_RECEIPT_CONFIG,
-} from "~/modules/pdf-document/config";
+} from "~/modules/pdf-template/config";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -93,12 +93,12 @@ function renderDialog(
 }
 
 describe("Generate PDF dialog", () => {
-  it("offers the workspace's documents and titles the page by the one shown", async () => {
+  it("offers the workspace's templates and titles the page by the one shown", async () => {
     renderDialog(() => ({
       error: null,
       pdfMeta: busyBookingPdfMeta(),
-      document: CHECKLIST,
-      documents: [
+      template: CHECKLIST,
+      templates: [
         { id: "doc-checklist", name: "Checklist", isDefault: true },
         { id: "doc-receipt", name: "Check-out receipt", isDefault: false },
       ],
@@ -111,19 +111,19 @@ describe("Generate PDF dialog", () => {
       })
     ).toBeInTheDocument();
     expect(screen.getByText("Generate PDF for Campaign Shoot")).toBeVisible();
-    expect(screen.getByText("Document")).toBeVisible();
+    expect(screen.getByText("Template")).toBeVisible();
     expect(screen.getByRole("combobox")).toHaveTextContent(
       "Checklist (default)"
     );
     expect(screen.getByRole("button", { name: "Download PDF" })).toBeVisible();
   });
 
-  it("offers no choice to a workspace without PDF documents and prints the page it always has", async () => {
+  it("offers no choice to a workspace without PDF templates and prints the page it always has", async () => {
     renderDialog(() => ({
       error: null,
       pdfMeta: busyBookingPdfMeta(),
-      document: null,
-      documents: [],
+      template: null,
+      templates: [],
     }));
 
     expect(
@@ -132,19 +132,19 @@ describe("Generate PDF dialog", () => {
         name: "Booking checklist for Campaign Shoot",
       })
     ).toBeInTheDocument();
-    expect(screen.queryByText("Document")).not.toBeInTheDocument();
+    expect(screen.queryByText("Template")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download PDF" })).toBeVisible();
   });
 
-  it("shows a refusal in the dialog and loads the documents again on request", async () => {
+  it("shows a refusal in the dialog and loads the templates again on request", async () => {
     let refuse = true;
     const requested = renderDialog(() =>
       refuse
         ? data(
             {
               error: {
-                message: "This document does not exist in your workspace.",
+                message: "This template does not exist in your workspace.",
               },
             },
             { status: 404 }
@@ -152,15 +152,15 @@ describe("Generate PDF dialog", () => {
         : {
             error: null,
             pdfMeta: busyBookingPdfMeta(),
-            document: { ...CHECKLIST, config: CHECKOUT_RECEIPT_CONFIG },
-            documents: [
+            template: { ...CHECKLIST, config: CHECKOUT_RECEIPT_CONFIG },
+            templates: [
               { id: "doc-checklist", name: "Checklist", isDefault: true },
             ],
           }
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This document does not exist in your workspace."
+      "This template does not exist in your workspace."
     );
     expect(
       screen.queryByRole("button", { name: "Download PDF" })
@@ -172,16 +172,16 @@ describe("Generate PDF dialog", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Download PDF" })).toBeVisible()
     );
-    expect(new URL(requested.at(-1)!).searchParams.has("document")).toBe(false);
+    expect(new URL(requested.at(-1)!).searchParams.has("template")).toBe(false);
   });
 
-  it("loads the document without the page's orderBy when no assetOrder is given", async () => {
+  it("loads the template without the page's orderBy when no assetOrder is given", async () => {
     const requested = renderDialog(
       () => ({
         error: null,
         pdfMeta: busyBookingPdfMeta(),
-        document: null,
-        documents: [],
+        template: null,
+        templates: [],
       }),
       undefined,
       "/bookings/booking-1?orderBy=from&orderDirection=asc"
@@ -198,8 +198,8 @@ describe("Generate PDF dialog", () => {
       () => ({
         error: null,
         pdfMeta: busyBookingPdfMeta(),
-        document: null,
-        documents: [],
+        template: null,
+        templates: [],
       }),
       { orderBy: "name", orderDirection: "asc" }
     );

@@ -1,38 +1,31 @@
 /**
  * Asset Model Form Component
  *
- * Renders a Card-based form for creating or editing asset models.
- * Supports two modes:
- * - **Page mode** (default): Full-page layout with Card, FormRow, and
- *   navigation buttons. Used by the create/edit routes.
- * - **Inline/dialog mode**: When `onSuccess` is provided, uses a fetcher
- *   so the form can live inside a dialog without triggering a page navigation.
+ * The settings page form for creating or editing an asset model: a Card with
+ * FormRow fields, submitted by navigation. The dialog version used inside
+ * selects is `inline-form.tsx`, kept apart so the dialog does not load the
+ * custom field default editors this form renders.
  *
+ * @see {@link file://./inline-form.tsx}
  * @see {@link file://./../../routes/_layout+/settings.asset-models.new.tsx}
  * @see {@link file://./../../routes/_layout+/settings.asset-models.$assetModelId_.edit.tsx}
  */
-import { useEffect } from "react";
 import type { AssetModel, Currency } from "@prisma/client";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
-import z from "zod";
 import {
   assetModelImageErrorAtom,
   assetModelImageValidateFileAtom,
 } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { ICustomFieldValueJson } from "~/modules/asset/types";
 import type { ModelDefaultFieldOption } from "~/modules/asset-model/defaults.server";
-import type { action } from "~/routes/_layout+/settings.asset-models.new";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
-import { zodFieldIsRequired } from "~/utils/zod";
-import { optionalNumberFromString } from "~/utils/zod-numeric";
 import { AssetModelCustomFieldDefaults } from "./custom-field-defaults";
+import { AssetModelFormSchema } from "./schema";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
@@ -47,20 +40,8 @@ import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import When from "../when/when";
 
-/** Links each image input to the <p> stating its accepted formats and size. */
-const INLINE_IMAGE_HELP_ID = "asset-model-image-help-inline";
-
-/** Zod schema for creating/editing an asset model. */
-export const AssetModelFormSchema = z.object({
-  name: z.string().min(2, "Name is required"),
-  description: z.string().optional(),
-  defaultCategoryId: z.string().optional(),
-  defaultValuation: optionalNumberFromString({
-    blank: null,
-    fieldName: "Default valuation",
-  }),
-  preventRedirect: z.string().optional(),
-});
+/** Re-exported for the settings routes that parse this form. */
+export { AssetModelFormSchema };
 
 /** Props accepted by the AssetModelForm component. */
 type AssetModelFormProps = {
@@ -78,199 +59,16 @@ type AssetModelFormProps = {
      * image of their own). Drives the blast-radius hint under the field. */
     _count?: { assets: number };
   };
-  /** The API URL to submit the form to (used in inline/dialog mode). */
-  apiUrl?: string;
-  /** Callback function to handle cancel action when form is used inline. */
-  onCancel?: () => void;
-  /** Callback function triggered on successful creation (enables inline mode). */
-  onSuccess?: (data?: { assetModel?: AssetModel }) => void;
 };
 
 /**
- * Renders the asset model create/edit form.
+ * Renders the asset model create/edit form of the settings pages: a Card with
+ * FormRow fields, including the model's default custom field values.
  *
- * When `onSuccess` is provided the form renders inside a compact inline layout
- * using a fetcher. Otherwise it renders as a full-page Card with FormRow fields.
+ * @param props - The model being edited, if any
+ * @returns The page form
  */
-export default function AssetModelForm({
-  assetModel,
-  apiUrl,
-  onCancel,
-  onSuccess,
-}: AssetModelFormProps) {
-  const zo = useZorm("AssetModelForm", AssetModelFormSchema);
-  const fetcher = useFetcherWithReset<typeof action>();
-  // Replaces `autoFocus` on the Name input. Mounts inside a layout Dialog
-  // (which also sets `data-dialog-initial-focus` here), but the hook is the
-  // source of truth so jsx-a11y/no-autofocus passes.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
-  // Fetcher-scoped disabled for the inline/dialog mode. The full-page mode
-  // uses navigation-based disabled wired up inside FullPageForm.
-  const disabled = useDisabled(fetcher);
-
-  /** Whether the form is used inside a dialog with an onSuccess callback. */
-  const hasOnSuccessFunc = typeof onSuccess === "function";
-
-  useEffect(() => {
-    if (!hasOnSuccessFunc) {
-      return;
-    }
-
-    if (fetcher.data && "assetModel" in fetcher.data) {
-      onSuccess(fetcher.data);
-      fetcher.reset();
-    }
-  }, [fetcher, onSuccess, hasOnSuccessFunc]);
-
-  /* ------------------------------------------------------------------ */
-  /*  Validation errors (inline mode only)                               */
-  /* ------------------------------------------------------------------ */
-
-  /** Server-side validation errors from the fetcher (inline mode). */
-  const fetcherValidationErrors = getValidationErrors<
-    typeof AssetModelFormSchema
-  >(fetcher.data?.error);
-
-  const nameError =
-    fetcherValidationErrors?.name?.message || zo.errors.name()?.message;
-
-  // Client-side file guard (type + 8MB cap). Deliberately SCOPED, not the shared
-  // `fileErrorAtom`: this dialog opens inside the asset form, whose own image
-  // input would otherwise surface — and clear — this field's error.
-  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
-  const fileError = useAtomValue(assetModelImageErrorAtom);
-
-  /**
-   * The image has no zod field (a File can't be parsed by the text schema), so
-   * its errors arrive either from the client-side guard or as the server's
-   * `field: "image"` ShelfError on the fetcher.
-   */
-  const inlineImageError =
-    (fetcher.data?.error?.additionalData?.field === "image"
-      ? fetcher.data.error.message
-      : undefined) ?? fileError;
-
-  /* ------------------------------------------------------------------ */
-  /*  Inline / dialog mode                                               */
-  /* ------------------------------------------------------------------ */
-
-  if (hasOnSuccessFunc) {
-    return (
-      <fetcher.Form
-        method="post"
-        className="w-full rounded border border-gray-200 bg-white px-6 py-5"
-        ref={zo.ref}
-        action={apiUrl}
-        /**
-         * Multipart so this dialog can carry the cover image too. Without it the
-         * file input silently posts nothing and a model created from the asset
-         * form would have no image — leaving its assets nothing to inherit,
-         * which reads as "the feature doesn't work".
-         */
-        encType="multipart/form-data"
-      >
-        <div className="gap-4 md:flex md:items-end">
-          <Input
-            ref={nameInputRef}
-            label="Name"
-            placeholder="Asset model name"
-            className="mb-4 lg:mb-0 lg:max-w-[180px]"
-            name={zo.fields.name()}
-            disabled={disabled}
-            error={nameError}
-            data-dialog-initial-focus
-            required={zodFieldIsRequired(AssetModelFormSchema.shape.name)}
-            defaultValue={assetModel?.name}
-          />
-          <Input
-            label="Description"
-            placeholder="Description (optional)"
-            name={zo.fields.description()}
-            disabled={disabled}
-            className="mb-4 lg:mb-0"
-            defaultValue={assetModel?.description || undefined}
-          />
-          <input type="hidden" name="preventRedirect" value="true" />
-        </div>
-
-        {/* Same cover-image field as the settings form, in a compact layout. */}
-        <div className="mt-4">
-          <Input
-            label="Image"
-            // Input spreads unknown props straight onto the <input> and adds no
-            // describedby of its own, so this is the only link between the field
-            // and its format/size requirements for assistive tech.
-            aria-describedby={INLINE_IMAGE_HELP_ID}
-            disabled={disabled}
-            accept={ACCEPT_SUPPORTED_IMAGES}
-            name="image"
-            type="file"
-            onChange={validateFile}
-            error={inlineImageError}
-            inputClassName="border-0 shadow-none p-0 rounded-none"
-          />
-          <p
-            id={INLINE_IMAGE_HELP_ID}
-            className="mt-1 text-[12px] text-gray-500"
-          >
-            Optional. Shown on every asset of this model that has no image of
-            its own. PNG, JPG, JPEG or WebP, max. 8 MB.
-          </p>
-        </div>
-
-        <div className="mt-4">
-          <div className="flex items-center gap-1">
-            {onCancel ? (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onCancel}
-                size="sm"
-                className="flex-1"
-                disabled={disabled}
-              >
-                Cancel
-              </Button>
-            ) : null}
-            <Button
-              type="submit"
-              size="sm"
-              className="flex-1"
-              disabled={disabled}
-            >
-              {disabled ? "Creating..." : "Create"}
-            </Button>
-          </div>
-
-          <div className="mt-3 self-end text-sm text-error-500">
-            {fetcher?.data?.error ? fetcher.data.error.message : " "}
-          </div>
-        </div>
-      </fetcher.Form>
-    );
-  }
-
-  /* ------------------------------------------------------------------ */
-  /*  Full-page Card mode                                                */
-  /* ------------------------------------------------------------------ */
-
-  return <FullPageForm assetModel={assetModel} />;
-}
-
-/* ====================================================================== */
-/*  Full-page form (Card layout)                                          */
-/* ====================================================================== */
-
-/**
- * Renders the full-page Card-based form layout with FormRow fields.
- * Extracted as a separate component so we can safely call `useLoaderData`
- * only when we are sure we are rendering inside a route (not a dialog).
- */
-function FullPageForm({
-  assetModel,
-}: {
-  assetModel?: AssetModelFormProps["assetModel"];
-}) {
+export default function AssetModelForm({ assetModel }: AssetModelFormProps) {
   const zo = useZorm("AssetModelForm", AssetModelFormSchema);
   // Page form submits via navigation, so the disabled state must watch the
   // router's navigation state — not a fetcher.

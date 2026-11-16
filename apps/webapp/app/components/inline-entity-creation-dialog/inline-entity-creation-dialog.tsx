@@ -1,12 +1,36 @@
-import { useState } from "react";
+import { lazy, useState } from "react";
 import type { AssetModel, Category, Location } from "@prisma/client";
 import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
-import AssetModelForm from "../asset-model/form";
-import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
-import { LocationForm } from "../location/form";
 import { Button } from "../shared/button";
-import When from "../when/when";
+import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
+import { Spinner } from "../shared/spinner";
+
+/* Lazy: the dialog sits closed inside selects on the asset index and many
+ * forms, and its forms bring the markdown editor. They load when it opens. */
+const LazyForms = lazy(() => import("./inline-entity-creation-forms"));
+
+/** What the dialog created, passed to `onCreated`. */
+export type InlineEntityCreated =
+  | {
+      type: "location";
+      entity: Pick<Location, "id" | "name"> & {
+        thumbnailUrl?: string | null;
+        imageUrl?: string | null;
+      };
+    }
+  | {
+      type: "category";
+      entity: Pick<Category, "id" | "name" | "color"> & {
+        description?: string | null;
+      };
+    }
+  | {
+      type: "assetModel";
+      entity: Pick<AssetModel, "id" | "name"> & {
+        description?: string | null;
+      };
+    };
 
 /**
  * Props for the InlineEntityCreationDialog component
@@ -19,28 +43,7 @@ type InlineEntityCreationDialogProps = {
   /** Type of entity to create (location, category, or assetModel) */
   type: "location" | "category" | "assetModel";
   /** Callback invoked when an entity is successfully created */
-  onCreated?: (
-    entity:
-      | {
-          type: "location";
-          entity: Pick<Location, "id" | "name"> & {
-            thumbnailUrl?: string | null;
-            imageUrl?: string | null;
-          };
-        }
-      | {
-          type: "category";
-          entity: Pick<Category, "id" | "name" | "color"> & {
-            description?: string | null;
-          };
-        }
-      | {
-          type: "assetModel";
-          entity: Pick<AssetModel, "id" | "name"> & {
-            description?: string | null;
-          };
-        }
-  ) => void;
+  onCreated?: (created: InlineEntityCreated) => void;
 };
 
 /**
@@ -117,76 +120,24 @@ export default function InlineEntityCreationDialog({
           <div
             className={type === "location" ? "border-t" : "border-t px-6 py-5"}
           >
-            {/* Category creation form */}
-            <When truthy={type === "category"}>
-              <NewCategoryForm
-                apiUrl="/categories/new"
-                formClassName="flex-col w-full border-none px-0 py-0"
-                className="w-full flex-col"
-                inputClassName="w-full lg:max-w-full"
-                buttonsClassName="w-full mt-4"
-                onCancel={handleClose}
-                onSuccess={(data) => {
-                  if (data?.category) {
-                    onCreated?.({
-                      type: "category",
-                      entity: {
-                        id: data.category.id,
-                        name: data.category.name,
-                        color: data.category.color,
-                        description: data.category.description,
-                      },
-                    });
-                  }
-
-                  handleClose();
-                }}
+            <LazyLoadBoundary
+              loading={
+                <div className="flex justify-center py-10">
+                  <Spinner className="size-6" />
+                </div>
+              }
+              failed={
+                <p className="py-10 text-center text-sm text-error-500">
+                  The form could not be loaded. Reload the page and try again.
+                </p>
+              }
+            >
+              <LazyForms
+                type={type}
+                onCreated={onCreated}
+                onClose={handleClose}
               />
-            </When>
-
-            {/* Asset model creation form */}
-            <When truthy={type === "assetModel"}>
-              <AssetModelForm
-                onSuccess={(data) => {
-                  if (data?.assetModel) {
-                    onCreated?.({
-                      type: "assetModel",
-                      entity: {
-                        id: data.assetModel.id,
-                        name: data.assetModel.name,
-                        description: data.assetModel.description,
-                      },
-                    });
-                  }
-                  setOpen(false);
-                }}
-                onCancel={() => setOpen(false)}
-                apiUrl="/settings/asset-models/new"
-              />
-            </When>
-
-            {/* Location creation form */}
-            <When truthy={type === "location"}>
-              <LocationForm
-                apiUrl="/locations/new"
-                onCancel={handleClose}
-                onSuccess={(data) => {
-                  if (data?.location) {
-                    onCreated?.({
-                      type: "location",
-                      entity: {
-                        id: data.location.id,
-                        name: data.location.name,
-                        thumbnailUrl: data.location.thumbnailUrl,
-                        imageUrl: data.location.imageUrl,
-                      },
-                    });
-                  }
-
-                  handleClose();
-                }}
-              />
-            </When>
+            </LazyLoadBoundary>
           </div>
         </Dialog>
       </DialogPortal>

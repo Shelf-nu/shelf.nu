@@ -28,8 +28,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *
  * PARITY: `delete` maps to `PermissionAction.delete` (web intent2ActionMap).
  * The guard is `assertCanDeleteBooking`, the same one the web delete intent
- * runs: ownership for callers who do not write every booking, and drafts only
- * for roles whose policy says so.
+ * runs: ownership for callers who do not write every booking.
  *
  * Body: { bookingId: string }
  * Query: ?orgId=...
@@ -84,9 +83,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await deleteBooking(
       { id: bookingId, organizationId },
       getClientHint(request),
-      user.id,
-      // Re-checked at write time: the booking may have left DRAFT since.
-      { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
+      user.id
     );
 
     return data({ success: true });

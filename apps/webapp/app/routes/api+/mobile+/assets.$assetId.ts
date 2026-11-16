@@ -56,6 +56,11 @@ import {
 } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -82,7 +87,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // here; the filtering happens below, after shaping. `access.bookings.seeAll`
     // is the booking screen's own read gate, which `activeBooking.canOpen`
     // answers in advance.
-    const { access } = await getMobileUserContext(user.id, organizationId);
+    const { access, roles } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+
+    // Activity notes are readable only with `note: read`, as on the web asset
+    // page. Passing `roles` keeps this a static matrix lookup (no query). A
+    // caller without it gets `notes: []`, so the response keeps its shape.
+    const canReadNotes = await hasPermission({
+      userId: user.id,
+      organizationId,
+      roles,
+      workspace: access.workspaceGrants,
+      entity: PermissionEntity.note,
+      action: PermissionAction.read,
+    });
 
     const storedAsset = await db.asset.findUnique({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail screen must still load an archived asset
@@ -250,7 +270,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             },
           },
           orderBy: { createdAt: "desc" as const },
-          take: 25,
+          // No rows for a caller without `note: read`; the field stays.
+          take: canReadNotes ? 25 : 0,
         },
         customFields: {
           select: {
@@ -591,6 +612,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return data({
       asset: {
         ...assetData,
+        // Empty for a caller without `note: read`: the query takes none.
+        notes: assetData.notes,
         // why: `assetData` carries the RAW image columns. Take the resolved
         // ones from the helper so an asset with no image of its own renders
         // its model's cover image on the detail screen.

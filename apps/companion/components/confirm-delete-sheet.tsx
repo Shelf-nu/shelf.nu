@@ -25,6 +25,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -78,7 +79,7 @@ export default function ConfirmDeleteSheet({
   const { colors } = useTheme();
   const styles = useStyles();
   const sheetColumn = useSheetColumnStyle();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const [typed, setTyped] = useState("");
 
   const target = deleteConfirmationTarget(expected);

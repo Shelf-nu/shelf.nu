@@ -65,6 +65,15 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     requireOrganizationAccess: vitest.fn(),
     // why: reads the caller's membership; the tests set custody visibility
     getMobileUserContext: vitest.fn(),
+    // why: the workspace lapse gate has its own tests
+    // (mobile-auth.server.workspace-lapse.test.ts); here it answers membership
+    // from the mocked membership row, as the gate does for an active workspace.
+    getMobileWorkspaceAccess: vitest.fn(
+      async (args: { userId: string; organizationId: string }) =>
+        (
+          await import("@mocks/mobile-workspace-access")
+        ).fakeMobileWorkspaceAccess(args)
+    ),
   };
 });
 
@@ -122,13 +131,14 @@ vitest.mock("~/utils/error", () => ({
 
 import {
   getMobileUserContext,
+  getMobileWorkspaceAccess,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { recordScanNonFatal } from "~/modules/scan/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 
 const mockUser = {
   id: "user-1",
@@ -459,6 +469,39 @@ describe("GET /api/mobile/qr/:qrId", () => {
     expect((result as unknown as Response).status).toBe(200);
     const body = await (result as unknown as Response).json();
     expect(body.qr.asset.id).toBe("asset-1");
+  });
+
+  it("refuses a code whose workspace is inactive with a 403 and its message, recording nothing", async () => {
+    const message =
+      "The workspace this code belongs to is inactive because its subscription has expired.";
+    // The gate's refusal; the `ShelfError` mock keeps message and status, so
+    // the structured marker the route reads is set on it here.
+    const inactiveError = Object.assign(
+      new ShelfError({
+        cause: null,
+        message,
+        label: "Auth",
+        status: 403,
+        additionalData: { reason: "workspace_inactive" },
+      }),
+      { additionalData: { reason: "workspace_inactive" } }
+    );
+    vitest.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
+      access: "inactive",
+      error: inactiveError,
+    });
+    vitest.mocked(makeShelfError).mockReturnValueOnce(inactiveError);
+
+    const result = await run(createQrRequest());
+
+    expect((result as unknown as Response).status).toBe(403);
+    // The reason lets the scanner title the answer "Workspace inactive".
+    expect(await (result as unknown as Response).json()).toEqual({
+      error: { message, reason: "workspace_inactive" },
+    });
+    expect(makeShelfError).toHaveBeenCalledWith(inactiveError);
+    expect(db.asset.findFirst).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
   it("handles auth errors from requireMobileAuth", async () => {

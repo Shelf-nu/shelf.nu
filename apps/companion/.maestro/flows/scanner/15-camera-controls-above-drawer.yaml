@@ -1,0 +1,207 @@
+# Scanner - camera controls stay reachable and the torch stays on during a batch
+#
+# Pause, torch and "Enter code" sit in one row under the mode pills. The batch
+# drawer is capped below that row, so five scanned items never cover them, and
+# the torch control stays on across every scan. The steps read the torch
+# label, which follows the app's torch state; whether the light itself stays
+# on needs a real device (the simulator has no torch). Collapsing the drawer hides the list;
+# a scan while collapsed is named in the header for a moment.
+#
+# Fixture: SAM-0001..SAM-0005 exist in GRANULAR WORKSPACE and can be assigned.
+# Nothing is submitted, so the workspace is unchanged.
+# The camera auto-pauses after 30 s without a scan; the flow resumes it before
+# each scan and screenshot so every code lands on a live camera.
+# No login step: runs against the session already on the simulator.
+appId: com.shelf.companion.carlos
+---
+- launchApp:
+    appId: com.shelf.companion.carlos
+    stopApp: false
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Open"
+    optional: true
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Resume camera"
+    optional: true
+# A result card left by an earlier flow hides manual entry; dismiss it.
+- tapOn:
+    text: ".*Tap to dismiss.*"
+    optional: true
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    text: "Switch"
+    optional: true
+- tapOn:
+    text: "Clear all.*"
+    optional: true
+
+# ── 1. Empty batch: controls in the row under the pills, torch on ──
+- extendedWaitUntil:
+    visible:
+      id: "camera-torch"
+    timeout: 15000
+- tapOn:
+    text: "Turn on flashlight"
+    optional: true
+# Every "Turn off flashlight" check in this flow reads the button label, which
+# follows React state only. It cannot see the hardware torch: iOS can switch
+# the light off while the label still says it is on. The guard for that is
+# lib/camera-frame-gate.test.ts (each camera keeps one stable scan handler).
+- assertVisible: "Turn off flashlight"
+- assertVisible:
+    id: "dev-scan-toggle"
+# The 30 s inactivity pause may have fired, so match the button, not its label.
+- assertVisible:
+    id: "camera-pause"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- takeScreenshot: controls-0-items
+
+# ── 2. One item: controls and torch unchanged ──
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0001"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn: "Close manual entry"
+- assertVisible: "Turn off flashlight"
+# The 30 s inactivity pause may have fired, so match the button, not its label.
+- assertVisible:
+    id: "camera-pause"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- takeScreenshot: controls-1-item
+
+# ── 3. Four items: drawer at its cap, controls still above it ──
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0002"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 15000
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0003"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "3 items scanned"
+    timeout: 15000
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0004"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "4 items scanned"
+    timeout: 15000
+- tapOn: "Close manual entry"
+- assertVisible: "Turn off flashlight"
+# The 30 s inactivity pause may have fired, so match the button, not its label.
+- assertVisible:
+    id: "camera-pause"
+- assertVisible:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+# Where the row sits, not only that it exists: under the pills, above the
+# drawer's title.
+- assertVisible:
+    id: "camera-torch"
+    below:
+      text: "Scanner action: Assign.*"
+- assertVisible:
+    id: "camera-torch"
+    above:
+      text: "4 items scanned"
+- assertVisible:
+    id: "dev-scan-toggle"
+    above:
+      text: "4 items scanned"
+- takeScreenshot: controls-4-items
+# assertVisible passes even for a covered view, so press the torch with the
+# drawer at its tallest: its label only flips if the tap reaches it.
+- tapOn:
+    id: "camera-torch"
+- assertVisible: "Turn on flashlight"
+- tapOn:
+    id: "camera-torch"
+- assertVisible: "Turn off flashlight"
+- takeScreenshot: controls-torch-pressed-4-items
+
+# ── An error card with the drawer open sits above it, controls still usable ──
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-9999"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*SAM ID doesn't exist.*"
+    timeout: 15000
+# The card hides manual entry while it is shown.
+- takeScreenshot: error-card-above-drawer
+- assertVisible:
+    id: "camera-pause"
+- tapOn: ".*Tap to dismiss.*"
+- tapOn: "Close manual entry"
+
+# ── 4. Collapse: the list goes, a new scan still updates the header ──
+- tapOn: "Collapse scanned items"
+- assertVisible: "Expand scanned items"
+- assertNotVisible: "Remove .*"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0005"
+- pressKey: Enter
+# The header names the new row for 1.5 s, too short to assert reliably on a
+# loaded simulator; the count it settles on is the stable outcome.
+- extendedWaitUntil:
+    visible: "5 items scanned.*"
+    timeout: 15000
+- assertVisible: "Turn off flashlight"
+- tapOn: "Close manual entry"
+- tapOn: "Expand scanned items"
+- assertVisible: "Collapse scanned items"
+- tapOn: "Clear all.*"

@@ -27,12 +27,14 @@
  */
 
 import { type ReactNode } from "react";
+import { auditCountLabel } from "@shelf/labels";
 import {
   type AuditAssetMeta,
   type AuditScannedItem,
   type AuditSessionInfo,
   type ScanListItem,
   type ScanListItems,
+  type AuditCount,
 } from "~/atoms/qr-scanner";
 import { AuditAssetActions } from "~/components/audit/audit-asset-actions";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
@@ -82,6 +84,10 @@ type AuditItemRowProps = {
   auditAssetMeta: Record<string, AuditAssetMeta>;
   /** Whether to show the asset's location (hidden when the audit is location-scoped). */
   showLocation: boolean;
+  /** Unit counts of quantity-tracked assets, keyed by assetId. */
+  auditCounts: Record<string, AuditCount>;
+  /** Opens the count dialog for this row (quantity-tracked assets only). */
+  onEditCount: (qrId: string) => void;
 };
 
 /**
@@ -103,6 +109,8 @@ export function AuditItemRow({
   expectedAssetIds,
   auditAssetMeta,
   showLocation,
+  auditCounts,
+  onEditCount,
 }: AuditItemRowProps) {
   const itemType = item?.type;
 
@@ -230,6 +238,13 @@ export function AuditItemRow({
                   {itemType === "asset" ? "asset" : "kit"}
                 </span>
                 <AuditLabels />
+                {isAsset && data?.id && auditCounts[data.id] ? (
+                  <AuditRowCount
+                    count={auditCounts[data.id]}
+                    isExpected={isExpected}
+                    onEdit={() => onEditCount(qrId)}
+                  />
+                ) : null}
                 {/* Action buttons for notes and images */}
                 {auditSession && itemType === "asset" && data?.id && (
                   <AuditAssetActions
@@ -321,6 +336,17 @@ export function AuditPendingRow({
                   tooltipContent="This asset is expected but has not been scanned yet."
                   className="border-gray-200 bg-gray-50 text-gray-600"
                 />
+                {typeof asset.expectedQuantity === "number" ? (
+                  <span className="text-xs text-gray-600">
+                    {auditCountLabel(
+                      {
+                        status: "PENDING",
+                        expectedQuantity: asset.expectedQuantity,
+                      },
+                      asset.unitOfMeasure
+                    )}
+                  </span>
+                ) : null}
                 {/* Action buttons for notes and images on pending assets */}
                 {auditSession && (
                   <AuditAssetActions
@@ -377,6 +403,10 @@ type RenderAuditItemsArgs = {
   auditAssetMeta: Record<string, AuditAssetMeta>;
   /** Whether to show each asset's location. */
   showLocation: boolean;
+  /** Unit counts of quantity-tracked assets, keyed by assetId. */
+  auditCounts: Record<string, AuditCount>;
+  /** Opens the count dialog for a scanned quantity-tracked row. */
+  onEditCount: (qrId: string) => void;
 };
 
 /**
@@ -396,6 +426,8 @@ export function renderAuditScannedRows({
   expectedAssetIds,
   auditAssetMeta,
   showLocation,
+  auditCounts,
+  onEditCount,
 }: RenderAuditItemsArgs): ReactNode {
   return (
     <>
@@ -410,6 +442,8 @@ export function renderAuditScannedRows({
           expectedAssetIds={expectedAssetIds}
           auditAssetMeta={auditAssetMeta}
           showLocation={showLocation}
+          auditCounts={auditCounts}
+          onEditCount={onEditCount}
         />
       ))}
     </>
@@ -457,5 +491,55 @@ export function renderAuditPendingRows({
         )
       )}
     </>
+  );
+}
+
+/**
+ * The count on a scanned quantity-tracked row ("8 of 14 pcs", or "Not
+ * counted") with a button to change it. A count below the expectation is
+ * shown in the warning tone: the pool was found, units are short.
+ */
+function AuditRowCount({
+  count,
+  isExpected,
+  onEdit,
+}: {
+  count: AuditCount;
+  /** Whether the audit expected this asset; words the count accordingly. */
+  isExpected: boolean;
+  onEdit: () => void;
+}) {
+  const label = auditCountLabel(
+    { status: isExpected ? "FOUND" : "UNEXPECTED", ...count },
+    count.unitOfMeasure
+  );
+  const isShort =
+    isExpected &&
+    count.foundQuantity !== null &&
+    count.foundQuantity < count.expectedQuantity;
+
+  return (
+    <span className="flex items-center gap-1">
+      <span
+        className={tw(
+          "text-xs font-medium",
+          isShort ? "text-warning-800" : "text-gray-700"
+        )}
+      >
+        {label}
+      </span>
+      <Button
+        type="button"
+        variant="link"
+        className="text-xs"
+        onClick={(event) => {
+          // The row itself is clickable; keep this click to the button.
+          event.stopPropagation();
+          onEdit();
+        }}
+      >
+        Edit count
+      </Button>
+    </span>
   );
 }

@@ -6,6 +6,7 @@ import type {
   MetaFunction,
 } from "react-router";
 import { data, useLoaderData } from "react-router";
+import { z } from "zod";
 import {
   AutoArchiveSettings,
   AutoArchiveDaysSchema,
@@ -21,6 +22,7 @@ import {
   ExplicitCheckoutSettingsSchema,
 } from "~/components/booking/explicit-checkout-settings";
 import { NotificationSettings } from "~/components/booking/notification-settings";
+import { PdfTemplatesSettings } from "~/components/booking/pdf-templates-settings";
 import {
   ProgressiveCheckinSettings,
   CountKitsAsUnitSettingsSchema,
@@ -44,6 +46,24 @@ import {
   updateAlwaysNotifyTeamMembers,
   updateBookingSettings,
 } from "~/modules/booking-settings/service.server";
+import {
+  assertCanUsePdfTemplates,
+  canUsePdfTemplates,
+} from "~/modules/pdf-template/access";
+import {
+  AddTemplateFormSchema,
+  PdfTemplateFormSchema,
+  templateFromForm,
+} from "~/modules/pdf-template/form";
+import {
+  createPdfTemplate,
+  deletePdfTemplate,
+  duplicatePdfTemplate,
+  getPdfTemplateCustomFields,
+  getPdfTemplates,
+  setDefaultPdfTemplate,
+  updatePdfTemplate,
+} from "~/modules/pdf-template/service.server";
 import { getTeamMembersForNotify } from "~/modules/team-member/service.server";
 import {
   createWorkingHoursOverride,
@@ -71,6 +91,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/** The PDF template intents; each needs a team workspace. */
+const TEMPLATE_INTENTS = [
+  "add-template",
+  "save-template",
+  "duplicate-template",
+  "default-template",
+  "delete-template",
+];
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -94,10 +123,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    const [bookingSettings, workingHours, notifyData] = await Promise.all([
+    // Only a team workspace has PDF templates; any other gets no card and
+    // none of its templates are read.
+    const showPdfTemplates = canUsePdfTemplates(currentOrganization);
+
+    const [
+      bookingSettings,
+      workingHours,
+      notifyData,
+      pdfTemplates,
+      templateCustomFields,
+    ] = await Promise.all([
       getBookingSettingsForOrganization(organizationId),
       getWorkingHoursForOrganization(organizationId),
       getTeamMembersForNotify({ organizationId }),
+      showPdfTemplates ? getPdfTemplates({ organizationId }) : [],
+      // The custom fields a template can print, for its edit form.
+      showPdfTemplates ? getPdfTemplateCustomFields({ organizationId }) : [],
     ]);
 
     const header: HeaderData = {
@@ -109,6 +151,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organization: currentOrganization,
       bookingSettings,
       workingHours,
+      showPdfTemplates,
+      pdfTemplates,
+      templateCustomFields,
       ...notifyData,
     });
   } catch (cause) {
@@ -133,12 +178,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, access } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.workingHours,
-      action: PermissionAction.update,
-    });
+    const { organizationId, access, currentOrganization } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.workingHours,
+        action: PermissionAction.update,
+      });
 
     const formData = await request.formData();
 
@@ -162,6 +208,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         "updateSchedule",
         "createOverride",
         "deleteOverride",
+        ...TEMPLATE_INTENTS,
       ].includes(intent)
     ) {
       throw new ShelfError({
@@ -170,6 +217,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         additionalData: { intent },
         label: "Working hours",
       });
+    }
+
+    // Templates are team-only. This guard does not rely on the loader: a
+    // hand-made POST from a personal workspace must not create or change one,
+    // even on an install with premium features off.
+    if (TEMPLATE_INTENTS.includes(intent)) {
+      assertCanUsePdfTemplates(currentOrganization);
     }
 
     switch (intent) {
@@ -628,6 +682,56 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return data(payload({ success: true }), { status: 200 });
       }
 
+      case "add-template": {
+        const { name } = parseData(formData, AddTemplateFormSchema, {
+          additionalData: { userId, organizationId },
+        });
+        const template = await createPdfTemplate({ organizationId, name });
+        sendNotification({
+          title: "Template added",
+          message: `"${template.name}" is ready to set up.`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+        return payload({ templateId: template.id });
+      }
+      case "save-template": {
+        const form = parseData(formData, PdfTemplateFormSchema, {
+          additionalData: { userId, organizationId },
+        });
+        const { name, config } = templateFromForm(form);
+        await updatePdfTemplate({
+          organizationId,
+          templateId: form.templateId,
+          name,
+          config,
+        });
+        sendNotification({
+          title: "Template saved",
+          message: `"${name}" prints with the new settings.`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+        return payload({ templateId: form.templateId });
+      }
+      case "duplicate-template":
+      case "default-template":
+      case "delete-template": {
+        const { templateId } = parseData(
+          formData,
+          z.object({ templateId: z.string().min(1) }),
+          { additionalData: { userId, organizationId } }
+        );
+        if (intent === "duplicate-template") {
+          await duplicatePdfTemplate({ organizationId, templateId });
+        } else if (intent === "default-template") {
+          await setDefaultPdfTemplate({ organizationId, templateId });
+        } else {
+          await deletePdfTemplate({ organizationId, templateId });
+        }
+        return payload({ templateId });
+      }
+
       default: {
         throw new ShelfError({
           cause: null,
@@ -643,7 +747,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 export default function GeneralPage() {
-  const { workingHours, bookingSettings } = useLoaderData<typeof loader>();
+  const {
+    workingHours,
+    bookingSettings,
+    showPdfTemplates,
+    pdfTemplates,
+    templateCustomFields,
+  } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -749,6 +859,14 @@ export default function GeneralPage() {
       )}
       {/* New weekly schedule form - only show if working hours are enabled */}
       {workingHours.enabled && <Overrides overrides={workingHours.overrides} />}
+
+      {/* PDF templates: what a booking's PDF prints */}
+      {showPdfTemplates ? (
+        <PdfTemplatesSettings
+          templates={pdfTemplates}
+          customFields={templateCustomFields}
+        />
+      ) : null}
     </>
   );
 }

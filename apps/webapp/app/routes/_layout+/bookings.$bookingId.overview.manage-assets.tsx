@@ -65,6 +65,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
+import { MoreLocationsChip } from "~/components/location/more-locations-chip";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -82,11 +83,12 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
-import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
@@ -114,6 +116,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { readModelTabParams } from "~/utils/booking-model-requests";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
@@ -353,12 +356,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // Ignores the custodian-filter seed: scope it rather than fetch a
             // roster nobody renders.
             canSeeAllCustody: false,
+            // The search matches custodian names only on custody the caller may see.
+            custodySearchScope: custodySearchScopeFor({
+              canSeeAllCustody: access.custody.seeAll,
+              userId,
+            }),
             locationIdsOverride,
-            extraInclude: {
-              assetLocations: {
-                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-              },
-            },
           })
       ),
       getBooking({
@@ -607,6 +610,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const modelTabData = await getBookingModelTabData({
       organizationId,
       booking,
+      ...readModelTabParams(getCurrentSearchParams(request)),
+      // A stale page in the URL lands on the last page, not an empty one.
+      clampPageToResults: true,
+      // This booking's reservations lead the list, as on the tab's own route.
+      pinReservedModels: true,
     });
 
     return payload({
@@ -798,6 +806,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // A custodian filter can therefore never reveal what a colleague
         // holds, whatever the caller's role.
         allowedTeamMemberIds: [],
+        // The same custodian-name search scope as the loader.
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         // The loader passes no list scope: the picker lists every asset.
         bookableScope: null,
         honorArchivedView: false,
@@ -1341,6 +1354,9 @@ export default function AddAssetsToNewBooking() {
     showModelsTab,
     assetModels,
     modelRequests,
+    matchedAssetModels,
+    modelsPage,
+    modelsPerPage,
     modelHeadroom,
     tickedLocationHasChildren,
   } = useLoaderData<typeof loader>();
@@ -1355,7 +1371,10 @@ export default function AddAssetsToNewBooking() {
    * into the Models tab rather than forcing a manual click.
    */
   const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") === "models" ? "models" : "assets";
+  // Only when the tab exists: a workspace without models never renders it, so
+  // a stale `?tab=models` would otherwise open the dialog with no tab shown.
+  const initialTab =
+    searchParams.get("tab") === "models" && showModelsTab ? "models" : "assets";
   const [activeTab, setActiveTab] = useState<"assets" | "models">(initialTab);
 
   /**
@@ -1799,6 +1818,9 @@ export default function AddAssetsToNewBooking() {
             bookingId={booking.id}
             assetModels={assetModels}
             modelRequests={modelRequests}
+            matchedAssetModels={matchedAssetModels}
+            modelsPage={modelsPage}
+            modelsPerPage={modelsPerPage}
           />
         </TabsContent>
       ) : null}
@@ -1913,7 +1935,6 @@ const RowComponent = ({
   extraProps,
 }: {
   item: AssetsFromViewItem & {
-    location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
     availableQuantity?: number;
     modelReservedElsewhere?: boolean;
   };
@@ -1925,7 +1946,16 @@ const RowComponent = ({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const currentOrganization = useCurrentOrganization();
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
-  const { category, tags, location } = item;
+  const { category, tags } = item;
+  /**
+   * `Asset` has no location column. The Location column shows the oldest
+   * placement from `assetLocations` as the badge and counts the rest in a
+   * "+N" chip, as the assets index does.
+   */
+  const location = getPrimaryLocation(item);
+  const otherLocations = (item.assetLocations ?? [])
+    .slice(1)
+    .flatMap((placement) => (placement.location ? [placement.location] : []));
   const isPartOfKit = (item.assetKits ?? []).length > 0;
   const isAddedThroughKit = isPartOfKit && checked;
   const isQtyTracked = isQuantityTracked(item);
@@ -2063,14 +2093,24 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          // Clicks on the badge, its hierarchy hover card (portalled, but React
+          // events still bubble through it) or the chip must not toggle the
+          // row's selection: the row's click handler selects the asset.
+          <span
+            role="presentation"
+            onClick={(e) => e.stopPropagation()}
+            className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap"
+          >
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+            <MoreLocationsChip primary={location} others={otherLocations} />
+          </span>
         ) : null}
       </Td>
     </>

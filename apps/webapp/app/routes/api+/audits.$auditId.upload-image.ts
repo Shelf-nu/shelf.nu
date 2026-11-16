@@ -71,6 +71,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       uploadedById: userId,
+      uploadedVia: "web",
       auditAssetId: auditAssetId || undefined,
     });
 

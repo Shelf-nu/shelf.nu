@@ -104,6 +104,8 @@ describe("topBookedAssetsReport", () => {
       expect(where.to).toEqual({ gte: TIMEFRAME.from });
       expect(where.OR).toBeUndefined();
       expect(where.status).toEqual({ notIn: ["DRAFT", "CANCELLED"] });
+      // A booking archived before any check-out was never used.
+      expect(where.archivedWithoutCheckin).toBe(false);
     }
   });
 

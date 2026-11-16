@@ -25,7 +25,6 @@ import {
   processFrame,
   updateCanvasSize,
 } from "./utils";
-import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/helpers";
 import { ErrorIcon } from "../errors";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
@@ -88,9 +87,8 @@ export async function handleScannerInputValue({
     return true;
   }
 
-  const result = extractQrIdFromValue(rawValue);
   await handleDetection({
-    result,
+    result: rawValue,
     onCodeDetectionSuccess,
     allowNonShelfCodes,
     paused,

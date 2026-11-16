@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 
 import {
+  extractQrIdFromValue,
   getDefaultValueForFieldType,
   getUIFieldType,
   valueForOperatorChange,
@@ -190,5 +191,28 @@ describe("valueForOperatorChange", () => {
         timeZone: "UTC",
       })
     ).toBe("2026-01-01");
+  });
+});
+
+describe("extractQrIdFromValue", () => {
+  // Our origin under test is SERVER_URL, http://localhost:3000.
+  const QR_ID = "abc1234567";
+
+  it("reduces a Shelf QR link to its id", () => {
+    expect(extractQrIdFromValue(`http://localhost:3000/qr/${QR_ID}`)).toBe(
+      QR_ID
+    );
+  });
+
+  it("keeps a raw QR id", () => {
+    expect(extractQrIdFromValue(QR_ID)).toBe(QR_ID);
+  });
+
+  it.each([
+    "https://example.com/product/123",
+    `https://example.com/qr/${QR_ID}`,
+    `http://localhost:3000/qr/${QR_ID}?a=b`,
+  ])("returns %s unchanged", (value) => {
+    expect(extractQrIdFromValue(value)).toBe(value);
   });
 });

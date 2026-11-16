@@ -982,6 +982,9 @@ describe("buildCsvExportDataFromAssets last audit date", () => {
   });
 });
 
+/** An exporting user who may see every custodian. */
+const SEES_ALL_CUSTODY = { canSeeAllCustody: true, userId: "exporter" };
+
 describe("buildCsvExportDataFromBookings", () => {
   it("creates a main booking row and additional asset rows", () => {
     const booking = {
@@ -1008,7 +1011,8 @@ describe("buildCsvExportDataFromBookings", () => {
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(
       [booking as any],
-      HARDCODED_DEFAULT_PREFS
+      HARDCODED_DEFAULT_PREFS,
+      SEES_ALL_CUSTODY
     );
 
     expect(headers).toEqual([
@@ -1090,6 +1094,7 @@ describe("buildCsvExportDataFromBookings", () => {
     const [, mainRow, assetRow] = buildCsvExportDataFromBookings(
       [booking as any],
       HARDCODED_DEFAULT_PREFS,
+      SEES_ALL_CUSTODY,
       checkinsByBooking
     );
 
@@ -1106,6 +1111,89 @@ describe("buildCsvExportDataFromBookings", () => {
     expect(assetRow[13]).toBe('""'); // no check-in date for an item still out
     expect(assetRow[14]).toBe('""'); // booking rollup not repeated on asset rows
     expect(assetRow[15]).toBe('""');
+  });
+});
+
+describe("buildCsvExportDataFromBookings custodian visibility", () => {
+  /** One booking as the exporter receives it. */
+  type ExportedBooking = Parameters<
+    typeof buildCsvExportDataFromBookings
+  >[0][number];
+
+  /**
+   * A booking held by `custodianUserId`, through both custody links. Carries
+   * only the fields the export reads, so it is cast to the full row type.
+   */
+  function bookingHeldBy(custodianUserId: string): ExportedBooking {
+    const booking = {
+      id: "booking-3",
+      name: "Loan",
+      status: "ONGOING",
+      from: new Date("2024-01-02T03:04:00Z"),
+      to: new Date("2024-01-03T03:04:00Z"),
+      custodianTeamMember: { name: "Jane Doe", userId: custodianUserId },
+      custodianUser: {
+        id: custodianUserId,
+        firstName: "Jane",
+        lastName: "Doe",
+        displayName: null,
+        email: "jane@example.com",
+      },
+      description: "",
+      tags: [],
+      bookingAssets: [],
+    };
+    return booking as unknown as ExportedBooking;
+  }
+
+  /** Index of the Custodian column in every row. */
+  const CUSTODIAN = 8;
+
+  it("writes Private, with no name or email, for a custodian the user may not see", () => {
+    const [, row] = buildCsvExportDataFromBookings(
+      [bookingHeldBy("someone-else")],
+      HARDCODED_DEFAULT_PREFS,
+      { canSeeAllCustody: false, userId: "exporter" }
+    );
+
+    expect(row[CUSTODIAN]).toBe('"private"');
+    expect(row.join(",")).not.toContain("jane@example.com");
+  });
+
+  it("names the user's own custody even without custody visibility", () => {
+    const [, row] = buildCsvExportDataFromBookings(
+      [bookingHeldBy("exporter")],
+      HARDCODED_DEFAULT_PREFS,
+      { canSeeAllCustody: false, userId: "exporter" }
+    );
+
+    expect(row[CUSTODIAN]).toBe('"Jane Doe (jane@example.com)"');
+  });
+
+  it("names every custodian for a user who may see all custody", () => {
+    const [, row] = buildCsvExportDataFromBookings(
+      [bookingHeldBy("someone-else")],
+      HARDCODED_DEFAULT_PREFS,
+      SEES_ALL_CUSTODY
+    );
+
+    expect(row[CUSTODIAN]).toBe('"Jane Doe (jane@example.com)"');
+  });
+
+  it("leaves the column empty for a booking with no custodian", () => {
+    const [, row] = buildCsvExportDataFromBookings(
+      [
+        {
+          ...bookingHeldBy("someone-else"),
+          custodianTeamMember: null,
+          custodianUser: null,
+        } as unknown as ExportedBooking,
+      ],
+      HARDCODED_DEFAULT_PREFS,
+      { canSeeAllCustody: false, userId: "exporter" }
+    );
+
+    expect(row[CUSTODIAN]).toBe('""');
   });
 });
 

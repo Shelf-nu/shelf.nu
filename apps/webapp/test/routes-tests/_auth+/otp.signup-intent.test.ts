@@ -32,6 +32,7 @@ import { action } from "~/routes/_auth+/otp";
 // redirect and the cookies it carries.
 vi.mock("~/modules/auth/service.server", () => ({
   verifyOtpAndSignin: vi.fn(),
+  endSessionByRefreshToken: vi.fn(),
 }));
 // why: the new-user branch creates a database row; the tests only check that
 // it is reached, not what it writes.

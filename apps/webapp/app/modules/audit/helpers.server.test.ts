@@ -17,6 +17,7 @@ import type * as MarkdocWrappersModule from "~/utils/markdoc-wrappers";
 
 import {
   createAssetScanNote,
+  createAuditCountUpdatedNote,
   createAuditCreationNote,
   createAuditStartedNote,
   createAuditCompletedNote,
@@ -1696,5 +1697,104 @@ describe("createAuditUpdateNote", () => {
       '- **audit name**: {% name text="Q3 audit" /%} → '
     );
     expectValueOnlyInTag(data.content, URL_SHAPED_VALUE, ["name"]);
+  });
+});
+
+describe("audit unit-count notes", () => {
+  /** A transaction stub holding one asset and one scanner. */
+  function makeTx() {
+    return {
+      asset: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: "pool-1", title: "Sandbag" }),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "user-1",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          displayName: "Ada Lovelace",
+        }),
+      },
+      auditNote: { create: vi.fn() },
+    };
+  }
+
+  /** The content of the one note the helper wrote. */
+  function noteContent(tx: ReturnType<typeof makeTx>): string {
+    return tx.auditNote.create.mock.calls[0][0].data.content;
+  }
+
+  it("adds the count to the scan note of an expected pool", async () => {
+    const tx = makeTx();
+
+    await createAssetScanNote({
+      auditSessionId: "audit-1",
+      assetId: "pool-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      isExpected: true,
+      count: { found: 8, expected: 14 },
+      tx,
+    });
+
+    expect(noteContent(tx)).toMatch(/and counted 8 of 14\.$/);
+  });
+
+  it("words the count of an unexpected pool without an expectation", async () => {
+    const tx = makeTx();
+
+    await createAssetScanNote({
+      auditSessionId: "audit-1",
+      assetId: "pool-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      isExpected: false,
+      count: { found: 5, expected: null },
+      tx,
+    });
+
+    expect(noteContent(tx)).toMatch(/and counted 5 units\.$/);
+  });
+
+  it("writes the recount note with the previous count, org-scoped", async () => {
+    const tx = makeTx();
+
+    await createAuditCountUpdatedNote({
+      auditSessionId: "audit-1",
+      assetId: "pool-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: 6,
+      count: { found: 8, expected: 14 },
+      tx: tx as never,
+    });
+
+    expect(tx.asset.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "pool-1", organizationId: "org-1" },
+      })
+    );
+    expect(noteContent(tx)).toMatch(
+      /recounted .*Sandbag.*: 8 of 14 \(was 6\)\.$/
+    );
+  });
+
+  it("leaves out the previous count when there was none", async () => {
+    const tx = makeTx();
+
+    await createAuditCountUpdatedNote({
+      auditSessionId: "audit-1",
+      assetId: "pool-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: null,
+      count: { found: 8, expected: 14 },
+      tx: tx as never,
+    });
+
+    expect(noteContent(tx)).not.toContain("(was");
+    expect(noteContent(tx)).toMatch(/: 8 of 14\.$/);
   });
 });

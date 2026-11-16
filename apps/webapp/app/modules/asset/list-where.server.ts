@@ -32,6 +32,7 @@ import { getParamsValues } from "~/utils/list";
 import { bookableListScopeWhere } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { resolveAssetSearchIds } from "./search-ids.server";
+import type { CustodySearchScope } from "./search-union.server";
 import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
 import {
   andAssetWhere,
@@ -52,6 +53,12 @@ const label: ErrorLabel = "Assets";
 export type AssetListFilters = {
   organizationId: Organization["id"];
   search?: string | null;
+  /**
+   * Whose custody a search may match by custodian name (see
+   * `custodySearchScopeFor`). Required so every list states the viewer's
+   * custody visibility, even one that never searches.
+   */
+  custodySearchScope: CustodySearchScope;
   categoriesIds?: Category["id"][] | null;
   locationIds?: Location["id"][] | null;
   tagsIds?: Tag["id"][] | null;
@@ -91,6 +98,7 @@ export async function buildAssetListWhere(
   const {
     organizationId,
     search,
+    custodySearchScope,
     categoriesIds,
     locationIds,
     tagsIds,
@@ -146,6 +154,7 @@ export async function buildAssetListWhere(
       const ids = await resolveAssetSearchIds({
         organizationId,
         terms: searchTerms,
+        custodySearchScope,
       });
       andAssetWhere(where, { id: { in: ids } });
     }
@@ -383,6 +392,8 @@ type ResolveAssetListFiltersArgs = {
    * `applyCustodianAllowList`.
    */
   teamMemberIds: TeamMember["id"][] | null | undefined;
+  /** Whose custody a search may match by custodian name (see `custodySearchScopeFor`). */
+  custodySearchScope: CustodySearchScope;
   /** The caller's list scope (see `resolveBookableListScope`); `null` or omitted lists every asset. */
   bookableScope?: BookableListScope | null;
   /**
@@ -410,6 +421,7 @@ export function resolveAssetListFilters({
   organizationId,
   searchParams,
   teamMemberIds,
+  custodySearchScope,
   bookableScope,
   locationIdsOverride,
   honorArchivedView,
@@ -442,6 +454,7 @@ export function resolveAssetListFilters({
   return {
     organizationId,
     search,
+    custodySearchScope,
     categoriesIds,
     tagsIds,
     status,
@@ -475,6 +488,8 @@ export function resolveAssetListFilters({
  * @param args.allowedTeamMemberIds - Custodian ids the caller may filter by
  *   (see `applyCustodianAllowList`). A list that refuses every custodian filter
  *   passes `[]`.
+ * @param args.custodySearchScope - Whose custody the list's search matched by
+ *   custodian name, so select-all matches the same rows.
  * @returns The Prisma where clause for the selected assets
  * @throws {ShelfError} 400 when a search matches more ids than a query can bind
  */
@@ -482,6 +497,7 @@ export async function getAssetListWhereForSelectAll({
   organizationId,
   currentSearchParams,
   allowedTeamMemberIds,
+  custodySearchScope,
   bookableScope,
   locationIdsOverride,
   honorArchivedView,
@@ -490,6 +506,7 @@ export async function getAssetListWhereForSelectAll({
   organizationId: Organization["id"];
   currentSearchParams: string | null | undefined;
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  custodySearchScope: CustodySearchScope;
   bookableScope: BookableListScope | null;
   locationIdsOverride: Location["id"][] | undefined;
   honorArchivedView: boolean;
@@ -505,6 +522,7 @@ export async function getAssetListWhereForSelectAll({
         searchParams.getAll("teamMember"),
         allowedTeamMemberIds
       ),
+      custodySearchScope,
       bookableScope,
       locationIdsOverride,
       honorArchivedView,

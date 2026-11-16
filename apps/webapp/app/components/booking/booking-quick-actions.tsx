@@ -136,6 +136,7 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
     extend,
     cancel,
     archive,
+    discardDraft,
     duplicate,
     bookingDocument,
     checkinReceipt,
@@ -144,6 +145,7 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
     extend.visible ||
     cancel.visible ||
     archive.visible ||
+    discardDraft.visible ||
     duplicate.visible ||
     bookingDocument.visible ||
     checkinReceipt.visible;
@@ -250,6 +252,9 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
             ) : null}
             {archive.visible ? (
               <ArchiveBookingAction booking={{ id: booking.id }} />
+            ) : null}
+            {discardDraft.visible ? (
+              <ArchiveBookingAction booking={{ id: booking.id }} discardDraft />
             ) : null}
             {duplicate.visible ? (
               <DuplicateBookingAction booking={{ id: booking.id }} />

@@ -61,10 +61,6 @@ export default function BulkActionsDropdown() {
 function ConditionalDropdown() {
   const selectedBookings = useAtomValue(selectedBulkItemsAtom);
 
-  const everyBookingInDraft = selectedBookings.every(
-    (booking) => booking.status === BookingStatus.DRAFT
-  );
-
   /**
    * Archive is enabled only when every selected booking is archivable —
    * COMPLETE, or a RESERVED booking whose end date has passed. The server
@@ -179,12 +175,6 @@ function ConditionalDropdown() {
 
   const archiveDisabled = !allBookingsArchivable || !canArchiveBooking;
 
-  // Members held to drafts may bulk-delete only a selection of drafts; the
-  // server refuses anything else. Loading is handled by the trigger's own
-  // fallback, so this flag carries only the drafts-only reason.
-  const deleteDisabled =
-    roleAccess.policy.bookings.deleteOnlyDrafts && !everyBookingInDraft;
-
   const {
     ref: dropdownRef,
     onOpenChange,
@@ -221,7 +211,6 @@ function ConditionalDropdown() {
       >
         <DropdownMenuTrigger
           className="actions-dropdown hidden md:flex"
-          onClick={() => setOpen(!open)}
           asChild
           disabled={disabled}
         >
@@ -339,14 +328,7 @@ function ConditionalDropdown() {
                 type="trash"
                 label="Delete"
                 onClick={closeMenu}
-                disabled={
-                  deleteDisabled
-                    ? {
-                        reason:
-                          "Some of the selected bookings are not in draft or you have self user permissions. You can only delete draft bookings.",
-                      }
-                    : isLoading
-                }
+                disabled={isLoading}
               />
             </DropdownMenuItem>
           </div>

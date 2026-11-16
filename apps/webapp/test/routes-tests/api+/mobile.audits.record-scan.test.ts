@@ -112,6 +112,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
 
   it("should record a scan and return scan data with counts", async () => {
     (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      expectedQuantity: null,
+      foundQuantity: null,
       scanId: "scan-1",
       auditAssetId: "audit-asset-1",
       foundAssetCount: 5,
@@ -145,6 +148,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
       userId: "user-1",
       organizationId: "org-1",
       userAgent: null,
+      foundQuantity: undefined,
+      // A body without a count comes from a build with no count prompt.
+      acceptUncounted: true,
     });
 
     // why: an ADMIN is not limited to assigned audits, so admins can scan
@@ -246,6 +252,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
       mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
     );
     (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      expectedQuantity: null,
+      foundQuantity: null,
       scanId: "scan-1",
       auditAssetId: "audit-asset-1",
       foundAssetCount: 1,
@@ -265,5 +274,129 @@ describe("POST /api/mobile/audits/record-scan", () => {
     expect(requireAuditAssignee).toHaveBeenCalledWith(
       expect.objectContaining({ assignedOnly: false })
     );
+  });
+
+  it("forwards a count and returns the row's counts", async () => {
+    (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-1",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+          isExpected: true,
+          foundQuantity: 8,
+        }),
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 8, acceptUncounted: false })
+    );
+    const body = await (result as unknown as Response).json();
+    expect(body).toMatchObject({
+      success: true,
+      scanId: "scan-1",
+      expectedQuantity: 14,
+      foundQuantity: 8,
+    });
+  });
+
+  it("forwards a count above the expectation (a surplus)", async () => {
+    (recordAuditScan as any).mockResolvedValue({
+      status: "recorded",
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-1",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+      expectedQuantity: 14,
+      foundQuantity: 16,
+    });
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+          foundQuantity: 16,
+        }),
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ foundQuantity: 16 })
+    );
+    const body = await (result as unknown as Response).json();
+    expect(body).toMatchObject({ expectedQuantity: 14, foundQuantity: 16 });
+  });
+
+  it("answers 500 with no scan data when the service does not record the scan", async () => {
+    // A count-less scan always sets acceptUncounted, so the service should
+    // never ask for a count here; if it does, the phone must not be told the
+    // scan was recorded.
+    (recordAuditScan as any).mockResolvedValue({
+      status: "count-required",
+      assetId: "pool-1",
+      assetTitle: "Sandbag",
+      expectedQuantity: 14,
+      foundQuantity: null,
+      unitOfMeasure: "pcs",
+    });
+    (makeShelfError as any).mockImplementationOnce((cause: any) => ({
+      message: cause?.message ?? "Unknown",
+      status: cause?.status ?? 500,
+    }));
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+        }),
+      })
+    );
+
+    expect(recordAuditScan).toHaveBeenCalledWith(
+      expect.objectContaining({ acceptUncounted: true })
+    );
+    const response = result as unknown as Response;
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: { message: "The scan could not be recorded." },
+    });
+    expect(body).not.toHaveProperty("success");
+  });
+
+  it("refuses a negative count before reaching the service", async () => {
+    (makeShelfError as any).mockImplementationOnce((cause: any) => ({
+      message: cause?.message ?? "Invalid",
+      status: cause?.status ?? 400,
+    }));
+
+    const result = await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "pool-1",
+          foundQuantity: -2,
+        }),
+      })
+    );
+
+    expect(recordAuditScan).not.toHaveBeenCalled();
+    expect((result as unknown as Response).status).toBeGreaterThanOrEqual(400);
   });
 });

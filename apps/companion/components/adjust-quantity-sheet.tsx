@@ -31,6 +31,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -107,7 +108,7 @@ export function AdjustQuantitySheet({
   const [submittedDirection, setSubmittedDirection] = useState<
     "add" | "subtract" | null
   >(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   // Re-seed the inputs every time the sheet opens: each open is a fresh
   // adjustment, so stale values must not leak across.

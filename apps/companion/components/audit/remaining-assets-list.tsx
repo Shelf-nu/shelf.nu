@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import { auditCountLabel } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { useOverlayEdges } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
@@ -24,6 +25,9 @@ export type RemainingAsset = {
   mainImage: string | null;
   locationName: string | null;
   categoryName: string | null;
+  /** Units expected, for a quantity-tracked asset; null otherwise. */
+  expectedQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
 
 type RemainingAssetsListProps = {
@@ -80,8 +84,30 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
             <Text style={styles.remainingItemName} numberOfLines={1}>
               {item.name}
             </Text>
-            {(item.locationName || item.categoryName) && (
+            {/* The expected units join the meta line rather than adding a
+                third line: the row has a fixed height (REMAINING_ITEM_HEIGHT). */}
+            {(item.locationName ||
+              item.categoryName ||
+              typeof item.expectedQuantity === "number") && (
               <View style={styles.remainingMetaRow}>
+                {typeof item.expectedQuantity === "number" ? (
+                  <View style={styles.remainingMetaPart}>
+                    <Ionicons
+                      name="layers-outline"
+                      size={12}
+                      color={colors.mutedLight}
+                    />
+                    <Text style={styles.remainingMeta} numberOfLines={1}>
+                      {auditCountLabel(
+                        {
+                          status: "PENDING",
+                          expectedQuantity: item.expectedQuantity,
+                        },
+                        item.unitOfMeasure
+                      )}
+                    </Text>
+                  </View>
+                ) : null}
                 {item.locationName ? (
                   <View style={styles.remainingMetaPart}>
                     <Ionicons

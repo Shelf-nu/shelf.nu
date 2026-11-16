@@ -589,7 +589,8 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   );
 
   // D-22: delete a booking, single roles x relationship x status
-  // (`assertCanDeleteBooking`: ownership, then the policy's drafts-only rule).
+  // (`assertCanDeleteBooking`: ownership only). The `booking:delete` gate runs
+  // before it in every route; B9:D-22:mobile-delete pins the two together.
   snapshot["D-22"] = Object.fromEntries(
     SINGLE_ROLES.map((role) => [
       role,
@@ -600,7 +601,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
             outcome(() =>
               assertCanDeleteBooking({
                 access: accessFor([role]),
-                booking: { ...booking, status },
+                booking,
                 userId: "caller",
               })
             ),
@@ -762,8 +763,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   );
 
   // B9:D-22: mobile delete (bookings.delete.ts: gate booking:delete, then
-  // `assertCanDeleteBooking` on the context's `access`: ownership first, then
-  // the policy's drafts-only rule).
+  // `assertCanDeleteBooking` on the context's `access`: ownership).
   snapshot["B9:D-22:mobile-delete"] = perRoleSet((roles) => {
     const access = accessFor(roles);
     return Object.fromEntries(
@@ -781,17 +781,6 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
                     userId: "caller",
                     access,
                     action: "delete",
-                  })
-                ),
-            ],
-            [
-              "denied:status",
-              () =>
-                throws(() =>
-                  assertCanDeleteBooking({
-                    access,
-                    booking: { ...RELATIONSHIPS[rel], status },
-                    userId: "caller",
                   })
                 ),
             ],
@@ -1158,29 +1147,29 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: deletion =====================
 
-  // B9:D-22: booking Delete menu item (actions-dropdown.tsx):
-  // `!useRoleAccess().policy.bookings.deleteOnlyDrafts || isDraft`.
+  // B9:D-22: booking Delete menu item (actions-dropdown.tsx): `booking:delete`
+  // (resolveBookingActions in booking-actions.ts), whatever the status.
   snapshot["B9:D-22:web-delete-menu"] = perRoleSet((roles) => {
-    const { deleteOnlyDrafts } = accessFor(roles).policy.bookings;
-    return perCase(
-      DRAFT_OR_NOT,
-      (status) => !deleteOnlyDrafts || status === "DRAFT"
-    );
+    const canDelete = can(roles, E.booking, A.delete);
+    return perCase(DRAFT_OR_NOT, () => canDelete);
+  });
+
+  // Discard draft (booking-actions.ts `discardDraft`): offered on a DRAFT to a
+  // member holding `booking:archive` but not `booking:delete`.
+  snapshot["B9:D-22:web-discard-draft-menu"] = perRoleSet((roles) => {
+    const offered =
+      can(roles, E.booking, A.archive) && !can(roles, E.booking, A.delete);
+    return perCase(DRAFT_OR_NOT, (status) => offered && status === "DRAFT");
   });
 
   // B9:D-17/D-22: bookings bulk delete: the menu renders only when
-  // `policy.bookings.showBulkActions` (bookings._index.tsx), and its Delete is
-  // disabled by `policy.bookings.deleteOnlyDrafts && !everyBookingInDraft`
-  // (bulk-actions-dropdown.tsx).
+  // `policy.bookings.showBulkActions` (bookings._index.tsx); its Delete is
+  // then enabled for any selection (bulk-actions-dropdown.tsx).
   snapshot["B9:D-17/D-22:web-bulk-delete"] = perRoleSet((roles) => {
-    const { showBulkActions, deleteOnlyDrafts } =
-      accessFor(roles).policy.bookings;
-    return perCase(SELECTION_CASES, (selection) => {
-      if (!showBulkActions) return "no-menu";
-      const everyBookingInDraft = selection === "allDraft";
-      const deleteDisabled = deleteOnlyDrafts && !everyBookingInDraft;
-      return deleteDisabled ? "disabled" : "enabled";
-    });
+    const { showBulkActions } = accessFor(roles).policy.bookings;
+    return perCase(SELECTION_CASES, () =>
+      showBulkActions ? "enabled" : "no-menu"
+    );
   });
 
   // ===================== Custody & assets =====================

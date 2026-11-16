@@ -15,6 +15,7 @@ import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
 import { TextWithLinks } from "~/components/links/text-with-links";
 import { LocationBadge } from "~/components/location/location-badge";
+import { MoreLocationsChip } from "~/components/location/more-locations-chip";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -756,13 +757,14 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              {/* No `allowExternalLinks`: descriptions are authored in a plain
-                  textarea and rendered as plain text on the asset page, so
-                  they are not a markdown surface. Links here would also be
-                  unreachable — Radix tooltip content is not interactive. */}
+              {/* Descriptions are typed in a plain textarea, so they get no
+                  external links (tooltip content is not interactive anyway)
+                  and no Markdoc tags: a tag a member types here must not
+                  render as a badge or a component. */}
               <MarkdownViewer
                 content={truncateText(value, DESCRIPTION_TOOLTIP_MAX_LENGTH)}
                 className="mt-2 text-sm"
+                withTags={false}
               />
               {isTooltipTruncated ? (
                 <p className="mt-2 text-xs text-gray-500">
@@ -1065,32 +1067,7 @@ function LocationColumnContent({
   return (
     <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
       {primaryButton}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-              data-testid="location-more-chip"
-              aria-label={`+${others.length} more location${
-                others.length === 1 ? "" : "s"
-              }`}
-            >
-              +{others.length}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent
-            className="max-w-xs"
-            data-testid="location-more-tooltip"
-          >
-            <ul className="flex flex-col gap-1 text-sm">
-              {[primary, ...others].map((entry) => (
-                <li key={entry.id}>{entry.name}</li>
-              ))}
-            </ul>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <MoreLocationsChip primary={primary} others={others} />
     </span>
   );
 }

@@ -85,6 +85,7 @@ async function captureWhere(
     userId: RESTRICTED_USER_ID,
     bookingsIds: [VICTIM_BOOKING_ID],
     canSeeAllBookings,
+    canSeeAllCustody: false,
     organizationId: ORGANIZATION_ID,
     list: null,
   });
@@ -166,6 +167,7 @@ describe("exportBookingsFromIndexToCsv: select all", () => {
       userId: RESTRICTED_USER_ID,
       bookingsIds: [ALL_SELECTED_KEY],
       canSeeAllBookings,
+      canSeeAllCustody: false,
       organizationId: ORGANIZATION_ID,
       list,
     });

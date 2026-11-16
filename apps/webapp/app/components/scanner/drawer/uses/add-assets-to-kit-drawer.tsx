@@ -45,7 +45,10 @@ export const addScannedAssetsToKitSchema = z.object({
   assetQuantities: z.string().optional().default("{}"),
 });
 
-/** Extend the type so we can use it. This is based on the extra asset includes passed to the row */
+/**
+ * A scanned asset with its kit membership, from the `AssetKit` pivot that
+ * `ASSET_INCLUDE` always selects (`kitId`, kit `id` and `name`).
+ */
 type AssetFromQrWithKit = AssetFromQr & {
   assetKits: Array<{
     kitId: string;
@@ -130,19 +133,6 @@ export default function AddAssetsToKitDrawer({
           return <KitRow kit={data as KitFromQr} />;
         }
         return null;
-      }}
-      assetExtraInclude={{
-        assetKits: {
-          select: {
-            kitId: true,
-            kit: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
       }}
       // Kit context so the API attaches `pickerMeta` with the
       // strict-available pool (matches the kit manage-assets picker's

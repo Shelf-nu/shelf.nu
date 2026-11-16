@@ -11,7 +11,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { pushIntoTab } from "@/lib/navigation";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -375,7 +375,7 @@ function MyCustodyContent() {
           ListFooterComponent={
             isLoadingMore ? (
               <ActivityIndicator style={styles.footer} color={colors.muted} />
-            ) : null
+            ) : undefined
           }
         />
       )}

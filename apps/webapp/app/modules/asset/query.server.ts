@@ -20,6 +20,7 @@ import { bookableListScopeSql } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import { buildAssetSearchUnion } from "./search-union.server";
+import type { CustodySearchScope } from "./search-union.server";
 import { splitAssetSearchTerms } from "./search.server";
 import { splitSortParam } from "./sort-param";
 import type { ArchivedFilter, CustomFieldSorting } from "./types";
@@ -55,9 +56,21 @@ const BOOKING_CUSTODIAN_NAME = Prisma.sql`CASE
               END`;
 
 /**
+ * A search for the advanced index: the typed text plus whose custody it may
+ * match by custodian name. Bundled so no caller can pass search text without
+ * stating the viewer's custody visibility.
+ */
+export type AdvancedAssetSearch = {
+  /** The raw search text, as typed. */
+  text: string;
+  /** Whose custody the custodian-name branch may match (see `custodySearchScopeFor`). */
+  custodySearchScope: CustodySearchScope;
+};
+
+/**
  * Generates the SQL WHERE clause for asset filtering
  * @param organizationId - Organization ID to filter by
- * @param search - Optional search string
+ * @param search - Optional search: the text and the viewer's custody scope
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
  * @param bookableScope - The caller's list scope: assets available to book plus
@@ -72,7 +85,7 @@ const BOOKING_CUSTODIAN_NAME = Prisma.sql`CASE
  */
 export function generateWhereClause(
   organizationId: string,
-  search: string | null,
+  search: AdvancedAssetSearch | null,
   filters: Filter[],
   assetIds?: string[],
   bookableScope: BookableListScope | null = null,
@@ -119,12 +132,12 @@ export function generateWhereClause(
     whereClause = Prisma.sql`${whereClause} AND a.id = ANY(${assetIds}::text[])`;
   }
 
-  if (search) {
+  if (search?.text) {
     // Shared bounded parser (lowercasing matches buildAssetSearchUnion's
     // precondition; ILIKE is case-insensitive anyway): caps the honored terms
     // at MAX_ASSET_SEARCH_TERMS so a malformed comma paste cannot fan into
     // unbounded UNION branches in the generated SQL.
-    const terms = splitAssetSearchTerms(search);
+    const terms = splitAssetSearchTerms(search.text);
 
     if (terms.length > 0) {
       // Search = "asset id is in the org-scoped UNION of matching ids". Each
@@ -132,7 +145,11 @@ export function generateWhereClause(
       // the UNION (see buildAssetSearchUnion), replacing the old multi-table
       // OR that forced cross-org seq scans.
       whereClause = Prisma.sql`${whereClause} AND a."id" IN ${buildAssetSearchUnion(
-        { organizationId, terms }
+        {
+          organizationId,
+          terms,
+          custodySearchScope: search.custodySearchScope,
+        }
       )}`;
     } else {
       // Typed input yielding zero terms (whitespace / bare commas) matches

@@ -5,7 +5,14 @@
  *
  * @see {@link file://./checkout-dialog.tsx}
  */
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { useState } from "react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { useNavigation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -327,6 +334,128 @@ describe("CheckoutDialog confirmation", () => {
   });
 });
 
+/**
+ * Opens a controlled dialog from a separate button, the way a menu row does,
+ * with a second button for focus to return to.
+ */
+function ControlledHarness({
+  returnFocus,
+  requiredField = false,
+  ...props
+}: {
+  returnFocus: boolean;
+  /** Adds an empty required field, so a submit is blocked by validation. */
+  requiredField?: boolean;
+} & Partial<Parameters<typeof CheckoutDialog>[0]>) {
+  const [open, setOpen] = useState(false);
+  return (
+    <form id="edit-booking-form" onSubmit={(event) => event.preventDefault()}>
+      {requiredField ? (
+        <input aria-label="Booking name" name="name" required />
+      ) : null}
+      <button type="button" onClick={() => setOpen(true)}>
+        Open from menu
+      </button>
+      <button type="button" id="menu-trigger">
+        Menu trigger
+      </button>
+      <CheckoutDialog
+        booking={booking}
+        formId="edit-booking-form"
+        open={open}
+        onOpenChange={setOpen}
+        returnFocusTo={
+          returnFocus
+            ? () => document.getElementById("menu-trigger")
+            : undefined
+        }
+        {...props}
+      />
+    </form>
+  );
+}
+
+describe("CheckoutDialog opened from outside", () => {
+  it("always asks, even when the confirmation is off", () => {
+    render(<ControlledHarness returnFocus confirm={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+
+    // The caller opened it, so it must show a dialog, not a bare submit.
+    expect(
+      screen.getByRole("alertdialog", { name: "Check out booking" })
+    ).toBeInTheDocument();
+  });
+
+  it("clears an old end-date error when it is opened again", () => {
+    render(
+      <ControlledHarness returnFocus booking={expiredBooking} allowNewEndDate />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+    fireEvent.change(screen.getByLabelText("New end date"), {
+      target: { value: "" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check out with new end date" })
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Pick a new end date");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+
+    // A fresh opening starts clean, even though it was opened from outside.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("New end date")).not.toHaveAttribute(
+      "aria-invalid"
+    );
+  });
+
+  it("reports a blocked submit instead of returning focus", async () => {
+    render(<ControlledHarness returnFocus requiredField />);
+    const form = document.getElementById(
+      "edit-booking-form"
+    ) as HTMLFormElement;
+    // why: happy-dom's reportValidity does not move focus to the invalid
+    // field, so the call itself is the observable sign that the blocked-submit
+    // branch ran. The spy keeps the real implementation.
+    const reportValidity = vi.spyOn(form, "reportValidity");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    );
+    await waitFor(() => expect(reportValidity).toHaveBeenCalled());
+    expect(document.activeElement).not.toBe(
+      screen.getByRole("button", { name: "Menu trigger" })
+    );
+  });
+
+  it("renders no trigger of its own", () => {
+    render(<ControlledHarness returnFocus />);
+
+    expect(
+      screen.queryByRole("button", { name: "Check Out" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("returns focus to the given element when it closes", async () => {
+    render(<ControlledHarness returnFocus />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Radix restores focus on the task after the dialog unmounts.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Menu trigger" })
+      )
+    );
+  });
+});
+
 describe("CheckoutDialog while a submission is in flight", () => {
   afterEach(() => {
     vi.mocked(useNavigation).mockReturnValue({ state: "idle" } as never);
@@ -352,7 +481,22 @@ describe("CheckoutDialog From location question", () => {
     const { container } = renderInForm({ sourceQuestions: [] });
 
     fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
-    expect(container.ownerDocument.querySelector("select")).toBeNull();
+    expect(
+      container.ownerDocument.querySelector('[aria-haspopup="listbox"]')
+    ).toBeNull();
+  });
+
+  it("posts nothing when the operator re-chooses the pre-selected location", () => {
+    renderInForm({ sourceQuestions: [QUESTION] });
+    fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /AA Batteries/ }));
+    fireEvent.click(
+      screen.getByRole("option", { name: "Store Room · 60 pcs" })
+    );
+
+    // Re-choosing the default is not an answer: the server keeps its own.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
   });
 
   it("asks where each pool's units leave from before checking out", () => {
@@ -366,18 +510,26 @@ describe("CheckoutDialog From location question", () => {
     expect(
       screen.getByRole("heading", { name: "Where do the units come from?" })
     ).toBeInTheDocument();
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.name).toBe("");
-    expect(select.value).toBe("loc-store");
-    expect(select.getAttribute("form")).toBe("edit-booking-form");
-    expect([...select.options].map((option) => option.text)).toEqual([
-      "Store Room · 60 pcs",
-      "Studio · 40 pcs",
-    ]);
-    // Unchanged, it posts nothing and the server records its own default;
-    // once the operator picks, the answer is posted under the slice's key.
-    fireEvent.change(select, { target: { value: "loc-studio" } });
-    expect(select.name).toBe("sourceLocation.ba-1");
+    // The trigger is named by its label, the pool's title.
+    const picker = screen.getByRole("button", { name: /AA Batteries/ });
+    expect(picker).toHaveTextContent("Store Room · 60 pcs");
+    // Unchanged, it posts nothing and the server records its own default.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
+
+    fireEvent.click(picker);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent)
+    ).toEqual(["Store Room · 60 pcs", "Studio · 40 pcs"]);
+    fireEvent.click(screen.getByRole("option", { name: "Studio · 40 pcs" }));
+
+    // Once the operator picks, the answer is posted under the slice's key,
+    // tied to the booking form the portaled dialog sits outside of.
+    const answer = document.querySelector<HTMLInputElement>(
+      'input[name="sourceLocation.ba-1"]'
+    );
+    expect(answer?.value).toBe("loc-studio");
+    expect(answer?.getAttribute("form")).toBe("edit-booking-form");
+    expect(picker).toHaveTextContent("Studio · 40 pcs");
 
     const submit = screen.getByRole("button", { name: "Check out" });
     expect(submit).toHaveAttribute("type", "submit");

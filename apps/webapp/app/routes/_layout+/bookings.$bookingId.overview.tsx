@@ -33,6 +33,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { resolveBookingCustodian } from "~/modules/booking/booking-custodian.server";
 import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
   primeBookingOverviewCache,
@@ -1484,6 +1485,7 @@ const INTENT_VERB = {
   checkOutRemaining: "check out",
   checkIn: "check in",
   archive: "archive",
+  "discard-draft": "discard",
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
@@ -1526,6 +1528,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkOutRemaining",
           "checkIn",
           "archive",
+          "discard-draft",
           "cancel",
           "removeKit",
           "revert-to-draft",
@@ -1563,10 +1566,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      // archive/cancel have dedicated permissions, and BASE deliberately holds
-      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
-      // user archive or cancel bookings the role was never granted.
+      // archive/cancel have dedicated permissions. `update` is not their gate:
+      // every role that writes bookings holds it, including roles without
+      // archive or cancel. Discarding a draft archives it, so it asks for
+      // archive too.
       archive: PermissionAction.archive,
+      "discard-draft": PermissionAction.archive,
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
@@ -1604,13 +1609,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * so we must not call findUniqueOrThrow before this.
      */
     if (intent === "delete") {
-      // A caller who writes every booking and may delete any status needs no
-      // lookup. Everyone else is held to their own bookings, and roles whose
-      // policy limits delete to drafts are held to drafts.
-      if (
-        !access.bookings.writeAll ||
-        access.policy.bookings.deleteOnlyDrafts
-      ) {
+      // A caller who writes every booking needs no lookup. Everyone else is
+      // held to their own bookings.
+      if (!access.bookings.writeAll) {
         const b = await getBooking({ id, organizationId, request });
         assertCanDeleteBooking({ access, booking: b, userId });
       }
@@ -1623,9 +1624,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const deletedBooking = await deleteBooking(
         { id, organizationId },
         getClientHint(request),
-        userId,
-        // Re-checked at write time: the booking may have left DRAFT since.
-        { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
+        userId
       );
 
       const actor = wrapUserLinkForNote({ ...user, id: userId });
@@ -1665,7 +1664,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          // creatorId/custodianUserId feed the ownership guard below.
+          // creatorId/custodianUserId feed the ownership guard below;
+          // custodianTeamMemberId tells save/reserve whether the custodian
+          // changes.
           select: {
             id: true,
             status: true,
@@ -1673,6 +1674,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             to: true,
             creatorId: true,
             custodianUserId: true,
+            custodianTeamMemberId: true,
           },
         }),
         getWorkingHoursForOrganization(organizationId),
@@ -1781,6 +1783,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const tags = buildTagsSet(parsedData.tags).set;
 
+        // The custodian is loaded from this workspace and held to the
+        // self-only rule; its user link comes from that row, not the form.
+        const custodian = await resolveBookingCustodian({
+          custodianTeamMemberId: parsedData.custodian.id,
+          organizationId,
+          userId,
+          access,
+          currentCustodianTeamMemberId: basicBookingInfo.custodianTeamMemberId,
+        });
+
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -1788,8 +1800,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianTeamMemberId: custodian.id,
           tags,
           userId,
           hints: getClientHint(request),
@@ -1838,6 +1849,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const formattedFrom = parsedData.startDate;
         const formattedTo = parsedData.endDate;
 
+        // Same custodian rule as the "save" branch.
+        const custodian = await resolveBookingCustodian({
+          custodianTeamMemberId: parsedData.custodian.id,
+          organizationId,
+          userId,
+          access,
+          currentCustodianTeamMemberId: basicBookingInfo.custodianTeamMemberId,
+        });
+
         const booking = await reserveBooking({
           id,
           organizationId,
@@ -1845,8 +1865,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianTeamMemberId: custodian.id,
           hints: getClientHint(request),
           alertsOrgOnReservation:
             access.policy.notifications.reservationAlertsAdmins,
@@ -2099,6 +2118,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         sendNotification({
           title: "Booking archived",
           message: "Your booking has been archived successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }), { headers });
+      }
+      case "discard-draft": {
+        await archiveBooking({
+          id,
+          organizationId,
+          userId: user.id,
+          discardDraft: true,
+        });
+
+        sendNotification({
+          title: "Draft discarded",
+          message:
+            "Your draft has been archived. You can still find it under archived bookings.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

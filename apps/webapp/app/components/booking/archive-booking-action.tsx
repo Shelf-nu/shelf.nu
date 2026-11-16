@@ -4,6 +4,10 @@
  * so it does not depend on the page it is rendered on or on an enclosing form.
  * The server sends the success toast.
  *
+ * With `discardDraft` it is "Discard draft" instead: it posts
+ * `intent=discard-draft`, which archives a DRAFT. That is how members without
+ * `booking:delete` drop a draft while the record stays in workspace history.
+ *
  * Forwards its ref and spreads extra props so `DropdownMenuItem asChild` can
  * drive it.
  *
@@ -12,7 +16,7 @@
  */
 import { forwardRef } from "react";
 import type { HTMLAttributes } from "react";
-import { ArchiveIcon } from "lucide-react";
+import { ArchiveIcon, ArchiveXIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -27,6 +31,8 @@ type ArchiveBookingActionProps = Omit<
   booking: { id: string };
   /** Defaults to `"menu-item"`. */
   trigger?: BookingActionTriggerVariant;
+  /** Discard a draft (archive a DRAFT) rather than archive a finished booking. */
+  discardDraft?: boolean;
 };
 
 /**
@@ -34,16 +40,18 @@ type ArchiveBookingActionProps = Omit<
  *
  * @param props.booking - The booking to archive
  * @param props.trigger - Menu row or icon button
+ * @param props.discardDraft - Post the discard-draft intent with its own label
  */
 export const ArchiveBookingAction = forwardRef<
   HTMLElement,
   ArchiveBookingActionProps
 >(function ArchiveBookingAction(
-  { booking, trigger = "menu-item", ...rest },
+  { booking, trigger = "menu-item", discardDraft = false, ...rest },
   ref
 ) {
+  const intent = discardDraft ? "discard-draft" : "archive";
   const fetcher = useFetcher<DataOrErrorResponse>({
-    key: `archive-booking-${booking.id}`,
+    key: `${intent}-booking-${booking.id}`,
   });
   const busy = useDisabled(fetcher);
 
@@ -52,14 +60,24 @@ export const ArchiveBookingAction = forwardRef<
       {...rest}
       ref={ref}
       variant={trigger}
-      label="Archive"
-      icon={<ArchiveIcon className="size-4" />}
-      disabled={busy ? { reason: "Archiving..." } : false}
+      label={discardDraft ? "Discard draft" : "Archive"}
+      icon={
+        discardDraft ? (
+          <ArchiveXIcon className="size-4" />
+        ) : (
+          <ArchiveIcon className="size-4" />
+        )
+      }
+      disabled={
+        busy
+          ? { reason: discardDraft ? "Discarding..." : "Archiving..." }
+          : false
+      }
       onClick={(event) => {
         // Keep the handler a Radix `asChild` parent attached (closing a menu).
         rest.onClick?.(event);
         void fetcher.submit(
-          { intent: "archive" },
+          { intent },
           { method: "post", action: `/bookings/${booking.id}/overview` }
         );
       }}

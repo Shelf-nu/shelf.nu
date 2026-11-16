@@ -400,6 +400,15 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
 
     // The raw concat path must NOT be taken.
     expect(db.$transaction).toHaveBeenCalled();
+
+    // A browser upload is always WEB_UPLOAD, and the rebuilt request keeps
+    // the original hints so an offset-less date is read in the right zone.
+    expect(uploadAuditImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uploadedVia: "web",
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
+      })
+    );
   });
 
   it("does NOT inline-concat user content for upload-image (no raw string build in the route)", async () => {
@@ -456,6 +465,16 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
     // The shared helper should NOT be called for multi-file (it's used only
     // for the single-file path per the fix spec).
     expect(createAuditImageEvidenceNote).not.toHaveBeenCalled();
+
+    expect(uploadAuditImage).toHaveBeenCalledTimes(2);
+    for (const [args] of vi.mocked(uploadAuditImage).mock.calls) {
+      expect(args).toEqual(
+        expect.objectContaining({
+          uploadedVia: "web",
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
+        })
+      );
+    }
   });
 
   it("refuses an upload on a finished audit before storing the file", async () => {

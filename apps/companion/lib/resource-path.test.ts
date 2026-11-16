@@ -11,7 +11,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  classifyResourcePath,
+  isPlainRecordId,
   matchResourcePath,
+  queryIdsArePlain,
   nativeRouteForLink,
   splitLinkUrl,
 } from "./resource-path";
@@ -152,4 +155,101 @@ test("a link outside the allowlist is returned unchanged", () => {
   ]) {
     assert.equal(nativeRouteForLink(url), url);
   }
+});
+
+test("an id that is not a plain record id matches nothing", () => {
+  for (const id of [
+    "as_1%3ForgId%3Dother",
+    "as_1%2Fbookings",
+    "as_1%23frag",
+    "as_1%26orgId%3Dother",
+    "..",
+    "as 1",
+    "a".repeat(129),
+  ]) {
+    assert.equal(matchResourcePath(["assets", id]), null, id);
+    assert.equal(matchResourcePath(["assets", "kits", id]), null, id);
+    assert.equal(matchResourcePath(["bookings", id]), null, id);
+    assert.equal(matchResourcePath(["audits", id]), null, id);
+    assert.equal(matchResourcePath(["qr", id]), null, id);
+  }
+  assert.equal(isPlainRecordId("clx9abc_DEF-12"), true);
+  assert.equal(isPlainRecordId("SAM-0001"), true);
+});
+
+test("a resource link with a refused id lands on the start screen", () => {
+  for (const url of [
+    "shelf://assets/as_1%3ForgId%3Dother",
+    "https://app.shelf.nu/bookings/bk_1%2Fmodel-requests",
+    "shelf://audits/..",
+    "https://app.shelf.nu/qr/qr_1%26x",
+  ]) {
+    assert.equal(nativeRouteForLink(url), "/", url);
+  }
+});
+
+test("the scanner ignores its id, so any id still opens it", () => {
+  assert.deepEqual(matchResourcePath(["scanner", "v1.2"]), {
+    resource: "scanner",
+    id: null,
+  });
+  assert.equal(nativeRouteForLink("https://app.shelf.nu/scan/a.b"), "/scanner");
+});
+
+test("an id-named query value must be a plain record id too", () => {
+  assert.equal(queryIdsArePlain("qrId=qr_1&tab=assets"), true);
+  assert.equal(queryIdsArePlain("note=a%26b"), true);
+  assert.equal(queryIdsArePlain("qrId=qr_1%26orgId%3Dother"), false);
+  assert.equal(queryIdsArePlain("auditId=..%2Fx"), false);
+  assert.equal(
+    nativeRouteForLink("shelf://assets/new?qrId=qr_1"),
+    "/assets/new?qrId=qr_1"
+  );
+  assert.equal(
+    nativeRouteForLink("https://app.shelf.nu/audits/scan?auditId=a%2Fb"),
+    "/"
+  );
+});
+
+test("tracking and other non-id query values are not checked", () => {
+  const fbclid = "A.b-c_".repeat(34).slice(0, 200);
+  assert.equal(
+    nativeRouteForLink(`https://app.shelf.nu/assets/as_1?fbclid=${fbclid}`),
+    `/assets/as_1?fbclid=${fbclid}`
+  );
+  assert.equal(queryIdsArePlain("gclid=x.y&uuid=a.b&valid=1.0"), true);
+  assert.equal(
+    nativeRouteForLink("https://app.shelf.nu/assets/new?qrId=qr.1"),
+    "/"
+  );
+});
+
+test("a known resource with a bad id is refused, not unknown", () => {
+  assert.equal(classifyResourcePath(["assets", "as_1%3Fx"]), "refused");
+  assert.equal(classifyResourcePath(["locations", "lc_1"]), null);
+  assert.deepEqual(classifyResourcePath(["scanner", "v1.2"]), {
+    resource: "scanner",
+    id: null,
+  });
+});
+
+test("an unknown path with a bad record-id query value is refused too", () => {
+  assert.equal(
+    nativeRouteForLink(
+      "shelf://(tabs)/scanner?bookingId=bk_1%2Fx&bookingAction=checkout"
+    ),
+    "/"
+  );
+  assert.equal(
+    nativeRouteForLink("shelf://(tabs)/scanner?bookingId=bk_1"),
+    "shelf://(tabs)/scanner?bookingId=bk_1"
+  );
+});
+
+test("an empty record-id query value is ignored", () => {
+  assert.equal(queryIdsArePlain("orgId=&qrId="), true);
+  assert.equal(
+    nativeRouteForLink("https://app.shelf.nu/assets/as_1?orgId="),
+    "/assets/as_1?orgId="
+  );
 });

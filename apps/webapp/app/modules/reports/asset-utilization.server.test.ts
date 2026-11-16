@@ -75,20 +75,22 @@ describe("assetUtilizationReport", () => {
     vi.useRealTimers();
   });
 
-  it("excludes DRAFT and CANCELLED bookings from the usage query", async () => {
+  it("excludes DRAFT, CANCELLED and never-checked-out archived bookings from the usage query", async () => {
     await assetUtilizationReport({
       organizationId: "org-1",
       timeframe: TIMEFRAME,
     });
 
     const args = vi.mocked(db.asset.findMany).mock.calls[0][0] as any;
-    // A DRAFT booking is a plan and a CANCELLED one never happened — neither
-    // is usage, so the slice filter excludes them exactly like the
-    // top-booked reports do.
+    // A DRAFT booking is a plan, a CANCELLED one never happened, and one
+    // archived before any check-out (a discarded draft or an unused
+    // reservation) never went out. None is usage, so the slice filter
+    // excludes them exactly like the top-booked reports do.
     expect(args.select.bookingAssets.where.booking).toEqual({
       from: { lte: TIMEFRAME.to },
       to: { gte: TIMEFRAME.from },
       status: { notIn: ["DRAFT", "CANCELLED"] },
+      archivedWithoutCheckin: false,
     });
   });
 

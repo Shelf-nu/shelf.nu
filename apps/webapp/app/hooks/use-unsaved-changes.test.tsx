@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { getDefaultStore } from "jotai";
 import {
   createRoutesStub,
   Form,
@@ -7,11 +8,13 @@ import {
   Outlet,
   redirect,
   useActionData,
+  useLoaderData,
   useLocation,
   useNavigation,
 } from "react-router";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dirtyFormCountAtom } from "~/atoms/unsaved-changes";
 import {
   serializeFormSnapshot,
   UNSAVED_CHANGES_DEFAULT_IGNORE,
@@ -134,7 +137,7 @@ function renderForm(
     },
     { path: "/other", Component: () => <p>Other page loaded</p> },
   ]);
-  render(<Stub initialEntries={["/edit"]} />);
+  return render(<Stub initialEntries={["/edit"]} />);
 }
 
 const status = () => screen.getByTestId("status").textContent;
@@ -147,6 +150,11 @@ beforeEach(() => {
   rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
 });
 afterEach(() => rafSpy.mockRestore());
+
+/** The app renders without a jotai Provider, so the hook writes here. */
+const jotaiStore = getDefaultStore();
+const dirtyFormCount = () => jotaiStore.get(dirtyFormCountAtom);
+beforeEach(() => jotaiStore.set(dirtyFormCountAtom, 0));
 
 /** Resolves once the hook has read its baseline snapshot. */
 async function waitForBaseline() {
@@ -337,6 +345,113 @@ describe("useUnsavedChanges", () => {
       timeout: 2000,
     });
     expect(status()).toBe("clean");
+  });
+});
+
+/**
+ * A record page whose route component stays mounted across records, as a
+ * booking's overview does when a duplicate or the record navigation moves
+ * it from one booking to the next. Fields are keyed by the record id, so
+ * they show the new record's values while the form element itself stays.
+ */
+function RecordForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+  const record = useLoaderData<{ id: string; name: string }>();
+  const actionData = useActionData();
+  const { state } = useUnsavedChanges({ formRef, actionData });
+
+  return (
+    <Form ref={formRef} method="post">
+      <input
+        key={record.id}
+        aria-label="Name"
+        name="name"
+        defaultValue={record.name}
+        disabled={useNavigation().state !== "idle"}
+      />
+      <input type="hidden" name="id" value={record.id} />
+      <span data-testid="status">{state.status}</span>
+      {state.status === "blocked" ? (
+        <button type="button" onClick={state.proceed}>
+          Leave page
+        </button>
+      ) : null}
+      <Link to="/records/b">Next record</Link>
+      <Link to="/other">Other page</Link>
+    </Form>
+  );
+}
+
+function renderRecords() {
+  const names: Record<string, string> = { a: "Booking A", b: "Booking B" };
+  const Stub = createRoutesStub([
+    {
+      path: "/records/:id",
+      Component: RecordForm,
+      loader: ({ params }) => ({
+        id: params.id ?? "",
+        name: names[params.id ?? ""] ?? "",
+      }),
+    },
+    { path: "/other", Component: () => <p>Other page loaded</p> },
+  ]);
+  render(<Stub initialEntries={["/records/a"]} />);
+}
+
+describe("useUnsavedChanges across records", () => {
+  it("is clean on the next record when the page component stays mounted", async () => {
+    renderRecords();
+    await waitForBaseline();
+    fireEvent.click(screen.getByRole("link", { name: "Next record" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Name")).toHaveValue("Booking B")
+    );
+    // why: past the 1 s interval check, which compares against the baseline
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(status()).toBe("clean");
+  });
+
+  it("tracks edits on the next record against that record's values", async () => {
+    renderRecords();
+    await waitForBaseline();
+    fireEvent.click(screen.getByRole("link", { name: "Next record" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Name")).toHaveValue("Booking B")
+    );
+    await waitForBaseline();
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Booking B, renamed" },
+    });
+    await waitFor(() => expect(status()).toBe("dirty"), { timeout: 3000 });
+    fireEvent.click(screen.getByRole("link", { name: "Other page" }));
+    await waitFor(() => expect(status()).toBe("blocked"));
+  });
+});
+
+describe("useUnsavedChanges dirty form count", () => {
+  it("counts the form while it is dirty", async () => {
+    renderForm();
+    await waitForBaseline();
+    expect(dirtyFormCount()).toBe(0);
+    await makeDirtyByTyping();
+    expect(dirtyFormCount()).toBe(1);
+  });
+
+  it("stops counting the form once it is clean again", async () => {
+    renderForm();
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(status()).toBe("clean"));
+    expect(dirtyFormCount()).toBe(0);
+  });
+
+  it("stops counting a dirty form when it unmounts", async () => {
+    const { unmount } = renderForm();
+    await makeDirtyByTyping();
+    expect(dirtyFormCount()).toBe(1);
+    unmount();
+    expect(dirtyFormCount()).toBe(0);
   });
 });
 

@@ -3,6 +3,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
 import type { FieldLinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
@@ -48,6 +49,16 @@ export type Organization = {
    * older servers; read as `false`, which only ever under-offers.
    */
   managersCanEditAssets?: boolean;
+  /**
+   * From `/api/mobile/me`: `true` when the mobile API refuses requests in this
+   * workspace (a lapsed Team plan, or switched off by a Shelf admin). Absent on
+   * older servers, which refuse nothing; read it through `isWorkspaceInactive`.
+   */
+  inactive?: boolean;
+  /** Why the workspace is inactive, or `null` when it is active. */
+  inactiveReason?: "lapsed" | "disabled" | null;
+  /** The server's text for an inactive workspace, or `null` when it is active. */
+  inactiveMessage?: string | null;
 };
 
 export type MeResponse = {
@@ -769,6 +780,11 @@ export type LocationsResponse = {
   perPage?: number;
   totalCount?: number;
   totalPages?: number;
+  /**
+   * Set only on requests sent without `page` and `perPage`: true when the
+   * server's 1000-row cap cut the list, so `locations` is not every location.
+   */
+  truncated?: boolean;
 };
 
 export type CustodyResponse = {
@@ -1241,6 +1257,12 @@ export type BookingDetailResponse = {
     canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
+    /**
+     * Whether the caller may discard this draft (archive a DRAFT): offered to
+     * members who may archive but not delete. Optional: servers that predate
+     * the flag omit it, and an absent flag hides the action.
+     */
+    canDiscardDraft?: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
     /**
@@ -1481,13 +1503,19 @@ export type AvailableKitsResponse = {
  * A bookable asset model in the book-by-model picker, with how many units are
  * free to reserve in the booking's window. `available` = total − in-custody −
  * reserved (concrete + via other model requests). Server-computed; the app
- * caps the reserve input at `available` + the amount already fulfilled.
+ * caps the reserve input with `modelReservationBounds`.
  */
 export type AvailableModel = {
   id: string;
   name: string;
   total: number;
   available: number;
+  /**
+   * Units of this model the booking already holds by name, outside custody.
+   * They come out of the same pool as the reservation. Optional because a
+   * server older than this field does not send it; treat missing as 0.
+   */
+  namedNotInCustody?: number;
   inCustody: number;
   reservedConcrete: number;
   reservedViaRequest: number;
@@ -1578,6 +1606,15 @@ export type AuditExpectedAsset = {
   name: string;
   auditAssetId: string;
   /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
+  /**
    * Evidence recorded against this asset, whether or not anyone scanned it —
    * a note or photo can be attached to an expected asset directly.
    *
@@ -1642,6 +1679,15 @@ export type AuditScanData = {
    * Absent on servers that predate archiving.
    */
   archivedAt?: string | null;
+  /**
+   * Units expected and counted on this row. Both null for an individual
+   * asset; `foundQuantity` null until counted. Absent on servers that predate
+   * audit counts.
+   */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
+  /** `Asset.unitOfMeasure`, for labelling the counts. */
+  unitOfMeasure?: string | null;
 };
 
 export type AuditDetailResponse = {
@@ -1713,6 +1759,10 @@ export type AuditEvidenceImage = {
   /** Always populated — the server falls back to `imageUrl`. */
   thumbnailUrl: string;
   description: string | null;
+  /** When the photo was taken (from its EXIF), ISO; null when unknown. */
+  capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;
@@ -1757,6 +1807,9 @@ export type RecordScanResponse = {
   auditAssetId: string | null;
   foundAssetCount: number;
   unexpectedAssetCount: number;
+  /** The row's counts after this scan. Absent on servers without audit counts. */
+  expectedQuantity?: number | null;
+  foundQuantity?: number | null;
 };
 
 /**

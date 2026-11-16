@@ -107,7 +107,13 @@ describe("removeAuditScan", () => {
 
     expect(db.auditAsset.update).toHaveBeenCalledWith({
       where: { id: "aa-1" },
-      data: { status: "MISSING", scannedAt: null, scannedById: null },
+      data: {
+        status: "MISSING",
+        scannedAt: null,
+        scannedById: null,
+        // The count goes with the scan it was recorded on.
+        foundQuantity: null,
+      },
     });
     expect(db.auditAsset.delete).not.toHaveBeenCalled();
     expect(db.auditScan.delete).toHaveBeenCalledWith({

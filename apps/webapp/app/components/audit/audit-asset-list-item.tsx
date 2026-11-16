@@ -12,7 +12,7 @@
  * @see {@link file://./../../routes/_layout+/audits.$auditId.overview.tsx}
  */
 
-import { isAuditCompleted } from "@shelf/labels";
+import { auditCountLabel, isAuditCompleted } from "@shelf/labels";
 import { ImageIcon, MessageSquare } from "lucide-react";
 import { useLoaderData } from "react-router";
 
@@ -72,6 +72,17 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
    * sheet has a notes section and a photo grid.
    */
   const noteCount = item.auditData?.auditNotesCount ?? 0;
+  // Units on a quantity-tracked row, e.g. "8 of 14 pcs"; null otherwise.
+  const countLabel = item.auditData
+    ? auditCountLabel(
+        {
+          status: item.auditData.auditStatus,
+          expectedQuantity: item.auditData.expectedQuantity,
+          foundQuantity: item.auditData.foundQuantity,
+        },
+        item.unitOfMeasure
+      )
+    : null;
   const photoCount = item.auditData?.auditImagesCount ?? 0;
   const hasEvidence = noteCount > 0 || photoCount > 0;
 
@@ -161,9 +172,14 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
                 column). Keeps composition consistent across surfaces per
                 `.claude/rules/code-bearing-entity-list-consistency.md`.
               */}
-              {displayCode || hasEvidence || item.archivedAt ? (
+              {displayCode || hasEvidence || item.archivedAt || countLabel ? (
                 <div className="flex flex-wrap items-center gap-2">
                   {item.archivedAt ? <ArchivedBadge /> : null}
+                  {countLabel ? (
+                    <span className="text-xs font-medium text-gray-700">
+                      {countLabel}
+                    </span>
+                  ) : null}
                   {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
                   {/*
                     why: the row is the only place someone looks when asking

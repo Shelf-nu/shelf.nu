@@ -351,6 +351,135 @@ describe("getAssetModels", () => {
     });
   });
 
+  it("puts the included model first when it falls outside the page", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    const ownModel = {
+      ...createAssetModelFactory({ id: "model-own", name: "Old Model" }),
+      _count: { assets: 4 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(150);
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(ownModel);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      perPage: 100,
+      includeId: "model-own",
+    });
+
+    // Scoped to the workspace, so another workspace's id cannot be pulled in.
+    expect(db.assetModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "model-own", organizationId: "org-123" },
+      })
+    );
+    expect(result.assetModels.map((m) => m.id)).toEqual([
+      "model-own",
+      "model-1",
+    ]);
+    expect(result.assetModels[0]).toMatchObject({ activeAssetCount: 4 });
+    // The total still counts the workspace's models, not the list length.
+    expect(result.totalAssetModels).toBe(150);
+  });
+
+  it("gives the included model its defaults and active count", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    const ownModel = {
+      ...createAssetModelFactory({ id: "model-own", name: "Old Model" }),
+      _count: { assets: 4 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(150);
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(ownModel);
+    // why: one of the included model's four assets is archived.
+    // @ts-expect-error mock setup
+    db.asset.groupBy.mockResolvedValueOnce([
+      { assetModelId: "model-own", _count: { _all: 1 } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModelCustomFieldDefault.findMany.mockResolvedValueOnce([
+      {
+        assetModelId: "model-own",
+        customFieldId: "brand",
+        value: { raw: "Westermo" },
+      },
+    ]);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      perPage: 100,
+      withCustomFieldDefaults: true,
+      includeId: "model-own",
+    });
+
+    // Both lookups cover the included model, not only the page.
+    expect(db.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetModelId: { in: expect.arrayContaining(["model-own"]) },
+        }),
+      })
+    );
+    expect(db.assetModelCustomFieldDefault.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetModelId: { in: expect.arrayContaining(["model-own"]) },
+        },
+      })
+    );
+    expect(result.assetModels[0]).toMatchObject({
+      id: "model-own",
+      activeAssetCount: 3,
+      customFieldDefaults: [
+        { customFieldId: "brand", value: { raw: "Westermo" } },
+      ],
+    });
+  });
+
+  it("does not look up a model for an asset without one", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(0);
+
+    await getAssetModels({ organizationId: "org-123", includeId: null });
+
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("does not list the included model twice when it is on the page", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(1);
+    // why: the lookup runs alongside the page query, so it returns the same row.
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(pageModel);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      includeId: "model-1",
+    });
+
+    expect(result.assetModels.map((m) => m.id)).toEqual(["model-1"]);
+  });
+
   it("does not read defaults unless asked for them", async () => {
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue([

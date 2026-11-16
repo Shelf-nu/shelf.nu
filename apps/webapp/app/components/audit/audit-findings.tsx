@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Maximize2 } from "lucide-react";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { AuditPhoto } from "~/components/audit/audit-photo";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -496,7 +496,11 @@ function NoteByline({ note }: { note: FindingNote }) {
   );
 }
 
-/** A row of thumbnails that open a navigable preview of the whole set. */
+/**
+ * A row of photo tiles that open a navigable preview of the whole set. Each
+ * tile carries how and when its photo was taken, and any "Old photo" or "No
+ * date" flag, the same way as every other place that shows an audit photo.
+ */
 function PhotoStrip({
   images,
   altFor,
@@ -508,28 +512,16 @@ function PhotoStrip({
 }) {
   if (images.length === 0) return null;
 
-  const gallery = images.map((image) => ({
-    id: image.id,
-    imageUrl: image.imageUrl,
-    thumbnailUrl: image.thumbnailUrl,
-    alt: altFor(image),
-  }));
-
   return (
     <div className="flex flex-wrap gap-2">
       {images.map((image) => (
-        <ImageWithPreview
+        <AuditPhoto
           key={image.id}
-          imageUrl={image.imageUrl}
-          thumbnailUrl={image.thumbnailUrl}
+          image={image}
+          images={images}
           alt={altFor(image)}
-          withPreview
-          className={tw(
-            "rounded border",
-            variant === "expanded" ? "size-28" : "size-14"
-          )}
-          images={gallery}
-          currentImageId={image.id}
+          // why: a tile is never narrower than its "Old photo" chip (80px).
+          className={variant === "expanded" ? "size-28" : "size-20"}
         />
       ))}
     </div>

@@ -176,6 +176,8 @@ describe("POST /api/mobile/audits/image", () => {
         uploadedById: "user-1",
         auditAssetId: "audit-asset-1",
         returnParsedFormData: true,
+        // The phone route is the only caller whose CAMERA / LIBRARY is kept.
+        uploadedVia: "phone",
       })
     );
 

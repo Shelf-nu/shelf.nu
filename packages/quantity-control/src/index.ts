@@ -37,6 +37,8 @@
  * @see {@link file://./format.ts} — unit-count formatting.
  * @see {@link file://./custody-source.ts} custody source picker values,
  *   options, defaults and source wording.
+ * @see {@link file://./audit-count.ts}, the audit count bound and what the
+ *   count prompt can promise.
  */
 
 export * from "./types";
@@ -47,3 +49,4 @@ export * from "./stock-status";
 export * from "./dispositions";
 export * from "./format";
 export * from "./custody-source";
+export * from "./audit-count";
