@@ -3284,9 +3284,10 @@ async function approvalOnCheckout({
 }
 
 /**
- * The audit trail of an approval made by checking the request out: the same
- * system note and `BOOKING_APPROVED` event `approveBooking` writes, inside the
- * check-out's transaction.
+ * The `BOOKING_APPROVED` event of an approval made by checking the request
+ * out, inside the check-out's transaction. No note of its own: the check-out's
+ * status note names the approval and reads "Pending approval" to "Ongoing", so
+ * the activity shows one step, as the approver took it.
  */
 async function recordApprovalOnCheckout(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3301,16 +3302,6 @@ async function recordApprovalOnCheckout(
     approver: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
   }
 ) {
-  await createSystemBookingNote(
-    {
-      bookingId,
-      organizationId,
-      content: `${wrapUserLinkForNote(
-        approver
-      )} approved the booking request by checking it out${approvalStatusClause()}`,
-    },
-    tx
-  );
   await recordEvent(
     {
       organizationId,
@@ -4191,6 +4182,7 @@ async function runCheckoutSideEffects({
   bookingSliceIds,
   departedSlices,
   unscannedSliceIds,
+  approvedOnCheckout = false,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
@@ -4221,6 +4213,11 @@ async function runCheckoutSideEffects({
    * holding one of them.
    */
   unscannedSliceIds?: ReadonlySet<string>;
+  /**
+   * The check-out approved a pending request (an approver checking it out),
+   * so its status note names the approval and starts from "Pending approval".
+   */
+  approvedOnCheckout?: boolean;
 }) {
   // Every booking-note write is scoped to the workspace.
   if (userId) {
@@ -4231,6 +4228,10 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
+      fromPendingApproval: approvedOnCheckout,
+      action: approvedOnCheckout
+        ? "approved the request and checked out the booking"
+        : undefined,
       methodClause: bookingMethodClause(
         provenance && unscannedSliceIds?.size
           ? { ...provenance, method: null }
@@ -5111,6 +5112,8 @@ export async function checkoutBooking({
       provenance,
       bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
       departedSlices,
+      // Set only by the approval gate, when this check-out approved a request.
+      approvedOnCheckout: dataToUpdate.approvedAt !== undefined,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -5626,6 +5629,8 @@ export async function fulfilModelRequestsAndCheckout({
       provenance,
       unscannedSliceIds,
       departedSlices,
+      // Set only by the approval gate, when this check-out approved a request.
+      approvedOnCheckout: dataToUpdate.approvedAt !== undefined,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -11987,6 +11992,8 @@ export async function partialCheckoutBooking({
         // Decided on the locked status: a concurrent first scan may already
         // have moved it on.
         let bookingStatusChanged = false;
+        // The first scan approved a pending request (an approver's check-out).
+        let approvedOnCheckout = false;
         if (lockedStatus === BookingStatus.RESERVED) {
           // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
           // The approval gate lives here, not only in the web dialog, because
@@ -12029,6 +12036,7 @@ export async function partialCheckoutBooking({
             select: { id: true },
           });
           bookingStatusChanged = true;
+          approvedOnCheckout = transitionData.approvedAt !== undefined;
         }
 
         // BOOKING ACTIVITY LOG: Log partial check-out activity.
@@ -12117,11 +12125,15 @@ export async function partialCheckoutBooking({
           },
         });
 
-        const statusNote = bookingStatusChanged
-          ? ` and checked out the booking (status changed to ${
+        const statusNote = !bookingStatusChanged
+          ? ""
+          : approvedOnCheckout
+          ? ` and checked out the booking, approving the request (status changed from Pending approval to ${
               isExpired ? "Overdue" : "Ongoing"
             })`
-          : "";
+          : ` and checked out the booking (status changed to ${
+              isExpired ? "Overdue" : "Ongoing"
+            })`;
 
         /**
          * Per-slice qty fragment for the booking-side note — names each

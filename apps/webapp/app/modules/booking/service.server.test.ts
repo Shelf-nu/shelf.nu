@@ -5505,6 +5505,16 @@ describe("checkoutBooking", () => {
       expect.objectContaining({ action: "BOOKING_APPROVED" }),
       expect.anything()
     );
+    // One decision, one note: the check-out names the approval and goes from
+    // "Pending approval" straight to Ongoing.
+    const noteContents = vitest
+      .mocked(bookingNoteService.createSystemBookingNote)
+      .mock.calls.map(([args]) => String(args.content));
+    expect(noteContents).toEqual([
+      expect.stringMatching(
+        /approved the request and checked out the booking\. Status changed from \{% booking_status status="PENDING_APPROVAL" \/%\} to \{% booking_status status="ONGOING"/
+      ),
+    ]);
   });
 
   it("refuses a straight check-out of a draft by a member whose reservation is a request", async () => {

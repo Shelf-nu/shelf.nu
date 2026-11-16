@@ -668,7 +668,7 @@ describe("partialCheckoutBooking", () => {
   });
 
   it("lets an approver's first scan approve the pending request with the transition", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     // The row lock still reads the booking RESERVED: this is its first scan.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
@@ -704,6 +704,17 @@ describe("partialCheckoutBooking", () => {
         }),
       })
     );
+    // One note for the one decision: the partial check-out names the approval
+    // and the move from "Pending approval", with no separate approval note.
+    expect(
+      vitest
+        .mocked(createSystemBookingNote)
+        .mock.calls.map(([args]) => String(args.content))
+    ).toEqual([
+      expect.stringContaining(
+        "and checked out the booking, approving the request (status changed from Pending approval to Ongoing)"
+      ),
+    ]);
   });
 
   it("uses the locked row's approval, not the pre-transaction snapshot", async () => {
