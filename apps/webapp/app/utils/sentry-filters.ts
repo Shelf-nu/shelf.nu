@@ -168,9 +168,35 @@ function isExpectedRouteErrorRejection(event: ErrorEvent): boolean {
 const WALLET_INJECTION_PATTERN = /window\.ethereum|'selectedAddress'/;
 
 /**
+ * Path every file of the client bundle is served under (`assetsDir` and the
+ * chunk names in `vite.config.ts`). A stack frame whose URL contains it ran
+ * Shelf's own code.
+ */
+const CLIENT_BUNDLE_PATH = "/file-assets/";
+
+/**
+ * Whether an exception has a stack frame from Shelf's own client bundle.
+ *
+ * Judged by the frame's URL, not `in_app`: the browser SDK sets `in_app: true`
+ * on every frame it parses, so a script an extension injects into the page,
+ * or an inline script, looks first-party by that flag.
+ *
+ * @param value - A serialized Sentry exception entry
+ * @returns `true` when at least one frame comes from the client bundle
+ */
+function hasClientBundleFrame(value: SentryExceptionValue): boolean {
+  return (
+    value.stacktrace?.frames?.some((f) =>
+      (f.filename ?? "").includes(CLIENT_BUNDLE_PATH)
+    ) ?? false
+  );
+}
+
+/**
  * Whether an event is a crypto wallet's injected script failing on the page
- * rather than an error in Shelf. Requires no first-party frame as well, so an
- * error thrown by our own code is never dropped by its wording alone.
+ * rather than an error in Shelf. Requires that no frame comes from the client
+ * bundle as well, so an error thrown by our own code is never dropped by its
+ * wording alone.
  *
  * @param event - The Sentry error event
  * @returns `true` when the error comes from an injected wallet script
@@ -179,7 +205,7 @@ function isWalletInjectionError(event: ErrorEvent): boolean {
   return (
     event.exception?.values?.some(
       (v) =>
-        WALLET_INJECTION_PATTERN.test(v.value ?? "") && hasNoFirstPartyFrame(v)
+        WALLET_INJECTION_PATTERN.test(v.value ?? "") && !hasClientBundleFrame(v)
     ) ?? false
   );
 }
