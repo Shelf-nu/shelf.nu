@@ -880,7 +880,11 @@ describe("duplicateAsset", () => {
 
     expect(db.locationNote.createMany).toHaveBeenCalledOnce();
     expect(locationLines()).toEqual([
-      expect.objectContaining({ locationId: "loc-store", userId: "user-1" }),
+      expect.objectContaining({
+        locationId: "loc-store",
+        userId: "user-1",
+        content: expect.stringContaining('count=2 ids="c1,c2"'),
+      }),
     ]);
   });
 
@@ -6664,7 +6668,11 @@ describe("bulkCreateAssetsFromModel location activity", () => {
     expect(result).toEqual({ createdAssetIds: ["a1", "a2", "a3"] });
     expect(db.locationNote.createMany).toHaveBeenCalledOnce();
     expect(locationLines()).toEqual([
-      expect.objectContaining({ locationId: "loc-store", userId: "user-1" }),
+      expect.objectContaining({
+        locationId: "loc-store",
+        userId: "user-1",
+        content: expect.stringContaining('count=3 ids="a1,a2,a3"'),
+      }),
     ]);
   });
 
