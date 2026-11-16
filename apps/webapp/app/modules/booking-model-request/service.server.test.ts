@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { db } from "~/database/db.server";
+import { clearApprovalWhenRequestGrows } from "~/modules/booking/request-change.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
@@ -41,6 +42,12 @@ import {
   upsertBookingModelRequests,
 } from "./service.server";
 import type { ModelPoolClaim } from "./service.server";
+
+// why: whether a grown request clears its approval is decided by the approval
+// helper, which has its own suite; here only when it is asked.
+vitest.mock("~/modules/booking/request-change.server", () => ({
+  clearApprovalWhenRequestGrows: vitest.fn().mockResolvedValue(false),
+}));
 
 vitest.mock("~/database/db.server", () => ({
   db: {
@@ -1415,7 +1422,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("creates the row when quantity is within availability", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     stageTotal(5);
 
     await upsertBookingModelRequest({
@@ -1443,6 +1450,11 @@ describe("upsertBookingModelRequest", () => {
       // row — existing is undefined, so existingFulfilled defaults to 0).
       update: { quantity: 3, fulfilledAt: null },
     });
+    // A new model reservation asks for more than an approval covered.
+    expect(clearApprovalWhenRequestGrows).toHaveBeenCalledWith(
+      expect.anything(),
+      { bookingId: BOOKING_ID, organizationId: ORG_ID, actorUserId: USER_ID }
+    );
   });
 
   it("rejects over-reservation when quantity > available", async () => {
@@ -1538,7 +1550,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("lets a reservation come down even when the pool no longer covers it", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
@@ -1581,6 +1593,8 @@ describe("upsertBookingModelRequest", () => {
         update: expect.objectContaining({ quantity: 8 }),
       })
     );
+    // Asking for less keeps any approval.
+    expect(clearApprovalWhenRequestGrows).not.toHaveBeenCalled();
   });
 
   it("refuses to drop a live booking's reservation below the units already assigned", async () => {

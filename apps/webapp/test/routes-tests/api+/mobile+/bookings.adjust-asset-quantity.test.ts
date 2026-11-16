@@ -19,6 +19,8 @@
 
 import { AssetType, BookingStatus, OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -29,16 +31,14 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
+import { clearApprovalWhenRequestGrows } from "~/modules/booking/request-change.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { ShelfError } from "~/utils/error";
 
 import { action } from "~/routes/api+/mobile+/bookings.adjust-asset-quantity";
-
-import { assertIsDataWithResponseInit } from "@helpers/assertions";
-import { mobileUserContext } from "@helpers/mobile-user-context";
+import { ShelfError } from "~/utils/error";
 
 // @vitest-environment node
 
@@ -46,6 +46,13 @@ import { mobileUserContext } from "@helpers/mobile-user-context";
 // gates, then re-reads and writes it inside a transaction. The transaction
 // runs its callback against a stub client so the in-tx reads/writes are
 // observable without a database.
+
+// why: whether a raised amount clears an approval is the approval helper's
+// call, with its own suite; here only who it is told made the change.
+vi.mock("~/modules/booking/request-change.server", () => ({
+  clearApprovalWhenRequestGrows: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     bookingAsset: { findFirst: vi.fn() },
@@ -233,6 +240,14 @@ describe("POST /api/mobile/bookings/adjust-asset-quantity", () => {
     // The guard is asked about THIS booking's window with the booking itself
     // excluded, comparing the fresh in-tx quantity against the request.
     expect(lockMock).toHaveBeenCalledWith(tx, ASSET_ID, ORG_ID);
+    // Raising an amount asks for more: the approval helper decides, told who.
+    expect(clearApprovalWhenRequestGrows).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        bookingId: BOOKING_ID,
+        actorUserId: expect.any(String),
+      })
+    );
     expect(availabilityGuardMock).toHaveBeenCalledTimes(1);
     expect(availabilityGuardMock).toHaveBeenCalledWith(
       expect.objectContaining({

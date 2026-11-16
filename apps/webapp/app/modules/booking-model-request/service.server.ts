@@ -47,6 +47,7 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
+import { clearApprovalWhenRequestGrows } from "~/modules/booking/request-change.server";
 import {
   canEditModelReservations,
   getReservationCeiling,
@@ -2872,6 +2873,17 @@ export async function writeBookingModelRequestInTx(
       },
       tx
     );
+  }
+
+  // A model reservation added or raised asks for more than an approval
+  // covered.
+  // Decided on the quantity read under the row lock: none before, or less.
+  if (previousQuantity == null || quantity > previousQuantity) {
+    await clearApprovalWhenRequestGrows(tx, {
+      bookingId,
+      organizationId,
+      actorUserId: userId,
+    });
   }
 
   return { request, booking, assetModel, previousQuantity, wasCreated };
