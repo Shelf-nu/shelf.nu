@@ -163,7 +163,10 @@ describe("booking page approve-booking intent", () => {
   it("hands a Manager's approval to the service", async () => {
     actAs([OrganizationRoles.MANAGER]);
 
-    const response = await post({ intent: "approve-booking" });
+    const response = await post({
+      intent: "approve-booking",
+      reviewedVersion: "abc123",
+    });
 
     // A success is the route's plain payload, not a Response; only a refusal
     // arrives as one.
@@ -181,6 +184,15 @@ describe("booking page approve-booking intent", () => {
 });
 
 describe("booking page approve-booking intent: the version reviewed", () => {
+  it("refuses an approval that carries no version, from a page loaded before the request was pending", async () => {
+    actAs([OrganizationRoles.MANAGER]);
+
+    const response = await post({ intent: "approve-booking" });
+
+    expect(response instanceof Response ? response.status : 200).toBe(400);
+    expect(approveBookingMock).not.toHaveBeenCalled();
+  });
+
   it("hands the version the approver saw to the service", async () => {
     actAs([OrganizationRoles.MANAGER]);
 

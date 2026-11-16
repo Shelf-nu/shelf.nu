@@ -110,7 +110,11 @@ export default function ApproveBookingDialog({
         <Button
           type="button"
           onClick={handleOpenDialog}
-          disabled={booking.status !== BookingStatus.RESERVED}
+          // No version on the page means it was loaded before the request was
+          // pending: reload to review it first.
+          disabled={
+            booking.status !== BookingStatus.RESERVED || !booking.requestVersion
+          }
           size="sm"
           className="grow"
         >

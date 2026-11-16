@@ -272,6 +272,23 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
     expect(flags.requestVersion).toEqual(expect.any(String));
   });
 
+  it("offers no Approve when the version could not be read with the screen", async () => {
+    // why: the request was not pending yet when its version was read, so an
+    // approval from this screen could not be checked against what it shows.
+    const { db } = await import("~/database/db.server");
+    vi.mocked(db.booking.findFirst).mockResolvedValueOnce(null);
+    const flags = await approvalFlagsFor({
+      roles: [OrganizationRoles.MANAGER],
+      settings: requiresApproval,
+      row: pendingRow,
+      approver: true,
+      mayCheckout: true,
+    });
+    expect(flags.isPendingApproval).toBe(true);
+    expect(flags.canApprove).toBe(false);
+    expect(flags.requestVersion).toBeNull();
+  });
+
   it("withholds check-out from a custodian who may not approve while the request is pending", async () => {
     const flags = await approvalFlagsFor({
       roles: [OrganizationRoles.SELF_SERVICE],

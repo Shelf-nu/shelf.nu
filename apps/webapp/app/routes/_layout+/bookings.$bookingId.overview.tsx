@@ -2295,6 +2295,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ApproveBookingSchema,
           { additionalData: { userId, id, organizationId } }
         );
+        // The page always renders the version it shows; a post without one
+        // is from a page that never had it (loaded before the request was
+        // pending), so the approver reloads and reviews the request first.
+        if (!reviewedVersion) {
+          throw new ShelfError({
+            cause: null,
+            label: "Booking",
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "This booking request changed since you opened it. Reload it and review it again before approving.",
+          });
+        }
         await approveBooking({
           id,
           organizationId,

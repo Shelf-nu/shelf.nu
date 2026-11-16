@@ -856,7 +856,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Who may decide the request: the same `booking:approve` answer the web
     // Approve button and the `approve-booking` intent resolve, so the phone
     // never draws (or withholds) a decision the server would answer otherwise.
-    const canApprove = isPendingApproval && canApprovePerm;
+    // Only with the version this screen shows: without it an approval could
+    // not be checked against what the approver saw, so the app offers none
+    // until the booking is reloaded.
+    const canApprove =
+      isPendingApproval && canApprovePerm && reviewableVersion !== null;
     // Sent back with Approve so a request that changed since this screen
     // loaded is refused.
     const requestVersion = canApprove ? reviewableVersion : null;
