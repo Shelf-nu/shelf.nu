@@ -4992,16 +4992,14 @@ export async function checkoutBooking({
           bookingId: id,
         });
 
-        // A new end later than the approved one (an expired reservation
-        // re-dated), or a start moved earlier (an early check-out), asks for
-        // more time than was approved: refused for a member whose own
-        // reservations need approval. Approvers pass.
+        // An expired reservation re-dated to a new end later than the approved
+        // one asks for more time than was approved: refused for a member whose
+        // own reservations need approval. Approvers pass. An early check-out
+        // (the start moved earlier) is not held to this rule: picking up a
+        // little before the start is everyday use.
         const asksForMoreTime =
-          (rescheduledWindow != null &&
-            rescheduledWindow.to.getTime() > bookingFound.to.getTime()) ||
-          (dataToUpdate.from instanceof Date &&
-            bookingFound.from != null &&
-            dataToUpdate.from.getTime() < bookingFound.from.getTime());
+          rescheduledWindow != null &&
+          rescheduledWindow.to.getTime() > bookingFound.to.getTime();
         if (
           asksForMoreTime &&
           lockedStatus === BookingStatus.RESERVED &&
@@ -5536,22 +5534,6 @@ export async function fulfilModelRequestsAndCheckout({
           bookingId,
           organizationId
         );
-        // An early check-out that moves the start earlier asks for more time
-        // than was approved: refused for a member whose own reservations
-        // need approval. Approvers pass.
-        if (
-          lockedStatus === BookingStatus.RESERVED &&
-          dataToUpdate.from instanceof Date &&
-          bookingFound.from != null &&
-          dataToUpdate.from.getTime() < bookingFound.from.getTime() &&
-          (await applyRequestGrowthRule(tx, {
-            bookingId,
-            organizationId,
-            actorUserId: userId,
-          }))
-        ) {
-          throw requestGrowthRefusal({ bookingId, status: lockedStatus });
-        }
         // An approver's check-out of a pending request approves it, so the
         // version they saw is compared here, under the lock and before the
         // scan below adds to the booking and changes its version.

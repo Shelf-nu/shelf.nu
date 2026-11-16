@@ -8378,6 +8378,100 @@ describe("fulfilModelRequestsAndCheckout", () => {
     expect(db.bookingModelRequest.findMany).not.toHaveBeenCalled();
   });
 
+  it("lets a requester check out their approved request early, keeping the approval", async () => {
+    // An earlier start is not held to the request-growth rule: picking up a
+    // little before the start is everyday use. Whether it should be is an
+    // open product decision (see the PR's "Decisions a reviewer may flip").
+    const approvedAt = new Date("2026-11-01T09:00:00Z");
+    const mockBooking = {
+      ...buildPreTxBooking({
+        bookingAssets: [
+          {
+            asset: {
+              id: "hp-1",
+              assetKits: [],
+              title: "HP",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            },
+            assetId: "hp-1",
+            quantity: 1,
+            id: "ba-hp",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      }),
+      approvedAt,
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      []
+    );
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: [OrganizationRoles.SELF_SERVICE],
+    });
+    // The growth rule's read, were it asked: an approved reservation.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt,
+      from: null,
+      to: null,
+    });
+
+    try {
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: [],
+        checkoutIntentChoice: "with-adjusted-date" as never,
+      });
+
+      const updateCall = findStatusUpdateCall();
+      expect(updateCall?.data?.status).toBe(BookingStatus.ONGOING);
+      expect((updateCall?.data?.from as Date).getTime()).toBeLessThan(
+        futureFromDate.getTime()
+      );
+      expect(db.booking.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { approvedAt: null, approvedById: null },
+        })
+      );
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.userOrganization.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue(null);
+    }
+  });
+
   it("should rewrite booking.from and set originalFrom when checkoutIntentChoice = with-adjusted-date", async () => {
     expect.assertions(4);
 

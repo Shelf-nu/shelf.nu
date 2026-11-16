@@ -18,9 +18,10 @@
  * booking is past DRAFT (`canManageBookingItems`), so the paths this rule
  * guards are the booked amounts, the model reservations, the extension of a
  * started booking, a scanned extra that answers no reservation at check-out,
- * and a check-out that moves the start earlier or re-dates an expired
- * reservation to a later end. At check-out no later approval can follow, so
- * those callers refuse when this clears an approval (`requestGrowthRefusal`).
+ * and a check-out that re-dates an expired reservation to a later end. At
+ * check-out no later approval can follow, so those callers refuse when this
+ * clears an approval (`requestGrowthRefusal`). An early check-out (the start
+ * moved earlier) is not held to the rule.
  *
  * Every write that can ask for more runs this before it commits.
  *
