@@ -42,7 +42,7 @@ import { SearchableSelect } from "../forms/searchable-select";
 import { Switch } from "../forms/switch";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import { GrayBadge } from "../shared/gray-badge";
 import {
   AlertDialog,
@@ -89,7 +89,7 @@ export function PdfTemplatesSettings({
   return (
     <Card id={BOOKING_SETTINGS_ANCHORS.pdfTemplates} className="my-0 w-full">
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">PDF templates</h3>
+        <CardTitle>PDF templates</CardTitle>
         <p className="text-sm text-gray-600">
           What prints when someone generates a PDF for a booking. Each template
           is a saved layout with its own columns, rows and header lines, picked

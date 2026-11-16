@@ -5,7 +5,9 @@
  * linked to directly: `/settings/bookings#automation` opens the Bookings tab
  * scrolled to the Automation card. React Router's `ScrollRestoration` (in
  * `root.tsx`) scrolls to the element named by the URL hash, on a fresh load
- * and on in-app navigation, so a card only needs a stable `id`.
+ * and on in-app navigation. Each card's title has a button that copies its
+ * link, and the hash follows the card being read as the page scrolls
+ * (`useSectionHashSync`).
  *
  * These ids are public URLs: people paste them into support replies, docs
  * and chat. Renaming one silently breaks every link already shared, so treat

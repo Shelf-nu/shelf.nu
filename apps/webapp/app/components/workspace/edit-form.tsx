@@ -30,7 +30,7 @@ import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import { DateS } from "../shared/date";
 import {
   AlertDialog,
@@ -180,7 +180,7 @@ const WorkspaceGeneralEditForms = ({
         className={tw("my-0", className)}
       >
         <div className="mb-6">
-          <h3 className="text-text-lg font-semibold">General</h3>
+          <CardTitle>General</CardTitle>
           <p className="text-sm text-gray-600">
             Manage general workspace settings.
           </p>
@@ -422,7 +422,7 @@ const WorkspacePermissionsEditForm = ({
       className={tw("my-0 w-full", className)}
     >
       <div className="border-b pb-5">
-        <h3 className="text-text-lg font-semibold">Permissions</h3>
+        <CardTitle>Permissions</CardTitle>
         <p className="text-sm text-gray-600">
           {showManagersSwitch ? (
             <>
@@ -661,7 +661,9 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
       <Card id={GENERAL_SETTINGS_ANCHORS.sso} className={tw("my-0", className)}>
         <div className=" border-b pb-5">
-          <h2 className=" text-[18px] font-semibold">SSO details</h2>
+          <CardTitle as="h2" className="text-[18px]">
+            SSO details
+          </CardTitle>
           <p>
             This workspace has SSO enabled so you can see your SSO settings.
           </p>
@@ -879,7 +881,9 @@ const WorkspaceScimTokensSection = ({
         className={tw("my-0", className)}
       >
         <div className="border-b pb-5">
-          <h2 className="text-[18px] font-semibold">SCIM provisioning</h2>
+          <CardTitle as="h2" className="text-[18px]">
+            SCIM provisioning
+          </CardTitle>
           <p className="text-sm text-gray-600">
             Manage bearer tokens for SCIM user provisioning (e.g. Microsoft
             Entra ID).

@@ -23,7 +23,7 @@ import {
 } from "../forms/select";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -155,9 +155,9 @@ export default function TransferOwnershipCard({
         className={tw(className)}
         id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
       >
-        <h4 className="mb-1 text-text-lg font-semibold">
+        <CardTitle as="h4" className="mb-1">
           Transfer workspace ownership
-        </h4>
+        </CardTitle>
         <p className="mb-2 text-sm text-gray-600">
           Personal workspaces cannot be transferred. To hand over this account
           to someone else, change the email address on your account instead.{" "}
@@ -177,9 +177,9 @@ export default function TransferOwnershipCard({
         className={tw(className)}
         id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
       >
-        <h4 className="mb-1 text-text-lg font-semibold">
+        <CardTitle as="h4" className="mb-1">
           Transfer workspace ownership
-        </h4>
+        </CardTitle>
         <p className="text-sm text-gray-600">
           Only the workspace owner
           {ownerEmail ? ` (${ownerEmail})` : ""} can transfer ownership of this
@@ -194,9 +194,9 @@ export default function TransferOwnershipCard({
       className={tw(className)}
       id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
     >
-      <h4 className="mb-1 text-text-lg font-semibold">
+      <CardTitle as="h4" className="mb-1">
         Transfer workspace ownership
-      </h4>
+      </CardTitle>
       <p className="mb-2 text-sm text-gray-600">
         Transfer workspace to another user. To transfer the workspace, the new
         owner must already be part of the workspace as an admin.{" "}

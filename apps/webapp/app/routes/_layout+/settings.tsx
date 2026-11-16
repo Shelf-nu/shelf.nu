@@ -4,6 +4,7 @@ import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
+import { useSectionHashSync } from "~/hooks/use-section-hash-sync";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -81,6 +82,9 @@ export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
   const { tabs } = useLoaderData<typeof loader>();
+  // Keeps the URL hash on the settings card being read, so the address bar
+  // is always a link to it.
+  useSectionHashSync();
 
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];

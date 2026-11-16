@@ -19,7 +19,7 @@ import { useZorm } from "react-zorm";
 import z from "zod";
 import FormRow from "~/components/forms/form-row";
 import { Switch } from "~/components/forms/switch";
-import { Card } from "~/components/shared/card";
+import { Card, CardTitle } from "~/components/shared/card";
 import { useDisabled } from "~/hooks/use-disabled";
 import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 
@@ -64,7 +64,7 @@ export function ProgressiveCheckinSettings({
   return (
     <Card id={BOOKING_SETTINGS_ANCHORS.countingOptions}>
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
+        <CardTitle>{header.title}</CardTitle>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
       </div>
       <div>

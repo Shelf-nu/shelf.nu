@@ -5,7 +5,7 @@ import { WorkingHoursToggleSchema } from "~/modules/working-hours/zod-utils";
 import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import FormRow from "../forms/form-row";
 import { Switch } from "../forms/switch";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 
 export function EnableWorkingHoursForm({
   enabled,
@@ -20,7 +20,7 @@ export function EnableWorkingHoursForm({
   return (
     <Card id={BOOKING_SETTINGS_ANCHORS.workingHours} className="mt-0">
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
+        <CardTitle>{header.title}</CardTitle>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
       </div>
       <div>

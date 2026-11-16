@@ -7,7 +7,7 @@ import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
-import { Card } from "~/components/shared/card";
+import { Card, CardTitle } from "~/components/shared/card";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
@@ -76,7 +76,7 @@ export function AutoArchiveSettings({
   return (
     <Card id={BOOKING_SETTINGS_ANCHORS.automation} className="my-0">
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
+        <CardTitle>{header.title}</CardTitle>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
       </div>
       <div>
