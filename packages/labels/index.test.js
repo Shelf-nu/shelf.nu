@@ -56,6 +56,7 @@ import {
   kitMemberCustodyBlockedReason,
   kitMemberCustodyRefusal,
   kitMembersCustodyRefusal,
+  archiveAssetBlockedReason,
   archivedAssetBlockedReason,
   archivedAssetsLeftOut,
   archivedAssetsRefusal,
@@ -887,5 +888,34 @@ test("auditCountLabel: a surplus says how many more than expected", () => {
       "pcs"
     ),
     "16 of 14 pcs (+2)"
+  );
+});
+
+test("archiveAssetBlockedReason names the first thing that stops an archive", () => {
+  const state = {
+    isQuantityTracked: false,
+    isInUse: false,
+    isInUnavailableKit: false,
+  };
+  assert.equal(archiveAssetBlockedReason(state), null);
+  assert.equal(
+    archiveAssetBlockedReason({ ...state, isInUnavailableKit: true }),
+    "This asset is part of a kit that's currently in use."
+  );
+  assert.equal(
+    archiveAssetBlockedReason({
+      ...state,
+      isInUse: true,
+      isInUnavailableKit: true,
+    }),
+    "Check the asset in and release any custody before archiving it."
+  );
+  assert.equal(
+    archiveAssetBlockedReason({
+      isQuantityTracked: true,
+      isInUse: true,
+      isInUnavailableKit: true,
+    }),
+    "Quantity-tracked assets can't be archived yet."
   );
 });

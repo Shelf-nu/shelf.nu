@@ -1,4 +1,5 @@
 import {
+  archivedAssetMessage,
   bulkArchiveResultMessage,
   draftBookingsNote,
 } from "./archive-messages";
@@ -19,6 +20,20 @@ describe("draftBookingsNote", () => {
   it("counts and names a few drafts for a bulk archive", () => {
     expect(draftBookingsNote([draft("A"), draft("B"), draft("C")], 4)).toBe(
       ' Some are still in 3 draft bookings ("A", "B" and 1 more), which can\'t be reserved until they are removed.'
+    );
+  });
+});
+
+describe("archivedAssetMessage", () => {
+  it("says what archiving does", () => {
+    expect(archivedAssetMessage([])).toBe(
+      "The asset is hidden from your lists and can't be booked. You can reinstate it any time."
+    );
+  });
+
+  it("adds the draft still holding the asset", () => {
+    expect(archivedAssetMessage([draft("Shoot")])).toBe(
+      "The asset is hidden from your lists and can't be booked. You can reinstate it any time. It is still in the draft booking \"Shoot\", which can't be reserved until it is removed."
     );
   });
 });

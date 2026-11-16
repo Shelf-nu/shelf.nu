@@ -247,6 +247,21 @@ export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected a
 export declare const KIT_IN_USE_REINSTATE_REASON: "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
 
 /**
+ * Why an active asset cannot be archived yet, or `null` when it can: it is
+ * quantity-tracked, checked out or in custody, or in a kit that is in use.
+ * Both apps say it before the tap; the server refuses the same assets.
+ *
+ * @param state.isQuantityTracked - the asset tracks units, not one item
+ * @param state.isInUse - checked out, or held in custody
+ * @param state.isInUnavailableKit - a member of a kit that is not available
+ */
+export declare function archiveAssetBlockedReason(state: {
+  isQuantityTracked: boolean;
+  isInUse: boolean;
+  isInUnavailableKit: boolean;
+}): string | null;
+
+/**
  * The reason an action on an archived asset is disabled. A reader who cannot
  * reinstate (no asset `archive` permission) is told to ask an admin.
  *

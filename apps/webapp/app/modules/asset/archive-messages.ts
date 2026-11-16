@@ -2,11 +2,12 @@
  * Archive Messages
  *
  * The success messages for archiving and reinstating assets, single and bulk.
- * Pure, so both routes word the same outcome the same way and the wording is
+ * Pure, so every route words the same outcome the same way and the wording is
  * tested without a request.
  *
  * @see {@link file://./../../routes/_layout+/assets.$assetId.tsx} single archive
  * @see {@link file://./../../routes/api+/assets.bulk-archive.ts} bulk archive
+ * @see {@link file://./../../routes/api+/mobile+/asset.archive.ts} phone archive
  */
 
 /** A draft booking that still holds an archived asset. */
@@ -37,6 +38,20 @@ export function draftBookingsNote(drafts: DraftBooking[], count = 1): string {
   return drafts.length === 1
     ? ` ${subject} still in the draft booking ${list}, which can't be reserved until ${them} removed.`
     : ` ${subject} still in ${drafts.length} draft bookings (${list}), which can't be reserved until ${them} removed.`;
+}
+
+/**
+ * The message after archiving one asset: what archiving does, and the note on
+ * any draft booking that still holds it. The web toast and the phone's
+ * `POST /api/mobile/asset/archive` answer both use it, so the two read alike.
+ *
+ * @param drafts - Draft bookings holding the archived asset
+ * @returns The full message, ending with the draft note when there is one
+ */
+export function archivedAssetMessage(drafts: DraftBooking[]): string {
+  return `The asset is hidden from your lists and can't be booked. You can reinstate it any time.${draftBookingsNote(
+    drafts
+  )}`;
 }
 
 /**

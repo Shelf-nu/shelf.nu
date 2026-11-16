@@ -4,7 +4,7 @@ import {
   ASSET_QUANTITY_FIGURE_LABELS,
   DELETE_CONSEQUENCE_LABELS,
 } from "@shelf/labels";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -77,6 +77,13 @@ import { InfoRow } from "@/components/shared/info-row";
 import { ImageZoomModal } from "@/components/shared/image-zoom-modal";
 import { ArchivedNotice } from "@/components/shared/archived-notice";
 import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
+import {
+  archiveBlockedReason,
+  canOfferArchive,
+  moreMenuActions,
+  runArchive,
+  settleArchiveChange,
+} from "@/lib/asset-archive";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
@@ -121,9 +128,9 @@ export default function AssetDetailScreen() {
     entity: "note",
     action: "create",
   });
-  // Reinstating an archived asset uses the same grant as archiving it on the
-  // web (`asset: archive`: admins and owners).
-  const canReinstate = userHasPermission({
+  // Archiving and reinstating share one grant, as on the web (`asset:
+  // archive`: admins and owners).
+  const canArchive = userHasPermission({
     roles,
     workspace: currentOrg,
     entity: "asset",
@@ -479,9 +486,78 @@ export default function AssetDetailScreen() {
       Alert.alert("Couldn't reinstate", err);
       return;
     }
-    await fetchAsset();
+    await settleArchiveChange(asset.id, fetchAsset);
     setIsReinstating(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  // ── Archive (active assets) ───────────────────────
+
+  // One archive at a time: the first tap's request may still be running when
+  // the menu is opened again.
+  const archiveInFlight = useRef(false);
+
+  // Same action as the web asset page's Archive. The web archives on one
+  // click; the phone confirms first, because an action sheet is easy to
+  // mis-tap. A state the server would refuse is explained instead of sent.
+  const handleArchive = () => {
+    if (!asset || archiveInFlight.current) return;
+    const blocked = archiveBlockedReason(asset, isQuantityTracked(asset));
+    if (blocked) {
+      Alert.alert("Can't archive this asset", blocked);
+      return;
+    }
+    Alert.alert(
+      "Archive asset?",
+      `"${asset.title}" will be hidden from your lists and can't be booked or assigned custody. You can reinstate it any time.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Archive", onPress: () => void performArchive() },
+      ]
+    );
+  };
+
+  /** Shows the server's model-reservation warning; resolves the choice. */
+  const confirmArchiveAnyway = (message: string) =>
+    new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Model reservations affected",
+        message,
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Archive anyway", onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) }
+      );
+    });
+
+  const performArchive = async () => {
+    if (!currentOrg || !asset || archiveInFlight.current) return;
+    archiveInFlight.current = true;
+    setIsActionLoading(true);
+    try {
+      const outcome = await runArchive({
+        send: (confirmModelShortfall) =>
+          api.archiveAsset(currentOrg.id, asset.id, { confirmModelShortfall }),
+        confirmShortfall: confirmArchiveAnyway,
+      });
+      if (outcome.kind === "failed") {
+        Alert.alert("Couldn't archive", outcome.message);
+        return;
+      }
+      if (outcome.kind === "cancelled") return;
+
+      await settleArchiveChange(asset.id, fetchAsset);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // The archived badge and notice say the rest; a draft still holding the
+      // asset is news the screen does not show.
+      if (outcome.data.draftBookings.length > 0) {
+        Alert.alert("Asset archived", outcome.data.message);
+      }
+    } finally {
+      archiveInFlight.current = false;
+      setIsActionLoading(false);
+    }
   };
 
   // ── Delete Asset ──────────────────────────────────
@@ -556,9 +632,17 @@ export default function AssetDetailScreen() {
   // a notice says why, and every change the server would refuse is off.
   const isArchived = isArchivedAsset(asset);
   const archivedReason = isArchived
-    ? archivedAssetBlockedReason({ canReinstate })
+    ? archivedAssetBlockedReason({ canReinstate: canArchive })
     : undefined;
   const canUpdateLiveAsset = canUpdateAsset && !isArchived;
+  const moreActions = moreMenuActions({
+    offerArchive: canOfferArchive({
+      canUpdate: canUpdateAsset,
+      canArchive,
+      isArchived,
+    }),
+    canDelete: canDeleteAsset,
+  });
   const badge = statusBadge[assetBadgeStatus(asset)] ?? {
     bg: colors.backgroundTertiary,
     text: colors.muted,
@@ -771,9 +855,9 @@ export default function AssetDetailScreen() {
             <View style={styles.archivedNotice}>
               <ArchivedNotice
                 message={archivedReason}
-                actionLabel={canReinstate ? "Reinstate" : undefined}
+                actionLabel={canArchive ? "Reinstate" : undefined}
                 actionAccessibilityLabel="Reinstate asset"
-                onAction={canReinstate ? handleReinstate : undefined}
+                onAction={canArchive ? handleReinstate : undefined}
                 busy={isReinstating}
               />
             </View>
@@ -878,11 +962,12 @@ export default function AssetDetailScreen() {
             }
             onEditPress={() => assetNavigation.openEdit(asset.id)}
             onDeletePress={handleDeleteAsset}
+            onArchivePress={handleArchive}
             isActionLoading={isActionLoading}
             showOverflowMenu={showOverflowMenu}
             setShowOverflowMenu={setShowOverflowMenu}
             canUpdate={canUpdateAsset}
-            canDelete={canDeleteAsset}
+            moreActions={moreActions}
             canCustody={canCustody}
             isSelfService={takesCustodyForSelfOnly}
             isQtyTracked={isQtyTracked}
@@ -1212,16 +1297,41 @@ export default function AssetDetailScreen() {
           onPress={() => setShowOverflowMenu(false)}
         >
           <View style={styles.overflowMenu} accessibilityViewIsModal={true}>
-            <TouchableOpacity
-              style={styles.overflowItem}
-              onPress={() => {
-                setShowOverflowMenu(false);
-                handleDeleteAsset();
-              }}
-            >
-              <Ionicons name="trash-outline" size={20} color={colors.error} />
-              <Text style={styles.overflowItemTextDanger}>Delete Asset</Text>
-            </TouchableOpacity>
+            {/* Archive first, Delete last behind a divider, so the permanent
+                action never sits where the reversible one is expected. */}
+            {moreActions.includes("archive") && (
+              <TouchableOpacity
+                style={styles.overflowItem}
+                onPress={() => {
+                  setShowOverflowMenu(false);
+                  handleArchive();
+                }}
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="archive-outline"
+                  size={20}
+                  color={colors.foreground}
+                />
+                <Text style={styles.overflowItemText}>Archive Asset</Text>
+              </TouchableOpacity>
+            )}
+            {moreActions.includes("delete") && (
+              <TouchableOpacity
+                style={[
+                  styles.overflowItem,
+                  moreActions.length > 1 && styles.overflowItemDivided,
+                ]}
+                onPress={() => {
+                  setShowOverflowMenu(false);
+                  handleDeleteAsset();
+                }}
+                accessibilityRole="button"
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.error} />
+                <Text style={styles.overflowItemTextDanger}>Delete Asset</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1570,6 +1680,15 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: 16,
+  },
+  overflowItemText: {
+    fontSize: fontSize.lg,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  overflowItemDivided: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
   overflowItemTextDanger: {
     fontSize: fontSize.lg,

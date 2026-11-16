@@ -23,6 +23,7 @@ import type {
   UpdateAssetPayload,
   UpdateAssetResponse,
   DeleteAssetResponse,
+  ArchiveAssetResponse,
   ReinstateAssetResponse,
   UpdateImageResponse,
   AdjustQuantityResponse,
@@ -156,6 +157,26 @@ export const assetMutationsApi = {
     apiFetch<DeleteAssetResponse>(`/api/mobile/asset/delete?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify({ assetId, confirmation }),
+    }),
+
+  /**
+   * Archive an asset: it drops out of the default lists and can't be booked
+   * or put in custody until reinstated. Admins and owners only
+   * (`asset: archive`). Refused, with the server's message, for an asset that
+   * is quantity-tracked, in use, or in a reserved or checked-out booking. A
+   * model-reservation shortfall comes back as `errorDetails.reason ===
+   * "model_shortfall"`; resend with `confirmModelShortfall` to archive anyway.
+   * Not retried: a retry after a slow success would read "already archived".
+   */
+  archiveAsset: (
+    orgId: string,
+    assetId: string,
+    { confirmModelShortfall }: { confirmModelShortfall: boolean }
+  ) =>
+    apiFetch<ArchiveAssetResponse>(`/api/mobile/asset/archive?orgId=${orgId}`, {
+      method: "POST",
+      body: JSON.stringify({ assetId, confirmModelShortfall }),
+      retry: false,
     }),
 
   /**

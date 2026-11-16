@@ -406,6 +406,33 @@ function quotedNameList(names) {
 }
 
 /**
+ * Why an active asset cannot be archived yet, or `null` when it can. Both apps
+ * say it before the tap (the web as the disabled Archive item's tooltip, the
+ * phone when the Archive item is tapped); the server (`archiveAsset`) refuses
+ * the same assets either way. Checked in this order, so one reason shows.
+ *
+ * @param {{ isQuantityTracked: boolean; isInUse: boolean; isInUnavailableKit: boolean }} state -
+ *   `isInUse` is checked out or held in custody; `isInUnavailableKit` is a
+ *   member of a kit that is not available
+ * @returns {string | null}
+ */
+export function archiveAssetBlockedReason({
+  isQuantityTracked,
+  isInUse,
+  isInUnavailableKit,
+}) {
+  if (isQuantityTracked)
+    return "Quantity-tracked assets can't be archived yet.";
+  if (isInUse) {
+    return "Check the asset in and release any custody before archiving it.";
+  }
+  if (isInUnavailableKit) {
+    return "This asset is part of a kit that's currently in use.";
+  }
+  return null;
+}
+
+/**
  * The reason an action on an archived asset is disabled.
  *
  * @param {{ canReinstate: boolean; action?: "change" | "book" }} options -
