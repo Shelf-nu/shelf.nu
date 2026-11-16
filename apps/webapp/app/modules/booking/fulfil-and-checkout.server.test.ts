@@ -11,6 +11,7 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestApprovedWithinTx,
   assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
@@ -56,11 +57,12 @@ vi.mock("~/modules/booking/utils.server", () => ({
 // their own suites in service.server.test.ts; this module only chooses and
 // sequences them, which is what these tests pin.
 vi.mock("~/modules/booking/service.server", () => ({
-  // why: the pending-approval preflight reads the booking and the actor's
-  // permission; its own suite covers that, here only whether it refused.
-  assertRequestMayBeCheckedOut: vi
-    .fn()
-    .mockResolvedValue({ approvesRequest: false }),
+  // why: the pending-approval preflight reads the booking and the approval
+  // switches; its own suite covers that, here only whether it refused.
+  assertRequestMayBeCheckedOut: vi.fn().mockResolvedValue(undefined),
+  // why: the same gate under the booking lock, inside the claim's own
+  // transaction; its suite covers the reads, here only whether it refused.
+  assertRequestApprovedWithinTx: vi.fn().mockResolvedValue(undefined),
   fulfilModelRequestsAndCheckout: vi.fn(),
   addScannedAssetsToBooking: vi.fn(),
   partialCheckoutBooking: vi.fn(),
@@ -424,6 +426,34 @@ describe("fulfilAndCheckOut", () => {
       }),
       expect.anything()
     );
+  });
+
+  it("claims nothing when the request is pending again by the time the claim locks the booking", async () => {
+    // The preflight passed, then a requester's change cleared the approval.
+    // The claim re-checks under the booking lock and writes nothing.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+    vi.mocked(assertRequestApprovedWithinTx).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message: "This booking request has not been approved yet.",
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true })
+    ).rejects.toThrow(/not been approved yet/);
+    expect(assertRequestApprovedWithinTx).toHaveBeenCalledWith(
+      expect.anything(),
+      { bookingId: "booking-1", organizationId: "org-1", actorUserId: "user-1" }
+    );
+    expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+    expect(partialCheckoutBooking).not.toHaveBeenCalled();
   });
 
   it("offers the claim step only the units it did not add", async () => {

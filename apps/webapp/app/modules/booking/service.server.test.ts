@@ -19942,6 +19942,51 @@ describe("addScannedAssetsToBooking", () => {
     }
   );
 
+  it("refuses the check-out's add, under its lock, when the request is pending again", async () => {
+    // The fulfil preflight passed, then a requester's change cleared the
+    // approval. The add re-checks under the booking lock and rolls back.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.RESERVED },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      status: BookingStatus.RESERVED,
+    });
+
+    try {
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: ["asset-1"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          access: null,
+          atCheckout: true,
+        })
+      ).rejects.toThrow(/Approve the request first/);
+      // Refused before the notes, which run only after a committed add.
+      expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(null);
+    }
+  });
+
   describe("QUANTITY_TRACKED pool", () => {
     const QT_ID = "asset-qty-scan";
     const from = new Date("2026-07-01T09:00:00Z");

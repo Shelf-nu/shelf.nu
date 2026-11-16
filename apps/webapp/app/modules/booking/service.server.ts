@@ -3247,7 +3247,10 @@ export async function assertRequestMayBeCheckedOut({
 
 /**
  * The approval gate every check-out runs inside its transaction, after the
- * booking row lock: a pending request is refused for everyone, and a draft
+ * booking row lock, and every write a check-out commits on its own before it
+ * (the scanned-only fulfil steps): a pending request is refused for everyone,
+ * so a request that became pending again after a preflight leaves nothing
+ * changed. A draft
  * checked out straight away is refused for a member whose own reservation
  * would be a request. The reads go through `tx`, so a revert that cleared the
  * approval after the caller's pre-transaction read is seen here.
@@ -3260,7 +3263,7 @@ export async function assertRequestMayBeCheckedOut({
  * @throws {ShelfError} 400 when the booking is a pending request, or a draft
  *   the actor would have to request
  */
-async function assertRequestApprovedWithinTx(
+export async function assertRequestApprovedWithinTx(
   tx: Pick<typeof db, "booking" | "bookingSettings" | "userOrganization">,
   {
     bookingId,
@@ -19819,10 +19822,20 @@ export async function addScannedAssetsToBooking({
         revealOtherBookings:
           seesAllBookings ?? access?.bookings.seeAll ?? false,
       });
-      if (atCheckout && result.approvalCleared) {
-        throw requestGrowthRefusal({
+      if (atCheckout) {
+        if (result.approvalCleared) {
+          throw requestGrowthRefusal({
+            bookingId,
+            status: result.booking.status,
+          });
+        }
+        // The first step of a check-out commits on its own: a request that
+        // is pending again since the caller's preflight is refused here,
+        // under the booking lock the add holds, and the add rolls back.
+        await assertRequestApprovedWithinTx(tx, {
           bookingId,
-          status: result.booking.status,
+          organizationId,
+          actorUserId: userId,
         });
       }
       await inSameTransaction?.(tx);

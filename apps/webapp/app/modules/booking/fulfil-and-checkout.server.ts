@@ -40,6 +40,7 @@ import { db } from "~/database/db.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestApprovedWithinTx,
   assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
@@ -413,6 +414,14 @@ async function checkOutScannedUnits(
   if (assetIdsAlreadyOnBooking.length > 0) {
     await db.$transaction(async (tx) => {
       await lockBookingForStatusCheck(tx, bookingId, organizationId);
+      // The preflight ran before this transaction: a request that is pending
+      // again since (a requester's change cleared its approval) is refused
+      // under the lock, before the claim stamps or fulfils anything.
+      await assertRequestApprovedWithinTx(tx, {
+        bookingId,
+        organizationId,
+        actorUserId: userId,
+      });
       await claimUnstampedBookingRows(
         {
           bookingId,
