@@ -2857,7 +2857,7 @@ describe("createAsset reused barcodes", () => {
         // Reused by id: connected as it is, so it must not be freed.
         { type: "Code128", value: "ZZ-KEPT-1", existingId: "bc-orphan" },
       ],
-    } as any);
+    } as Parameters<typeof createAsset>[0]);
 
     // Only this workspace's rows, only the values written as new rows
     // (normalized per type), only rows attached to nothing.
@@ -2882,7 +2882,7 @@ describe("createAsset reused barcodes", () => {
       title: "ZZ Test Asset",
       userId: "user-1",
       organizationId: "org-A",
-    } as any);
+    } as Parameters<typeof createAsset>[0]);
 
     expect(db.barcode.deleteMany).not.toHaveBeenCalled();
   });

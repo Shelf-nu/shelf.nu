@@ -23,7 +23,7 @@ import {
 // why: testing barcode service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    $transaction: vitest.fn(),
     // The org guards look the target up by id + organizationId. Default:
     // every requested id is found, i.e. it belongs to the caller's workspace.
     asset: {
@@ -53,7 +53,9 @@ function findAllRequestedIds({ where }: { where: { id: { in: string[] } } }) {
 
 beforeEach(() => {
   // Suites below replace this per test; each test starts from the default.
-  mockTransaction.mockImplementation((callback) => callback(db));
+  mockTransaction.mockImplementation((work) =>
+    typeof work === "function" ? work(db) : Promise.all(work)
+  );
   //@ts-expect-error missing vitest type
   db.asset.findMany.mockImplementation(findAllRequestedIds);
   //@ts-expect-error missing vitest type
@@ -748,6 +750,31 @@ describe("updateBarcodes", () => {
     });
   });
 
+  it("frees no unattached barcodes when the edit takes no new value", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      { id: "barcode-1", type: BarcodeType.Code128, value: "SAME123" },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.barcode.update.mockResolvedValue({});
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((operations) => Promise.all(operations));
+
+    await updateBarcodes({
+      // Same value, typed in lower case: it normalizes to the value held.
+      barcodes: [
+        { id: "barcode-1", type: BarcodeType.Code128, value: "same123" },
+      ],
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.barcode.update).toHaveBeenCalledTimes(1);
+    expect(db.barcode.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("should delete barcodes not in new list", async () => {
     expect.assertions(2);
     const existingBarcodes = [
@@ -1021,7 +1048,6 @@ describe("validateBarcodeUniqueness", () => {
       where: {
         value: { in: ["UNIQUE123", "UNIQUE456"] },
         organizationId: "org-1",
-        OR: [{ assetId: { not: null } }, { kitId: { not: null } }],
       },
       include: {
         asset: { select: { title: true } },

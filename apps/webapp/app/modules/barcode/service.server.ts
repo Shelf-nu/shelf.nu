@@ -106,8 +106,8 @@ export type BarcodeReleaseClient = {
  * Scans that recorded a removed row keep their scanned `code`; their
  * `barcodeId` is nulled by the foreign key.
  *
- * Returns the query without awaiting it, so it works both awaited inside an
- * interactive transaction and as an entry of a batch transaction.
+ * Returns the query without awaiting it, so it can be an entry of a batch
+ * transaction or be awaited inside an interactive one.
  *
  * @param client - The root client or the caller's transaction client
  * @param args.barcodes - The barcodes about to be written, as submitted
@@ -167,12 +167,12 @@ export async function createBarcode({
       });
     }
 
-    const barcode = await db.$transaction(async (tx) => {
-      await releaseUnattachedBarcodes(tx, {
+    const [, barcode] = await db.$transaction([
+      releaseUnattachedBarcodes(db, {
         barcodes: [{ type, value }],
         organizationId,
-      });
-      return tx.barcode.create({
+      }),
+      db.barcode.create({
         data: {
           type,
           value: normalizedValue, // Preserve case for ExternalQR, uppercase others
@@ -180,8 +180,8 @@ export async function createBarcode({
           ...(assetId && { assetId }),
           ...(kitId && { kitId }),
         },
-      });
-    });
+      }),
+    ]);
     return barcode;
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
@@ -255,9 +255,9 @@ export async function createBarcodes({
     // Let Prisma handle unique constraint violations for performance
 
     // Use createMany for bulk insert performance
-    await db.$transaction(async (tx) => {
-      await releaseUnattachedBarcodes(tx, { barcodes, organizationId });
-      await tx.barcode.createMany({
+    await db.$transaction([
+      releaseUnattachedBarcodes(db, { barcodes, organizationId }),
+      db.barcode.createMany({
         data: barcodes.map((barcode) => ({
           type: barcode.type,
           value: normalizeBarcodeValue(barcode.type, barcode.value),
@@ -265,8 +265,8 @@ export async function createBarcodes({
           ...(assetId && { assetId }),
           ...(kitId && { kitId }),
         })),
-      });
-    });
+      }),
+    ]);
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -329,18 +329,18 @@ export async function updateBarcode({
       }
     }
 
-    const barcode = await db.$transaction(async (tx) => {
-      if (type !== undefined && value !== undefined) {
-        await releaseUnattachedBarcodes(tx, {
-          barcodes: [{ type, value }],
-          organizationId,
-        });
-      }
-      return tx.barcode.update({
+    const [, barcode] = await db.$transaction([
+      releaseUnattachedBarcodes(db, {
+        // The value only changes when both type and value are given.
+        barcodes:
+          type !== undefined && value !== undefined ? [{ type, value }] : [],
+        organizationId,
+      }),
+      db.barcode.update({
         where: { id, organizationId },
         data: updateData,
-      });
-    });
+      }),
+    ]);
     return barcode;
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
@@ -641,7 +641,6 @@ export async function validateBarcodeUniqueness(
     where: {
       value: { in: submittedValues },
       organizationId,
-      OR: [{ assetId: { not: null } }, { kitId: { not: null } }],
     },
     include: {
       asset: { select: { title: true } },
@@ -660,7 +659,8 @@ export async function validateBarcodeUniqueness(
       })
     : existingBarcodes;
 
-  // Map for O(1) lookup: value -> name of the asset or kit that holds it
+  // Map for O(1) lookup: value -> name of the asset or kit that holds it.
+  // A row attached to neither has no holder, so its value is not in the map.
   const holderNameByValue = new Map<string, string>();
   filteredExistingBarcodes.forEach((barcode) => {
     const holderName = barcode.asset?.title ?? barcode.kit?.name;
@@ -758,11 +758,28 @@ export async function updateBarcodes({
       (existing) => !submittedIds.has(existing.id)
     );
 
-    const operations: Prisma.PrismaPromise<unknown>[] = [
-      // First, so a submitted value held by an unattached row is free before
-      // the updates and creates below write it.
-      releaseUnattachedBarcodes(db, { barcodes, organizationId }),
-    ];
+    // Barcodes whose value this item does not hold yet: new ones, and
+    // existing ones whose value changes.
+    const heldValueById = new Map(existingBarcodes.map((b) => [b.id, b.value]));
+    const barcodesTakingAValue = barcodes.filter(
+      (barcode) =>
+        !barcode.id ||
+        heldValueById.get(barcode.id) !==
+          normalizeBarcodeValue(barcode.type, barcode.value)
+    );
+
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+    // First, so a submitted value held by an unattached row is free before
+    // the updates and creates below write it.
+    if (barcodesTakingAValue.length > 0) {
+      operations.push(
+        releaseUnattachedBarcodes(db, {
+          barcodes: barcodesTakingAValue,
+          organizationId,
+        })
+      );
+    }
 
     // Update existing barcodes
     for (const barcode of barcodesToUpdate) {
