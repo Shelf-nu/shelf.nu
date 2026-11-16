@@ -1,10 +1,15 @@
 import type { CSSProperties } from "react";
+import { useMemo } from "react";
 import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
+import { PackageIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
+  assignAlreadyIncludedAtom,
+  assignReservedModelsAtom,
   clearScannedItemsAtom,
+  expectedModelRequestsAtom,
   removeScannedItemAtom,
   scannedAssetQuantitiesAtom,
   scannedItemsAtom,
@@ -12,12 +17,24 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import type {
+  ModelProgress,
+  PendingModelRow,
+} from "~/components/booking/model-pending-rows";
+import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
+import { ModelProgressStrips } from "~/components/booking/model-progress-strips";
+import { Badge } from "~/components/shared/badge";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import {
+  matchScansToModelRequests,
+  type ScannedAssetRow,
+} from "~/modules/booking-model-request/scan-matching";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
 import {
   assetLabelPresets,
@@ -27,7 +44,13 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
+import {
+  buildAddToBookingBlockers,
+  resolveScannedUnitsAvailable,
+} from "./booking-scan-blockers";
+import { kitHasUnavailableActiveMember } from "./scan-blocker-helpers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToBookingSchema = z
@@ -86,10 +109,6 @@ export default function AddAssetsToBookingDrawer({
   const { assetIds } = useAtomValue(scannedItemIdsAtom);
 
   // Filter and prepare data for component rendering
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitFromQr);
@@ -151,172 +170,145 @@ export default function AddAssetsToBookingDrawer({
     )
   );
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
+  // Outstanding model reservations for this booking, seeded by the route's
+  // session hook. Empty on a booking that reserves no models, which is what
+  // keeps every value derived from it below empty too.
+  const expectedModelRequests = useAtomValue(expectedModelRequestsAtom);
 
-  // Asset blockers
-  const assetsAlreadyAddedIds = assets
-    .filter((asset) => !!asset)
-    .filter((asset) =>
-      booking.bookingAssets.some((ba) => ba.assetId === asset.id)
-    )
-    .map((a) => !!a && a.id);
+  /**
+   * Every model the booking reserves, fully filled ones included, so the
+   * matcher can tell an extra scan of a filled model (over the reserved
+   * count) from a scan of an unreserved one. `expectedModelRequests` cannot
+   * answer this: it lists only reservations still owed.
+   */
+  const reservedModels = useAtomValue(assignReservedModelsAtom);
 
-  // Only INDIVIDUAL assets that are in a kit are truly "scan the kit
-  // QR instead" cases — the whole asset is committed to a kit, so
-  // booking the asset directly would conflict with the kit.
-  //
-  // QUANTITY_TRACKED assets only have a *slice* of their pool in any
-  // given kit (`AssetKit.quantity` ≤ `Asset.quantity`); the free
-  // remainder is bookable individually. Server-side availability
-  // re-validation (sum-within-pool + DEFERRED trigger) is the source
-  // of truth — this client-side blocker is just UX. So qty-tracked
-  // rows with kit memberships are no longer blocked here.
-  const assetsPartOfKitIds = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.assetKits.length > 0 &&
-        asset.id
-    )
-    .map((asset) => asset.id);
+  /**
+   * Assets already on the booking before this scan session, as the route
+   * seeded them. Read from `assignAlreadyIncludedAtom` rather than the Check
+   * Out drawer's session atom: the two screens own separate lifecycles, so
+   * tearing one down can never clear the other's data.
+   */
+  const alreadyIncluded = useAtomValue(assignAlreadyIncludedAtom);
 
-  const unavailableAssetsIds = assets
-    .filter((asset) => !asset.availableToBook)
-    .map((a) => !!a && a.id);
+  const alreadyIncludedIds = useMemo(
+    () => new Set(alreadyIncluded.map((row) => row.id)),
+    [alreadyIncluded]
+  );
 
-  // Kit blockers
-  const kitsWithUnavailableAssets = kits
-    .filter((kit) => kit.assetKits.some((ak) => !ak.asset.availableToBook))
-    .map((kit) => kit.id);
+  /**
+   * Which of those a scan could still make answer a reservation. An asset can
+   * appear twice, once standalone and once through a kit, so one entry saying
+   * yes is enough.
+   */
+  const claimableIncludedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of alreadyIncluded) {
+      if (row.claimable) set.add(row.id);
+    }
+    return set;
+  }, [alreadyIncluded]);
 
-  const qrIdsOfUnavailableKits = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return kitsWithUnavailableAssets.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
+  /**
+   * Which scans answer which reservation. The same matcher Check Out uses, so
+   * the two screens can never disagree about what a scan is worth.
+   *
+   * `checksOutScannedOnly` is false here because this screen never checks
+   * anything out: an asset already on the booking is a duplicate unless its
+   * row can still claim a unit.
+   */
+  const scannedBuckets = useMemo(
+    () =>
+      matchScansToModelRequests({
+        items,
+        expectedModelRequests,
+        reservedModels,
+        alreadyIncludedIds,
+        claimableIncludedIds,
+        checksOutScannedOnly: false,
+      }),
+    [
+      items,
+      expectedModelRequests,
+      reservedModels,
+      alreadyIncludedIds,
+      claimableIncludedIds,
+    ]
+  );
 
-  // Assets already checked out as current booking is checked out
-  const checkedOutAssetsIds = assets
-    .filter((asset) => asset.status === AssetStatus.CHECKED_OUT)
-    .map((asset) => asset.id);
-  const tryingToAddCheckedOutAssets =
-    checkedOutAssetsIds.length > 0 &&
-    ["ONGOING", "OVERDUE"].includes(booking.status);
-
-  // Kits already checked out as current booking is checked out
-  const checkedOutKitsIds = kits
-    .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
-    .map((kit) => kit.id);
-  const qrIdsOfCheckedOutKits = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return checkedOutKitsIds.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-  const tryingToAddCheckedOutKits =
-    checkedOutKitsIds.length > 0 &&
-    ["ONGOING", "OVERDUE"].includes(booking.status);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: tryingToAddCheckedOutAssets,
-      count: checkedOutAssetsIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already checked out.
-        </>
+  /**
+   * Scans that will actually answer a reservation, as opposed to assets whose
+   * row merely could in principle.
+   *
+   * `claimableIncludedIds` is structural: it says a row is standalone,
+   * unstamped and INDIVIDUAL, not that anything outstanding matches it. Only
+   * the matcher knows that, because it also needs a reserved model with
+   * capacity left after this session's other scans. Exempting the structural
+   * set from the duplicate blocker would wave through every ordinary rescan
+   * on a booking with no reservations, which is most of them.
+   *
+   * Reading the matcher's tally is a prediction of what the server will do,
+   * not a guarantee of it: scans are held newest-first, so this client
+   * allocates a scarce unit to the most recent matching scan, while the
+   * server claims rows in its own query order. The two can therefore
+   * disagree on which of several equally-claimable rows wins a single unit.
+   * That is fine here because the direction only ever fails closed: the
+   * worst case is the blocker holding a scan the server would have accepted,
+   * never a duplicate slipping through.
+   *
+   * The value is the model the row answers, which the badge names.
+   */
+  const claimedModelNameByAssetId = useMemo(
+    () =>
+      new Map(
+        scannedBuckets.rows
+          .filter((row) => row.bucket === "claimed")
+          .map((row) => [row.asset!.id, row.claimedModelName] as const)
       ),
-      onResolve: () => removeAssetsFromList(checkedOutAssetsIds),
-    },
-    {
-      condition: tryingToAddCheckedOutKits,
-      count: checkedOutKitsIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already checked out.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfCheckedOutKits),
-    },
-    {
-      condition: unavailableAssetsIds.length > 0,
-      count: unavailableAssetsIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          marked as <strong>unavailable</strong>.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(unavailableAssetsIds),
-    },
-    {
-      condition: assetsAlreadyAddedIds.length > 0,
-      count: assetsAlreadyAddedIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> already
-          added to the booking.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
-    },
-    {
-      condition: assetsPartOfKitIds.length > 0,
-      count: assetsPartOfKitIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong> are part
-          of a kit.
-        </>
-      ),
-      description: "Note: Scan Kit QR to add the full kit",
-      onResolve: () => removeAssetsFromList(assetsPartOfKitIds),
-    },
-    {
-      condition: kitsWithUnavailableAssets.length > 0,
-      count: kitsWithUnavailableAssets.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s have" : " has"} `}</strong>{" "}
-          unavailable assets inside {count > 1 ? "them" : "it"}.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfUnavailableKits),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+    [scannedBuckets.rows]
+  );
+
+  /**
+   * The matcher's verdict per scanned code, so each row can say which
+   * reservation it fills, or that it fills none.
+   */
+  const scannedRowByQrId = useMemo(
+    () => new Map(scannedBuckets.rows.map((row) => [row.qrId, row] as const)),
+    [scannedBuckets.rows]
+  );
+
+  /** Per-model progress. `prefulfilled` covers units assigned before this scan. */
+  const progressByModel = useMemo<ModelProgress[]>(
+    () =>
+      expectedModelRequests.map((expected) => ({
+        assetModelId: expected.assetModelId,
+        assetModelName: expected.assetModelName,
+        booked: expected.booked,
+        remaining: expected.remaining,
+        prefulfilled: Math.max(0, expected.booked - expected.remaining),
+        matched:
+          scannedBuckets.matchedCountByModel.get(expected.assetModelId) ?? 0,
+      })),
+    [expectedModelRequests, scannedBuckets.matchedCountByModel]
+  );
+
+  /** One synthetic row per unit still to pull, grouped by model. */
+  const pendingModelRows = useMemo(
+    () => buildPendingModelRows(progressByModel),
+    [progressByModel]
+  );
+
+  const { blockerConfigs } = buildAddToBookingBlockers({
+    items,
+    booking,
+    claimedAssetIds: new Set(claimedModelNameByAssetId.keys()),
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...assetsAlreadyAddedIds,
-        ...assetsPartOfKitIds,
-        ...unavailableAssetsIds,
-        ...checkedOutAssetsIds,
-      ]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfUnavailableKits,
-        ...qrIdsOfCheckedOutKits,
-      ]);
-    },
   });
 
   // Render item row
@@ -331,7 +323,24 @@ export default function AddAssetsToBookingDrawer({
       )}
       renderItem={(data) => {
         if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetFromQr} />;
+          const scannedAsset = data as AssetFromQr;
+          const scannedRow = scannedRowByQrId.get(qrId);
+          return (
+            <AssetRow
+              asset={scannedAsset}
+              scannedCode={qrId}
+              reservation={resolveRowReservation({
+                row: scannedRow,
+                // Keyed by asset, as the blocker exemption is: every row of
+                // a claimed asset reads as claimed, never as a duplicate.
+                isClaimed: claimedModelNameByAssetId.has(scannedAsset.id),
+                claimedModelName: claimedModelNameByAssetId.get(
+                  scannedAsset.id
+                ),
+                hasReservations: reservedModels.length > 0,
+              })}
+            />
+          );
         } else if (item?.type === "kit") {
           return <KitRow kit={data as KitFromQr} />;
         }
@@ -370,27 +379,259 @@ export default function AddAssetsToBookingDrawer({
       className={className}
       style={style}
       formName="AddScannedAssetsToBooking"
+      headerContent={
+        <AssignReservationHeader
+          progressByModel={progressByModel}
+          pendingModelRows={pendingModelRows}
+        />
+      }
     />
   );
 }
 
-// Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetFromQr }) {
+/**
+ * Header content rendered above the scanned list: per-model progress strips,
+ * then one row per unit still to pull for those models.
+ *
+ * Lives in `ConfigurableDrawer`'s `headerContent` slot rather than in the
+ * item list itself. `ConfigurableDrawer` owns that list, the blockers
+ * placement and the empty state; reusing its shared strips and pending-row
+ * builder here keeps this screen's numbers identical to Check Out's without
+ * taking over rendering this feature doesn't need to change.
+ *
+ * Renders nothing when the booking reserves no models, so a plain booking
+ * looks exactly as this screen always has.
+ */
+function AssignReservationHeader({
+  progressByModel,
+  pendingModelRows,
+}: {
+  progressByModel: ModelProgress[];
+  pendingModelRows: PendingModelRow[];
+}) {
+  if (progressByModel.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border border-b-0 bg-gray-50 p-4">
+      <div className="flex flex-col gap-3">
+        <ModelProgressStrips
+          progressByModel={progressByModel}
+          idPrefix="assign"
+        />
+        {pendingModelRows.length > 0 ? (
+          <ul className="flex max-h-[176px] flex-col gap-2 overflow-y-auto border-t border-gray-200 pr-1 pt-3">
+            {pendingModelRows.map((row) => (
+              <PendingModelRowItem
+                key={row.key}
+                assetModelName={row.assetModelName}
+              />
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One row standing in for a single unit still to pull for a reserved model.
+ * Not interactive: the operator resolves it by scanning a matching QR, the
+ * same as the placeholder row Check Out shows for the same unit.
+ */
+function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
+  return (
+    <li className="flex items-center gap-2 border-b border-gray-200 pb-2">
+      <div
+        aria-hidden="true"
+        className="flex size-[40px] shrink-0 items-center justify-center rounded-[2px] border border-gray-200 bg-white"
+      >
+        <PackageIcon className="size-5 text-gray-400" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-800">
+          {assetModelName}
+        </span>
+        <Badge
+          color={BADGE_COLORS.gray.bg}
+          textColor={BADGE_COLORS.gray.text}
+          withDot={false}
+        >
+          Pending
+        </Badge>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * What a scanned row means for the booking's model reservations.
+ *
+ * - `claimed`: already on the booking without answering a reservation, and
+ *   this scan makes it answer one of `modelName`.
+ * - `matched`: fills an outstanding unit of `modelName`.
+ * - `overReserved`: its model is reserved, but every unit is already filled,
+ *   so it joins the booking as an extra.
+ * - `notReserved`: its model is not reserved at all (or it has none), so it
+ *   joins the booking as an extra.
+ */
+export type RowReservation =
+  | { kind: "claimed"; modelName: string | undefined }
+  | { kind: "matched"; modelName: string }
+  | { kind: "overReserved"; modelName: string }
+  | { kind: "notReserved" };
+
+/**
+ * Turns the matcher's verdict for one scanned asset into the reservation note
+ * its row shows, or null when the row needs none.
+ *
+ * Only a booking that reserves models gets an "extra" note: on a plain
+ * booking every scan is simply added, and calling each one "not reserved"
+ * would be noise. The matcher gives quantity-tracked scans no
+ * `unmatchedReason` (a reservation is for whole units), so they get none
+ * either.
+ *
+ * @param args.row - The matcher's row for this scan, if it has one yet.
+ * @param args.isClaimed - Whether this asset's scan answers a reservation
+ *   from a row already on the booking.
+ * @param args.claimedModelName - The model a claimed row answers, when known.
+ * @param args.hasReservations - Whether the booking reserves any model.
+ * @returns The note for the row, or null.
+ */
+export function resolveRowReservation({
+  row,
+  isClaimed,
+  claimedModelName,
+  hasReservations,
+}: {
+  row: ScannedAssetRow | undefined;
+  isClaimed: boolean;
+  claimedModelName: string | undefined;
+  hasReservations: boolean;
+}): RowReservation | null {
+  if (isClaimed) {
+    return { kind: "claimed", modelName: claimedModelName };
+  }
+  if (row?.bucket === "matched" && row.matchedModelName) {
+    return { kind: "matched", modelName: row.matchedModelName };
+  }
+  if (row?.bucket !== "unmatched" || !hasReservations) {
+    return null;
+  }
+  if (row.unmatchedReason === "overReserved" && row.overReservedModelName) {
+    return { kind: "overReserved", modelName: row.overReservedModelName };
+  }
+  return row.unmatchedReason === "notReserved" ? { kind: "notReserved" } : null;
+}
+
+/**
+ * Body of a scanned asset row on Scan to Assign: title, identifiers, and the
+ * badges that say what submitting will do with it.
+ */
+export function AssetRow({
+  asset,
+  scannedCode,
+  reservation = null,
+}: {
+  asset: AssetFromQr;
+  /** The code the operator scanned to add this row. */
+  scannedCode: string;
+  /** What this scan means for the booking's model reservations. */
+  reservation?: RowReservation | null;
+}) {
   const { booking } = useLoaderData<typeof loader>();
-  // Check if booking is in checked-out state and asset is checked out
+  // Whether the booking is in a checked-out state and the asset is checked out.
+  // INDIVIDUAL only — a QUANTITY_TRACKED row reads CHECKED_OUT while free stock
+  // remains, so it is judged on its own pool (`maxAllowed`) below.
   const bookingIsCheckedOut = ["ONGOING", "OVERDUE"].includes(booking.status);
-  const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
+  const isCheckedOut =
+    asset.type === AssetType.INDIVIDUAL &&
+    asset.status === AssetStatus.CHECKED_OUT;
+
+  const unitsAvailable = resolveScannedUnitsAvailable(asset);
+  const qtyTracked = unitsAvailable !== null;
+  const alreadyInBooking = booking.bookingAssets.some(
+    (ba) => ba.assetId === asset.id
+  );
+  const totalQty = asset.quantity ?? 0;
+  const maxAllowed = unitsAvailable ?? 0;
+  const noUnitsAvailable = qtyTracked && !alreadyInBooking && maxAllowed <= 0;
+
+  /**
+   * States a blocker refuses on submit (see `buildAddToBookingBlockers`). A
+   * refused row gets no reservation note: telling the operator it counts
+   * toward a model, or joins as an extra, is false for a row that cannot go.
+   */
+  const refusedOnSubmit =
+    !!asset.archivedAt ||
+    !asset.availableToBook ||
+    (asset.type === AssetType.INDIVIDUAL && asset.assetKits.length > 0) ||
+    (bookingIsCheckedOut && isCheckedOut) ||
+    noUnitsAvailable;
+  const shownReservation = refusedOnSubmit ? null : reservation;
 
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.unavailable(!asset.availableToBook),
     assetLabelPresets.partOfKit(
       asset.assetKits.length > 0,
       isQuantityTracked(asset)
     ),
+    // A scan the matcher credited against an outstanding reserved unit. The
+    // row is on the booking, same as the badge below reports, but here that
+    // is the point rather than the problem: submitting stamps this row as
+    // the answer to a reservation. It reads green and names the model, so an
+    // operator can tell it apart from a rescan that does nothing.
+    {
+      condition: shownReservation?.kind === "claimed",
+      badgeText:
+        shownReservation?.kind === "claimed" && shownReservation.modelName
+          ? `Already here, now counts toward ${shownReservation.modelName}`
+          : "Already here, now counts",
+      tooltipTitle: "Counts toward a reserved unit",
+      tooltipContent:
+        "This asset was already on the booking without answering a reservation. Submitting assigns it to one.",
+      priority: 75,
+      className: "bg-green-50 border-green-200 text-green-700",
+    },
+    {
+      condition: shownReservation?.kind === "matched",
+      badgeText:
+        shownReservation?.kind === "matched"
+          ? `Counts toward ${shownReservation.modelName}`
+          : "",
+      tooltipTitle: "Fills a reserved unit",
+      tooltipContent:
+        "Submitting assigns this asset to one of the units reserved for its model.",
+      priority: 75,
+      className: "bg-green-50 border-green-200 text-green-700",
+    },
+    {
+      condition: shownReservation?.kind === "overReserved",
+      badgeText:
+        shownReservation?.kind === "overReserved"
+          ? `Extra: every ${shownReservation.modelName} unit is already filled`
+          : "",
+      tooltipTitle: "Over the reserved count",
+      tooltipContent:
+        "All reserved units of this model are already filled. Submitting adds this asset to the booking as an extra item.",
+      priority: 60,
+      className: "bg-warning-50 border-warning-200 text-warning-700",
+    },
+    {
+      condition: shownReservation?.kind === "notReserved",
+      badgeText: "Extra: model not reserved",
+      tooltipTitle: "Not part of a reservation",
+      tooltipContent:
+        "This asset's model is not reserved on this booking. Submitting adds it to the booking as an extra item.",
+      priority: 60,
+      className: "bg-warning-50 border-warning-200 text-warning-700",
+    },
     // Custom preset for "already in this booking"
     {
-      condition: booking.bookingAssets.some((ba) => ba.assetId === asset.id),
+      condition: reservation?.kind !== "claimed" && alreadyInBooking,
       badgeText: "Already added to this booking",
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",
@@ -406,21 +647,21 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       priority: 80, // High priority - blocking issue
       // Uses default warning colors (red/orange) appropriate for blocking issue
     },
+    // Qty-tracked counterpart of the badge above: the pool itself is out, so
+    // there is nothing to stage even though the row is a single asset.
+    {
+      condition: noUnitsAvailable,
+      badgeText: "No units available",
+      tooltipTitle: "No units available",
+      tooltipContent:
+        "Every unit of this asset is already in custody, in a kit or reserved for the booking window.",
+      priority: 80,
+    },
   ];
 
   // Create the availability labels component
   const [, AssetAvailabilityLabels] =
     createAvailabilityLabels(availabilityConfigs);
-
-  const qtyTracked = isQuantityTracked(asset) && asset.quantity != null;
-  const alreadyInBooking = booking.bookingAssets.some(
-    (ba) => ba.assetId === asset.id
-  );
-  // `pickerMeta` is the booking picker's available pool — same
-  // formula as `bookings/$bookingId/overview/manage-assets`.
-  const pickerMeta = qtyTracked ? asset.pickerMeta ?? null : null;
-  const totalQty = qtyTracked ? (asset.quantity as number) : 0;
-  const maxAllowed = pickerMeta?.maxAllowed ?? totalQty;
 
   return (
     <div className="flex w-full items-start justify-between gap-3">
@@ -430,14 +671,19 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
           {qtyTracked ? (
             <span className="ml-2 text-xs font-normal text-gray-500">
               · {totalQty} {asset.unitOfMeasure || "units"}
-              {pickerMeta && pickerMeta.maxAllowed < totalQty ? (
+              {maxAllowed < totalQty ? (
                 <span className="ml-1 text-warning-700">
-                  · {pickerMeta.maxAllowed} available
+                  · {maxAllowed} available
                 </span>
               ) : null}
             </span>
           ) : null}
         </p>
+
+        <ScannedAssetIdentifiers
+          sequentialId={asset.sequentialId}
+          scannedCode={scannedCode}
+        />
 
         <div className="flex flex-wrap items-center gap-1">
           <span
@@ -478,7 +724,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
     kitLabelPresets.containsUnavailableAssets(
-      kit.assetKits.some((ak) => !ak.asset.availableToBook)
+      kitHasUnavailableActiveMember(kit)
     ),
     // Custom preset for "already checked out" - only show when booking is checked out
     {

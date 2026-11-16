@@ -5,6 +5,8 @@
  * @see {@link file://./import-update-diff.ts}
  */
 import { describe, expect, it } from "vitest";
+import { decodeCsvListCell } from "~/utils/csv-cells";
+import { parseYesNo } from "~/utils/custom-fields";
 import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
@@ -14,7 +16,6 @@ import {
   describeBulkUpdateRowFailure,
   isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
-  parseYesNo,
 } from "./import-update-diff";
 import type { AssetForUpdate, HeaderAnalysis } from "./import-update-types";
 
@@ -30,6 +31,7 @@ function makeAsset(overrides: Partial<AssetForUpdate> = {}): AssetForUpdate {
     description: null,
     sequentialId: "SAM-0001",
     valuation: null,
+    categoryId: null,
     availableToBook: true,
     category: null,
     location: null,
@@ -127,9 +129,24 @@ describe("parseYesNo", () => {
 
 describe("analyzeUpdateHeaders", () => {
   const mockCustomFields = [
-    { id: "cf1", name: "Serial Number", type: "TEXT" as const },
-    { id: "cf2", name: "Purchase Date", type: "DATE" as const },
-    { id: "cf3", name: "Notes", type: "MULTILINE_TEXT" as const },
+    {
+      id: "cf1",
+      name: "Serial Number",
+      type: "TEXT" as const,
+      format: "PLAIN" as const,
+    },
+    {
+      id: "cf2",
+      name: "Purchase Date",
+      type: "DATE" as const,
+      format: "PLAIN" as const,
+    },
+    {
+      id: "cf3",
+      name: "Notes",
+      type: "MULTILINE_TEXT" as const,
+      format: "PLAIN" as const,
+    },
   ];
 
   it("identifies Asset ID as primary identifier", () => {
@@ -193,6 +210,41 @@ describe("analyzeUpdateHeaders", () => {
     expect(result.ignoredColumns).toContain("Status");
     expect(result.ignoredColumns).toContain("Kit");
     expect(result.ignoredColumns).toContain("Custody");
+  });
+
+  it("updates a workspace custom field named like the export-only QR URL column", () => {
+    // The asset export leaves out its own QR URL column when a custom field
+    // already uses that header, so a "QR URL" header in such a workspace is
+    // the custom field.
+    const result = analyzeUpdateHeaders(
+      ["Asset ID", "Name", "QR URL"],
+      [
+        ...mockCustomFields,
+        { id: "cf4", name: "QR URL", type: "TEXT", format: "PLAIN" as const },
+      ]
+    );
+    expect(result.updatableColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          csvHeader: "QR URL",
+          internalKey: "cf:QR URL",
+        }),
+      ])
+    );
+    expect(result.ignoredColumns).toEqual([]);
+  });
+
+  it("ignores the export-only QR URL and Total value columns", () => {
+    // A standard asset export fed back into the update importer carries these
+    // derived columns; they must be skipped, never reported as unknown.
+    const result = analyzeUpdateHeaders(
+      ["Asset ID", "Name", "QR ID", "QR URL", "Total value"],
+      mockCustomFields
+    );
+    expect(result.ignoredColumns).toEqual(
+      expect.arrayContaining(["QR URL", "Total value"])
+    );
+    expect(result.unrecognizedColumns).toEqual([]);
   });
 
   it("matches custom fields by name (case-insensitive)", () => {
@@ -429,6 +481,40 @@ describe("compareCoreField", () => {
       const asset = makeAsset({ tags: [] });
       const result = compareCoreField("tags", "NewTag", asset, "Tags");
       expect(result?.currentValue).toBe("(none)");
+    });
+
+    it("keeps a quoted tag name intact in the value the apply flow re-reads", () => {
+      // `newValue` is not only display: import-update.server.ts and
+      // import-update-entities.server.ts decode it again to resolve and
+      // connect the tags, so it has to survive that second read.
+      const asset = makeAsset({ tags: [{ id: "t1", name: "small" }] });
+      const result = compareCoreField(
+        "tags",
+        '"Berlin, DE",small',
+        asset,
+        "Tags"
+      );
+
+      expect(result).not.toBeNull();
+      expect(decodeCsvListCell(result!.newValue)).toEqual([
+        "Berlin, DE",
+        "small",
+      ]);
+    });
+
+    it("reads a quoted tag name carrying a comma as one tag", () => {
+      // The import-ready export is this importer's input and quotes a tag name
+      // containing the separator, so a bare split would report a spurious
+      // change here and write the wrong tags on apply.
+      const asset = makeAsset({
+        tags: [
+          { id: "t1", name: "Berlin, DE" },
+          { id: "t2", name: "small" },
+        ],
+      });
+      expect(
+        compareCoreField("tags", '"Berlin, DE",small', asset, "Tags")
+      ).toBeNull();
     });
   });
 
@@ -807,6 +893,7 @@ describe("compareCustomField", () => {
   const textCfDef = {
     name: "Serial",
     type: "TEXT" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -815,6 +902,7 @@ describe("compareCustomField", () => {
   const boolCfDef = {
     name: "Active",
     type: "BOOLEAN" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -823,6 +911,7 @@ describe("compareCustomField", () => {
   const dateCfDef = {
     name: "PurchaseDate",
     type: "DATE" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -831,6 +920,7 @@ describe("compareCustomField", () => {
   const numberCfDef = {
     name: "Weight",
     type: "NUMBER" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -862,6 +952,112 @@ describe("compareCustomField", () => {
         ],
       });
       expect(compareCustomField(textCfDef, "SAME", asset, "Serial")).toBeNull();
+    });
+
+    it("warns about a value that is not a web link in a Link field, so it is skipped", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({ customFields: [] });
+
+      expect(
+        compareCustomField(linkCfDef, "see shelf", asset, "Manual")
+      ).toEqual({
+        field: "Manual",
+        currentValue: "(empty)",
+        newValue: "see shelf",
+        warning:
+          '"see shelf" is not a web link. Enter just the link, with no spaces or other text',
+      });
+    });
+
+    it("accepts a web link in a Link field", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({ customFields: [] });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "https://example.com/manual.pdf",
+          asset,
+          "Manual"
+        )
+      ).toEqual({
+        field: "Manual",
+        currentValue: "(empty)",
+        newValue: "https://example.com/manual.pdf",
+      });
+    });
+
+    it("sees no change in a Link cell that matches the stored link once normalized", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({
+        customFields: [
+          {
+            id: "cfv1",
+            value: { raw: "https://www.example.com/manual.pdf" },
+            customField: { name: "Manual" } as any,
+          },
+        ],
+      });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "www.example.com/manual.pdf",
+          asset,
+          "Manual"
+        )
+      ).toBeNull();
+      // A plain text field compares the cell as typed.
+      expect(
+        compareCustomField(
+          { ...linkCfDef, format: "PLAIN" as const },
+          "www.example.com/manual.pdf",
+          asset,
+          "Manual"
+        )?.newValue
+      ).toBe("www.example.com/manual.pdf");
+    });
+
+    it("shows a changed Link cell as the link that will be stored", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({
+        customFields: [
+          {
+            id: "cfv1",
+            value: { raw: "https://www.example.com/manual-v1.pdf" },
+            customField: { name: "Manual" } as any,
+          },
+        ],
+      });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "www.example.com/manual-v2.pdf",
+          asset,
+          "Manual"
+        )
+      ).toEqual({
+        field: "Manual",
+        currentValue: "https://www.example.com/manual-v1.pdf",
+        newValue: "https://www.example.com/manual-v2.pdf",
+      });
     });
   });
 
@@ -1057,6 +1253,67 @@ describe("computeAssetDiffs", () => {
     expect(result.assetsToUpdate).toHaveLength(0);
     expect(result.skippedAssets).toHaveLength(1);
     expect(result.skippedAssets[0].reason).toBe("No changes detected");
+  });
+
+  it("reports an archived asset as a failed row, not a pending update", () => {
+    // why: `updateAsset` refuses archived assets at apply time (issue #382).
+    // The preview exists to say what will happen BEFORE anything is saved, so
+    // counting an archived row as "to update" and then failing it makes the
+    // preview lie about its own outcome.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: new Date("2026-08-14T00:00:00Z"),
+        }),
+      ],
+    ]);
+
+    const csvData = [
+      ["Asset ID", "Name"],
+      ["SAM-0001", "New Name"],
+    ];
+
+    const result = computeAssetDiffs({
+      csvData,
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.assetsToUpdate).toHaveLength(0);
+    expect(result.failedRows).toHaveLength(1);
+    expect(result.failedRows[0].reason).toBe(
+      "Asset is archived — reinstate it before updating"
+    );
+  });
+
+  it("still previews an update for an asset that is not archived", () => {
+    // why: guards against the archived branch swallowing ordinary rows —
+    // `archivedAt: null` must behave exactly as before.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: null,
+        }),
+      ],
+    ]);
+
+    const result = computeAssetDiffs({
+      csvData: [
+        ["Asset ID", "Name"],
+        ["SAM-0001", "New Name"],
+      ],
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.failedRows).toHaveLength(0);
+    expect(result.assetsToUpdate).toHaveLength(1);
   });
 
   it("reports missing assets as failed rows", () => {
@@ -1731,20 +1988,90 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
       "cf:Perkins Fiscal Year,type:TEXT",
     ];
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: "TEXT" as const },
-      { id: "cf2", name: "Order Number", type: "TEXT" as const },
-      { id: "cf3", name: "LACCD #", type: "TEXT" as const },
-      { id: "cf4", name: "IT Asset #", type: "TEXT" as const },
-      { id: "cf5", name: "Model #", type: "TEXT" as const },
-      { id: "cf6", name: "Perkins Purchase", type: "TEXT" as const },
-      { id: "cf7", name: "Perkins Item Fund ID", type: "TEXT" as const },
-      { id: "cf8", name: "Manufacturer", type: "TEXT" as const },
-      { id: "cf9", name: "Supplier", type: "TEXT" as const },
-      { id: "cf10", name: "Purchase Date", type: "DATE" as const },
-      { id: "cf11", name: "Perkins Fund #", type: "TEXT" as const },
-      { id: "cf12", name: "Perkins Fund ID #", type: "TEXT" as const },
-      { id: "cf13", name: "Perkins Item?", type: "BOOLEAN" as const },
-      { id: "cf14", name: "Perkins Fiscal Year", type: "TEXT" as const },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf2",
+        name: "Order Number",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf3",
+        name: "LACCD #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf4",
+        name: "IT Asset #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf5",
+        name: "Model #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf6",
+        name: "Perkins Purchase",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf7",
+        name: "Perkins Item Fund ID",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf8",
+        name: "Manufacturer",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf9",
+        name: "Supplier",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf10",
+        name: "Purchase Date",
+        type: "DATE" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf11",
+        name: "Perkins Fund #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf12",
+        name: "Perkins Fund ID #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf13",
+        name: "Perkins Item?",
+        type: "BOOLEAN" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf14",
+        name: "Perkins Fiscal Year",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
     ];
 
     const result = analyzeUpdateHeaders(headers, orgCustomFields);
@@ -1802,7 +2129,12 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
 
   it("resolves cf:<Name>,type:<TYPE>, cf:<Name>, and bare <Name> to the same custom field", () => {
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: "TEXT" as const },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
     ];
 
     for (const header of ["cf:Serial,type:TEXT", "cf:Serial", "Serial"]) {
@@ -1825,7 +2157,12 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
     // The org's "Serial" field is TEXT; the header declares BOOLEAN. The
     // workspace definition wins — no warning, no branch on the mismatch.
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: "TEXT" as const },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
     ];
     const result = analyzeUpdateHeaders(
       ["ID", "cf:Serial,type:BOOLEAN"],
@@ -1848,21 +2185,19 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// isBackupExportHeaderRow — workspace backup export detection (final review)
+// isBackupExportHeaderRow: legacy workspace backup file detection
 //
-// The workspace backup export (`exportAssetsBackupToCsv`) writes raw Prisma
-// field/relation names as headers, with `category` / `tags` / `assetModel`
-// cells containing JSON blobs. This branch's case-insensitive identifier
-// matching + `sequentialId` alias means that file can now slip past the
-// "no identifier column" guard — this predicate catches it before its JSON
+// A legacy workspace backup file carries raw Prisma field/relation names as
+// headers, with `category` / `tags` / `assetModel` cells containing JSON
+// blobs. Case-insensitive identifier matching lets its `id` column pass the
+// "no identifier column" guard, so this predicate catches it before its JSON
 // cells get proposed as literal new entities.
 // ---------------------------------------------------------------------------
 
 describe("isBackupExportHeaderRow", () => {
   it("detects a raw backup-export header row", () => {
-    // Representative subset of `Object.keys(asset)` from
-    // `exportAssetsBackupToCsv` — id/title plus relation keys whose cells
-    // are JSON blobs.
+    // Representative subset of a legacy backup file's header row: id/title
+    // plus relation keys whose cells are JSON blobs.
     const headers = [
       "id",
       "title",
@@ -1956,5 +2291,90 @@ describe("isBackupExportHeaderRow", () => {
       "Asset model",
     ];
     expect(isBackupExportHeaderRow(headers)).toBe(false);
+  });
+});
+
+describe("computeAssetDiffs: description length limit", () => {
+  const headers = ["Asset ID", "Description", "Name"];
+
+  /** Diffs one data row per asset against `SAM-0001` and `SAM-0002`. */
+  function diff(
+    rows: string[][],
+    stored: Partial<AssetForUpdate> = { description: "Old description" }
+  ) {
+    const existingAssets = new Map<string, AssetForUpdate>([
+      ["SAM-0001", makeAsset({ id: "uuid-1", ...stored })],
+      ["SAM-0002", makeAsset({ id: "uuid-2", sequentialId: "SAM-0002" })],
+    ]);
+    return computeAssetDiffs({
+      csvData: [headers, ...rows],
+      headerAnalysis: analyzeUpdateHeaders(headers, []),
+      existingAssets,
+    });
+  }
+
+  it("refuses a row whose new description is over 5,000 characters", () => {
+    const result = diff([
+      ["SAM-0002", "Fits", "Test Asset"],
+      ["SAM-0001", "a".repeat(5123), "New Name"],
+    ]);
+
+    expect(result.failedRows).toEqual([
+      {
+        rowNumber: 3,
+        id: "SAM-0001",
+        reason:
+          "Description too long: 5,123 characters, but the maximum is 5,000. Shorten it and import again.",
+      },
+    ]);
+    expect(result.assetsToUpdate.map((a) => a.id)).toEqual(["SAM-0002"]);
+  });
+
+  it("accepts a description of exactly 5,000 characters", () => {
+    const description = "a".repeat(5000);
+    const result = diff([["SAM-0001", description, "Test Asset"]]);
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes).toEqual([
+      {
+        field: "Description",
+        currentValue: "Old description",
+        newValue: description,
+      },
+    ]);
+  });
+
+  it("counts a \\r\\n line break as one character", () => {
+    // 5,001 UTF-16 units, 5,000 characters as the user counts them.
+    const description = `${"a".repeat(2500)}\r\n${"a".repeat(2499)}`;
+    const result = diff([["SAM-0001", description, "Test Asset"]]);
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes[0].newValue).toBe(description);
+  });
+
+  it("does not block a row that leaves a stored over-limit description as it is", () => {
+    const stored = "a".repeat(6000);
+    const result = diff([["SAM-0001", stored, "New Name"]], {
+      description: stored,
+    });
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes).toEqual([
+      { field: "Name", currentValue: "Test Asset", newValue: "New Name" },
+    ]);
+  });
+
+  it("treats a stored description that differs only by surrounding whitespace as unchanged", () => {
+    // The CSV cell arrives trimmed, so a stored trailing line break is not
+    // something the file asks to change.
+    const result = diff([["SAM-0001", "a".repeat(6000), "New Name"]], {
+      description: `${"a".repeat(6000)}\n`,
+    });
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes).toEqual([
+      { field: "Name", currentValue: "Test Asset", newValue: "New Name" },
+    ]);
   });
 });

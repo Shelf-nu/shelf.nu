@@ -2,8 +2,13 @@ import { BarcodeType } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
   resolveDisplayCode,
+  describeCodeFallback,
+  serializeDisplayCode,
   type AssetForCodeResolution,
   type OrganizationForCodeResolution,
+  type ResolvedDisplayCode,
+  ASSET_CODE_RESOLUTION_SELECT,
+  QR_CODES_ORDER_BY,
 } from "./display";
 
 // @vitest-environment node
@@ -427,5 +432,127 @@ describe("resolveDisplayCode — non-addon organizations", () => {
 
     // Still resolves at runtime — which is exactly why the type must object.
     expect(result.value).toBe("qr");
+  });
+});
+
+describe("ASSET_CODE_RESOLUTION_SELECT", () => {
+  it("orders the QR relation, so the one QR it keeps is the same on every read", () => {
+    // why: the fragment keeps a single QR and `Qr.assetId` is not unique.
+    // Without the order, which QR survives `take: 1` is up to the database.
+    expect(ASSET_CODE_RESOLUTION_SELECT.qrCodes).toEqual({
+      take: 1,
+      orderBy: QR_CODES_ORDER_BY,
+      select: { id: true },
+    });
+  });
+});
+
+describe("describeCodeFallback", () => {
+  it("has nothing to explain when the preferred code is the one shown", () => {
+    expect(
+      describeCodeFallback({
+        type: "Code128",
+        isFallback: false,
+        workspacePreference: "Code128",
+        entityKind: "asset",
+      })
+    ).toBeNull();
+  });
+
+  it("names the preference an asset is missing, not the code shown in its place", () => {
+    expect(
+      describeCodeFallback({
+        type: "QR_ID",
+        isFallback: true,
+        workspacePreference: "Code128",
+        entityKind: "asset",
+      })
+    ).toEqual({
+      text: "Your workspace prefers Code 128 but this item has no Code 128.",
+      fixable: true,
+    });
+  });
+
+  it("tells a kit on a SAM ID workspace that kits have none, and offers no fix", () => {
+    // why: `Kit` has no `sequentialId` column and no UI to set one, so the
+    // generic "this item has no SAM ID" would imply a fix nobody can make.
+    expect(
+      describeCodeFallback({
+        type: "QR_ID",
+        isFallback: true,
+        workspacePreference: "SAM_ID",
+        entityKind: "kit",
+      })
+    ).toEqual({
+      text: "Your workspace prefers SAM ID, which kits do not have. Showing the QR Code ID instead.",
+      fixable: false,
+    });
+  });
+
+  it("words a kit's missing barcode the same as an asset's", () => {
+    // why: kits do carry barcodes, so only SAM ID earns the kit wording.
+    expect(
+      describeCodeFallback({
+        type: "QR_ID",
+        isFallback: true,
+        workspacePreference: "Code128",
+        entityKind: "kit",
+      })
+    ).toEqual({
+      text: "Your workspace prefers Code 128 but this item has no Code 128.",
+      fixable: true,
+    });
+  });
+});
+
+describe("serializeDisplayCode", () => {
+  /** A resolved code with overrides; defaults to an honoured Code 128. */
+  function resolved(
+    partial: Partial<ResolvedDisplayCode> = {}
+  ): ResolvedDisplayCode {
+    return {
+      value: "CODE-000128",
+      type: "Code128",
+      isFallback: false,
+      workspacePreference: "Code128",
+      entityKind: "asset",
+      ...partial,
+    };
+  }
+
+  it("labels the code that is shown and carries no note when nothing fell back", () => {
+    expect(serializeDisplayCode(resolved())).toEqual({
+      value: "CODE-000128",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+      fallbackNote: null,
+    });
+  });
+
+  it("keeps the label on the code shown and explains the fallback separately", () => {
+    // why: a client that printed `label` as the missing preference would tell
+    // the reader the workspace shows "QR Code ID". The preference is named
+    // only in `fallbackNote`.
+    expect(
+      serializeDisplayCode(
+        resolved({ value: "qr-1", type: "QR_ID", isFallback: true })
+      )
+    ).toEqual({
+      value: "qr-1",
+      label: "QR Code ID",
+      type: "QR_ID",
+      isFallback: true,
+      fallbackNote:
+        "Your workspace prefers Code 128 but this item has no Code 128.",
+    });
+  });
+
+  it("sends nothing when the entity has no code to show", () => {
+    expect(
+      serializeDisplayCode(
+        resolved({ value: "", type: "QR_ID", isFallback: true })
+      )
+    ).toBeNull();
   });
 });

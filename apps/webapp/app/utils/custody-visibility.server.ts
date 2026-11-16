@@ -10,7 +10,8 @@
  *
  * This is the server-side half. `assetIndexFields` / `KITS_INCLUDE_FIELDS`
  * select the custodian unconditionally (they have no role argument, and a
- * Prisma `select` cannot vary per row), so the identity is removed here, after
+ * Prisma `select` cannot vary per row), and the advanced index's raw SQL
+ * projects it unconditionally too — so the identity is removed here, after
  * the query and before the payload leaves the loader.
  *
  * Deliberately NOT a "drop the custody relation" — see
@@ -36,8 +37,17 @@ type CustodianIdentity = {
   } | null;
 } | null;
 
-/** One custody record — the thing that names a custodian. */
-type CustodyEntry = { custodian?: CustodianIdentity };
+/**
+ * One custody record — the thing that names a custodian.
+ *
+ * `name` is a second projection of the same identity, present only on shapes
+ * that mirror it at the top level (the advanced asset index's raw query
+ * projects a custodian's name both here and inside `custodian.name`, so a
+ * sort key and display code can read it without descending into
+ * `custodian`). Optional because most shapes — kits included — never carry
+ * it; see `redactEntry`'s "absent stays absent" handling below.
+ */
+type CustodyEntry = { name?: string | null; custodian?: CustodianIdentity };
 
 /**
  * A list row carrying an optional custody relation.
@@ -102,8 +112,12 @@ const REDACTED_CUSTODIAN = {
  * An NRM custodian has no user to compare against, so it can never match the
  * viewer and is always redacted for a restricted role.
  *
+ * Also empties the top-level `custody[].name` mirror where a row has one (see
+ * {@link CustodyEntry}) — redacting only `custodian.name` would leave the same
+ * identity readable one field over.
+ *
  * @param rows - List rows straight from Prisma.
- * @param args.canSeeAllCustody - Resolved by `resolveCanSeeAllCustody`.
+ * @param args.canSeeAllCustody - The caller's `access.custody.seeAll`.
  * @param args.userId - The viewer.
  * @returns A shallow copy with disallowed custodian identities emptied. The
  *   input array and its rows are left untouched, because callers reuse them.
@@ -125,11 +139,23 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
     !!custodian &&
     (custodian.userId === userId || custodian.user?.id === userId);
 
-  /** Empties one custody record's custodian, or returns it untouched. */
+  /**
+   * Empties one custody record's custodian, or returns it untouched.
+   *
+   * Also empties the top-level `name` mirror when the entry carries one —
+   * "absent stays absent", the same rule `redactBookingAsset` below applies
+   * to the booking-derived scalar FKs: writing `name: ""` onto an entry that
+   * never had the field would invent one, and rows without the mirror (e.g.
+   * kits) go through this same path.
+   */
   const redactEntry = (entry: CustodyEntry) =>
     !entry?.custodian || maySee(entry.custodian)
       ? entry
-      : { ...entry, custodian: { ...REDACTED_CUSTODIAN } };
+      : {
+          ...entry,
+          ...(entry.name === undefined ? {} : { name: "" }),
+          custodian: { ...REDACTED_CUSTODIAN },
+        };
 
   // Casts: only `custody[].custodian` is replaced, so each row keeps its
   // shape. TypeScript cannot verify a spread still satisfies `T`, and widening
@@ -242,4 +268,54 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
 
     return { ...withBookings, custody: redactEntry(row.custody) } as T;
   });
+}
+
+/**
+ * Redacts the custodians on one scanned asset or kit for the viewer.
+ *
+ * Applies {@link redactCustodianForViewer} to the item itself (an asset's
+ * custody rows, or a kit's single custody row) and to every member asset a
+ * kit carries under `assetKits[].asset`, so a scanner drawer receives the same
+ * identities the viewer could see on the asset or kit page.
+ *
+ * @param item - The scanned asset or kit row.
+ * @param visibility.canSeeAllCustody - The caller's `access.custody.seeAll`.
+ * @param visibility.userId - The viewer.
+ * @returns A shallow copy with disallowed custodian identities emptied.
+ */
+export function redactScannedItemForViewer<T extends object>(
+  item: T,
+  visibility: { canSeeAllCustody: boolean; userId: string }
+): T {
+  if (visibility.canSeeAllCustody) {
+    return item;
+  }
+
+  // Structural probe: the scanner endpoints build their `include` at runtime,
+  // so Prisma types `custody` as bare scalars although the custodian is
+  // selected. Read the row as carrying custody and redact what is there.
+  const [redacted] = redactCustodianForViewer(
+    [item as RowWithCustody],
+    visibility
+  ) as T[];
+
+  // Kit members: structural probe, for the reason `BookingCustodianCarrier`
+  // gives. An asset's own `assetKits` entries carry no `asset` and pass as is.
+  const rawAssetKits = (redacted as { assetKits?: unknown }).assetKits;
+  if (!Array.isArray(rawAssetKits)) {
+    return redacted;
+  }
+
+  const assetKits = (
+    rawAssetKits as Array<{ asset?: RowWithCustody | null }>
+  ).map((assetKit) =>
+    assetKit?.asset?.custody
+      ? {
+          ...assetKit,
+          asset: redactCustodianForViewer([assetKit.asset], visibility)[0],
+        }
+      : assetKit
+  );
+
+  return { ...redacted, assetKits } as T;
 }

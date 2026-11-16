@@ -3,6 +3,8 @@ import { auditDeletedAssetLabel } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import {
   startAuditSessionAtom,
+  auditCountsFromItems,
+  mergeAuditCountsAtom,
   setAuditExpectedAssetsAtom,
   endAuditSessionAtom,
   scannedItemsAtom,
@@ -102,6 +104,7 @@ export function useAuditSessionInitialization({
   const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
   const endAuditSession = useSetAtom(endAuditSessionAtom);
   const setScannedItems = useSetAtom(scannedItemsAtom);
+  const mergeAuditCounts = useSetAtom(mergeAuditCountsAtom);
 
   // Track if we've initialized for this session to avoid re-initializing
   // This is crucial because startAuditSession clears scannedItemsAtom
@@ -194,6 +197,15 @@ export function useAuditSessionInitialization({
       // the payload exists to avoid. The narrow type above is what keeps this
       // honest — it still catches a typo in any field the rows actually use.
       setScannedItems(restoredItems as unknown as ScanListItems);
+      // Counts of scanned rows, unexpected ones included (expected rows are
+      // already seeded from the expected list).
+      mergeAuditCounts(
+        auditCountsFromItems(
+          existingScans
+            .filter((scan) => scan.assetId)
+            .map((scan) => ({ ...scan, id: scan.assetId }))
+        )
+      );
     }
   }, [
     expectedItems,
@@ -208,6 +220,7 @@ export function useAuditSessionInitialization({
     session.scopeMeta,
     setExpectedAssets,
     setScannedItems,
+    mergeAuditCounts,
     startAuditSession,
     persistedItemsRef,
   ]);

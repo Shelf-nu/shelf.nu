@@ -30,6 +30,7 @@ import {
 import { action } from "~/routes/api+/mobile+/bookings.$bookingId.model-requests";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -98,14 +99,10 @@ function makeArgs(method: "POST" | "DELETE", body: Record<string, unknown>) {
 
 /** Point `getMobileUserContext` at a specific role for the next call. */
 function withRole(role: OrganizationRoles) {
-  getMobileUserContextMock.mockResolvedValue({
-    role,
+  getMobileUserContextMock.mockResolvedValue(
     // The guard reads the full array, not roles[0].
-    roles: [role],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+    mobileUserContext({ roles: [role] })
+  );
 }
 
 beforeEach(() => {

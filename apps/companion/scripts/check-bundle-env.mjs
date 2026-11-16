@@ -1,5 +1,7 @@
 /**
- * Asserts the exported bundles carry the environment they are meant to.
+ * Asserts the exported bundles carry the environment they are meant to: the
+ * expected Supabase project, and React Native's fetch as the global fetch
+ * (see metro.config.js for why the app needs it).
  *
  * `EXPO_PUBLIC_*` values are inlined by Metro at export time, and Metro's
  * transform cache is keyed on file content rather than on the environment. A
@@ -52,6 +54,24 @@ export function refsIn(text) {
   return [...refs].sort();
 }
 
+/**
+ * Name of Expo's native fetch module. Expo's fetch is compiled into a bundle
+ * only when it is installed as the global fetch; with EXPO_PUBLIC_USE_RN_FETCH
+ * set (see metro.config.js) the minifier drops it, name included.
+ */
+const EXPO_FETCH_MARKER = "ExpoFetchModule";
+
+/**
+ * Whether a bundle installs Expo's fetch as the global fetch instead of
+ * React Native's.
+ *
+ * @param text - bundle contents, read as binary-safe latin1
+ * @returns true when Expo's fetch is in the bundle
+ */
+export function usesExpoFetch(text) {
+  return text.includes(EXPO_FETCH_MARKER);
+}
+
 /** Every built bundle under {@link DIST}, per platform. */
 function bundlePaths() {
   const out = [];
@@ -101,24 +121,29 @@ function main() {
 
   let bad = false;
   for (const path of paths) {
-    const refs = refsIn(readFileSync(path, "latin1"));
-    const ok = refs.length === 1 && refs[0] === expected;
+    const text = readFileSync(path, "latin1");
+    const refs = refsIn(text);
+    const refOk = refs.length === 1 && refs[0] === expected;
+    const fetchOk = !usesExpoFetch(text);
     console.log(
-      `  ${ok ? "ok  " : "FAIL"} ${path}  ->  ${
+      `  ${refOk && fetchOk ? "ok  " : "FAIL"} ${path}  ->  ${
         refs.join(" ") || "(no Supabase ref found)"
-      }`
+      }${fetchOk ? "" : "  + Expo fetch is the global fetch"}`
     );
-    if (!ok) bad = true;
+    if (!refOk || !fetchOk) bad = true;
   }
 
   if (bad) {
     console.error(
-      `\n[bundle-env] FAILED — expected exactly ${expected}.\n` +
-        "  Do NOT publish. Re-export with --clear and run this again."
+      `\n[bundle-env] FAILED: expected exactly ${expected} and React Native's fetch.\n` +
+        "  Do NOT publish. Re-export with --clear from apps/companion (so metro.config.js\n" +
+        "  sets EXPO_PUBLIC_USE_RN_FETCH) and run this again."
     );
     process.exit(1);
   }
-  console.log(`\n[bundle-env] OK — every bundle points at ${expected}`);
+  console.log(
+    `\n[bundle-env] OK: every bundle points at ${expected} and uses React Native's fetch`
+  );
 }
 
 // `process.argv[1]` is whatever path the caller typed, so it is relative when

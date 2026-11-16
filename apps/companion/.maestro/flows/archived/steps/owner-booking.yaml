@@ -1,0 +1,37 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: a DRAFT booking holding an asset that was archived after it was
+# added. The row reads "Archived", Reserve is disabled with the reason shown,
+# and a duplicate says the archived asset was left out.
+# No login (see ../01-owner.yaml).
+
+- openLink: "shelf://bookings/${SHELF_TEST_ARCHIVED_BOOKING_ID}"
+- extendedWaitUntil:
+    visible: "E2E Archived Camera.*Archived.*"
+    timeout: 20000
+- assertVisible: "E2E Active Tripod.*Available.*"
+- scrollUntilVisible:
+    element: '"E2E Archived Camera" is archived. Remove it from the booking or reinstate it.'
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    text: "Reserve this booking"
+    enabled: false
+- takeScreenshot: archived-owner-booking
+
+# Duplicate: the copy leaves the archived asset out, and says so.
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Duplicate booking"
+    timeout: 5000
+- tapOn: "Duplicate booking"
+- extendedWaitUntil:
+    visible: "Duplicate Booking"
+    timeout: 5000
+- tapOn:
+    text: "^Duplicate$"
+- extendedWaitUntil:
+    visible: "1 archived asset was left out."
+    timeout: 20000
+- takeScreenshot: archived-owner-duplicate
+- tapOn: "OK"

@@ -7,6 +7,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
@@ -18,6 +19,10 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
 
+/** Shown whenever nothing in the selection can be added to the booking. */
+const ALL_ASSETS_ALREADY_IN_BOOKING =
+  "The booking you have selected already contains all the selected assets. Please select a different booking or different assets.";
+
 export async function action({ request, context }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const userId = authSession.userId;
@@ -25,7 +30,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -45,7 +50,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       id,
       assetsIds,
       organizationId,
-      { userId, role }
+      { userId, access }
     );
 
     /**
@@ -56,6 +61,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
       finalAssetIds = finalAssetIds.filter(
         (assetId) => !bookingAssetIds.includes(assetId)
       );
+
+      // Nothing is left to add when every selected asset is already in the
+      // booking. Say that, rather than handing an empty list on to be reported
+      // as assets that no longer exist.
+      if (finalAssetIds.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          message: ALL_ASSETS_ALREADY_IN_BOOKING,
+          additionalData: { bookingId: id },
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     if (
@@ -74,13 +93,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: allAssetsInBooking
-          ? "The booking you have selected already contains all the selected assets. Please select different booking or different assets."
+          ? ALL_ASSETS_ALREADY_IN_BOOKING
           : "The booking you have selected already contains the asset you are trying to add. Please select a different booking.",
         additionalData: {
           alreadyAddedAssets,
           allAssetsInBooking,
         },
         label: "Booking",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -97,6 +117,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       id,
       organizationId,
       assetIds: finalAssetIds,
+      // Re-checks the add rule against the locked booking status.
+      access,
+      hints: getClientHint(request),
     });
 
     const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });

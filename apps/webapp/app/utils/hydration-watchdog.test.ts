@@ -1,0 +1,786 @@
+/**
+ * Tests for the hydration watchdog: the inline script that turns a bundle
+ * which never loads into a reload (once) or a recovery screen, and the
+ * report it leaves for the next page that does hydrate.
+ *
+ * The script runs against the real happy-dom document and storage, with a
+ * stand-in `window` whose `location` records reloads instead of performing
+ * them.
+ *
+ * @see {@link file://./hydration-watchdog.ts}
+ */
+import * as Sentry from "@sentry/react-router";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { UNSUPPORTED_BROWSER_ATTRIBUTE } from "./browser-support";
+import type { HydrationFailureReport } from "./hydration-watchdog";
+import {
+  HYDRATION_FAILED_ATTRIBUTE,
+  HYDRATION_FAILED_SCREEN_ID,
+  HYDRATION_FAILURE_STORAGE_KEY,
+  HYDRATION_GATE_STYLES,
+  HYDRATION_RELOAD_ATTRIBUTE,
+  HYDRATION_RELOAD_WINDOW_MS,
+  HYDRATION_TIMEOUT_MS,
+  HYDRATION_WATCHDOG_SCRIPT,
+  markHydrated,
+  MAX_MISSING_BUNDLE_FILES,
+  RESOURCE_TIMING_BUFFER_SIZE,
+} from "./hydration-watchdog";
+
+// why: Sentry is a network side effect; the test asserts what would be sent.
+vi.mock("@sentry/react-router", () => ({
+  captureMessage: vi.fn(),
+  logger: { info: vi.fn() },
+}));
+
+/** The origin the page is served from, as the script sees it. */
+const ORIGIN = "https://app.shelf.nu";
+
+/** A file of the app's own bundle. */
+const OWN_CHUNK = `${ORIGIN}/file-assets/abc/chunk-X1.js`;
+
+/** Another file of the bundle. */
+const OTHER_CHUNK = `${ORIGIN}/file-assets/abc/chunk-Y2.js`;
+
+/** The Cloudflare analytics beacon, which content blockers commonly stop. */
+const THIRD_PARTY_SCRIPT =
+  "https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d873";
+
+type FakeWindow = {
+  location: {
+    origin: string;
+    pathname: string;
+    reload: ReturnType<typeof vi.fn>;
+  };
+  __shelfHydrationWatchdog?: { done: () => void };
+  performance?: FakePerformance;
+};
+
+/** The parts of `window.performance` the script reads. */
+type FakePerformance = {
+  now: () => number;
+  timeOrigin: number;
+  getEntriesByType: () => Array<{ name: string; responseEnd: number }>;
+  setResourceTimingBufferSize: ReturnType<typeof vi.fn>;
+  addEventListener: (type: string, listener: () => void) => void;
+  /** Fires the event the browser sends once it drops timing entries. */
+  fillBuffer: () => void;
+};
+
+/**
+ * A `performance` whose clock and finished downloads the test controls.
+ *
+ * @param finished - URLs of the files that finished downloading
+ * @param now - What the monotonic clock reads; defaults to wall time since start
+ */
+function fakePerformance({
+  finished = [],
+  now,
+}: { finished?: string[]; now?: () => number } = {}): FakePerformance {
+  const timeOrigin = Date.now();
+  const bufferFullListeners: Array<() => void> = [];
+  return {
+    timeOrigin,
+    now: now ?? (() => Date.now() - timeOrigin),
+    getEntriesByType: () =>
+      finished.map((name) => ({ name, responseEnd: 100 })),
+    setResourceTimingBufferSize: vi.fn(),
+    addEventListener: (type, listener) => {
+      if (type === "resourcetimingbufferfull") {
+        bufferFullListeners.push(listener);
+      }
+    },
+    fillBuffer: () => bufferFullListeners.forEach((listener) => listener()),
+  };
+}
+
+let fakeWindow: FakeWindow;
+
+/**
+ * Runs the inline script the way the document `<head>` would.
+ *
+ * @param performance - Stands in for `window.performance` when given
+ */
+function runWatchdog(performance?: FakePerformance) {
+  fakeWindow = {
+    location: { origin: ORIGIN, pathname: "/assets", reload: vi.fn() },
+    ...(performance ? { performance } : {}),
+  };
+  // why: `location.reload` cannot be observed on the real window, so the
+  // script gets a window whose location records it. Everything else is the
+  // real happy-dom implementation.
+  const scriptWindow = new Proxy(fakeWindow, {
+    get(target, key: string) {
+      if (key in target) {
+        return target[key as keyof FakeWindow];
+      }
+      const value = Reflect.get(window, key);
+      return typeof value === "function" ? value.bind(window) : value;
+    },
+  });
+  new Function("window", "document", HYDRATION_WATCHDOG_SCRIPT)(
+    scriptWindow,
+    document
+  );
+}
+
+/** Appends an element and fires the load error a failed download produces. */
+function failToLoad(element: HTMLElement) {
+  document.head.appendChild(element);
+  element.dispatchEvent(new Event("error"));
+}
+
+/**
+ * An inline module script, like React Router's bootstrap. Its static imports
+ * failing fires the error on this element. No `src`, so happy-dom does not try
+ * to fetch anything.
+ */
+function moduleScript() {
+  const script = document.createElement("script");
+  script.type = "module";
+  return script;
+}
+
+/**
+ * A module script with a `src`. The property is defined on the instance rather
+ * than set as an attribute, so happy-dom does not try to fetch it.
+ */
+function externalModuleScript(src: string) {
+  const script = moduleScript();
+  Object.defineProperty(script, "src", { value: src });
+  return script;
+}
+
+function modulePreload(href: string) {
+  const link = document.createElement("link");
+  link.rel = "modulepreload";
+  link.href = href;
+  return link;
+}
+
+function storedReport(): HydrationFailureReport | null {
+  return JSON.parse(
+    sessionStorage.getItem(HYDRATION_FAILURE_STORAGE_KEY) ?? "null"
+  );
+}
+
+const isShowingScreen = () =>
+  document.documentElement.hasAttribute(HYDRATION_FAILED_ATTRIBUTE);
+
+/** What the tab's visibility and automation flag read as, per test. */
+let visibility: DocumentVisibilityState = "visible";
+let automated = false;
+
+/** Shows or hides the tab, firing the event the browser would. */
+function setTabVisibility(state: DocumentVisibilityState) {
+  visibility = state;
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+// why: happy-dom reports every page as visible and as automated
+// (`navigator.webdriver` is true), so each test states both itself.
+Object.defineProperty(document, "visibilityState", {
+  configurable: true,
+  get: () => visibility,
+});
+Object.defineProperty(navigator, "webdriver", {
+  configurable: true,
+  get: () => automated,
+});
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  sessionStorage.clear();
+  document.head.innerHTML = "";
+  document.body.innerHTML = "";
+  document.documentElement.removeAttribute(HYDRATION_FAILED_ATTRIBUTE);
+  document.documentElement.removeAttribute(UNSUPPORTED_BROWSER_ATTRIBUTE);
+  vi.mocked(Sentry.captureMessage).mockClear();
+  vi.mocked(Sentry.logger.info).mockClear();
+  visibility = "visible";
+  automated = false;
+});
+
+afterEach(() => {
+  // Stand the script down so its listeners do not leak into the next test.
+  fakeWindow.__shelfHydrationWatchdog?.done();
+  vi.useRealTimers();
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
+  it("reloads the page once and records why", () => {
+    runWatchdog();
+    failToLoad(modulePreload(OWN_CHUNK));
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+    expect(isShowingScreen()).toBe(false);
+    expect(storedReport()).toMatchObject({
+      reason: "load-error",
+      source: expect.stringContaining("/file-assets/abc/chunk-X1.js"),
+      path: "/assets",
+      failures: 1,
+      reloadedAt: expect.any(Number),
+    });
+  });
+
+  it("shows the recovery screen instead of reloading again when the reload fails too", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    fakeWindow.__shelfHydrationWatchdog?.done();
+
+    // The reloaded page fails the same way.
+    runWatchdog();
+    failToLoad(moduleScript());
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(true);
+    // Same chain: the earlier automatic reload is still reported.
+    expect(storedReport()).toMatchObject({
+      failures: 2,
+      reloadedAt: expect.any(Number),
+    });
+  });
+
+  it("reloads again once the last automatic reload is old enough", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    fakeWindow.__shelfHydrationWatchdog?.done();
+
+    vi.advanceTimersByTime(HYDRATION_RELOAD_WINDOW_MS + 1);
+    runWatchdog();
+    failToLoad(moduleScript());
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a failed inline module script as a failed load", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+    expect(storedReport()).toMatchObject({ source: "inline module script" });
+  });
+
+  it("treats a rejected dynamic import of the bundle as a failed load", () => {
+    runWatchdog();
+    const event = Object.assign(new Event("unhandledrejection"), {
+      reason: new TypeError(
+        `Failed to fetch dynamically imported module: ${ORIGIN}/file-assets/entry.client-X1.js`
+      ),
+    });
+    window.dispatchEvent(event);
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores files that do not stop hydration, like a blocked analytics script", () => {
+    runWatchdog();
+    // A classic (non-module) script, like the Clarity or Cloudflare tags.
+    failToLoad(document.createElement("script"));
+    failToLoad(document.createElement("img"));
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(false);
+  });
+
+  it("does nothing in a browser the support check already turned away", () => {
+    document.documentElement.setAttribute(UNSUPPORTED_BROWSER_ATTRIBUTE, "");
+    runWatchdog();
+    failToLoad(moduleScript());
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(false);
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: files from another origin", () => {
+  it("counts a module script of our own", () => {
+    runWatchdog();
+    failToLoad(externalModuleScript(OWN_CHUNK));
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a blocked third-party module script", () => {
+    runWatchdog();
+    failToLoad(externalModuleScript(THIRD_PARTY_SCRIPT));
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(false);
+    expect(storedReport()).toBeNull();
+  });
+
+  it("ignores a blocked third-party modulepreload", () => {
+    runWatchdog();
+    failToLoad(modulePreload(THIRD_PARTY_SCRIPT));
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+  });
+
+  it("ignores a rejected dynamic import of a third-party file", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError(
+          `Failed to fetch dynamically imported module: ${THIRD_PARTY_SCRIPT}`
+        ),
+      })
+    );
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Failed to fetch dynamically imported module: data:text/javascript,export%20default%201",
+    "Failed to fetch dynamically imported module: chrome-extension://abcdef/content.js",
+    "error loading dynamically imported module: blob:https://app.shelf.nu/1234",
+  ])(
+    "ignores a rejected import that names a non-http module: %s",
+    (message) => {
+      runWatchdog();
+      window.dispatchEvent(
+        Object.assign(new Event("unhandledrejection"), {
+          reason: new TypeError(message),
+        })
+      );
+
+      expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    }
+  );
+
+  it("counts an import failure that names no module", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError("error loading dynamically imported module"),
+      })
+    );
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts Safari's import failure, which names no URL", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError("Importing a module script failed."),
+      })
+    );
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: the reload loop guard", () => {
+  it("holds after the reloaded page hydrated and sent its report", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+
+    // The reloaded page hydrates, which consumes and sends the report.
+    runWatchdog();
+    markHydrated();
+    fakeWindow.__shelfHydrationWatchdog?.done();
+    expect(storedReport()).toBeNull();
+
+    // The next load fails again within the window: no second reload.
+    runWatchdog();
+    failToLoad(moduleScript());
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(true);
+    // A new chain of failures: it did not reload, so it must not say it did.
+    expect(storedReport()).toMatchObject({ failures: 1, reloadedAt: null });
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: the page is slow to hydrate", () => {
+  it("shows the recovery screen at the timeout without reloading", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 1);
+    expect(isShowingScreen()).toBe(false);
+
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(storedReport()).toMatchObject({
+      reason: "timeout",
+      reloadedAt: null,
+    });
+  });
+
+  it("does not count time while the tab is hidden", () => {
+    // A background tab or a restored session: nobody is looking yet.
+    visibility = "hidden";
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS * 5);
+    expect(isShowingScreen()).toBe(false);
+
+    // The clock starts once the tab is shown.
+    setTabVisibility("visible");
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+    expect(storedReport()).toMatchObject({ reason: "timeout", hidden: true });
+  });
+
+  it("pauses the clock while hidden and keeps the visible time already spent", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(15_000);
+    setTabVisibility("hidden");
+    vi.advanceTimersByTime(60_000);
+    setTabVisibility("visible");
+
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 15_000 - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+  });
+
+  it("is not shortened by a wall-clock change while visible", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(15_000);
+    // The system clock jumps an hour ahead (a manual change, an NTP fix).
+    vi.setSystemTime(Date.now() + 3_600_000);
+    setTabVisibility("hidden");
+    setTabVisibility("visible");
+
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 15_000 - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+  });
+
+  it("records what the page looked like when it timed out", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      reason: "timeout",
+      hidden: false,
+      automated: false,
+      failedAfterMs: expect.any(Number),
+      bundleFilesLoaded: expect.any(Number),
+    });
+    expect(storedReport()).toHaveProperty("lastBundleFileMs");
+    expect(storedReport()).toHaveProperty("connection");
+  });
+
+  it("names the requested files that never finished downloading", () => {
+    // A stalled download raises no error; only the missing timing entry shows it.
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    document.head.appendChild(modulePreload(OTHER_CHUNK));
+    document.head.appendChild(modulePreload(THIRD_PARTY_SCRIPT));
+    runWatchdog(fakePerformance({ finished: [OTHER_CHUNK] }));
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesLoaded: 1,
+      bundleFilesExpected: 2,
+      missingBundleFiles: ["/file-assets/abc/chunk-X1.js"],
+    });
+  });
+
+  it("names no missing files once the browser dropped timing entries", () => {
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    const performance = fakePerformance();
+    runWatchdog(performance);
+    performance.fillBuffer();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesExpected: 1,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names no missing files when the finished downloads cannot be read", () => {
+    document.head.appendChild(modulePreload(OWN_CHUNK));
+    const performance = fakePerformance();
+    performance.getEntriesByType = () => {
+      throw new Error("not supported");
+    };
+    runWatchdog(performance);
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesLoaded: 0,
+      bundleFilesExpected: 1,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names no missing files when the requested files cannot be read", () => {
+    runWatchdog(fakePerformance());
+    // why: a document the script cannot query is hard to produce in happy-dom.
+    const query = vi
+      .spyOn(document, "querySelectorAll")
+      .mockImplementation(() => {
+        throw new Error("not supported");
+      });
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+    query.mockRestore();
+
+    expect(storedReport()).toMatchObject({
+      bundleFilesExpected: null,
+      missingBundleFiles: null,
+    });
+  });
+
+  it("names at most a handful of unfinished files", () => {
+    for (let i = 0; i < MAX_MISSING_BUNDLE_FILES + 5; i++) {
+      document.head.appendChild(
+        modulePreload(`${ORIGIN}/file-assets/abc/chunk-${i}.js`)
+      );
+    }
+    runWatchdog(fakePerformance());
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()?.bundleFilesExpected).toBe(
+      MAX_MISSING_BUNDLE_FILES + 5
+    );
+    expect(storedReport()?.missingBundleFiles).toHaveLength(
+      MAX_MISSING_BUNDLE_FILES
+    );
+  });
+
+  it("keeps timing entries for the whole module graph", () => {
+    const performance = fakePerformance();
+    runWatchdog(performance);
+
+    expect(performance.setResourceTimingBufferSize).toHaveBeenCalledWith(
+      RESOURCE_TIMING_BUFFER_SIZE
+    );
+  });
+
+  it("records wall-clock time next to the monotonic clock", () => {
+    // The monotonic clock stood still for 16 s, as it does while a device sleeps.
+    let monotonic = 0;
+    runWatchdog(fakePerformance({ now: () => monotonic }));
+    monotonic = 4_000;
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(storedReport()).toMatchObject({
+      failedAfterMs: 4_000,
+      wallClockMs: HYDRATION_TIMEOUT_MS,
+    });
+  });
+
+  it("removes the screen again if hydration completes late", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+    fakeWindow.__shelfHydrationWatchdog?.done();
+
+    expect(isShowingScreen()).toBe(false);
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: after hydration", () => {
+  it("stops watching, so later chunk failures stay with the router", () => {
+    runWatchdog();
+    fakeWindow.__shelfHydrationWatchdog?.done();
+
+    failToLoad(moduleScript());
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(false);
+    expect(storedReport()).toBeNull();
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: the reload button", () => {
+  it("reloads the page without React", () => {
+    runWatchdog();
+    document.body.innerHTML = `<button ${HYDRATION_RELOAD_ATTRIBUTE}=""><span>Reload</span></button>`;
+    document.querySelector("span")?.click();
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays parseable by pre-ES2015 engines (no arrow functions, let/const, template literals)", () => {
+    expect(HYDRATION_WATCHDOG_SCRIPT).not.toMatch(/=>|\blet\b|\bconst\b|`/);
+  });
+});
+
+describe("HYDRATION_GATE_STYLES", () => {
+  it("shows only the recovery screen while the document is flagged", () => {
+    expect(HYDRATION_GATE_STYLES).toContain(
+      `#${HYDRATION_FAILED_SCREEN_ID}{display:none}`
+    );
+    expect(HYDRATION_GATE_STYLES).toContain(
+      `html[${HYDRATION_FAILED_ATTRIBUTE}] #${HYDRATION_FAILED_SCREEN_ID}{display:block}`
+    );
+    expect(HYDRATION_GATE_STYLES).toContain(
+      `html[${HYDRATION_FAILED_ATTRIBUTE}] body>:not(#${HYDRATION_FAILED_SCREEN_ID}){display:none}`
+    );
+  });
+});
+
+describe("markHydrated", () => {
+  it("logs a load the automatic reload fixed, once, without raising an issue", () => {
+    runWatchdog();
+    failToLoad(modulePreload(OWN_CHUNK));
+
+    // The reloaded page hydrates.
+    markHydrated();
+    markHydrated();
+
+    // The user only saw a reload, so this is counted, not alerted on.
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    expect(Sentry.logger.info).toHaveBeenCalledWith(
+      "App bundle reloaded after a failed load",
+      expect.objectContaining({
+        label: "Hydration",
+        reason: "load-error",
+        path: "/assets",
+        failures: 1,
+        source: expect.stringContaining("/file-assets/abc/chunk-X1.js"),
+      })
+    );
+    expect(storedReport()).toBeNull();
+  });
+
+  it("raises a warning when the reload failed too and the recovery screen showed", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    fakeWindow.__shelfHydrationWatchdog?.done();
+    runWatchdog();
+    failToLoad(moduleScript());
+
+    // A manual reload from the recovery screen hydrates.
+    markHydrated();
+
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        level: "warning",
+        fingerprint: ["hydration-failure", "load-error"],
+        tags: {
+          hydration_failure: "load-error",
+          hydration_auto_reloaded: "yes",
+          hydration_tab_hidden: "no",
+          hydration_clock_gap: "no",
+        },
+        extra: expect.objectContaining({ failures: 2 }),
+      })
+    );
+  });
+
+  it("raises a warning when the page timed out", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        fingerprint: ["hydration-failure", "timeout"],
+        tags: {
+          hydration_failure: "timeout",
+          hydration_auto_reloaded: "no",
+          hydration_tab_hidden: "no",
+          hydration_clock_gap: "no",
+        },
+      })
+    );
+  });
+
+  it("tags a failure from a tab that had been hidden", () => {
+    runWatchdog();
+    setTabVisibility("hidden");
+    setTabVisibility("visible");
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        tags: expect.objectContaining({ hydration_tab_hidden: "yes" }),
+      })
+    );
+  });
+
+  it("tags a failure whose wall clock ran ahead of the page clock", () => {
+    let monotonic = 0;
+    runWatchdog(fakePerformance({ now: () => monotonic }));
+    monotonic = 4_000;
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        tags: expect.objectContaining({ hydration_clock_gap: "yes" }),
+      })
+    );
+  });
+
+  it("raises a separate info issue for a timeout that fired before its clock ran out", () => {
+    // A link scanner opening emailed links runs timers early: the 20-second
+    // visible-time timeout fires with only a few seconds on the page clock.
+    // Both clocks read 6 seconds when it fires, so the device did not sleep.
+    const performance = fakePerformance({ now: () => 6_000 });
+    performance.timeOrigin = Date.now() + HYDRATION_TIMEOUT_MS - 6_000;
+    runWatchdog(performance);
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "Hydration timeout fired before its clock ran out",
+      expect.objectContaining({
+        level: "info",
+        fingerprint: ["hydration-failure", "timeout-early"],
+        tags: expect.objectContaining({ hydration_failure: "timeout" }),
+        extra: expect.objectContaining({ failedAfterMs: 6_000 }),
+      })
+    );
+  });
+
+  it("keeps a timeout that took its full time in the warning issue", () => {
+    runWatchdog(fakePerformance({ now: () => HYDRATION_TIMEOUT_MS + 500 }));
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        level: "warning",
+        fingerprint: ["hydration-failure", "timeout"],
+      })
+    );
+  });
+
+  it("sends nothing for a browser under automation", () => {
+    // Crawlers and link previewers fast-forward timers; their timeouts say
+    // nothing about users.
+    automated = true;
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing after a clean load", () => {
+    runWatchdog();
+    markHydrated();
+
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+  });
+});

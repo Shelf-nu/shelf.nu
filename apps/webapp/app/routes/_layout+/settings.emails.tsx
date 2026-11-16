@@ -387,6 +387,12 @@ function EmailPreview({
               >
                 Booking reservation for Jane Doe
               </h1>
+              <p style={{ fontSize: "16px", color: "#344054" }}>
+                <span style={{ color: "#101828", fontWeight: "600" }}>
+                  Reserved by:
+                </span>{" "}
+                John Smith on 01/14/26, 3:30 PM
+              </p>
               <h2
                 style={{
                   fontSize: "16px",

@@ -7,21 +7,30 @@
  * across their other workspaces, and the response carries the OWNING
  * `organizationId` so the app can offer to switch and open it there.
  *
+ * A linked asset carries only the custody the caller may see in the owning
+ * workspace, as on the asset detail.
+ *
  * @see {@link file://./qr.$qrId.ts} the QR twin of this route
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} MOBILE_ASSET_SELECT and the shape helpers
  */
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+  mobileWorkspaceAccessFromMembership,
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  shapeMobileAssetResponse,
   shapeMobileKitResponse,
+  mobileScanErrorBody,
 } from "~/modules/api/mobile-auth.server";
+import { shapeScannedAssetForViewer } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { parseScanGeolocation } from "~/modules/scan/geolocation.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
@@ -36,6 +45,12 @@ import { canUseBarcodes } from "~/utils/subscription.server";
  * Requires the workspace to hold the barcode capability (`canUseBarcodes`),
  * which every workspace holds on a self-hosted deployment — there is no
  * billing there to gate on.
+ *
+ * Records the scan as `COMPANION` with a note on a scanned asset. The
+ * companion's audit scanner resolves barcodes here too: it marks those calls
+ * with `X-Scan-Context: audit`, which records the scan as `AUDIT` with no note
+ * (the audit keeps its own trail). Optional `X-Scan-Latitude` /
+ * `X-Scan-Longitude` headers are stored as the scan's position.
  *
  * @returns 200 with the barcode, its owning `organizationId`, and the linked
  *   asset or kit; 403 when the workspace lacks the capability; 404 when the
@@ -103,14 +118,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!foundBarcode) {
       const memberships = await db.userOrganization.findMany({
         where: { userId: user.id, organizationId: { not: organizationId } },
-        // The owning workspace must hold the barcode capability itself —
-        // resolving through a sibling whose add-on lapsed would bypass its
-        // gate. Same canonical rule the /me serializer applies.
+        // An owner is a sibling that can use barcodes, active or not: a
+        // workspace without the barcode add-on is never searched, so it never
+        // owns a code, and resolving through one would bypass its gate. Same
+        // canonical rule the /me serializer applies. The workspace gate's
+        // columns ride along, so each owner is decided from this row.
         select: {
           organizationId: true,
-          organization: { select: { barcodesEnabled: true } },
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+          organization: {
+            select: {
+              barcodesEnabled: true,
+              ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.organization.select,
+            },
+          },
         },
       });
+      const membershipByOrgId = new Map(
+        memberships.map((membership) => [membership.organizationId, membership])
+      );
       const eligibleOrgIds = memberships
         .filter((membership) => canUseBarcodes(membership.organization))
         .map((membership) => membership.organizationId);
@@ -136,8 +162,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         });
 
         // Barcode uniqueness is per-workspace, so the same value can exist in
-        // several sibling workspaces. Only a UNIQUE match may drive the jump —
-        // picking one arbitrarily would open the wrong asset.
+        // several sibling workspaces. Only a UNIQUE match may drive the jump:
+        // the physical label belongs to exactly one of them, and picking one
+        // would open the wrong asset. Inactive owners count here too: a label
+        // from a lapsed workspace must not open a namesake in an active one.
         if (owningOrgIds.length > 1) {
           return data(
             {
@@ -146,28 +174,43 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                   "This barcode exists in more than one of your workspaces. Switch to the right workspace to scan it there.",
               },
             },
-            // 409, not 404: the code exists and the caller may see it — what
+            // 409, not 404: the code exists and the caller may see it; what
             // fails is choosing between workspaces.
             { status: 409 }
           );
         }
 
         if (owningOrgIds.length === 1) {
-          // Phase 2: the full payload, once, for the winner. Routed back
-          // through `getBarcodeByValue` so the original-case-then-uppercase
-          // preference stays identical to the current-workspace path.
-          const candidate = await getBarcodeByValue({
-            value,
-            organizationId: owningOrgIds[0].organizationId,
-            include: {
-              asset: { select: MOBILE_ASSET_SELECT },
-              kit: { select: MOBILE_KIT_SELECT },
-            },
+          const ownerId = owningOrgIds[0].organizationId;
+          // The code opens in the workspace that owns it, so that workspace
+          // must be active, decided from the membership row loaded above (no
+          // read of its own). An inactive one refuses with its 403, like a QR
+          // scan of one of its codes.
+          const owner = mobileWorkspaceAccessFromMembership({
+            userId: user.id,
+            organizationId: ownerId,
+            membership: membershipByOrgId.get(ownerId) ?? null,
+            reason: "code",
           });
+          if (owner.access === "inactive") throw owner.error;
 
-          if (candidate) {
-            foundOrganizationId = owningOrgIds[0].organizationId;
-            foundBarcode = candidate;
+          if (owner.access === "active") {
+            // Phase 2: the full payload, once, for the winner. Routed back
+            // through `getBarcodeByValue` so the original-case-then-uppercase
+            // preference stays identical to the current-workspace path.
+            const candidate = await getBarcodeByValue({
+              value,
+              organizationId: ownerId,
+              include: {
+                asset: { select: MOBILE_ASSET_SELECT },
+                kit: { select: MOBILE_KIT_SELECT },
+              },
+            });
+
+            if (candidate) {
+              foundOrganizationId = ownerId;
+              foundBarcode = candidate;
+            }
           }
         }
       }
@@ -195,6 +238,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
+    const isAuditScan =
+      request.headers.get("x-scan-context")?.toLowerCase() === "audit";
+
+    // An audit runs in the requesting workspace, so an AUDIT scan of a code
+    // owned by a sibling workspace belongs to no audit: the app rejects it as
+    // "Different Workspace", and recording it would leave an audit-sourced
+    // row in a workspace that is not being audited.
+    const isAuditScanOfSibling =
+      isAuditScan && foundOrganizationId !== organizationId;
+
+    // Non-fatal: a failed record never fails the resolve. The note and the
+    // row belong to the workspace that owns the barcode.
+    if (!isAuditScanOfSibling) {
+      await recordScanNonFatal({
+        codeType: ScanCodeType.BARCODE,
+        code: value,
+        source: isAuditScan ? ScanSource.AUDIT : ScanSource.COMPANION,
+        userAgent: request.headers.get("user-agent") ?? "mobile-companion",
+        userId: user.id,
+        barcodeId: foundBarcode.id,
+        assetId: foundBarcode.assetId,
+        kitId: foundBarcode.kitId,
+        organizationId: foundOrganizationId,
+        ...(parseScanGeolocation(request.headers) ?? {}),
+        writeNote: !isAuditScan,
+      });
+    }
+
     return data({
       barcode: {
         id: foundBarcode.id,
@@ -210,8 +281,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // the flat `asset.kit` / `.location` / `.custody` shape the companion
         // build in the App Store consumes. Mirrors qr.$qrId.ts; see
         // MOBILE_ASSET_SELECT for the full shape.
+        // Re-signed, and custody scoped, in the workspace that owns the
+        // barcode.
         asset: foundBarcode.asset
-          ? shapeMobileAssetResponse(foundBarcode.asset)
+          ? await shapeScannedAssetForViewer({
+              asset: foundBarcode.asset,
+              organizationId: foundOrganizationId,
+              viewerUserId: user.id,
+            })
           : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it. shapeMobileKitResponse handles null pass-through.
@@ -221,7 +298,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
-      { error: { message: reason.message } },
+      { error: mobileScanErrorBody(reason) },
       { status: reason.status }
     );
   }

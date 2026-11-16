@@ -16,7 +16,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -30,6 +30,10 @@ import { ChevronRight } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import type { KitRemovalBookingImpact } from "~/components/kits/booking-removal-notice";
 import { BookingRemovalNotice } from "~/components/kits/booking-removal-notice";
+import {
+  CrossKitMoveNotice,
+  getCrossKitMoves,
+} from "~/components/kits/cross-kit-move-notice";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
@@ -54,6 +58,7 @@ import {
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
@@ -64,11 +69,13 @@ import {
   updateKitAssets,
 } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { joinAriaIds } from "~/utils/aria-ids";
 import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -118,7 +125,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -181,6 +188,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Ignores the custodian-filter seed — scope it rather than fetch a
         // roster nobody renders.
         canSeeAllCustody: false,
+        // The search matches custodian names only on custody the caller may see.
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
       }),
     ]);
 
@@ -307,12 +319,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
  */
 const REMOVAL_NOTICE_ID = "manage-kit-assets-removal-notice";
 
+/** `aria-describedby` target for the cross-kit move notice. */
+const MOVE_NOTICE_ID = "manage-kit-assets-move-notice";
+
+/** `aria-describedby` targets for the custody, quantity and location notices. */
+const CUSTODY_NOTICE_ID = "manage-kit-assets-custody-notice";
+const QUANTITY_NOTICE_ID = "manage-kit-assets-quantity-notice";
+const LOCATION_NOTICE_ID = "manage-kit-assets-location-notice";
+
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems, bookingImpactByAssetId } =
     useLoaderData<LoaderData>();
-  // why: `.map` returns a new array each render. The effects below depend on
-  // these lists, so without memoisation each render fired the effect and
-  // re-triggered a render via setSelectedBulkItems → infinite loop.
+  // why: `.map` returns a new array each render. The disabled-items effect
+  // below depends on `kitAssetIds`, so an unmemoised list would re-run it on
+  // every render, and its `setDisabledBulkItems` write would loop.
   const kitAssetsList = useMemo(
     () => kit.assetKits.map((ak) => ak.asset),
     [kit.assetKits]
@@ -342,7 +362,7 @@ export default function ManageAssetsInKit() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
@@ -427,6 +447,16 @@ export default function ManageAssetsInKit() {
     };
   }, [bookingImpactByAssetId, selectedBulkItems]);
 
+  /**
+   * Selected INDIVIDUAL assets that sit in another kit. Confirming moves them
+   * here, out of that kit and off its bookings that are not checked out yet,
+   * so the dialog names them.
+   */
+  const crossKitMoves = useMemo(
+    () => getCrossKitMoves(selectedBulkItems, kit.id),
+    [selectedBulkItems, kit.id]
+  );
+
   const kitIsInCustody =
     kit.status === KitStatus.IN_CUSTODY || kit.status === KitStatus.CHECKED_OUT;
   const showInCustodyQtyWarning =
@@ -448,7 +478,7 @@ export default function ManageAssetsInKit() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(kitAssetsList);
+    seedFormSelection(kitAssetsList);
   }
 
   /**
@@ -655,16 +685,22 @@ export default function ManageAssetsInKit() {
               </AlertDialogTrigger>
 
               <AlertDialogContent
+                // The notices stack (custody, location, move, removal), and the
+                // shared content caps its height without scrolling, so this
+                // dialog scrolls to keep Cancel and Continue reachable.
+                className="overflow-y-auto"
                 // The dialog has no `AlertDialogDescription`, so Radix has
-                // nothing to announce beyond the heading. When the removal
-                // warning is present it IS the consequential part — point the
-                // dialog's description at it so it's read out on open.
-                aria-describedby={
-                  deselectedBookingImpact.reserved.bookings.length > 0 ||
-                  deselectedBookingImpact.checkedOut.bookings.length > 0
-                    ? REMOVAL_NOTICE_ID
-                    : undefined
-                }
+                // nothing to announce beyond the heading, so the dialog's
+                // description points at every notice it shows.
+                aria-describedby={joinAriaIds(
+                  kitIsInCustody && CUSTODY_NOTICE_ID,
+                  showInCustodyQtyWarning && QUANTITY_NOTICE_ID,
+                  LOCATION_NOTICE_ID,
+                  crossKitMoves.length > 0 && MOVE_NOTICE_ID,
+                  (deselectedBookingImpact.reserved.bookings.length > 0 ||
+                    deselectedBookingImpact.checkedOut.bookings.length > 0) &&
+                    REMOVAL_NOTICE_ID
+                )}
               >
                 <div className="flex items-center gap-4">
                   <div className="flex size-12 items-center justify-center rounded-full bg-blue-200/20">
@@ -678,7 +714,7 @@ export default function ManageAssetsInKit() {
 
                 <div>
                   {kitIsInCustody && (
-                    <p className="mb-3">
+                    <p id={CUSTODY_NOTICE_ID} className="mb-3">
                       This kit is currently{" "}
                       {kit.status === KitStatus.IN_CUSTODY
                         ? "in custody"
@@ -693,7 +729,10 @@ export default function ManageAssetsInKit() {
                       shift in the same tx. Make sure the user understands
                       the cascade before they confirm. */}
                   {showInCustodyQtyWarning && (
-                    <div className="mb-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+                    <div
+                      id={QUANTITY_NOTICE_ID}
+                      className="mb-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800"
+                    >
                       <strong>Quantity change notice:</strong> You changed the
                       quantity for{" "}
                       {qtyEditedInExistingKitRows.length === 1
@@ -704,18 +743,23 @@ export default function ManageAssetsInKit() {
                     </div>
                   )}
                   {kit.location ? (
-                    <p className="mb-3">
+                    <p id={LOCATION_NOTICE_ID} className="mb-3">
                       <strong>Location Update Notice:</strong> Adding assets to
                       this kit will automatically update their location to{" "}
                       <strong>{kit.location.name}</strong>.
                     </p>
                   ) : (
-                    <p className="mb-3">
-                      <strong>Location Update Notice:</strong> Adding assets to
-                      this kit will remove their current location since this kit
-                      has no location assigned.
+                    <p id={LOCATION_NOTICE_ID} className="mb-3">
+                      <strong>Location Update Notice:</strong> This kit has no
+                      location, so the assets you add keep their current
+                      location.
                     </p>
                   )}
+                  <CrossKitMoveNotice
+                    id={MOVE_NOTICE_ID}
+                    className="mb-3"
+                    moves={crossKitMoves}
+                  />
                   {/* Removal notice: deselecting a row is destructive even
                       though this dialog is titled "Add Assets to kit?" — the
                       asset leaves the kit AND every reserved booking that
@@ -999,6 +1043,7 @@ const RowComponent = ({
                 <input
                   id={`kit-qty-${item.id}`}
                   type="number"
+                  {...numberInputWheelGuard}
                   min={1}
                   max={Number.isFinite(max) ? max : undefined}
                   value={currentValue}
@@ -1055,14 +1100,19 @@ const RowComponent = ({
       {/* Location */}
       <Td className={allowCursor}>
         {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count?.children ?? 0,
-            }}
-          />
+          // Clicks on the badge or its hierarchy hover card (portalled, but React
+          // events still bubble through it) must not toggle the row's
+          // selection: the row's click handler selects the asset.
+          <span role="presentation" onClick={(e) => e.stopPropagation()}>
+            <LocationBadge
+              location={{
+                id: location.id,
+                name: location.name,
+                parentId: location.parentId ?? undefined,
+                childCount: location._count?.children ?? 0,
+              }}
+            />
+          </span>
         ) : null}
       </Td>
     </>

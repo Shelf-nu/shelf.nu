@@ -1,5 +1,9 @@
-import { useState } from "react";
-import { CustomFieldType, type CustomField } from "@prisma/client";
+import { useReducer, useState } from "react";
+import {
+  CustomFieldFormat,
+  CustomFieldType,
+  type CustomField,
+} from "@prisma/client";
 import { useAtom } from "jotai";
 import { Link, useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
@@ -7,9 +11,16 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useOrganizationId } from "~/hooks/use-organization-id";
+import {
+  createOptionListState,
+  optionListReducer,
+} from "~/modules/custom-field/option-list";
 import type { action as editCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.$fieldId_.edit";
 import type { action as newCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.new";
-import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import {
+  FIELD_TYPE_NAME,
+  LINK_FORMAT_NEEDS_TEXT_MESSAGE,
+} from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -30,6 +41,39 @@ import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 
+/** Shown when an OPTION field would be saved with nothing to choose from. */
+export const MISSING_OPTIONS_MESSAGE =
+  "Please add at least one option for a dropdown field";
+
+/**
+ * The options an operator could actually pick. A blank entry renders a row in
+ * the dropdown that selects nothing and cannot be told apart from its
+ * neighbours, so it does not count towards having options.
+ */
+export function selectableOptions(options?: string[] | null): string[] {
+  return (options ?? []).filter((option) => option.trim() !== "");
+}
+
+/**
+ * Whether saving this type with these options would leave a dropdown nobody can
+ * use. An OPTION field with no selectable options is not merely empty, it is
+ * unusable: the dropdown renders no choices, and a REQUIRED one then demands a
+ * value that cannot be picked, which blocks saving the asset at all.
+ *
+ * Shared by the submission schema and the edit action. The schema can only judge
+ * the SUBMITTED type, while the edit action ignores that value because a field's
+ * type is immutable once it exists, so the action re-checks against the persisted
+ * type. Both call this, so the two cannot answer differently.
+ */
+export function optionFieldIsMissingOptions(
+  type: CustomFieldType,
+  options?: string[] | null
+): boolean {
+  return (
+    type === CustomFieldType.OPTION && selectableOptions(options).length === 0
+  );
+}
+
 export const NewCustomFieldFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   helpText: z
@@ -37,6 +81,9 @@ export const NewCustomFieldFormSchema = z.object({
     .optional()
     .transform((val) => val || null), // Transforming undefined to fit prismas null constraint
   type: z.nativeEnum(CustomFieldType),
+  // The Format picker is rendered for TEXT fields only, so every other type
+  // posts nothing here and gets PLAIN.
+  format: z.nativeEnum(CustomFieldFormat).default(CustomFieldFormat.PLAIN),
   required: z
     .string()
     .optional()
@@ -46,12 +93,58 @@ export const NewCustomFieldFormSchema = z.object({
     .optional()
     .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
+  // Stored verbatim. An option IS the string an asset keeps in
+  // `AssetCustomFieldValue`, and a stored value is validated by exact membership
+  // (`options.includes(v)` in `getSchema`), so rewriting an option here would
+  // orphan every asset already pointing at the old spelling. Normalising what an
+  // operator types is `OptionBuilder`'s job, where it touches only new input.
   options: z.array(z.string()).optional(),
+  // Saved spelling -> final option, for assets that follow a renamed or merged
+  // option. `updateCustomField` checks each pair against the saved options.
+  optionRenames: z
+    .array(z.object({ from: z.string(), to: z.string() }))
+    .optional(),
   categories: z
     .array(z.string().min(1, "Please select a category"))
     .optional()
     .default([]),
 });
+
+/**
+ * What the create and edit ACTIONS parse.
+ *
+ * Adds the rules that span two fields, which is why they cannot live inside
+ * the object above: an OPTION field needs at least one option, and only a TEXT
+ * field can have the Link format. Both routes parse through this, so a rule
+ * cannot hold on one page and not the other. The edit action keeps a field's
+ * saved type, so `updateCustomField` checks the format against that type too.
+ *
+ * `NewCustomFieldFormSchema` stays a plain `ZodObject` because the form reads
+ * `.shape` for its required markers and hands the schema to `useZorm`, neither of
+ * which works on the `ZodEffects` a refinement produces. The cross-field message
+ * reaches the UI through the server-error fallback the form already renders.
+ */
+export const CustomFieldSubmissionSchema = NewCustomFieldFormSchema.superRefine(
+  (data, ctx) => {
+    if (optionFieldIsMissingOptions(data.type, data.options)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: MISSING_OPTIONS_MESSAGE,
+      });
+    }
+    if (
+      data.format === CustomFieldFormat.LINK &&
+      data.type !== CustomFieldType.TEXT
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["format"],
+        message: LINK_FORMAT_NEEDS_TEXT_MESSAGE,
+      });
+    }
+  }
+);
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
@@ -59,8 +152,11 @@ interface Props {
   helpText?: CustomField["helpText"];
   required?: CustomField["required"];
   type?: CustomField["type"];
+  format?: CustomField["format"];
   active?: CustomField["active"];
   options?: CustomField["options"];
+  /** Assets per stored option spelling, shown beside each option when editing. */
+  optionUsage?: Record<string, number>;
   isEdit?: boolean;
   categories?: string[];
 }
@@ -74,7 +170,7 @@ interface Props {
 const EMPTY_CATEGORIES: string[] = [];
 
 const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
-  TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
+  TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes, or a link to a manual.",
   OPTION: "A dropdown list of predefined options.",
   BOOLEAN: "A true/false or yes/no value.",
   DATE: "A date picker for selecting a date.",
@@ -85,13 +181,20 @@ const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   NUMBER: "Enter numerical values. Supports decimals.",
 };
 
+const FIELD_FORMAT_NAME: { [key in CustomFieldFormat]: string } = {
+  PLAIN: "Plain text",
+  LINK: "Link",
+};
+
 export const CustomFieldForm = ({
   options: opts,
   name,
   helpText,
   required,
   type,
+  format,
   active,
+  optionUsage,
   isEdit = false,
   categories = EMPTY_CATEGORIES,
 }: Props) => {
@@ -99,9 +202,16 @@ export const CustomFieldForm = ({
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
-  const [options, setOptions] = useState<Array<string>>(opts || []);
+  const [optionList, dispatchOptionList] = useReducer(
+    optionListReducer,
+    opts ?? [],
+    createOptionListState
+  );
   const [selectedType, setSelectedType] = useState<CustomFieldType>(
     type || "TEXT"
+  );
+  const [selectedFormat, setSelectedFormat] = useState<CustomFieldFormat>(
+    format ?? CustomFieldFormat.PLAIN
   );
   const [useCategories, setUseCategories] = useState(categories.length > 0);
 
@@ -116,9 +226,9 @@ export const CustomFieldForm = ({
   const actionData = useActionData<
     typeof newCustomFieldsAction | typeof editCustomFieldsAction
   >();
-  const validationErrors = getValidationErrors<typeof NewCustomFieldFormSchema>(
-    actionData?.error
-  );
+  const validationErrors = getValidationErrors<
+    typeof CustomFieldSubmissionSchema
+  >(actionData?.error);
 
   return (
     <Card className="w-full md:w-min">
@@ -190,28 +300,85 @@ export const CustomFieldForm = ({
               <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
             </div>
           </FormRow>
+          {selectedType === CustomFieldType.TEXT ? (
+            <>
+              <label className="lg:hidden" htmlFor="custom-field-format">
+                Format
+              </label>
+              <FormRow
+                rowLabel="Format"
+                className="border-b-0 pb-[10px] pt-[6px]"
+              >
+                <Select
+                  name={zo.fields.format()}
+                  defaultValue={selectedFormat}
+                  disabled={disabled}
+                  onValueChange={(val: CustomFieldFormat) =>
+                    setSelectedFormat(val)
+                  }
+                >
+                  <SelectTrigger
+                    className="px-3.5 py-3"
+                    id="custom-field-format"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent
+                    position="popper"
+                    className="w-full min-w-[300px]"
+                    align="start"
+                  >
+                    {Object.values(CustomFieldFormat).map((value) => (
+                      <SelectItem value={value} key={value}>
+                        <span className="mr-4 text-[14px] text-gray-700">
+                          {FIELD_FORMAT_NAME[value]}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedFormat === CustomFieldFormat.LINK ? (
+                  <div className="mt-2 flex-1 grow rounded border px-6 py-4 text-[14px] text-gray-600">
+                    <p>
+                      Every value must be a web link, like
+                      https://example.com/manual.pdf. It shows as a short link
+                      with the page title when Shelf can read it.
+                    </p>
+                    {isEdit && format !== CustomFieldFormat.LINK ? (
+                      <p className="mt-2">
+                        Values already saved that are not links stay as they
+                        are. They have to be changed to a link the next time
+                        someone edits them.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {validationErrors?.format ? (
+                  <div className="text-sm text-error-500">
+                    {validationErrors.format.message}
+                  </div>
+                ) : null}
+              </FormRow>
+            </>
+          ) : null}
           {selectedType === "OPTION" ? (
             <>
               <FormRow rowLabel="" className="mt-0 border-b-0 pt-0">
                 <OptionBuilder
-                  onRemove={(i: number) => {
-                    options.splice(i, 1);
-                    setOptions([...options]);
-                  }}
-                  options={options}
-                  onAdd={(o: string) => setOptions([...options, o])}
+                  state={optionList}
+                  dispatch={dispatchOptionList}
+                  usageCounts={optionUsage}
+                  optionName={(i) => zo.fields.options(i)()}
+                  renameName={(i, side) => zo.fields.optionRenames(i)[side]()}
                 />
-                {options.map((op, i) => (
-                  // Option values are the stable identity here — the
-                  // OptionBuilder above disallows duplicates, so each
-                  // option string is unique within this list.
-                  <input
-                    key={op}
-                    type="hidden"
-                    name={zo.fields.options(i)()}
-                    value={op}
-                  />
-                ))}
+                {/* "At least one option" spans type + options, so it is refined
+                    on the submission schema rather than on a single field and
+                    arrives here as a server error. */}
+                {validationErrors?.options ? (
+                  <div className="text-sm text-error-500">
+                    {validationErrors.options.message}
+                  </div>
+                ) : null}
               </FormRow>
             </>
           ) : null}

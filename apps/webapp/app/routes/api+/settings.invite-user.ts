@@ -1,3 +1,12 @@
+/**
+ * Invite User API
+ *
+ * Handles the "Invite a user" dialog on the team settings page: sends one
+ * invite to one email address.
+ *
+ * @see {@link file://./../../components/settings/invite-user-dialog.tsx}
+ * @see {@link file://./../../modules/invite/service.server.ts}
+ */
 import { data, type ActionFunctionArgs } from "react-router";
 import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
@@ -12,12 +21,23 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 
+/**
+ * Sends a workspace invite to one email address.
+ *
+ * An earlier pending invite to the same address (in any letter case) does not
+ * block it: `createInvite` invalidates the earlier one, so only the newest
+ * invite can be accepted.
+ *
+ * @returns `{ success: true }` when an invite was sent, `null` payload when
+ *   `createInvite` declined it (it notifies the sender why), or an error
+ *   payload with its status
+ */
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -52,25 +72,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
-    const existingInvites = await db.invite.findMany({
-      where: {
-        status: "PENDING",
-        inviteeEmail: email,
-        organizationId,
-      },
-    });
-
-    if (existingInvites.length) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "User already has a pending invite. Either resend it or cancel it in order to be able to send a new one.",
-        additionalData: { email, organizationId },
-        label: "Invite",
-        shouldBeCaptured: false,
-      });
-    }
-
+    // An earlier pending invite to this email does not block a new one:
+    // createInvite invalidates it in the same transaction that creates this one.
     const invite = await createInvite({
       organizationId,
       inviteeEmail: email,
@@ -80,6 +83,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       teamMemberId,
       userId,
       extraMessage: inviteMessage,
+      // Only the workspace owner may grant an owner-only role; createInvite enforces it.
+      actorOwnsWorkspace: access.ownsWorkspace,
     });
 
     if (!invite) {

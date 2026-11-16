@@ -1,6 +1,8 @@
 ---
 description: Use BADGE_COLORS constants for badge styling instead of hardcoding hex values
-globs: ["apps/webapp/**/*.tsx", "apps/webapp/**/*.ts"]
+paths:
+  - "apps/webapp/**/*.tsx"
+  - "apps/webapp/**/*.ts"
 ---
 
 Always use `BADGE_COLORS` from `~/utils/badge-colors` when styling

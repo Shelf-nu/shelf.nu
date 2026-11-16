@@ -5,6 +5,7 @@ import type { loader } from "~/routes/_layout+/home";
 import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 
+import { buildAssetsFilterHref } from "../assets/assets-filter-link";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
@@ -51,15 +52,24 @@ export default function AssetsByStatusChart() {
                 {chartData
                   .sort((a, b) => b.assets - a.assets)
                   .map((data) => {
-                    const { status, assets, color } = data;
+                    const { id, status, assets, color } = data;
                     return (
                       <li key={status}>
-                        <Badge color={color} noBg>
-                          <span className="text-gray-600">
-                            <strong className="text-gray-900">{assets}</strong>{" "}
-                            {status}
-                          </span>
-                        </Badge>
+                        <Button
+                          to={buildAssetsFilterHref({ status: id })}
+                          variant="inherit"
+                          className="hover:no-underline"
+                          title={`View ${status.toLowerCase()} assets`}
+                        >
+                          <Badge color={color} noBg>
+                            <span className="text-gray-600">
+                              <strong className="text-gray-900 underline">
+                                {assets}
+                              </strong>{" "}
+                              {status}
+                            </span>
+                          </Badge>
+                        </Button>
                       </li>
                     );
                   })}

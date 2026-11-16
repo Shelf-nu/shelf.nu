@@ -9,18 +9,24 @@ import {
 } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
-import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
+import {
+  bookingAddableStatusClause,
+  bookingWriteScopeClause,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
+  ASSET_MODEL_FORM_DEFAULTS_SELECT,
   getModelFilterConfig,
   isSearchableKey,
 } from "~/utils/model-filters-registry.server";
+import { resolveMembershipAccess } from "~/utils/permissions/membership-access";
 import {
-  resolveCanSeeAllBookings,
-  resolveCanSeeAllCustody,
-  resolveEffectiveRole,
-} from "~/utils/roles.server";
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { rolesWhere } from "~/utils/permissions/role-access";
 
 /**
  * Booking statuses a booking search returns when the caller does not ask for a
@@ -76,7 +82,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
-    userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
+    selectableRecipientsOnly: z.coerce.boolean().optional(), // Only members whose role may be picked as a notification recipient
     usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
     /**
      * Which question this custodian picker is asking — see
@@ -120,6 +126,13 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
+    /**
+     * `"true"` asks for each model's defaults (category, value, custom field
+     * defaults) with the results, for the asset form's pre-fill. Granted only
+     * to callers who may create or edit assets; see
+     * `ASSET_MODEL_FORM_DEFAULTS_SELECT`.
+     */
+    withDefaults: z.literal("true").optional(),
   }),
   // No `asset` member: `Asset` has no `name` column (it has `title`), no call
   // site ever passed `name: "asset"`, and any such call would have thrown at
@@ -137,6 +150,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const { organizationId, userOrganizations, currentOrganization } =
       await getSelectedOrganization({ userId, request });
+    // The caller's access in the active organization, resolved from the
+    // session and the workspace toggles, never from a request param.
+    const access = resolveMembershipAccess({
+      userOrganizations,
+      organizationId,
+      workspace: currentOrganization,
+    });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -151,6 +171,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Validating parameters */
     const modelFilters = parseData(searchParams, ModelFiltersSchema);
+
+    /**
+     * The registry's select, plus the asset form's model defaults when the
+     * request asks for them and the caller may create or edit assets. The
+     * grant is resolved from the session's roles, never from a request param.
+     */
+    const resolveSelect = async (): Promise<{
+      select: Record<string, unknown>;
+      withModelDefaults: boolean;
+    }> => {
+      const base = getModelFilterConfig(modelFilters.name).select;
+      if (modelFilters.name !== "assetModel" || !modelFilters.withDefaults) {
+        return { select: base, withModelDefaults: false };
+      }
+      const roles = userOrganizations.find(
+        (o) => o.organization.id === organizationId
+      )?.roles;
+      const canEdit = (action: PermissionAction) =>
+        hasPermission({
+          organizationId,
+          userId,
+          roles,
+          workspace: currentOrganization,
+          entity: PermissionEntity.asset,
+          action,
+        });
+      const [canCreate, canUpdate] = await Promise.all([
+        canEdit(PermissionAction.create),
+        canEdit(PermissionAction.update),
+      ]);
+      return canCreate || canUpdate
+        ? {
+            select: { ...base, ...ASSET_MODEL_FORM_DEFAULTS_SELECT },
+            withModelDefaults: true,
+          }
+        : { select: base, withModelDefaults: false };
+    };
     const { name, queryKey, queryValue, selectedValues } = modelFilters;
 
     /**
@@ -210,7 +267,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
 
       where.deletedAt = modelFilters.deletedAt;
-      if (modelFilters.userWithAdminAndOwnerOnly) {
+      if (modelFilters.selectableRecipientsOnly) {
         where.AND = [
           { user: { isNot: null } },
           {
@@ -219,7 +276,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 some: {
                   AND: [
                     { organizationId },
-                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                    {
+                      roles: {
+                        hasSome: rolesWhere(
+                          (p) => p.notifications.selectableAsRecipient
+                        ),
+                      },
+                    },
                   ],
                 },
               },
@@ -237,21 +300,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * the list grew from "just me" to the entire roster the moment the user
        * typed.
        */
-      const role = resolveEffectiveRole({ userOrganizations, organizationId });
+      // Fail closed: an unmigrated call site gets the NARROWER assignment
+      // rule, so it shows too few names rather than too many.
+      const purpose = modelFilters.custodyPurpose ?? "custody-assignment";
       const custodyScope = resolveCustodianPickerScope({
-        // Fail closed: an unmigrated call site gets the NARROWER assignment
-        // rule, so it shows too few names rather than too many.
-        purpose: modelFilters.custodyPurpose ?? "custody-assignment",
-        role,
-        canSeeAllCustody: resolveCanSeeAllCustody({
-          role,
-          currentOrganization,
-        }),
+        purpose,
+        access,
         userId,
       });
 
-      // BASE may never assign custody, so there is nothing to offer and no
-      // reason to hit the database.
+      // A caller who may not assign custody at all has nothing to be offered,
+      // so there is no reason to hit the database.
       if (custodyScope.mode === "none") {
         return data(payload({ filters: [] }));
       }
@@ -287,25 +346,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        */
       where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
 
-      const role = resolveEffectiveRole({ userOrganizations, organizationId });
-
       /**
        * Standard booking READ visibility: SELF_SERVICE / BASE users only see
        * bookings they are custodian of, unless the workspace has switched the
        * setting on.
        *
-       * Resolved from the session role plus the organization's settings, never
-       * from a request param, and AND-ed so the search `OR` cannot widen it.
-       * The restriction used to be opt-in via a `scopeToCustodian` query param,
-       * which a caller could simply omit — every booking row in the workspace
-       * came back to a restricted user with the setting off.
+       * Resolved from the membership's effective role plus the organization's
+       * settings, never from a request param (a caller could omit a param),
+       * and AND-ed so the search `OR` cannot widen it.
        *
        * Shares `custodianScopeClause` with `getBookings` so the shape matches
-       * the loader that seeded the picker; matching only `custodianUserId` here
-       * dropped bookings custodied through a legacy team-member row as soon as
-       * the user typed.
+       * the loader that seeded the picker: the clause also matches bookings
+       * custodied through a legacy team-member row, which `custodianUserId`
+       * alone would miss.
        */
-      if (!resolveCanSeeAllBookings({ role, currentOrganization })) {
+      if (!access.bookings.seeAll) {
         where.AND.push(
           custodianScopeClause(
             await resolveCustodianScope({ userId, organizationId })
@@ -317,7 +372,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * Standard booking WRITE authorization, AND-ed on top.
        *
        * Every reachable consumer of a booking search for a restricted role is a
-       * mutation-target picker — the two "Add to existing booking" dialogs. The
+       * mutation-target picker: the two "Add to existing booking" dialogs. The
        * asset-index advanced filter is the only read-only consumer, and
        * `assets._index.tsx` refuses ADVANCED mode to SELF_SERVICE / BASE
        * outright, so this never narrows a list they can otherwise reach.
@@ -327,10 +382,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * action rejects turns the picker into a 403 dead end. A future read-only
        * booking search for these roles needs a purpose distinction here.
        */
-      const writeScope = bookingWriteScopeClause({ userId, role });
+      const writeScope = bookingWriteScopeClause({ userId, access });
 
       if (writeScope) {
         where.AND.push(writeScope);
+      }
+
+      // Same picker rule as the seeding loader: only statuses the add action
+      // accepts for this caller.
+      const addableStatus = bookingAddableStatusClause({ access });
+
+      if (addableStatus) {
+        where.AND.push(addableStatus);
       }
     }
 
@@ -352,7 +415,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // The registry — not this call site — decides what leaves the server.
     // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
     // spread below safe, instead of having to sanitise three separate paths.
-    const select = getModelFilterConfig(name).select;
+    const { select, withModelDefaults } = await resolveSelect();
 
     /**
      * Two queries rather than one capped `OR`.
@@ -383,6 +446,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy: { [queryKey]: "asc" },
       }),
     ])) as Array<Array<Record<string, string>>>;
+
+    if (withModelDefaults) {
+      await keepActiveFieldDefaults(
+        [...selectedRows, ...searchRows] as unknown as ModelRowWithDefaults[],
+        organizationId
+      );
+    }
 
     // Selected first, then search hits, de-duplicated: a selected row can also
     // match what the user typed.
@@ -425,5 +495,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
+  }
+}
+
+/** An asset model row carrying `ASSET_MODEL_FORM_DEFAULTS_SELECT`. */
+type ModelRowWithDefaults = {
+  customFieldDefaults: { customFieldId: string; value: unknown }[];
+};
+
+/**
+ * Drops, in place, the custom field defaults whose field is inactive, deleted
+ * or outside the workspace, the way the server fill reads them
+ * (`getModelDefaults`), so the form never pre-fills a field it does not show.
+ */
+async function keepActiveFieldDefaults(
+  rows: ModelRowWithDefaults[],
+  organizationId: string
+) {
+  const fieldIds = [
+    ...new Set(
+      rows.flatMap((row) => row.customFieldDefaults.map((d) => d.customFieldId))
+    ),
+  ];
+  if (fieldIds.length === 0) return;
+
+  const activeFields = await db.customField.findMany({
+    where: {
+      id: { in: fieldIds },
+      organizationId,
+      active: true,
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  const activeIds = new Set(activeFields.map((field) => field.id));
+  for (const row of rows) {
+    row.customFieldDefaults = row.customFieldDefaults.filter((d) =>
+      activeIds.has(d.customFieldId)
+    );
   }
 }

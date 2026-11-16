@@ -19,6 +19,10 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
 import { deleteNRM } from "~/modules/team-member/service.server";
 import { ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 const ORG = "org-1";
@@ -119,5 +123,44 @@ describe("settings.team.nrm delete action", () => {
     const response = await submitDelete("nrm-1");
 
     expect(response).toMatchObject({ status: 302 });
+  });
+});
+
+describe("settings.team.nrm delete action: permission", () => {
+  it("gates the delete on nonRegisteredMember:delete", async () => {
+    await submitDelete("nrm-1");
+
+    expect(requirePermissionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: PermissionEntity.nonRegisteredMember,
+        action: PermissionAction.delete,
+      })
+    );
+  });
+
+  it("refuses a caller holding only nonRegisteredMember:update (403) and deletes nothing", async () => {
+    // A grant-aware stand-in for the matrix: this caller may rename NRMs but
+    // not delete them.
+    requirePermissionMock.mockImplementation(async ({ entity, action }) => {
+      if (
+        entity === PermissionEntity.nonRegisteredMember &&
+        action === PermissionAction.update
+      ) {
+        return { organizationId: ORG } as never;
+      }
+      throw new ShelfError({
+        cause: null,
+        message: "You have no permission to perform this action",
+        status: 403,
+        label: "Permission",
+        shouldBeCaptured: false,
+      });
+    });
+
+    const response = await submitDelete("nrm-1");
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(403);
+    expect(deleteNRMMock).not.toHaveBeenCalled();
   });
 });

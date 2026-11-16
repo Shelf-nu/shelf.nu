@@ -1,4 +1,5 @@
 import { loader } from "~/routes/api+/mobile+/audits.$auditId.evidence";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -27,17 +28,12 @@ vi.mock("react-router", async () => {
 vi.mock("~/modules/audit/service.server", () => ({
   requireAuditAssignee: vi.fn(),
 }));
-// why: pure role-precedence helper, but importing it pulls in server-only
-// booking authorization; the tests drive the role through getMobileUserContext.
-vi.mock("~/utils/booking-authorization.server", () => ({
-  resolveMostPrivilegedRole: (roles: string[]) =>
-    roles.includes("ADMIN") || roles.includes("OWNER") ? "ADMIN" : roles[0],
-}));
 // why: external auth — verifying a bearer token needs Supabase, which these
 // tests neither have nor are testing; the route's own gates are what matter.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
 }));
 
@@ -118,6 +114,8 @@ const IMAGE_GENERAL = {
   imageUrl: "https://x/full-rack.jpg",
   thumbnailUrl: "https://x/thumb-rack.jpg",
   description: "Rack before the sweep",
+  capturedAt: new Date("2026-08-19T12:40:00.000Z"),
+  captureSource: "CAMERA",
   createdAt: new Date("2026-08-19T12:42:00.000Z"),
   auditAssetId: null,
   uploadedBy: { firstName: "John", lastName: "Doe", profilePicture: null },
@@ -130,6 +128,8 @@ const IMAGE_ASSET = {
   // than send null into a thumbnail grid.
   thumbnailUrl: null,
   description: null,
+  capturedAt: null,
+  captureSource: null,
   createdAt: new Date("2026-08-19T12:34:00.000Z"),
   auditAssetId: "aa-1",
   uploadedBy: null,
@@ -140,11 +140,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
     vi.clearAllMocks();
     (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["ADMIN"],
-      role: "ADMIN",
-      canUseAudits: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
     (requireAuditAssignee as any).mockResolvedValue(undefined);
     mockDb.auditSession.findFirst.mockResolvedValue({ id: "audit-1" });
     mockDb.auditNote.findMany.mockResolvedValue([]);
@@ -236,6 +234,53 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
     });
   });
 
+  describe("when each photo was taken", () => {
+    it("sends the capture time as an ISO string, and null when unknown", async () => {
+      // why: the app shows "Time taken unknown" for null, so a missing time
+      // must arrive as null and never be dropped or replaced by the upload time.
+      mockDb.auditImage.findMany.mockResolvedValue([
+        IMAGE_GENERAL,
+        IMAGE_ASSET,
+      ]);
+
+      const json = await body(
+        await loader(createLoaderArgs({ request: request(), ...ARGS }))
+      );
+
+      expect(json.general.images[0].capturedAt).toBe(
+        "2026-08-19T12:40:00.000Z"
+      );
+      expect(json.byAuditAsset["aa-1"].images[0].capturedAt).toBeNull();
+    });
+
+    it("sends how each photo arrived, and null when unknown", async () => {
+      mockDb.auditImage.findMany.mockResolvedValue([
+        IMAGE_GENERAL,
+        IMAGE_ASSET,
+      ]);
+
+      const json = await body(
+        await loader(createLoaderArgs({ request: request(), ...ARGS }))
+      );
+
+      expect(json.general.images[0].captureSource).toBe("CAMERA");
+      expect(json.byAuditAsset["aa-1"].images[0].captureSource).toBeNull();
+    });
+
+    it("asks the database for the capture time", async () => {
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            capturedAt: true,
+            captureSource: true,
+          }),
+        })
+      );
+    });
+  });
+
   describe("guards", () => {
     it("404s for an audit outside the caller's workspace, without reading evidence", async () => {
       // why: proves a guessed id from another org cannot be probed here.
@@ -280,10 +325,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
     });
 
     it("403s when audits are not enabled for the workspace", async () => {
-      (getMobileUserContext as any).mockResolvedValue({
-        role: "ADMIN",
-        canUseAudits: false,
-      });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["ADMIN"], canUseAudits: false })
+      );
 
       const res = await loader(
         createLoaderArgs({ request: request(), ...ARGS })
@@ -308,10 +352,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       // class of data #2900 gated on the detail route. Without this an
       // unassigned BASE or SELF_SERVICE user could read any audit's evidence
       // in the workspace by id, reopening the hole that PR closed.
-      (getMobileUserContext as any).mockResolvedValue({
-        roles: ["SELF_SERVICE"],
-        canUseAudits: true,
-      });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["SELF_SERVICE"] })
+      );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
@@ -319,24 +362,22 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
         expect.objectContaining({
           auditSessionId: "audit-1",
           organizationId: "org-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         })
       );
     });
 
     it("does not treat a privileged member as self-service", async () => {
-      // why: getMobileUserContext sets role = roles[0], so a membership
-      // ordered [SELF_SERVICE, ADMIN] would refuse a real admin. The role must
-      // be resolved from ALL roles.
-      (getMobileUserContext as any).mockResolvedValue({
-        roles: ["SELF_SERVICE", "ADMIN"],
-        canUseAudits: true,
-      });
+      // why: the scope follows the effective role, so a membership ordered
+      // [SELF_SERVICE, ADMIN] is not limited to assigned audits.
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+      );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
       expect(requireAuditAssignee).toHaveBeenCalledWith(
-        expect.objectContaining({ isSelfServiceOrBase: false })
+        expect.objectContaining({ assignedOnly: false })
       );
     });
 

@@ -1,6 +1,78 @@
+/**
+ * Invite Helpers
+ *
+ * Pure helpers for invites: email normalisation and matching, invite codes,
+ * plain-text email bodies, and splitting a team member name into first and
+ * last name.
+ *
+ * @see {@link file://./service.server.ts}
+ */
+import type { Prisma } from "@prisma/client";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { InviteWithInviterAndOrg } from "./types";
+
+/**
+ * Normalises an invitee email to the form in which invites are stored and
+ * compared: trimmed and lowercased.
+ *
+ * Sign-in lowercases the address, so an invite that keeps the capitals of a
+ * CSV row never equals the invitee's account email. Every path that creates
+ * an invite, or looks one up by an email from outside, calls this first.
+ *
+ * @param email - The address as typed or imported
+ * @returns The trimmed, lowercased address
+ */
+export function normalizeInviteEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * Prisma filter for an email column that matches the given addresses without
+ * regard to letter case.
+ *
+ * Stored `Invite.inviteeEmail` and `User.email` values can contain capitals,
+ * so an exact match misses the same person. The filter uses `in`, not
+ * `equals`: with `mode: "insensitive"`, Prisma compiles `equals` to an
+ * unescaped `ILIKE`, where `_` and `%` in an address are wildcards that match
+ * other addresses. `in` compiles to `LOWER(column) IN (LOWER(value), ...)`,
+ * which is an exact comparison.
+ *
+ * @param emails - One address or a list; each is normalised first
+ * @returns A string filter for `inviteeEmail` or `email`
+ */
+export function caseInsensitiveEmailFilter(emails: string | string[]) {
+  const list = Array.isArray(emails) ? emails : [emails];
+
+  return {
+    in: list.map(normalizeInviteEmail),
+    mode: "insensitive" as const,
+  } satisfies Prisma.StringFilter;
+}
+
+/**
+ * Picks the account an email address resolves to among rows that match it
+ * without regard to letter case.
+ *
+ * Stored addresses can carry capitals from before every path lowercased them,
+ * so one person can have rows that differ only by case. The row stored in
+ * lowercase wins, since that is what every path writes today; otherwise the
+ * oldest, so the same address always resolves to the same account.
+ *
+ * @param users - Matching rows, ordered oldest first
+ * @param email - The address being resolved
+ * @returns The account to use, or null when there is none
+ */
+export function pickUserForEmail<T extends { email: string }>(
+  users: T[],
+  email: string
+): T | null {
+  return (
+    users.find((user) => user.email === normalizeInviteEmail(email)) ??
+    users[0] ??
+    null
+  );
+}
 
 export function generateRandomCode(length: number): string {
   const characters =

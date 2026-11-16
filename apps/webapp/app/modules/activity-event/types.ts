@@ -28,6 +28,7 @@ export type FieldChangeAction =
   | "ASSET_NAME_CHANGED"
   | "ASSET_DESCRIPTION_CHANGED"
   | "ASSET_CATEGORY_CHANGED"
+  | "ASSET_MODEL_CHANGED"
   | "ASSET_KIT_CHANGED"
   | "ASSET_LOCATION_CHANGED"
   | "ASSET_TAGS_CHANGED"
@@ -37,6 +38,7 @@ export type FieldChangeAction =
   | "ASSET_MIN_QUANTITY_CHANGED"
   | "ASSET_CUSTOM_FIELD_CHANGED"
   | "ASSET_PREFERRED_BARCODE_CHANGED"
+  | "ASSET_AVAILABLE_TO_BOOK_CHANGED"
   | "BOOKING_STATUS_CHANGED"
   | "BOOKING_DATES_CHANGED"
   | "BOOKING_MODEL_REQUEST_CHANGED"
@@ -100,6 +102,7 @@ export type CustodyEventInput = BaseEventInput & {
 export type AssetLifecycleAction =
   | "ASSET_CREATED"
   | "ASSET_ARCHIVED"
+  | "ASSET_UNARCHIVED"
   | "ASSET_DELETED";
 
 export type AssetLifecycleEventInput = BaseEventInput & {

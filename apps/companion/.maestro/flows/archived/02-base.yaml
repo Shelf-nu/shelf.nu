@@ -1,0 +1,17 @@
+appId: com.shelf.companion.carlos
+name: "Archived assets - Base member"
+tags:
+  - archived
+  - roles
+  - fixture
+
+---
+# Test: an archived asset, as a Base member (read only). Needs the fixture:
+# ./scripts/seed-e2e.sh archived-up, then pass env/e2e-archived.env.
+
+- runFlow: ../../shared/login-base.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- runFlow: steps/base-asset.yaml

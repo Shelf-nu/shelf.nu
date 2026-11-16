@@ -2,7 +2,13 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
+import { permissionContext } from "@helpers/role-access";
 
+import {
+  buildKitSlicesForBooking,
+  createBooking,
+} from "~/modules/booking/service.server";
 import { action } from "~/routes/_layout+/bookings.new";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -10,6 +16,9 @@ const dbMocks = vi.hoisted(() => {
   return {
     booking: {
       create: vi.fn(),
+    },
+    assetKit: {
+      findMany: vi.fn(),
     },
   };
 });
@@ -23,6 +32,11 @@ vi.mock("~/database/db.server", () => ({
   db: {
     booking: {
       create: dbMocks.booking.create,
+    },
+    // why: the kit flow reads the kit's full membership (archived members
+    // included) to keep every member out of the standalone bucket
+    assetKit: {
+      findMany: dbMocks.assetKit.findMany,
     },
     // why: the action now resolves the acting user's timezone preference via
     // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS
@@ -40,6 +54,9 @@ vi.mock("~/utils/roles.server", () => ({
 
 // why: testing booking creation validation without executing actual booking service operations
 vi.mock("~/modules/booking/service.server", () => ({
+  buildKitSlicesForBooking: vi.fn().mockResolvedValue([]),
+  // why: archived kit members left out, for the toast; none by default.
+  countArchivedKitMembers: vi.fn().mockResolvedValue(0),
   createBooking: vi.fn().mockResolvedValue({
     id: "booking-123",
     from: new Date("2024-01-01T10:00:00Z"),
@@ -164,13 +181,21 @@ beforeEach(() => {
 describe("bookings/new - custodian assignment", () => {
   it("prevents assigning booking to custodians from different organizations", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
     } as any);
 
     // Custodian not found due to org filter
-    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
+    // getTeamMember reports a missing member as an uncaptured 404.
+    mockGetTeamMember.mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Team member not found",
+        label: "Team Member",
+        status: 404,
+        shouldBeCaptured: false,
+      })
+    );
 
     const formData = new FormData();
     formData.set("name", "Test Booking");
@@ -204,9 +229,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("allows assigning booking to custodians from the same organization", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
     } as any);
 
     // Valid team member from same org
@@ -245,9 +269,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("redirects scan intent to the booking overview scan assets page", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
     } as any);
 
     mockGetTeamMember.mockResolvedValue({
@@ -283,9 +306,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("prevents self-service users from assigning booking to other team members", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }),
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
     } as any);
 
     // Valid team member from same org, but different user
@@ -313,16 +335,15 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect((response as Response).status).toBe(500); // ShelfError defaults to 500
+    expect((response as Response).status).toBe(403);
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
   });
 
   it("allows self-service users to assign booking to themselves", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }),
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
     } as any);
 
     // Valid team member from same org, same user
@@ -355,9 +376,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("allows BASE role users to assign booking to themselves only", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.BASE] }),
       organizationId: "org-1",
-      role: OrganizationRoles.BASE,
-      isSelfServiceOrBase: true,
     } as any);
 
     // Valid team member from same org, but different user (should fail for BASE role)
@@ -385,8 +405,152 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect((response as Response).status).toBe(500); // ShelfError for self-assignment restriction
+    expect((response as Response).status).toBe(403);
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("bookings/new - custodian comes from the team member row", () => {
+  /** Posts a booking naming `custodian` as the caller holding `role`. */
+  async function postBooking(
+    role: OrganizationRoles,
+    custodian: { id: string; name: string; userId?: string }
+  ) {
+    requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [role] }),
+      organizationId: "org-1",
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    const formData = new FormData();
+    formData.set("name", "Test Booking");
+    formData.set("startDate", "2024-01-01T10:00");
+    formData.set("endDate", "2024-01-02T10:00");
+    formData.set("custodian", JSON.stringify(custodian));
+
+    return (await action(
+      createActionArgs({
+        request: new Request("https://example.com/bookings/new", {
+          method: "POST",
+          body: formData,
+        }),
+      })
+    )) as Response;
+  }
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s naming another member while posting its own user id",
+    async (role) => {
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-456",
+        userId: "other-user-456",
+      });
+
+      const response = await postBooking(role, {
+        id: "team-member-456",
+        name: "Other Team Member",
+        userId: "user-123",
+      });
+
+      expect(response.status).toBe(403);
+      expect(vi.mocked(createBooking)).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "books the resolved team member, never the posted user id, for %s booking for themself",
+    async (role) => {
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-123",
+        userId: "user-123",
+      });
+
+      const response = await postBooking(role, {
+        id: "team-member-123",
+        name: "Self User",
+        userId: "other-user-456",
+      });
+
+      expect(response.status).toBe(302);
+      const [{ booking }] = vi.mocked(createBooking).mock.calls[0];
+      expect(booking.custodianTeamMemberId).toBe("team-member-123");
+      // The custodian user is read from the team member row by the service.
+      expect(booking).not.toHaveProperty("custodianUserId");
+    }
+  );
+
+  it("books a member without a user, whatever user id is posted", async () => {
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-nrm",
+      userId: null,
+    });
+
+    const response = await postBooking(OrganizationRoles.ADMIN, {
+      id: "team-member-nrm",
+      name: "NRM",
+      userId: "other-user-456",
+    });
+
+    expect(response.status).toBe(302);
+    const [{ booking }] = vi.mocked(createBooking).mock.calls[0];
+    expect(booking.custodianTeamMemberId).toBe("team-member-nrm");
+    expect(booking).not.toHaveProperty("custodianUserId");
+  });
+});
+
+describe("bookings/new - kit with an archived member", () => {
+  it("books the kit without the archived member instead of refusing it", async () => {
+    requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
+      organizationId: "org-1",
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+    });
+    // The kit has two members; the slice builder leaves out the archived one.
+    const activeSlice = {
+      assetKitId: "ak-active",
+      assetId: "asset-active",
+      kitId: "kit-1",
+      quantity: 1,
+    };
+    vi.mocked(buildKitSlicesForBooking).mockResolvedValue([activeSlice]);
+    dbMocks.assetKit.findMany.mockResolvedValue([
+      { assetId: "asset-active" },
+      { assetId: "asset-archived" },
+    ]);
+
+    const formData = new FormData();
+    formData.set("name", "Kit Booking");
+    formData.set("startDate", "2024-01-01T10:00");
+    formData.set("endDate", "2024-01-02T10:00");
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    // A form rendered before the member was archived still posts its id.
+    formData.append("assetIds[0]", "asset-active");
+    formData.append("assetIds[1]", "asset-archived");
+    formData.set("kitId", "kit-1");
+
+    const request = new Request("https://example.com/bookings/new", {
+      method: "POST",
+      body: formData,
+    });
+
+    const response = await action(createActionArgs({ request }));
+
+    expect((response as Response).status).toBe(302);
+    expect(dbMocks.assetKit.findMany).toHaveBeenCalledWith({
+      where: { kitId: { in: ["kit-1"] }, kit: { organizationId: "org-1" } },
+      select: { assetId: true },
+    });
+    expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: [],
+        kitSlices: [activeSlice],
+      })
+    );
   });
 });

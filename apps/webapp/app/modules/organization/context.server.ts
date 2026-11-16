@@ -10,7 +10,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
 import type { OrganizationFromUser } from "./service.server";
-import { getUserOrganizations } from "./service.server";
+import { getUserOrganizations, isSsoUser } from "./service.server";
 
 const label: ErrorLabel = "Organization";
 
@@ -85,9 +85,10 @@ async function getSelectedOrganizationUncached({
   const userOrganizations = await getUserOrganizations({ userId });
   const allOrganizations = userOrganizations.map((uo) => uo.organization);
 
-  // Resolve the SSO flag from the already-fetched user data so the
-  // result is consistent regardless of which loader populates the cache.
-  const isSSO = userOrganizations[0]?.user?.sso === true;
+  // Resolved from the already-fetched memberships so the result is consistent
+  // regardless of which loader populates the cache. A user with none still
+  // needs an answer — see `isSsoUser`.
+  const isSSO = await isSsoUser({ userId, userOrganizations });
 
   // SSO users never see their personal workspace — filter it out.
   const organizations = isSSO

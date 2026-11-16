@@ -306,6 +306,72 @@ describe("calculateBookingLifecycleProgress (asset mode)", () => {
     expect(p.checkinProgressPercentage).toBe(50);
     expect(p.hasPartialCheckins).toBe(true);
   });
+
+  it.each([BookingStatus.COMPLETE, BookingStatus.ARCHIVED])(
+    "%s: a dispatched INDIVIDUAL slice with no return marker is Returned",
+    (bookingStatus) => {
+      // The status is the record: a finished booking returned every
+      // INDIVIDUAL slice that left, so "unstamped" reads Returned like the
+      // rows and the check-in receipt do. The status settles returns, not
+      // departures, so a slice that never left stays Booked.
+      const slice = (id: string, out: boolean, back: boolean) => ({
+        ...A(id, AssetStatus.AVAILABLE),
+        assetType: AssetType.INDIVIDUAL,
+        sliceCheckedOut: out,
+        sliceCheckedIn: back,
+      });
+      const p = calculateBookingLifecycleProgress({
+        bookingAssets: [
+          slice("stamped", true, true),
+          slice("unstamped", true, false),
+          slice("never", false, false),
+        ],
+        checkedInAssetIds: ["stamped"],
+        checkedOutAssetIds: ["stamped", "unstamped"],
+        bookingStatus,
+      });
+      expect(p.returnedCount).toBe(2);
+      expect(p.checkedOutCount).toBe(0);
+      expect(p.bookedCount).toBe(1);
+      expect(p.checkinProgressCount).toBe(2);
+    }
+  );
+
+  it("ARCHIVED without check-in keeps every item Booked", () => {
+    // Archived straight from RESERVED: nothing left, so no slice markers and
+    // no session records. Without the flag that reads as legacy data.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        A("a", AssetStatus.AVAILABLE),
+        A("b", AssetStatus.AVAILABLE),
+        {
+          ...A("cables", AssetStatus.AVAILABLE),
+          assetType: AssetType.QUANTITY_TRACKED,
+          bookedQuantity: 5,
+          checkedOutQuantity: 0,
+          dispositionedQuantity: 0,
+        },
+      ],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.ARCHIVED,
+      archivedWithoutCheckin: true,
+    });
+    expect(p.bookedCount).toBe(3);
+    expect(p.returnedCount).toBe(0);
+    expect(p.checkoutProgressPercentage).toBe(0);
+    expect(p.checkinProgressPercentage).toBe(0);
+  });
+
+  it("ARCHIVED from COMPLETE with no records still reads legacy data as returned", () => {
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [A("a", AssetStatus.AVAILABLE)],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.ARCHIVED,
+      archivedWithoutCheckin: false,
+    });
+    expect(p.returnedCount).toBe(1);
+    expect(p.bookedCount).toBe(0);
+  });
 });
 
 describe("calculateBookingLifecycleProgress (unit mode)", () => {
@@ -401,6 +467,27 @@ describe("calculateBookingLifecycleProgress (unit mode)", () => {
     expect(p.returnedCount).toBe(1);
     expect(p.bookedCount).toBe(0);
     expect(p.checkedOutCount).toBe(0);
+  });
+
+  it("COMPLETE: a kit whose dispatched members carry no return marker is Returned", () => {
+    // Neither member is in `checkedInAssetIds` and neither slice is stamped
+    // in: the finished status is the record that both came back.
+    const member = (id: string) => ({
+      ...A(id, AssetStatus.AVAILABLE, "K"),
+      sliceCheckedOut: true,
+      sliceCheckedIn: false,
+    });
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [member("k1"), member("k2")],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["k1", "k2"],
+      bookingStatus: BookingStatus.COMPLETE,
+      countKitsAsSingleUnit: true,
+    });
+    expect(p.totalUnits).toBe(1);
+    expect(p.returnedCount).toBe(1);
+    expect(p.checkedOutCount).toBe(0);
+    expect(p.bookedCount).toBe(0);
   });
 });
 
@@ -573,8 +660,10 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.hasPartialCheckins).toBe(true);
   });
 
-  it("COMPLETE booking with qty residual checkout (C>D) — collapses to Returned", () => {
-    // C=10 > 0 at COMPLETE → asset collapses to Returned; never per-unit math.
+  it("COMPLETE booking with qty residual checkout (C>D) — stays visibly Partial", () => {
+    // 10 units went out on record and only 7 came back. A closed booking
+    // holding unreturned units must show it — collapsing to Returned is what
+    // hid the early-complete data loss from users.
     const p = calculateBookingLifecycleProgress({
       bookingAssets: [QT("pencils", 50, 10, 7)],
       checkedInAssetIds: ["pencils"],
@@ -583,11 +672,9 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     });
     expect(p.totalUnits).toBe(1);
     expect(p.bookedCount).toBe(0);
-    expect(p.partialCount).toBe(0);
+    expect(p.partialCount).toBe(1);
     expect(p.checkedOutCount).toBe(0);
-    expect(p.returnedCount).toBe(1);
-    expect(p.checkoutProgressPercentage).toBe(100);
-    expect(p.checkinProgressPercentage).toBe(100);
+    expect(p.returnedCount).toBe(0);
   });
 
   it("COMPLETE booking with a quick-checked-out QT row (no records) → Returned", () => {
@@ -608,11 +695,12 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
 
   it("COMPLETE multi-slice QT — never-checked-out slice stays Booked when records exist", () => {
     // checkedOutAssetIds is asset-level; with progressive records present a
-    // checked-out slice must NOT drag a sibling never-checked-out slice into
-    // Returned. Each slice uses its own C.
+    // checked-out slice must NOT drag a sibling never-checked-out slice out
+    // of Booked. Each slice uses its own C — and the checked-out slice has
+    // no recorded return (D=0), so it reads Checked out, not Returned.
     const p = calculateBookingLifecycleProgress({
       bookingAssets: [
-        QT("gloves", 50, 50, 0, "K1"), // slice checked out
+        QT("gloves", 50, 50, 0, "K1"), // slice checked out, never returned
         QT("gloves", 30, 0, 0, null), // sibling slice never checked out
       ],
       checkedInAssetIds: [],
@@ -620,8 +708,92 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
       bookingStatus: BookingStatus.COMPLETE,
     });
     expect(p.totalUnits).toBe(2);
-    expect(p.returnedCount).toBe(1); // the checked-out slice
+    expect(p.checkedOutCount).toBe(1); // out with no recorded return
+    expect(p.returnedCount).toBe(0);
     expect(p.bookedCount).toBe(1); // the never-checked-out slice
+  });
+
+  it("COMPLETE mixed-mode booking — slice markers keep button-checked-out rows truthful", () => {
+    // The shape behind the early-complete incident: a button checkout stamps
+    // slices but writes no session rows, one asset was scanned out
+    // progressively, and a button-checked-out QT row never got its return
+    // recorded. With slice markers supplied, returned rows read Returned and
+    // the stranded row stays visibly Checked out — one scanned asset must
+    // not flip every other row to Booked at COMPLETE.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        {
+          id: "scanned",
+          kitId: null,
+          status: AssetStatus.AVAILABLE,
+          assetType: AssetType.INDIVIDUAL,
+          sliceCheckedOut: true,
+          sliceCheckedIn: true,
+        },
+        {
+          ...QT("cables", 25, 0, 25),
+          sliceCheckedOut: true,
+          sliceCheckedIn: true,
+        },
+        {
+          ...QT("keyboards", 8, 0, 0),
+          sliceCheckedOut: true,
+          sliceCheckedIn: false,
+        },
+      ],
+      checkedInAssetIds: ["scanned"],
+      checkedOutAssetIds: ["scanned", "cables", "keyboards"],
+      bookingStatus: BookingStatus.COMPLETE,
+    });
+    expect(p.totalUnits).toBe(3);
+    expect(p.returnedCount).toBe(2);
+    expect(p.checkedOutCount).toBe(1); // the stranded qty row
+    expect(p.bookedCount).toBe(0);
+    expect(p.checkinProgressCount).toBe(2);
+  });
+
+  it("ONGOING button-checked-out QT row reads Checked out via its slice marker", () => {
+    // Button checkout writes no session rows (C=0) — the slice marker is
+    // what says this row's booked units are out. Without it the row would
+    // wrongly read Booked whenever the booking also has scan records.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        {
+          ...QT("keyboards", 8, 0, 0),
+          sliceCheckedOut: true,
+          sliceCheckedIn: false,
+        },
+      ],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["some-other-asset"],
+      bookingStatus: BookingStatus.ONGOING,
+    });
+    expect(p.checkedOutCount).toBe(1);
+    expect(p.bookedCount).toBe(0);
+  });
+
+  it("COMPLETE collapsed QT row honors dispatchedQuantity over its session counter", () => {
+    // Asset-collapsed rows (the mobile shape) can mix a button-checked-out
+    // slice with a progressively-scanned sibling: 9 units dispatched (8
+    // stamped + 1 session-recorded) but C only carries the session unit.
+    // The caller-computed dispatchedQuantity must outrank C — judged by C
+    // alone (1 out, 1 back) the row would wrongly read Returned.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        {
+          ...QT("mixed", 9, 1, 1),
+          sliceCheckedOut: true,
+          sliceCheckedIn: false,
+          dispatchedQuantity: 9,
+        },
+      ],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["mixed"],
+      bookingStatus: BookingStatus.COMPLETE,
+    });
+    expect(p.partialCount).toBe(1); // 1 of 9 dispatched units back on record
+    expect(p.returnedCount).toBe(0);
+    expect(p.bookedCount).toBe(0);
   });
 
   it("qty asset with two slices (kit-driven + standalone) — each slice is its own asset count", () => {

@@ -108,7 +108,7 @@ export function AssetDistributionContent({
 
       {/* Distribution donut charts - clickable to filter assets */}
       {distributionBreakdown && (
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           <DistributionDonut
             title="By Category"
             data={distributionBreakdown.byCategory}
@@ -129,6 +129,14 @@ export function AssetDistributionContent({
             emptyMessage="No status data"
             maxLegendItems={5}
             onItemClick={handleStatusClick}
+          />
+          {/* Models have no simple-mode `/assets` filter to drill into, so
+              this donut is read-only where the others navigate. */}
+          <DistributionDonut
+            title="By Asset Model"
+            data={distributionBreakdown.byAssetModel}
+            emptyMessage="No asset models defined"
+            maxLegendItems={5}
           />
         </div>
       )}

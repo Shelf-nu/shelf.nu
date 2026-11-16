@@ -24,16 +24,25 @@
  *  - For INDIVIDUAL assets the flag is a no-op (the
  *    `isQuantityTracked` check already short-circuits the qty-aware
  *    branch for non-QT assets).
+ *  - With index-style props (server figures plus `quantityListsDeferred`)
+ *    the first hover fetches the breakdown, and only its booking and kit
+ *    lists join the card; the server's figures stay. With detail-page props
+ *    (lists inline) the badge never fetches.
+ *  - A checked-out INDIVIDUAL asset links the booking that `ongoing-booking`
+ *    names when it opens for the viewer, names it without a link when it
+ *    does not, and shows no booking when that route answers `booking: null`.
  *
  * @see {@link file://./asset-status-badge.tsx}
  */
 
 import type { ReactNode } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act, render, screen, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import type { OngoingBookingPayload } from "~/routes/api+/assets.$assetId.ongoing-booking";
 import { AssetStatusBadge } from "./asset-status-badge";
-import type { QuantityAwareAsset } from "./quantity-data";
+import type { QuantityAwareAsset, QuantityBreakdown } from "./quantity-data";
 
 /**
  * Captures calls into the `useApiQuery` hook so each test can assert
@@ -42,6 +51,15 @@ import type { QuantityAwareAsset } from "./quantity-data";
  * state — exactly what booking rows render on first paint.
  */
 const apiQueryCalls: Array<{ api: string; enabled: boolean }> = [];
+
+/**
+ * What the mocked `/quantity-breakdown` query answers once it is enabled.
+ * `undefined` (the default) keeps every badge in its pre-fetch state.
+ */
+let lazyBreakdownResponse: QuantityAwareAsset | undefined;
+
+/** What the mocked `/ongoing-booking` query answers once it is enabled. */
+let ongoingBookingResponse: OngoingBookingPayload | undefined;
 
 // why: AssetStatusBadge uses `useApiQuery` for two endpoints
 // (`/api/assets/:id/quantity-breakdown` and
@@ -52,7 +70,14 @@ const apiQueryCalls: Array<{ api: string; enabled: boolean }> = [];
 vi.mock("~/hooks/use-api-query", () => ({
   default: ({ api, enabled }: { api: string; enabled?: boolean }) => {
     apiQueryCalls.push({ api, enabled: !!enabled });
-    return { data: undefined, isLoading: false, error: undefined };
+    const data = !enabled
+      ? undefined
+      : api.includes("/quantity-breakdown")
+      ? lazyBreakdownResponse
+      : api.includes("/ongoing-booking")
+      ? ongoingBookingResponse
+      : undefined;
+    return { data, isLoading: false, error: undefined };
   },
 }));
 
@@ -61,6 +86,14 @@ vi.mock("~/hooks/use-api-query", () => ({
 // only need the trigger (Badge text) to render — wrap the Radix
 // components in passthrough renderers so the badge text reaches the
 // DOM without needing to drive the hover lifecycle.
+// why: `DateS` reads the user's format preferences from the root loader data,
+// which this component test does not mount. The dates are not under test.
+vi.mock("~/components/shared/date", () => ({
+  DateS: ({ date }: { date: Date | string }) => (
+    <span>{new Date(date).toISOString()}</span>
+  ),
+}));
+
 vi.mock("../../shared/hover-card", () => ({
   HoverCard: ({ children }: { children: ReactNode }) => <>{children}</>,
   HoverCardTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -69,7 +102,36 @@ vi.mock("../../shared/hover-card", () => ({
 
 beforeEach(() => {
   apiQueryCalls.length = 0;
+  lazyBreakdownResponse = undefined;
+  ongoingBookingResponse = undefined;
 });
+
+/** Whether the breakdown endpoint for `id` was ever queried with `enabled`. */
+function breakdownFetchEnabled(id: string) {
+  return apiQueryCalls.some(
+    (call) =>
+      call.api === `/api/assets/${id}/quantity-breakdown` && call.enabled
+  );
+}
+
+/**
+ * The figures the assets index's `StatusColumn` passes: server totals, no
+ * per-booking or per-kit lists. 10 owned, 2 reserved, 2 in custody, 6 free.
+ */
+function makeIndexFigures(): QuantityBreakdown {
+  return {
+    total: 10,
+    inCustody: 2,
+    inKits: 0,
+    reserved: 2,
+    checkedOut: 0,
+    available: 6,
+    freeNow: 6,
+    bookingAssets: [],
+    assetKits: [],
+    nextReservedFrom: null,
+  };
+}
 
 /**
  * Builds a minimal QT asset shape carrying a custody slice so the
@@ -220,6 +282,232 @@ describe("AssetStatusBadge", () => {
         />
       );
       expect(screen.getByText("Available")).toBeInTheDocument();
+    });
+  });
+
+  describe("quantityListsDeferred (index figures, lists on hover)", () => {
+    it("fetches the breakdown on first hover when the figures come without lists", () => {
+      const { container } = render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-idx-1"
+            status="AVAILABLE"
+            availableToBook
+            asset={{ type: "QUANTITY_TRACKED", quantity: 10 }}
+            quantityBreakdown={makeIndexFigures()}
+            quantityListsDeferred
+          />
+        </MemoryRouter>
+      );
+      // No request before anyone hovers the row
+      expect(breakdownFetchEnabled("asset-idx-1")).toBe(false);
+
+      const root = container.querySelector("span");
+      if (root) fireEvent.mouseEnter(root);
+
+      expect(breakdownFetchEnabled("asset-idx-1")).toBe(true);
+    });
+
+    it("lists the fetched bookings while keeping the server's Free now figure", () => {
+      lazyBreakdownResponse = {
+        type: "QUANTITY_TRACKED",
+        quantity: 10,
+        custody: [{ quantity: 2 }],
+        bookingAssets: [
+          {
+            quantity: 2,
+            assetKitId: null,
+            booking: {
+              id: "booking-9",
+              name: "Spring shoot",
+              status: "RESERVED",
+            },
+          },
+        ],
+        assetKits: [],
+        // The fetched figure differs on purpose: the server's index figure wins
+        freeNow: 9,
+      };
+
+      const { container } = render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-idx-2"
+            status="AVAILABLE"
+            availableToBook
+            asset={{ type: "QUANTITY_TRACKED", quantity: 10 }}
+            quantityBreakdown={makeIndexFigures()}
+            quantityListsDeferred
+          />
+        </MemoryRouter>
+      );
+      const root = container.querySelector("span");
+      if (root) fireEvent.mouseEnter(root);
+
+      expect(
+        screen.getByRole("link", { name: "Spring shoot" })
+      ).toHaveAttribute("href", "/bookings/booking-9");
+      expect(screen.getByText("6 free right now")).toBeInTheDocument();
+      expect(screen.queryByText("9 free right now")).not.toBeInTheDocument();
+    });
+
+    it("does not fetch when the asset page passes the lists inline", () => {
+      const { container } = render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-detail-1"
+            status="AVAILABLE"
+            availableToBook
+            asset={{
+              type: "QUANTITY_TRACKED",
+              quantity: 10,
+              custody: [{ quantity: 2 }],
+              bookingAssets: [
+                {
+                  quantity: 2,
+                  assetKitId: null,
+                  booking: {
+                    id: "booking-9",
+                    name: "Spring shoot",
+                    status: "RESERVED",
+                  },
+                },
+              ],
+              assetKits: [],
+            }}
+          />
+        </MemoryRouter>
+      );
+      const root = container.querySelector("span");
+      if (root) fireEvent.mouseEnter(root);
+
+      expect(breakdownFetchEnabled("asset-detail-1")).toBe(false);
+    });
+
+    it("does not fetch for supplied figures unless the lists are marked deferred", () => {
+      const { container } = render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-idx-3"
+            status="AVAILABLE"
+            availableToBook
+            asset={{ type: "QUANTITY_TRACKED", quantity: 10 }}
+            quantityBreakdown={makeIndexFigures()}
+          />
+        </MemoryRouter>
+      );
+      const root = container.querySelector("span");
+      if (root) fireEvent.mouseEnter(root);
+
+      expect(breakdownFetchEnabled("asset-idx-3")).toBe(false);
+    });
+  });
+  describe("a reservation ending while the page is open", () => {
+    const NOW = new Date("2026-10-20T12:00:00Z").getTime();
+
+    beforeEach(() => {
+      // why: the badge schedules its refresh against the clock, so pin and
+      // advance it
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("stops counting it once its end passes, with no new data", () => {
+      render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-expiring-1"
+            status="AVAILABLE"
+            availableToBook
+            asset={{
+              type: "QUANTITY_TRACKED",
+              quantity: 10,
+              custody: [],
+              assetKits: [],
+              bookingAssets: [
+                {
+                  quantity: 10,
+                  assetKitId: null,
+                  booking: {
+                    id: "b-ending",
+                    name: "Ending soon",
+                    status: "RESERVED",
+                    from: new Date(NOW - 60 * 60 * 1000),
+                    to: new Date(NOW + 60_000),
+                  },
+                },
+              ],
+            }}
+          />
+        </MemoryRouter>
+      );
+      expect(screen.getByText("Reserved")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2 * 60_000);
+      });
+
+      expect(screen.queryByText("Reserved")).not.toBeInTheDocument();
+      expect(screen.getByText("Available")).toBeInTheDocument();
+    });
+  });
+
+  describe("ongoing booking hover card", () => {
+    /** A checked-out INDIVIDUAL asset, as the asset index renders it. */
+    function renderCheckedOut() {
+      render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-out-1"
+            status="CHECKED_OUT"
+            availableToBook
+            asset={{
+              type: "INDIVIDUAL",
+              quantity: 1,
+              custody: null,
+              bookingAssets: [],
+              assetKits: [],
+            }}
+          />
+        </MemoryRouter>
+      );
+    }
+
+    it("links the booking the route names", () => {
+      ongoingBookingResponse = {
+        booking: { id: "booking-1", name: "Field shoot", canOpen: true },
+      };
+
+      renderCheckedOut();
+
+      expect(screen.getByRole("link", { name: "Field shoot" })).toHaveAttribute(
+        "href",
+        "/bookings/booking-1"
+      );
+    });
+
+    it("names the booking without a link when it does not open for the viewer", () => {
+      ongoingBookingResponse = {
+        booking: { id: "booking-1", name: "Field shoot", canOpen: false },
+      };
+
+      renderCheckedOut();
+
+      expect(screen.getByText("Field shoot")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    });
+
+    it("shows no booking when the route withholds it", () => {
+      ongoingBookingResponse = { booking: null };
+
+      renderCheckedOut();
+
+      expect(screen.getByText("Checked out")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
     });
   });
 });

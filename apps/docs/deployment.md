@@ -113,7 +113,7 @@ fly secrets set SUPABASE_URL="https://your-production-project.supabase.co"
 fly secrets set SUPABASE_SERVICE_ROLE="your-production-service-role-key"
 fly secrets set SUPABASE_ANON_PUBLIC="your-production-anon-key"
 fly secrets set DATABASE_URL="postgres://user:pass@host:6543/db?pgbouncer=true&connection_limit=1"
-fly secrets set DIRECT_URL="postgres://user:pass@host:5432/db"
+fly secrets set DIRECT_URL="postgres://user:pass@host:5432/db"  # migrations + toasts across machines
 
 # Email configuration (required)
 fly secrets set SMTP_HOST="smtp.yourhost.com"
@@ -300,6 +300,21 @@ Shelf requires email for authentication. Here are recommended providers:
 2. **Get SMTP credentials** from your domain dashboard
 3. **Configure secrets** with your Mailgun SMTP details
 
+### Groundmail
+
+Until you add a payment method, Groundmail only sends to your own account email: from `noreply@mail.groundmail.dev`, or from your domain once it's verified. Sending to other recipients needs a verified domain and a payment method on file.
+
+1. **Sign up** at [Groundmail](https://groundmail.dev/) and verify your sending domain
+2. **Create an SMTP credential** in the dashboard under SMTP (it starts with `gmsmtp_`)
+3. **Configure SMTP** (use port 2525 if 587 is blocked):
+   ```bash
+   fly secrets set SMTP_HOST="smtp.groundmail.dev"
+   fly secrets set SMTP_PORT=587
+   fly secrets set SMTP_USER="groundmail"
+   fly secrets set SMTP_PWD="your-groundmail-smtp-credential"
+   fly secrets set SMTP_FROM="Shelf.nu <noreply@yourdomain.com>"
+   ```
+
 ### Gmail (Development Only)
 
 ⚠️ **Not recommended for production**
@@ -370,6 +385,9 @@ fly scale vm performance-1x
 # Add more instances
 fly scale count 2
 ```
+
+With more than one instance, toast notifications travel between machines through Postgres
+over `DIRECT_URL`, one extra connection per instance. See [Toast Notifications](./notifications.md).
 
 ### Useful Commands
 

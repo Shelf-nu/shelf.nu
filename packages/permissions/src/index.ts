@@ -2,10 +2,18 @@
  * `@shelf/permissions` — the single source of truth for Shelf's RBAC rules.
  *
  * Owns the permission vocabulary (`PermissionAction` / `PermissionEntity`),
- * the role → permission matrix, and the pure resolution logic
- * (`roleHasPermission`) that turns (roles, entity, action) into a boolean —
+ * the role-to-permission matrix, and the pure resolution logic
+ * (`roleHasPermission`) that turns (roles, entity, action) into a boolean,
  * INCLUDING the ADMIN/OWNER allow-all short-circuit that is part of Shelf's
  * effective authorization behavior but never appeared in the raw matrix.
+ *
+ * Also owns the role policy table (`ROLE_POLICIES`) and `resolveRoleAccess`,
+ * which answer how far a role reaches beyond the matrix: whose bookings,
+ * whose custody, which audits, which limits apply, and who hears about what,
+ * folded with the workspace's visibility toggles.
+ *
+ * Also owns `WORKSPACE_GRANTS`: the permissions an owner can add to a role
+ * with a workspace switch, which `roleHasPermission` unions with the matrix.
  *
  * Consumed by:
  * - webapp server validator (~/utils/permissions/permission.validator.server.ts)
@@ -22,8 +30,50 @@
  * implementations live in the sibling modules.
  */
 
-export { ORGANIZATION_ROLES } from "./roles";
+export {
+  ORGANIZATION_ROLES,
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+  ROLE_PLURAL_LABELS,
+  isOrganizationRole,
+} from "./roles";
 export type { OrganizationRole } from "./roles";
 export { PermissionAction, PermissionEntity } from "./vocabulary";
 export { Role2PermissionMap } from "./matrix";
 export { roleHasPermission } from "./resolver";
+export {
+  NO_WORKSPACE_GRANTS,
+  WORKSPACE_GRANTS,
+  pickWorkspaceGrants,
+  workspaceGrantedActions,
+} from "./workspace-grants";
+export type {
+  WorkspaceGrantSetting,
+  WorkspaceGrantSettings,
+} from "./workspace-grants";
+export {
+  BOOKING_STATUS_NAMES,
+  INVITABLE_ROLES,
+  ROLE_POLICIES,
+  ROLES_BY_RANK,
+  SSO_ASSIGNABLE_ROLES,
+} from "./policies";
+export type { BookingStatusName, RolePolicy } from "./policies";
+export { resolveRole } from "./resolve-role";
+export {
+  canManageBookingItems,
+  canPartialCheckInOut,
+  canRemoveBookingItems,
+  isExplicitScanRequired,
+  isWorkspaceOwner,
+  labelToRole,
+  resolveRoleAccess,
+  rolesWhere,
+  transfersBookingsOnRoleChange,
+  transfersOwnershipOnRoleChange,
+} from "./access";
+export type {
+  ExplicitScanSettings,
+  RoleAccess,
+  WorkspaceAccessSettings,
+} from "./access";

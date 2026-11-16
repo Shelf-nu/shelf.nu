@@ -69,6 +69,7 @@ import {
   createBulkKitChangeNotes,
   createNote,
   createNotes,
+  createNotesPerAsset,
   deleteNote,
   getPaginatedAndFilterableAssetNotes,
 } from "./service.server";
@@ -194,6 +195,86 @@ describe("note service", () => {
     });
   });
 
+  describe("createNotesPerAsset", () => {
+    /**
+     * The point of the helper: a batch of any size costs one ownership check
+     * and one insert, never a pair of round trips per asset.
+     */
+    it("writes every note in one insert after one ownership check", async () => {
+      vi.mocked(db.note.createMany).mockResolvedValue({ count: 3 });
+
+      const result = await createNotesPerAsset({
+        notes: [
+          { assetId: "asset-1", content: "added 2 units of Cable" },
+          { assetId: "asset-2", content: "added Camera" },
+          { assetId: "asset-3", content: "added Tripod via Kit A" },
+        ],
+        type: "UPDATE",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.asset.findMany).toHaveBeenCalledTimes(1);
+      expect(db.note.createMany).toHaveBeenCalledTimes(1);
+      expect(db.note.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            content: "added 2 units of Cable",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-1",
+          },
+          {
+            content: "added Camera",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-2",
+          },
+          {
+            content: "added Tripod via Kit A",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-3",
+          },
+        ],
+      });
+      expect(result.count).toBe(3);
+    });
+
+    it("touches the database not at all for an empty batch", async () => {
+      const result = await createNotesPerAsset({
+        notes: [],
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(result.count).toBe(0);
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+      expect(db.note.createMany).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when an asset belongs to another workspace", async () => {
+      // why: the ownership guard reads the assets back scoped to the org; one
+      // missing from the result is one the caller does not own.
+      vi.mocked(db.asset.findMany).mockResolvedValue([
+        { id: "asset-1" },
+      ] as never);
+
+      await expect(
+        createNotesPerAsset({
+          notes: [
+            { assetId: "asset-1", content: "added Camera" },
+            { assetId: "asset-foreign", content: "added Lens" },
+          ],
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toBeInstanceOf(ShelfError);
+
+      expect(db.note.createMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe("createNotes", () => {
     it("creates multiple notes with the same content", async () => {
       vi.mocked(db.note.createMany).mockResolvedValue({ count: 3 });
@@ -250,9 +331,7 @@ describe("note service", () => {
       });
     });
 
-    it("handles empty asset IDs array", async () => {
-      vi.mocked(db.note.createMany).mockResolvedValue({ count: 0 });
-
+    it("writes nothing for an empty asset IDs array", async () => {
       const result = await createNotes({
         content: "Test note",
         userId: "user-1",
@@ -260,10 +339,9 @@ describe("note service", () => {
         organizationId: "org-1",
       });
 
-      expect(db.note.createMany).toHaveBeenCalledWith({
-        data: [],
-      });
-
+      // Nothing to check and nothing to insert, so no round trip at all.
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+      expect(db.note.createMany).not.toHaveBeenCalled();
       expect(result.count).toBe(0);
     });
 
@@ -389,6 +467,32 @@ describe("note service", () => {
       expect(firstCall.data.user?.connect?.id).toBe("user-1");
 
       expect(result).toBeUndefined();
+    });
+
+    it("names both kits when an asset moves from one kit to another", async () => {
+      vi.mocked(db.user.findFirstOrThrow).mockResolvedValue({
+        firstName: "John",
+        lastName: "Doe",
+      } as any);
+
+      await createBulkKitChangeNotes({
+        newlyAddedAssets: [
+          {
+            id: "asset-1",
+            title: "Camera",
+            type: "INDIVIDUAL",
+            kit: { id: "kit-a", name: "Box A" },
+          },
+        ],
+        removedAssets: [],
+        userId: "user-1",
+        kit: { id: "kit-b", name: "Box B" } as any,
+        organizationId: "org-1",
+      });
+
+      const content = vi.mocked(db.note.create).mock.calls[0][0].data.content;
+      // The kit wrapper is mocked in this file to "kit:<name>".
+      expect(content).toBe("@John changed kit from kit:Box A to kit:Box B.");
     });
 
     it("names the per-kit unit count when a QUANTITY_TRACKED asset is added", async () => {

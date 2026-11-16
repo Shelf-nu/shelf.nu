@@ -52,6 +52,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Verify asset exists and belongs to the organization
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: lookup ahead of updateAssetMainImage, whose archive guard must see the row to refuse with the archived message
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     });
@@ -72,6 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Fetch the updated asset to return fresh image URLs
     const updatedAsset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: re-read of the specific asset just written
       where: { id: assetId, organizationId },
       select: {
         id: true,

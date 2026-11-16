@@ -6,13 +6,9 @@
  * @sentry/react-router auto-instrumentations (HTTP, Prisma, undici, etc.)
  * can patch their target modules before they are required.
  *
- * History — the previous version routed BOTH `beforeSend` (errors) and
- * `beforeSendTransaction` (performance traces) through the same handler,
- * which inspected `hint.originalException`. Transactions never carry an
- * exception, so they were silently dropped 100% of the time. As a result
- * Sentry collected only client-side spans and no Prisma / loader timing
- * was visible. Errors and transactions are now handled by separate
- * callbacks.
+ * Errors, transactions and logs each have their own `beforeSend*` hook, and
+ * every one of them masks email addresses before the payload leaves the
+ * server (see `~/utils/sentry-email-mask`).
  */
 import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
@@ -23,6 +19,8 @@ import {
   isHandledClientError,
   isLikeShelfError,
 } from "~/utils/error";
+import { redactSensitive } from "~/utils/redact";
+import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 
 /**
  * Resolve the release identifier for this server process. Read from the
@@ -76,16 +74,20 @@ if (SENTRY_DSN) {
       return breadcrumb;
     },
     /**
-     * Performance transactions are passed through unchanged. Do NOT route
-     * them through the error-event filter — transactions carry no
-     * exception, and the old code returned null for any event without
-     * one, which silently dropped 100% of server traces.
+     * Performance transactions are kept, with email addresses masked. They
+     * must NOT go through the error-event filter: a transaction carries no
+     * exception, and that filter drops every event without one.
      */
     beforeSendTransaction(event) {
-      return event;
+      return maskEmailsInSentryPayload(event);
     },
     beforeSend(event, hint) {
-      return handleBeforeSendError(event, hint);
+      const kept = handleBeforeSendError(event, hint);
+      return kept && maskEmailsInSentryPayload(kept);
+    },
+    /** Structured logs quote `ShelfError` messages, which can name a user. */
+    beforeSendLog(log) {
+      return maskEmailsInSentryPayload(log);
     },
   });
 
@@ -101,7 +103,8 @@ if (SENTRY_DSN) {
  *  - client-disconnect / abort errors that bypass `makeShelfError`
  *
  * Also redacts the auth-session cookie and attaches our ShelfError
- * metadata as Sentry tags / extras.
+ * metadata as Sentry tags / extras. Email masking runs on the result, in the
+ * `beforeSend` hook.
  */
 function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
   const exception = hint.originalException;
@@ -121,8 +124,8 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
 
   // Handled client errors (4xx) are not server faults. They're recorded as a
   // low-severity Sentry log trail (Logger.handledClientError) on the separate
-  // logs quota, so keep them OUT of the error-event pipeline entirely — this
-  // also makes PR3's per-site `shouldBeCaptured: false` opt-outs redundant.
+  // logs quota, so keep them OUT of the error-event pipeline entirely; a 4xx
+  // call site does not need its own `shouldBeCaptured: false`.
   if (isHandledClientError(exception)) {
     return null;
   }
@@ -211,13 +214,19 @@ function redactSecrets(data: unknown): Record<string, unknown> {
 /**
  * Build a Sentry overlay (user / tags / extras) from a ShelfError.
  *
+ * Everything in `extra` taken from the error (its `additionalData`, `message`
+ * and `cause`) also goes through `redactSensitive`, the same pass the log line
+ * gets: it strips credentials embedded in URLs and caps each string, so a field
+ * as large as the client chose to send cannot reach Sentry whole. `traceId` is
+ * a short id the server generates, so it is included as is.
+ *
  * Returns `undefined` for anything that isn't a ShelfError so the caller
  * can fall through to the scope-derived event without overlaying noisy
  * fallback tags ("Unknown" / "?"). Plain Errors that bubble up still get
  * captured — they just don't gain Shelf-specific tagging they can't
  * provide meaningful values for.
  */
-function makeSentryContext(exception: unknown) {
+export function makeSentryContext(exception: unknown) {
   if (!isLikeShelfError(exception)) {
     return;
   }
@@ -231,16 +240,22 @@ function makeSentryContext(exception: unknown) {
       shelf_trace_id: exception.traceId || "Unknown",
     },
     extra: {
-      ...redactSecrets(exception.additionalData),
+      // redactSecrets first: its walk is cycle-safe, so redactSensitive only
+      // ever sees an acyclic tree.
+      ...redactSensitive(redactSecrets(exception.additionalData)),
       traceId: exception.traceId,
-      message: exception.message,
+      message: redactSensitive(exception.message),
       cause: {
-        message: (exception.cause as Error | null)?.message,
+        message: redactSensitive((exception.cause as Error | null)?.message),
         // Redact the raw cause chain too; otherwise it bypasses redactSecrets
         // and the "no secret can reach Sentry (at any depth)" guarantee would
-        // not actually hold.
-        raw: JSON.stringify(
-          redactValue(exception.cause, new WeakSet<object>())
+        // not actually hold. The object is redacted before it is stringified,
+        // because URL credentials are only found in a string that is a URL,
+        // and the JSON is capped as a whole.
+        raw: redactSensitive(
+          JSON.stringify(
+            redactSensitive(redactValue(exception.cause, new WeakSet<object>()))
+          )
         ),
       },
     },

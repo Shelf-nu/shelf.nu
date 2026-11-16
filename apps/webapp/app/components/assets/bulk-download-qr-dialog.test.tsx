@@ -32,10 +32,14 @@ import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
  * - `searchParams`: what the mocked `useSearchParams` returns (the active filter)
  * - `renderedTitles`: titles of every asset actually rasterized into a zip, so a
  *   test can assert which request's assets were processed.
+ * - `zipRootFiles` / `zipFolderFiles`: names (and text contents) written to the
+ *   zip's root and to its `qr-codes` folder.
  */
 const hoisted = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
   renderedTitles: [] as string[],
+  zipRootFiles: new Map<string, unknown>(),
+  zipFolderFiles: [] as string[],
 }));
 
 // why: the dialog imports `useSearchParams` from this cookie/org-context-aware
@@ -77,16 +81,20 @@ vi.mock("~/components/code-preview/code-preview", () => ({
   QrLabel: (props: { title?: string }) => props as unknown as null,
 }));
 
-// why: zip generation is irrelevant to the assertions and its Blob plumbing is
-// unreliable under happy-dom; a no-op archive lets processDownload reach its
-// success state deterministically.
+// why: JSZip's Blob plumbing is unreliable under happy-dom; a recording archive
+// lets processDownload reach its success state deterministically and shows
+// which files were placed where.
 vi.mock("jszip", () => {
   class FakeZip {
     folder() {
-      return { file: () => undefined };
+      return {
+        file: (name: string) => {
+          hoisted.zipFolderFiles.push(name);
+        },
+      };
     }
-    file() {
-      return undefined;
+    file(name: string, content: unknown) {
+      hoisted.zipRootFiles.set(name, content);
     }
     generateAsync() {
       return Promise.resolve(new Blob(["zip"]));
@@ -127,6 +135,7 @@ function payloadFor(assetIds: string[]): BulkQrDownloadLoaderData {
     })),
     qrIdDisplayPreference: "QR_ID",
     showShelfBranding: true,
+    labelsCsv: `labels for ${assetIds.join(",")}`,
   };
 }
 
@@ -135,6 +144,8 @@ beforeEach(() => {
   fetchControl.pending = [];
   hoisted.searchParams = new URLSearchParams();
   hoisted.renderedTitles = [];
+  hoisted.zipRootFiles = new Map();
+  hoisted.zipFolderFiles = [];
 
   // why: install the fetch spy AFTER MSW's interception (mirrors
   // use-api-query.test.ts) so the dialog's request is captured here and never
@@ -206,6 +217,22 @@ async function setFilterAndSelection(
 }
 
 describe("BulkDownloadQrDialog", () => {
+  it("puts the server's labels.csv at the zip root and keeps the images in qr-codes", async () => {
+    const user = userEvent.setup();
+    const { store } = renderDialog();
+
+    await setFilterAndSelection(store, "", ["a1", "a2"]);
+    await user.click(await screen.findByRole("button", { name: "Download" }));
+    await screen.findByText(/successfully downloaded qr codes/i);
+
+    expect([...hoisted.zipRootFiles.keys()]).toEqual(["labels.csv"]);
+    expect(hoisted.zipRootFiles.get("labels.csv")).toBe("labels for a1,a2");
+    expect(hoisted.zipFolderFiles).toEqual([
+      "Asset_a1_qr-a1.jpg",
+      "Asset_a2_qr-a2.jpg",
+    ]);
+  });
+
   it("refetches with the current params on a second download after filters change", async () => {
     const user = userEvent.setup();
     const { store } = renderDialog();

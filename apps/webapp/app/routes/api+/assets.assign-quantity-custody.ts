@@ -3,31 +3,24 @@
  *
  * Handles POST requests to check out a specific quantity of a
  * QUANTITY_TRACKED asset to a team member. Validates permissions,
- * parses form data with Zod, delegates to `checkOutQuantity`, and
- * sends a success notification.
+ * parses form data with Zod, delegates to `assignQuantityToCustodian` (the
+ * custody change, its audit note and the low-stock check), and sends a
+ * success notification.
  *
- * @see {@link file://./../../modules/asset/service.server.ts} — checkOutQuantity
- * @see {@link file://./assets.bulk-assign-custody.ts} — Similar pattern for bulk custody
+ * @see {@link file://./../../modules/custody/quantity-custody.server.ts} assignQuantityToCustodian
+ * @see {@link file://./assets.bulk-assign-custody.ts} the bulk route, which uses the same function
  */
 
-import type { Prisma } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { checkOutQuantity } from "~/modules/asset/service.server";
-import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
-import { createNote } from "~/modules/note/service.server";
+import {
+  assignQuantityToCustodian,
+  QUANTITY_CUSTODIAN_SELECT,
+} from "~/modules/custody/quantity-custody.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
-import { Logger } from "~/utils/logger";
-import {
-  appendUserTextToNote,
-  wrapCustodianForNote,
-  wrapUserLinkForNote,
-} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -46,6 +39,12 @@ export const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `"unplaced"` for the
+   * unplaced units. Only sent by the dialog for a pool placed at two or more
+   * locations; absent means the service decides (see `resolveCustodySource`).
+   */
+  locationId: z.string().optional(),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -55,7 +54,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -64,7 +63,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetId, teamMemberId, quantity, note } = parseData(
+    const { assetId, teamMemberId, quantity, note, locationId } = parseData(
       formData,
       AssignQuantityCustodySchema
     );
@@ -73,7 +72,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const teamMember = await getTeamMember({
       id: teamMemberId,
       organizationId,
-      include: { user: true },
+      select: { ...QUANTITY_CUSTODIAN_SELECT, userId: true },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -85,11 +84,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    /** Self-service users can only assign custody to themselves */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== userId
-    ) {
+    /** A caller whose custody scope is `self` may assign only to themselves */
+    const assignsSelfOnly = access.custody.assign === "self";
+    if (assignsSelfOnly && teamMember.userId !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -101,52 +98,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    await checkOutQuantity({
+    await assignQuantityToCustodian({
       assetId,
-      teamMemberId,
+      custodian: teamMember,
       quantity,
       userId,
       organizationId,
+      custodyAssign: access.custody.assign,
       note,
+      locationId,
     });
-
-    /** Best-effort audit note — don't fail the action if note creation fails */
-    try {
-      const user = await getUserByID(userId, {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        } satisfies Prisma.UserSelect,
-      });
-
-      const actor = wrapUserLinkForNote(user);
-      const custodianDisplay = wrapCustodianForNote({ teamMember });
-
-      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-      const baseLine = isSelfService
-        ? `${actor} took custody of **${quantity}** unit(s).`
-        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
-      const noteContent = appendUserTextToNote(baseLine, note);
-
-      await createNote({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetId,
-        organizationId,
-      });
-    } catch (noteError) {
-      Logger.error(
-        new ShelfError({
-          cause: noteError,
-          message: "Failed to create audit note for quantity operation",
-          label: "Assets",
-          additionalData: { assetId, userId },
-        })
-      );
-    }
 
     sendNotification({
       title: `${quantity} unit(s) assigned to ${teamMember.name}`,
@@ -154,9 +115,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
-
-    /** Check low-stock threshold and notify if breached */
-    await checkAndNotifyLowStock({ assetId, userId, organizationId });
 
     return data(payload({ success: true }));
   } catch (cause) {

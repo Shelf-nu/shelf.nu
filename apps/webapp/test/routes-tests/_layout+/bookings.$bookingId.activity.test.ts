@@ -15,11 +15,13 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 import { action, loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { db } from "~/database/db.server";
 import * as bookingService from "~/modules/booking/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
+import * as linkPreviewService from "~/modules/link-preview/service.server";
 import type * as HttpServerModule from "~/utils/http.server";
 import * as httpServer from "~/utils/http.server";
 import {
@@ -51,6 +53,12 @@ vi.mock("~/modules/booking-note/service.server", () => ({
   createBookingNote: vi.fn().mockResolvedValue({}),
   deleteBookingNote: vi.fn().mockResolvedValue({ count: 1 }),
   getBookingNotes: vi.fn().mockResolvedValue([]),
+}));
+
+// why: reads stored titles from the DB and fetches pages over the network. The
+// loader tests pin what the loader hands it and what it does with the answer.
+vi.mock("~/modules/link-preview/service.server", () => ({
+  getLinkTitles: vi.fn().mockResolvedValue({}),
 }));
 
 // why: the loader's gate reads the booking `getBooking` returns; stub the
@@ -102,15 +110,13 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // The attacker's session org (Org A)
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
       role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: accessFor(["BASE"]),
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -366,15 +372,13 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
   it("allows a POST on another user's booking when the requester can see all bookings", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
       role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: accessFor(["ADMIN"]),
     });
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "someone-elses-booking",
@@ -409,7 +413,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -499,7 +503,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
   it("reads another user's booking when the caller can see all bookings", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as any);
     vi.mocked(bookingService.getBooking).mockResolvedValue({
       id: "victim-booking",
@@ -517,5 +521,53 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
     );
 
     expect((response as any).booking?.id).toBe("victim-booking");
+  });
+
+  it("reads the titles of the links in the booking's notes once, for the session's workspace", async () => {
+    // The workspace comes from the permission check, never from the URL.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org-from-session",
+      access: accessFor(["ADMIN"]),
+    } as any);
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "victim-booking",
+      name: "Shoot day",
+      custodianUserId: "user-victim",
+      custodianTeamMember: { userId: "user-victim" },
+    } as any);
+    const notes = [
+      {
+        id: "note-1",
+        type: "COMMENT",
+        content: "Call sheet: https://example.com/m.pdf",
+      },
+      { id: "note-2", type: "UPDATE", content: "Booking checked out" },
+    ];
+    vi.mocked(bookingNoteService.getBookingNotes).mockResolvedValue(
+      notes as any
+    );
+    const linkTitles = {
+      "https://example.com/m.pdf": { pageTitle: "Manual", customTitle: null },
+    };
+    vi.mocked(linkPreviewService.getLinkTitles).mockResolvedValue(linkTitles);
+
+    const response = (await loader(
+      createLoaderArgs({
+        request: makeLoaderRequest(),
+        params: { bookingId: "victim-booking" },
+        context: mockContext,
+      })
+    )) as any;
+
+    expect(linkPreviewService.getLinkTitles).toHaveBeenCalledTimes(1);
+    expect(linkPreviewService.getLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-from-session",
+      notes,
+    });
+    // The very notes the page shows, not a copy or a subset.
+    expect(
+      vi.mocked(linkPreviewService.getLinkTitles).mock.calls[0][0].notes
+    ).toBe(response.booking.notes);
+    expect(response.linkTitles).toEqual(linkTitles);
   });
 });

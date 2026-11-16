@@ -4,12 +4,15 @@ import { UploadIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { z } from "zod";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { isFormProcessing } from "~/utils/form";
+import { readImportRowErrors } from "~/utils/import-row-errors";
 import { tw } from "~/utils/tw";
 import ImportUsersSuccessContent from "./import-users-success-content";
 import Input from "../../forms/input";
 import { Dialog, DialogPortal } from "../../layout/dialog";
 import { Button } from "../../shared/button";
+import { ImportRowErrorsTable } from "../../shared/import-row-errors-table";
 import { WarningBox } from "../../shared/warning-box";
 import When from "../../when/when";
 import type { InviteUserFormSchema } from "../invite-user-dialog";
@@ -22,7 +25,8 @@ type ImportUsersDialogProps = {
 type ImportUser = z.infer<typeof InviteUserFormSchema>;
 
 export type FetcherData = {
-  error?: { message?: string };
+  /** `additionalData` carries the row errors of a refused file. */
+  error?: { message?: string; title?: string; additionalData?: unknown };
   success?: boolean;
   inviteSentUsers?: ImportUser[];
   skippedUsers?: ImportUser[];
@@ -41,6 +45,11 @@ export default function ImportUsersDialog({
 
   const fetcher = useFetcherWithReset<FetcherData>();
   const disabled = isFormProcessing(fetcher.state);
+
+  /** The rows a refused file was refused for, when the server listed them. */
+  const { rowErrors, totalRowErrors } = readImportRowErrors(
+    fetcher.data?.error?.additionalData
+  );
 
   function openDialog() {
     setIsDialogOpen(true);
@@ -129,12 +138,13 @@ export default function ImportUsersDialog({
                   You must use <b>, (comma)</b> as a delimiter in your CSV file.
                 </li>
                 <li>
-                  Only valid roles are <b>ADMIN</b>, <b>BASE</b> and{" "}
-                  <b>SELF_SERVICE</b>. Role column is case-sensitive.
+                  {/* Derived from the invitable roles: exactly the values the
+                      CSV role column accepts, most privileged first. */}
+                  Only valid roles are <b>{INVITABLE_ROLES.join(", ")}</b>.
                 </li>
                 <li>
-                  Each row represents a new user to be invited. Ensure the email
-                  column is valid.
+                  Each row represents a new user to be invited. Every email must
+                  be a valid address and appear only once.
                 </li>
                 <li>
                   Invited users will receive an email with a link to join the
@@ -151,6 +161,11 @@ export default function ImportUsersDialog({
                 <li>
                   The first row of the sheet will be ignored. Use it for column
                   headers as in the provided template.
+                </li>
+                <li>
+                  The whole file is checked before anyone is invited. If any row
+                  has a problem, nothing is imported and every problem row is
+                  listed so you can fix the file and upload it again.
                 </li>
               </ul>
 
@@ -190,6 +205,14 @@ export default function ImportUsersDialog({
                   <p className="mb-2 text-sm  text-error-500">
                     {fetcher.data?.error?.message}
                   </p>
+                  {rowErrors ? (
+                    <div className="mb-4">
+                      <ImportRowErrorsTable
+                        rowErrors={rowErrors}
+                        totalRowErrors={totalRowErrors}
+                      />
+                    </div>
+                  ) : null}
                 </When>
 
                 <Button type="submit" disabled={!selectedFile || disabled}>

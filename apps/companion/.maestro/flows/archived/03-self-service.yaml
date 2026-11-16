@@ -1,0 +1,18 @@
+appId: com.shelf.companion.carlos
+name: "Archived assets - Self-service member"
+tags:
+  - archived
+  - roles
+  - fixture
+
+---
+# Test: an archived asset, as a Self-service member (takes custody for
+# themselves, cannot reinstate). Needs the fixture: ./scripts/seed-e2e.sh
+# archived-up, then pass env/e2e-archived.env.
+
+- runFlow: ../../shared/login-self-service.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- runFlow: steps/self-service.yaml

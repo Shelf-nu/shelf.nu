@@ -1,7 +1,7 @@
 /**
  * Sentry instrumentation for the companion app.
  *
- * Two jobs:
+ * Main jobs:
  *  1. `initSentry()` — wire up crash/error reporting. No-ops in dev and when no
  *     DSN is configured (the DSN is injected from the EAS env var
  *     `EXPO_PUBLIC_SENTRY_DSN` for preview/production builds, so local Metro
@@ -11,14 +11,19 @@
  *     offline → kill → sync path is failing in the field. These are the four
  *     danger points of the scan-durability machinery (#2580/#2586). They're
  *     tagged uniformly so we can build targeted Sentry alerts on them.
+ *  3. `reportPushRegistrationFailure()` reports a background push
+ *     registration or sign-out unregistration that failed, which the person
+ *     would otherwise only notice as a push that never arrives.
  *
  * @see {@link file://./audit-scan-persistence.ts}
  * @see {@link file://./../hooks/use-scan-queue.ts}
  * @see {@link file://./../hooks/use-audit-init.ts}
  */
 import * as Sentry from "@sentry/react-native";
+import type { PushFailureStage } from "./push/token-record";
 import {
   getActiveServer,
+  setIncompleteTeardownReporter,
   subscribeToServerChange,
 } from "./server/active-server";
 
@@ -120,7 +125,14 @@ export function trackServerTag(): () => void {
     }
   };
   apply();
-  return subscribeToServerChange(apply);
+  // A server switch tears the outgoing session down and reports an
+  // incomplete teardown the same way a sign-out does.
+  setIncompleteTeardownReporter(reportSignOutIncomplete);
+  const unsubscribe = subscribeToServerChange(apply);
+  return () => {
+    unsubscribe();
+    setIncompleteTeardownReporter(null);
+  };
 }
 
 /**
@@ -161,7 +173,12 @@ export type AuditDurabilityEvent =
   /** "Resume Previous Session?" was shown — a kill left unsynced scans behind. */
   | "session_recovered"
   /** Audit completion was blocked because scans were still unsynced. */
-  | "completion_blocked_unsynced";
+  | "completion_blocked_unsynced"
+  /**
+   * A draft with no owning account still holds unsynced scans. It is kept
+   * but never offered, because nothing says which account made them.
+   */
+  | "unowned_draft_kept";
 
 /**
  * Report a durability event to Sentry. No-ops when Sentry isn't configured.
@@ -178,7 +195,70 @@ export function reportAuditDurabilityEvent(
   if (!dsn || __DEV__) return;
   Sentry.captureMessage(`audit-durability: ${event}`, {
     level,
+    // One issue per event: the stack this is captured from varies, and
+    // grouping by it splits one report across several issues.
+    fingerprint: ["audit-durability", event],
     tags: { feature: "audit-scan-durability", durability_event: event },
     extra: context,
   });
+}
+
+/**
+ * Reports a sign-out that could not confirm the stored session is gone: a
+ * delete failed, the session was still found after every delete, or the check
+ * timed out. The app still shows the login screen; this makes the case
+ * visible. `blockStored: false` marks the worst case, where the block refusing
+ * that session could not be stored either, so a restart could restore it.
+ *
+ * @param server - The Supabase project URL of the client being signed out
+ * @param details - Whether the block on the session was stored
+ */
+export function reportSignOutIncomplete(
+  server: string | null,
+  { blockStored }: { blockStored: boolean }
+): void {
+  if (__DEV__) {
+    console.warn("[Auth] stored session not confirmed gone after sign-out");
+  }
+  if (!dsn || __DEV__) return;
+  try {
+    Sentry.captureMessage("sign-out: stored session not confirmed deleted", {
+      level: "error",
+      tags: { feature: "auth", block_stored: String(blockStored) },
+      extra: { server },
+    });
+  } catch {
+    // Telemetry must never throw into the sign-out path.
+  }
+}
+
+/**
+ * Reports a failed push registration or unregistration.
+ *
+ * Both run in the background, so a failure is invisible to the person until
+ * a push they expected never arrives, or a signed-out phone keeps receiving
+ * them. It has to reach Sentry rather than only a dev console. Only the stage
+ * and the error message are sent, never the token. The registrar reports
+ * each stage at most once per app session.
+ *
+ * @param stage - Which step failed
+ * @param message - The error message from the OS, Expo or the server
+ */
+export function reportPushRegistrationFailure(
+  stage: PushFailureStage,
+  message: string
+): void {
+  if (__DEV__) console.warn(`[Push] ${stage} failed:`, message);
+  if (!dsn || __DEV__) return;
+  try {
+    Sentry.captureMessage(`push-registration: ${stage}`, {
+      level: "warning",
+      // One issue per stage, whatever stack it is captured from.
+      fingerprint: ["push-registration", stage],
+      tags: { feature: "push", push_stage: stage },
+      extra: { message },
+    });
+  } catch {
+    // Telemetry must never throw into the registration path.
+  }
 }

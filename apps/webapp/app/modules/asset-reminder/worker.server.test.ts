@@ -1,20 +1,23 @@
 /**
  * Tests for the asset-reminder pg-boss worker.
  *
- * Focus: the worker-wrapping behavior around `regierAssetWorkers` — the
+ * Covers the worker-wrapping behavior around `regierAssetWorkers` (the
  * catch/log/rethrow contract that determines whether pg-boss retries a
- * failed reminder job or silently marks it COMPLETED. The handler is
- * exercised through the callback captured from `scheduler.work`, since the
- * event handlers themselves are not exported.
+ * failed reminder job or silently marks it COMPLETED) and who a reminder
+ * emails and pushes. The handler is exercised through the callback captured
+ * from `scheduler.work`, since the event handlers themselves are not exported.
  *
  * @see {@link file://./worker.server.ts}
  */
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
+import { sendPush } from "~/modules/push/service.server";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { AssetsSchedulerData } from "./scheduler.server";
 import { regierAssetWorkers } from "./worker.server";
+import { createNote } from "../note/service.server";
 
 // @vitest-environment node
 
@@ -23,6 +26,7 @@ vi.mock("~/database/db.server", () => ({
   db: {
     assetReminder: {
       findFirst: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     user: {
       findFirst: vi.fn(),
@@ -42,7 +46,9 @@ vi.mock("~/utils/scheduler.server", () => ({
 }));
 
 // why: preventing actual email rendering/sending during worker tests
-vi.mock("./emails", () => ({
+vi.mock("./emails", async (importOriginal) => ({
+  // the stop messages are plain strings shared with the note
+  ...((await importOriginal()) as object),
   assetAlertEmailHtmlString: vi.fn().mockResolvedValue("<html></html>"),
   assetAlertEmailText: vi.fn().mockReturnValue("text body"),
 }));
@@ -53,6 +59,12 @@ vi.mock("~/emails/mail.server", () => ({
   sendEmail: vi.fn(),
 }));
 
+// why: sendPush queues a pg-boss job; the queue and delivery are the push
+// module's concern and have their own tests
+vi.mock("~/modules/push/service.server", () => ({
+  sendPush: vi.fn().mockResolvedValue(undefined),
+}));
+
 // why: avoiding actual note creation during worker tests
 vi.mock("../note/service.server", () => ({
   createNote: vi.fn().mockResolvedValue({}),
@@ -61,6 +73,7 @@ vi.mock("../note/service.server", () => ({
 // why: spying on Logger to verify logging behavior without touching Sentry/pino
 vi.mock("~/utils/logger", () => ({
   Logger: {
+    info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   },
@@ -131,6 +144,174 @@ describe("regierAssetWorkers", () => {
 
     expect(Logger.warn).toHaveBeenCalled();
     expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing and writes no note when the reminder's asset is archived", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [{ user: { email: "a@example.com", firstName: "A" } }],
+      asset: { id: "asset-1", title: "Camera", archivedAt: new Date() },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(sendPush).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
+    expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("records the skip by clearing this job's scheduler reference", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [],
+      asset: { id: "asset-1", title: "Camera", archivedAt: new Date() },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await workerHandler(buildJob({ id: "job-7" }));
+
+    // Conditioned on the job, so a reminder rescheduled meanwhile keeps its
+    // new job reference.
+    expect(db.assetReminder.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "reminder-1",
+        organizationId: "org-1",
+        activeSchedulerReference: "job-7",
+      },
+      data: { activeSchedulerReference: null },
+    });
+  });
+
+  it("emails and notes as usual when the reminder's asset is active", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [{ user: { email: "a@example.com", firstName: "A" } }],
+      asset: { id: "asset-1", title: "Camera", archivedAt: null },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
+
+    expect(sendEmail).toHaveBeenCalledOnce();
+    expect(createNote).toHaveBeenCalledOnce();
+    expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("pushes once to every team member with a login, by user id", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [
+        { user: { id: "user-a", email: "a@example.com", firstName: "A" } },
+        { user: { id: "user-b", email: "b@example.com", firstName: "B" } },
+      ],
+      asset: { id: "asset-1", title: "Camera", archivedAt: null },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await workerHandler(buildJob());
+
+    expect(db.assetReminder.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          teamMembers: {
+            select: { user: { select: expect.objectContaining({ id: true }) } },
+          },
+        }),
+      })
+    );
+    expect(vi.mocked(sendPush).mock.calls).toEqual([
+      [
+        {
+          userIds: ["user-a", "user-b"],
+          organizationId: "org-1",
+          category: "stockAndReminders",
+          title: "⏰ Asset Reminder Notice",
+          body: "Service check (Camera)",
+          url: "/assets/asset-1?orgId=org-1",
+        },
+      ],
+    ]);
+  });
+
+  it("pushes to the owner in place of a team member whose access was revoked", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [
+        { user: { id: "user-a", email: "a@example.com", firstName: "A" } },
+        { user: null },
+      ],
+      asset: { id: "asset-1", title: "Camera", archivedAt: null },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+    // @ts-expect-error missing vitest type
+    db.user.findFirst.mockResolvedValue({
+      id: "owner-1",
+      email: "owner@example.com",
+      firstName: "Olive",
+      lastName: "Owner",
+      displayName: null,
+    });
+
+    await workerHandler(buildJob());
+
+    expect(db.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ id: true }),
+      })
+    );
+    expect(sendPush).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendPush).mock.calls[0][0].userIds).toEqual([
+      "user-a",
+      "owner-1",
+    ]);
+  });
+
+  it("pushes nothing when writing the note fails, so the retried job pushes once", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [
+        { user: { id: "user-a", email: "a@example.com", firstName: "A" } },
+      ],
+      asset: { id: "asset-1", title: "Camera", archivedAt: null },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+    vi.mocked(createNote).mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(workerHandler(buildJob())).rejects.toThrow("connection lost");
+
+    expect(sendPush).not.toHaveBeenCalled();
   });
 
   it("rethrows when the handler fails, so pg-boss retries the job", async () => {

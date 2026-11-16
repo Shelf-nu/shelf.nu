@@ -9,7 +9,18 @@ instead — this document is the binary.
 - `eas whoami` returns an account with access to the Shelf project.
 - `apps/companion/google-service-account.json` exists. It is git-ignored and
   holds the Play submission key; without it the Android submit fails.
+- Push credentials are in place on EAS (APNs key, FCM V1 service account) and
+  `ios/Shelf/Shelf.entitlements` still carries `aps-environment`. See
+  [PUSH-NOTIFICATIONS.md](./PUSH-NOTIFICATIONS.md).
+- The `GOOGLE_SERVICES_JSON` file variable exists on EAS for the `production`
+  environment (`eas env:list --environment production`). `app.config.js` reads
+  it into `expo.android.googleServicesFile`; without it Android installs never
+  register for push. The file is not in git (it carries a Firebase client key).
 - Everything intended for this release is merged to `main`.
+- App Store Connect has screenshots for 13-inch iPad displays. The iOS build
+  targets iPad as well as iPhone (`supportsTablet` in `app.json`), so App Store
+  Connect will not send a version to review without them. Uploaded screenshots
+  carry over to later versions.
 
 ## 1. The version bump
 
@@ -44,6 +55,14 @@ itself. Do not edit `CFBundleVersion` or add `android.versionCode`.
 Add `RELEASE-NOTES-<version>.md` beside the previous one. It carries the App
 Store text, a Google Play version under 500 characters, and an internal section
 for behaviour worth knowing that does not belong in a store listing.
+
+Write the notes from what is an **ancestor of the build commit**, not from what
+was merged that week — a change that lands days before the cut can still miss
+it. Check each claim:
+
+```bash
+git merge-base --is-ancestor <feature-commit> <build-commit> && echo shipped
+```
 
 ## 3. Build
 
@@ -91,8 +110,3 @@ separate Supabase project. The review notes need:
 Check `disablePasswordLogin` is false for whichever domain you give them.
 When it is true the reviewer only sees single sign-on, which hands off to an
 identity provider they cannot pass, and a working feature looks like a dead end.
-
-## After it ships
-
-Update `COMPANION-RELEASE-STATUS.md` at the repo root so what is live per store
-is written down next to what is merged.

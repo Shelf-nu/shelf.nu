@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "~/hooks/search-params";
+import { isSheetViewport } from "~/utils/sheet-viewport";
 
 type UseControlledDropdownMenuReturn = {
   ref: RefObject<HTMLDivElement | null>;
@@ -8,6 +9,15 @@ type UseControlledDropdownMenuReturn = {
   defaultApplied: boolean;
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
+  /**
+   * Pass to the Radix menu's `onOpenChange`. On desktop it applies every open
+   * change Radix asks for: the trigger (mouse and keyboard), Escape, Tab-out,
+   * an outside click and an item select. The trigger must therefore not also
+   * toggle `open` in its own `onClick`, or one click opens and closes it.
+   * On a sheet viewport it applies them only after a QR-scan auto-open: there
+   * the desktop trigger is hidden, and the mobile button and overlay drive it.
+   */
+  onOpenChange: (open: boolean) => void;
 };
 
 interface Options {
@@ -35,12 +45,9 @@ export function useControlledDropdownMenu(
   const [open, setOpen] = useState(false);
   const [defaultApplied, setDefaultApplied] = useState(false);
 
-  // Reactively calculate if menu should auto-open based on current state
+  // A QR scan opens the menu wherever it renders as a bottom sheet (below `md`)
   const shouldAutoOpen =
-    !options?.skipDefault &&
-    typeof window !== "undefined" &&
-    window.innerWidth <= 640 &&
-    refIsQrScan;
+    !options?.skipDefault && isSheetViewport() && refIsQrScan;
 
   // Apply auto-open when conditions are met
   useEffect(() => {
@@ -49,6 +56,13 @@ export function useControlledDropdownMenu(
       setDefaultApplied(true);
     }
   }, [shouldAutoOpen, defaultApplied]);
+
+  const onOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!isSheetViewport() || defaultApplied) setOpen(nextOpen);
+    },
+    [defaultApplied]
+  );
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -77,5 +91,6 @@ export function useControlledDropdownMenu(
     defaultApplied,
     open,
     setOpen,
+    onOpenChange,
   };
 }

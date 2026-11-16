@@ -1,6 +1,7 @@
 import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -9,6 +10,10 @@ import {
   isLikeShelfError,
 } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
+import {
+  assertAssetsBelongToOrg,
+  assertKitsBelongToOrg,
+} from "~/utils/org-validation.server";
 import { validateBarcodeValue, normalizeBarcodeValue } from "./validation";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -33,7 +38,38 @@ export interface UpdateBarcodeParams {
 }
 
 /**
+ * Asserts that the asset or kit a new barcode will be attached to belongs to
+ * the caller's workspace.
+ *
+ * The barcode row itself is written with the caller's `organizationId`, so
+ * without this check a barcode in one workspace could point at another
+ * workspace's asset or kit — and scanning it would resolve that foreign item.
+ * Runs outside the callers' `try` blocks so its 400 reaches the user as-is
+ * instead of being rewrapped as a generic barcode error.
+ *
+ * @throws {ShelfError} 400 when the asset or kit is not in `organizationId`
+ */
+async function assertBarcodeTargetBelongsToOrg({
+  assetId,
+  kitId,
+  organizationId,
+}: {
+  assetId?: Asset["id"];
+  kitId?: Kit["id"];
+  organizationId: Organization["id"];
+}) {
+  if (assetId) {
+    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId });
+  }
+  if (kitId) {
+    await assertKitsBelongToOrg({ kitIds: [kitId], organizationId });
+  }
+}
+
+/**
  * Create a single barcode
+ *
+ * @throws {ShelfError} 400 when the target asset or kit is not in `organizationId`
  */
 export async function createBarcode({
   type,
@@ -43,6 +79,8 @@ export async function createBarcode({
   assetId,
   kitId,
 }: CreateBarcodeParams): Promise<Barcode> {
+  await assertBarcodeTargetBelongsToOrg({ assetId, kitId, organizationId });
+
   try {
     // Validate barcode value format (preserve case for ExternalQR)
     const normalizedValue = normalizeBarcodeValue(type, value);
@@ -108,11 +146,13 @@ export async function createBarcodes({
   assetId?: Asset["id"];
   kitId?: Kit["id"];
 }): Promise<void> {
-  try {
-    if (!barcodes || barcodes.length === 0) {
-      return;
-    }
+  if (!barcodes || barcodes.length === 0) {
+    return;
+  }
 
+  await assertBarcodeTargetBelongsToOrg({ assetId, kitId, organizationId });
+
+  try {
     // Validate all barcode values first (preserve case for ExternalQR)
     for (const barcode of barcodes) {
       const normalizedValue = normalizeBarcodeValue(
@@ -294,7 +334,16 @@ export async function deleteBarcodes({
 }
 
 /**
- * Get barcode by value within organization
+ * Finds a barcode by value within an organization.
+ *
+ * The barcode must belong to the organization, and so must the asset or kit it
+ * links to: a barcode linked to another workspace's item resolves to `null`,
+ * so no caller can read or record a scan of that item.
+ *
+ * @param args.value - The scanned value; matched as given, then upper-cased
+ * @param args.organizationId - The caller's workspace
+ * @param args.include - Relations to load (asset and kit by default)
+ * @returns The barcode, or null when none matches in this workspace
  */
 export async function getBarcodeByValue<
   T = {
@@ -319,6 +368,10 @@ export async function getBarcodeByValue<
           { value: value.toUpperCase() }, // Try uppercase (other barcode types)
         ],
         organizationId,
+        AND: [
+          { OR: [{ assetId: null }, { asset: { organizationId } }] },
+          { OR: [{ kitId: null }, { kit: { organizationId } }] },
+        ],
       },
       include: include || {
         asset: true,
@@ -772,11 +825,10 @@ export async function parseBarcodesFromImportData({
           typeof columnValue === "string" &&
           columnValue.trim()
         ) {
-          // Split comma-separated values and validate each
-          const values = columnValue
-            .split(",")
-            .map((v) => v.trim())
-            .filter(Boolean);
+          // One cell may carry several barcodes of this type. A value may
+          // itself contain a comma, so it is read back quote-aware — see
+          // `decodeCsvListCell`.
+          const values = decodeCsvListCell(columnValue);
           values.forEach((value) => {
             // Validate barcode format (preserve case for ExternalQR)
             const normalizedValue = normalizeBarcodeValue(type, value);

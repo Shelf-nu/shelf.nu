@@ -2,6 +2,7 @@ import { QrIdDisplayPreference } from "@prisma/client";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import type { ScimTokenItem } from "./edit-form";
 import { TooltipProvider } from "../shared/tooltip";
 
@@ -47,6 +48,7 @@ const ssoDetails = {
   selfServiceGroupId: "group-ss",
   baseUserGroupId: "group-base",
   adminGroupId: "group-admin",
+  managerGroupId: null,
 };
 
 function createLoaderData(overrides: Record<string, unknown> = {}) {
@@ -100,9 +102,10 @@ const routeLoaderDefaults: Record<string, unknown> = {
       },
     },
   },
-  // useUserRoleHelper → useRouteLoaderData("routes/_layout+/_layout")
+  // useRoleAccess and useOrganizationRoles → useRouteLoaderData("routes/_layout+/_layout")
   "routes/_layout+/_layout": {
     currentOrganizationUserRoles: ["OWNER"],
+    roleAccess: accessFor(["OWNER"]),
   },
 };
 
@@ -177,7 +180,10 @@ describe("WorkspaceScimTokensSection", () => {
     it("should not render when user is not owner", () => {
       mockUseRouteLoaderData.mockImplementation((routeId: string) => {
         if (routeId === "routes/_layout+/_layout") {
-          return { currentOrganizationUserRoles: ["ADMIN"] };
+          return {
+            currentOrganizationUserRoles: ["ADMIN"],
+            roleAccess: accessFor(["ADMIN"]),
+          };
         }
         return routeLoaderDefaults[routeId];
       });
@@ -381,5 +387,34 @@ describe("WorkspaceScimTokensSection", () => {
 
       expect(screen.queryByText("SCIM token generated")).toBeNull();
     });
+  });
+});
+
+describe("Permissions card", () => {
+  it("says what each restricted role does by default, above its switches", () => {
+    mockUseLoaderData.mockReturnValue(
+      createLoaderData({ type: "TEAM", managersCanEditAssets: false })
+    );
+
+    render(
+      <TooltipProvider>
+        <WorkspaceEditForms
+          name="Test Org"
+          currency="USD"
+          qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
+          showManagersSwitch
+        />
+      </TooltipProvider>
+    );
+
+    screen.getByText(
+      "By default, Managers run bookings, custody and audits for everyone, but cannot change the catalogue."
+    );
+    screen.getByText(
+      "By default, Self service users book assets and check them out and in for themselves, and see only their own bookings and custody."
+    );
+    screen.getByText(
+      "By default, Base users request assets through bookings that an Administrator or Manager checks out, and see only their own bookings."
+    );
   });
 });

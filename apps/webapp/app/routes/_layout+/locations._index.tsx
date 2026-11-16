@@ -1,12 +1,14 @@
+import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data } from "react-router";
+import { data, useLoaderData } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { CountLink } from "~/components/list/count-link";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
@@ -15,7 +17,12 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import LocationQuickActions from "~/components/location/location-quick-actions";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import {
+  type ListContextLinkState,
+  useListContextLinkState,
+} from "~/hooks/use-list-context";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { LOCATION_SORTING_OPTIONS } from "~/modules/location/utils";
@@ -33,6 +40,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -98,19 +106,46 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const showRowActions = useShowLocationRowActions();
+  const { perPage } = useLoaderData<typeof loader>();
+  const linkState = useListContextLinkState("location", perPage);
+  const listItemProps = useMemo(
+    () => ({ showRowActions, linkState }),
+    [showRowActions, linkState]
+  );
+  // The bulk menu offers Delete and Create audit.
+  const showBulkActions =
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.create,
+    });
+
+  const canCreateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
 
   return (
     <>
       <Header>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new location`}
-          data-test-id="createNewLocation"
-        >
-          New location
-        </Button>
+        {canCreateLocation ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label={`new location`}
+            data-test-id="createNewLocation"
+          >
+            New location
+          </Button>
+        ) : null}
       </Header>
       <ListContentWrapper>
         <Filters
@@ -125,16 +160,22 @@ export default function LocationsIndexPage() {
           }}
         />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
+          customEmptyStateContent={
+            canCreateLocation
+              ? {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+                  newButtonRoute: "/locations/new",
+                  newButtonContent: "Create your first location",
+                }
+              : {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Locations added to this workspace will appear here.",
+                }
           }
-          customEmptyStateContent={{
-            title: "No locations yet",
-            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
-            newButtonRoute: "/locations/new",
-            newButtonContent: "Create your first location",
-          }}
           ItemComponent={ListItemContent}
+          extraItemComponentProps={listItemProps}
           headerChildren={
             <>
               <Th>Description</Th>
@@ -142,7 +183,7 @@ export default function LocationsIndexPage() {
               <Th className="whitespace-nowrap">Child locations</Th>
               <Th>Assets</Th>
               <Th>Kits</Th>
-              <Th>Actions</Th>
+              {showRowActions ? <Th>Actions</Th> : null}
             </>
           }
         />
@@ -153,8 +194,14 @@ export default function LocationsIndexPage() {
 
 const ListItemContent = ({
   item,
+  extraProps,
 }: {
   item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
+  /**
+   * `showRowActions` is decided once by the page, so the row cells always
+   * match the header. `linkState` lets the location page step through this list.
+   */
+  extraProps: { showRowActions: boolean; linkState: ListContextLinkState };
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">
@@ -169,7 +216,8 @@ const ListItemContent = ({
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
             <Button
-              to={`${item.id}/assets`}
+              to={LIST_DETAIL_PATH.location(item.id)}
+              state={extraProps.linkState}
               variant="link"
               className="text-left font-medium text-gray-900 hover:text-gray-700"
             >
@@ -200,17 +248,58 @@ const ListItemContent = ({
         "-"
       )}
     </Td>
-    <Td>{item._count.children}</Td>
-    <Td>{item._count.assetLocations}</Td>
-    <Td>{item._count.kits}</Td>
     <Td>
-      <LocationQuickActions
-        location={{
-          id: item.id,
-          name: item.name,
-          childCount: item._count.children,
-        }}
+      <CountLink
+        count={item._count.children}
+        to={`/locations/${item.id}`}
+        label={`Open ${item.name} and its child locations`}
       />
     </Td>
+    <Td>
+      <CountLink
+        count={item._count.assetLocations}
+        to={`/locations/${item.id}/assets`}
+        label={`View the assets in ${item.name}`}
+      />
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.kits}
+        to={`/locations/${item.id}/kits`}
+        label={`View the kits in ${item.name}`}
+      />
+    </Td>
+    {extraProps.showRowActions ? (
+      <Td>
+        <LocationQuickActions
+          location={{
+            id: item.id,
+            name: item.name,
+            childCount: item._count.children,
+          }}
+        />
+      </Td>
+    ) : null}
   </>
 );
+
+/**
+ * Whether the member gets any per-row location action. Every button in
+ * `LocationQuickActions` needs `location: update` or `location: delete`, so
+ * without either the Actions column would render empty.
+ */
+function useShowLocationRowActions() {
+  const roles = useOrganizationRoles();
+  return (
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    })
+  );
+}

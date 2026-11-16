@@ -4,6 +4,7 @@ import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { getClientIp } from "./client-ip";
+import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -215,9 +216,16 @@ function logRateLimitHit({
  */
 const bucketKeys = {
   mobileIp: (c: Context) => `mobile:ip:${getClientIp(c)}`,
+  // Paths are normalised so every spelling that reaches one route (case,
+  // trailing slash) counts against one bucket.
   appLoader: (c: Context) =>
-    `app:${resolveAppLoaderIdentity(c).identity}:${c.req.path}`,
-  calendarFeed: (c: Context) => `calendar:${c.req.path}`,
+    `app:${resolveAppLoaderIdentity(c).identity}:${normalizeRequestPath(
+      c.req.path
+    )}`,
+  // The route path also drops the single-fetch `.data` suffix, so a feed and
+  // its `.data` form share one bucket.
+  calendarFeed: (c: Context) => `calendar:${normalizeRoutePath(c.req.path)}`,
+  sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
 };
 
 /**
@@ -294,10 +302,10 @@ export const mobileIpRateLimit = () =>
  * The bucket key is `(userId | clientIP, path)`:
  * - Keying by `userId` (falling back to client IP for unauthenticated/edge
  *   cases) isolates one user's loop from everyone else.
- * - Keying by `c.req.path` (which excludes the query string — intentional)
- *   means a loop hammering ONE path is capped, while normal navigation across
- *   many varied paths is never throttled. Same-path/different-query
- *   revalidations deliberately share a bucket.
+ * - Keying by the normalised path (lower-case, no trailing slash, query
+ *   string excluded) means a loop hammering ONE path is capped, while normal
+ *   navigation across many varied paths is never throttled. Same-path and
+ *   different-query revalidations deliberately share a bucket.
  *
  * Backed by an in-memory MemoryStore, so counters are per-machine: with N Fly
  * machines the effective ceiling is ~`limit`×N/min worst-case. That's an
@@ -355,6 +363,71 @@ export const appLoaderRateLimit = (limit = 60) =>
  * Same in-memory MemoryStore caveat as `mobileIpRateLimit`. Generic floods of
  * random (invalid-token) paths are cheap indexed 404s, best absorbed at the edge.
  */
+/**
+ * Sentry tunnel rate limit, keyed on client IP.
+ *
+ * The tunnel is reachable without a session, because an error that happens
+ * before anyone signs in is exactly the kind worth reporting. That makes it an
+ * anonymous POST relay into our own Sentry project, so it is bounded per IP to
+ * stop one caller burning the org's event quota or burying real incidents in
+ * noise.
+ *
+ * This is a speed bump, not the control that contains the endpoint. What makes
+ * the tunnel safe to expose is that its destination is pinned to the server's
+ * configured Sentry project and redirects are never followed, so the caller
+ * chooses nothing about where the request goes
+ * (see `~/utils/sentry-tunnel.server`). A limiter cannot stop a caller with
+ * many addresses; a Cloudflare edge rule is the hard ceiling, as with
+ * {@link mobileIpRateLimit}.
+ *
+ * **The bucket is coarser than one caller.** `getClientIp` trusts the edge
+ * header, which behind Cloudflare is the Cloudflare address rather than the end
+ * user's, so in production one bucket covers everyone arriving through the same
+ * edge. `client-ip.ts` calls that acceptable because IP is only a fallback
+ * behind a signed-session key, and this limiter has no session to fall back
+ * from, so the coarseness is load-bearing here: a tight ceiling would throttle
+ * unrelated visitors. Self-hosted, where the proxy sets `X-Forwarded-For`, the
+ * bucket is per client.
+ *
+ * So the ceiling is set at "clearly abnormal for one edge address" rather than
+ * tight, and the body bound
+ * ({@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES}) is what protects memory. Clipping
+ * during a genuine error storm costs duplicates rather than the signal, since
+ * Sentry groups events by fingerprint. Counters are per-machine, so the
+ * effective ceiling is this times the machine count, and a Cloudflare rule
+ * remains the hard, cross-machine one.
+ *
+ * @param limit - Envelopes per bucket per 60s window. Defaults to 300. Exposed
+ *   so tests can drive a low, deterministic threshold; production callers
+ *   should rely on the default.
+ */
+export const sentryTunnelRateLimit = (limit = 300) =>
+  rateLimiter({
+    windowMs: 60_000,
+    limit,
+    standardHeaders: "draft-7",
+    keyGenerator: bucketKeys.sentryTunnel,
+    handler: (c) => {
+      // Anonymous by design, so the IP bucket is all there is to attribute
+      // this to. The envelope body is never logged: it is caller-supplied and
+      // can carry the reporting page's own data.
+      logRateLimitHit({
+        scope: "sentry-tunnel",
+        bucket: bucketKeys.sentryTunnel(c),
+        detail: c.req.path,
+      });
+
+      return c.json(
+        {
+          error: {
+            message: "Too many requests. Please try again later.",
+          },
+        },
+        429
+      );
+    },
+  });
+
 export const calendarFeedRateLimit = () =>
   rateLimiter({
     windowMs: 60_000,

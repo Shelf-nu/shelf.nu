@@ -5,6 +5,7 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { BookingsListFields } from "./bookings-list-fields";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
@@ -34,6 +35,7 @@ export default function BulkArchiveDialog() {
       {({ disabled, fetcherError, handleCloseDialog }) => (
         <>
           <input type="hidden" value="bulk-archive" name="intent" />
+          <BookingsListFields />
 
           {fetcherError ? (
             <p className="text-sm text-error-500">{fetcherError}</p>

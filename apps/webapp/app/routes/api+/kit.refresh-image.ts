@@ -1,15 +1,23 @@
+/**
+ * `POST /api/kit/refresh-image`: re-signs a kit's expired image URL.
+ *
+ * `KitImage` posts the kit id when the URL it rendered has expired. The work
+ * (reading the stored image, the own-folder check, signing, saving) lives in
+ * `refreshKitImage`.
+ *
+ * @see {@link file://../../modules/kit/service.server.ts} refreshKitImage
+ * @see {@link file://../../components/kits/kit-image.tsx}
+ */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { updateKit } from "~/modules/kit/service.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { refreshKitImage } from "~/modules/kit/service.server";
+import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
-import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { createSignedUrl } from "~/utils/storage.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -25,39 +33,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { kitId, image } = parseData(
+    const { kitId } = parseData(
       await request.formData(),
       z.object({
         kitId: z.string(),
-        image: z.string(),
       })
     );
 
-    const url = new URL(image);
-    const path = url.pathname;
-
-    const start = path.indexOf("/kits/");
-
-    const filename = start !== -1 ? path.slice(start + "/kits/".length) : null;
-
-    if (!filename) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot find kit filename",
-        additionalData: { userId, kitId, image },
-        label: "Kit",
-      });
-    }
-
-    const signedUrl = await createSignedUrl({ filename, bucketName: "kits" });
-
-    const kit = await updateKit({
-      id: kitId,
-      image: signedUrl,
-      imageExpiration: oneDayFromNow(),
-      createdById: userId,
-      organizationId,
-    });
+    // The service reads the image from the kit row; the request names only
+    // the kit, so it can never point the kit at another file.
+    const kit = await refreshKitImage({ kitId, organizationId, userId });
 
     return data(payload({ kit }));
   } catch (cause) {

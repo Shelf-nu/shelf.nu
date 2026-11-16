@@ -37,7 +37,7 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
 
 /**
  * Upper bound on comma-separated terms honored per search. Each term adds a
- * full 10-source group to the search UNION, so an unbounded paste could fan a
+ * full 11-source group to the search UNION, so an unbounded paste could fan a
  * single request into an arbitrarily expensive query. Ten is far beyond any
  * real search-box usage.
  */

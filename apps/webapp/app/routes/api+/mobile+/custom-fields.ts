@@ -71,6 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         id: true,
         name: true,
         type: true,
+        format: true,
         helpText: true,
         required: true,
         options: true,
@@ -83,6 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         id: cf.id,
         name: cf.name,
         type: cf.type,
+        format: cf.format,
         helpText: cf.helpText,
         required: cf.required,
         // why: `options` is only meaningful for OPTION fields per the schema

@@ -7,6 +7,9 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { mobileIdSchema } from "~/modules/api/mobile-bulk-ids.server";
+import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -67,15 +70,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetId, custodianId } = parsed.data;
 
-    // Get user context (role + barcode access) for asset index settings
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // Caller's access (effective role, custody scope), barcode and audit add-ons
+    const { canUseBarcodes, canUseAudits, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     // Validate custodian belongs to the organization
@@ -96,13 +101,22 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await bulkCheckOutAssets({
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds: [assetId],
       custodianId,
       custodianName: teamMember.name,
       organizationId,
       currentSearchParams: "",
       settings,
+      lastAuditDateAccess: resolveLastAuditDateAccess({
+        seeAllAudits: access.audits.seeAll,
+        auditsUsable: canUseAudits,
+      }),
+      bookableScope: resolveBookableListScope({ access, userId: user.id }),
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody: access.custody.seeAll,
+        userId: user.id,
+      }),
       /**
        * Mobile sends no list filters (`currentSearchParams` is empty above), so
        * this never narrows anything today — the where-builder returns before it
@@ -111,7 +125,7 @@ export async function action({ request }: ActionFunctionArgs) {
        * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
        * they can still filter by their OWN custody.
        */
-      allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+      allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
     });
 
     return data({ success: true });

@@ -37,7 +37,7 @@ vi.mock("~/database/db.server", () => ({
     assetKit: { groupBy: vi.fn() },
     bookingAsset: { findMany: vi.fn() },
     partialBookingCheckout: { findMany: vi.fn() },
-    consumptionLog: { groupBy: vi.fn() },
+    consumptionLog: { findMany: vi.fn(), groupBy: vi.fn() },
   },
 }));
 
@@ -63,7 +63,10 @@ function mockedDb() {
     assetKit: { groupBy: ReturnType<typeof vi.fn> };
     bookingAsset: { findMany: ReturnType<typeof vi.fn> };
     partialBookingCheckout: { findMany: ReturnType<typeof vi.fn> };
-    consumptionLog: { groupBy: ReturnType<typeof vi.fn> };
+    consumptionLog: {
+      findMany: ReturnType<typeof vi.fn>;
+      groupBy: ReturnType<typeof vi.fn>;
+    };
   };
 }
 
@@ -132,6 +135,7 @@ describe("buildAvailableUnitsByAsset", () => {
     client.assetKit.groupBy.mockResolvedValue([]);
     client.bookingAsset.findMany.mockResolvedValue([]);
     client.partialBookingCheckout.findMany.mockResolvedValue([]);
+    client.consumptionLog.findMany.mockResolvedValue([]);
     client.consumptionLog.groupBy.mockResolvedValue([]);
   });
 

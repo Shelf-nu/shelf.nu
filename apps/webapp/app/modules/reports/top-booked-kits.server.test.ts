@@ -1,23 +1,31 @@
 /**
  * Top Booked Kits Report — Aggregation Tests
  *
- * Covers the public `topBookedKitsReport` function: that kits are counted
- * once per booking (kits are atomic in a booking), aggregated across
+ * Covers the public `topBookedKitsReport` function: that kit attribution
+ * comes from each booking slice's own provenance columns (`sourceKitId`
+ * primary, live `assetKitId` membership as legacy fallback), that kits are
+ * counted once per booking (kits are atomic in a booking), aggregated across
  * bookings, ranked by booking volume, and summarised into KPIs whose
  * "total" reconciles with the per-kit booking counts.
  *
  * @see {@link file://./helpers.server.ts}
  */
 
+import type { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: Mock the Prisma client so the unit tests never touch a real database.
-// Matches the pattern in `helpers.server.test.ts`. `kit.update` is stubbed
-// for `refreshExpiredKitImages`, which only calls it for expired image URLs —
-// these tests use kits with no image, so it is never actually invoked.
+// Matches the pattern in `helpers.server.test.ts`. `assetKit.findMany` backs
+// the legacy-fallback resolution (slices with a live membership but no
+// `sourceKitId`). `kit.update` is stubbed for `refreshExpiredKitImages`,
+// which only calls it for expired image URLs — these tests use kits with no
+// image, so it is never actually invoked.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: {
+      findMany: vi.fn(),
+    },
+    assetKit: {
       findMany: vi.fn(),
     },
     kit: {
@@ -29,6 +37,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
+import { WITHOUT_LOCATION_ID } from "./filter-params";
 import { topBookedKitsReport } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
@@ -39,12 +48,41 @@ const TIMEFRAME: ResolvedTimeframe = {
   to: new Date("2026-04-30T23:59:59Z"),
 };
 
+/**
+ * A booking row exactly as the report's lightweight scan projects it.
+ *
+ * Declared against the query rather than cast loose: `fetchTopBookedKitData`
+ * selects `from`, `to` and each kit-driven slice's two provenance columns, so
+ * a fixture that drifts from that select stops compiling instead of quietly
+ * feeding the report a shape it never receives.
+ */
+type KitScanBooking = Prisma.BookingGetPayload<{
+  select: {
+    from: true;
+    to: true;
+    bookingAssets: { select: { sourceKitId: true; assetKitId: true } };
+  };
+}>;
+
+/** A kit row exactly as the report's hydration query projects it. */
+type KitMetaRow = Prisma.KitGetPayload<{
+  select: {
+    id: true;
+    organizationId: true;
+    name: true;
+    image: true;
+    imageExpiration: true;
+    category: { select: { name: true } };
+    location: { select: { name: true } };
+  };
+}>;
+
 /** Build a kit-metadata row as returned by the hydration `db.kit.findMany`. */
 function kitMeta(
   id: string,
   name: string,
-  overrides: Record<string, unknown> = {}
-) {
+  overrides: Partial<KitMetaRow> = {}
+): KitMetaRow {
   return {
     id,
     organizationId: "org-1",
@@ -58,25 +96,35 @@ function kitMeta(
 }
 
 /**
- * Build a booking row as returned by the lightweight scan
- * `db.booking.findMany`. Post-Phase-4a: Booking has no direct `assets`
- * relation; assets live behind the `BookingAsset` pivot, and kit
- * membership is on the `AssetKit` pivot (asset.kitId was removed). A
- * non-null `kitId` here translates to one `assetKits` entry on the
- * projected asset; a null `kitId` translates to an empty `assetKits[]`
- * (a standalone asset that's not in any kit, which the report should
- * ignore).
+ * A `bookingAssets` slice as projected by the lightweight scan: the slice's
+ * own provenance columns. A plain string is shorthand for a slice whose
+ * durable provenance and live membership agree (`sourceKitId` = the kit,
+ * `assetKitId` = a membership row id derived from it).
  */
-function booking(from: string, to: string, kitIds: Array<string | null>) {
+type SliceFixture =
+  | string
+  | { sourceKitId: string | null; assetKitId: string | null };
+
+/**
+ * Build a booking row as returned by the lightweight scan
+ * `db.booking.findMany`. The scan's `where` keeps only kit-driven slices
+ * (`sourceKitId` or `assetKitId` non-null), so fixtures list only those —
+ * a booking whose slices are all standalone comes back with an empty
+ * `bookingAssets[]`.
+ */
+function booking(
+  from: string,
+  to: string,
+  slices: SliceFixture[]
+): KitScanBooking {
   return {
     from: new Date(from),
     to: new Date(to),
-    bookingAssets: kitIds.map((kitId, i) => ({
-      asset: {
-        id: `asset-${i}-${kitId}`,
-        assetKits: kitId ? [{ kitId }] : [],
-      },
-    })),
+    bookingAssets: slices.map((slice) =>
+      typeof slice === "string"
+        ? { sourceKitId: slice, assetKitId: `ak-${slice}` }
+        : slice
+    ),
   };
 }
 
@@ -84,6 +132,7 @@ describe("topBookedKitsReport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(db.booking.findMany).mockResolvedValue([] as any);
+    vi.mocked(db.assetKit.findMany).mockResolvedValue([] as any);
     vi.mocked(db.kit.findMany).mockResolvedValue([] as any);
   });
 
@@ -91,8 +140,8 @@ describe("topBookedKitsReport", () => {
     vi.useRealTimers();
   });
 
-  it("counts a kit once per booking even when multiple of its assets are present", async () => {
-    // A single booking containing three assets that all belong to kit-1.
+  it("counts a kit once per booking even when multiple of its slices are present", async () => {
+    // A single booking containing three kit-driven slices for kit-1.
     vi.mocked(db.booking.findMany).mockResolvedValue([
       booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", [
         "kit-1",
@@ -114,6 +163,31 @@ describe("topBookedKitsReport", () => {
     expect(result.rows[0].bookingCount).toBe(1);
     // Booking spans 2 days.
     expect(result.rows[0].totalDaysBooked).toBe(2);
+  });
+
+  it("clamps a booking's days to the report window", async () => {
+    // The overlap predicate admits a booking extending far beyond the window,
+    // so its days must be measured on the overlap: March 15 to May 15 viewed
+    // in April contributes April's days, not 61. Total Days, the Avg Duration
+    // derived from it, and the CSV export all read this number.
+    //
+    // `timeBookedRate` cannot catch this — `Math.min(100, …)` pins an
+    // over-long booking to 100%, which is exactly why the column looked
+    // plausible while the days behind it did not.
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-03-15T00:00:00Z", "2026-05-15T00:00:00Z", ["kit-1"]),
+    ] as any);
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      kitMeta("kit-1", "Camera Kit"),
+    ] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    // Window = April (30 days). Unclamped this would read 61.
+    expect(result.rows[0].totalDaysBooked).toBe(30);
   });
 
   it("aggregates booking count and total days across multiple bookings", async () => {
@@ -185,9 +259,11 @@ describe("topBookedKitsReport", () => {
     expect(byId("avg_bookings_per_kit")).toBe(1.5);
   });
 
-  it("ignores assets with no kit and returns an empty report when no kits are booked", async () => {
+  it("returns an empty report when no kit-driven slices are booked", async () => {
+    // A booking whose slices are all standalone: the scan's kit-driven
+    // filter leaves it with no projected slices.
     vi.mocked(db.booking.findMany).mockResolvedValue([
-      booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", [null, null]),
+      booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", []),
     ] as any);
 
     const result = await topBookedKitsReport({
@@ -202,6 +278,99 @@ describe("topBookedKitsReport", () => {
     expect(db.kit.findMany).not.toHaveBeenCalled();
   });
 
+  it("scans only kit-driven slices, attributed from the slice itself", async () => {
+    await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    const args = vi.mocked(db.booking.findMany).mock.calls[0][0] as any;
+    // Attribution comes from the slice's own provenance columns, never from
+    // the asset's CURRENT kit memberships — a standalone booking of an asset
+    // that happens to sit in a kit must not credit that kit, and editing a
+    // kit's membership must not rewrite booking history.
+    expect(args.select.bookingAssets.where).toEqual({
+      OR: [{ sourceKitId: { not: null } }, { assetKitId: { not: null } }],
+    });
+    expect(args.select.bookingAssets.select).toEqual({
+      sourceKitId: true,
+      assetKitId: true,
+    });
+  });
+
+  it("attributes detached-kit residue slices via their durable sourceKitId", async () => {
+    // The asset left the kit: the membership row is gone (`assetKitId`
+    // null) but the durable provenance survives.
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", [
+        { sourceKitId: "kit-1", assetKitId: null },
+      ]),
+    ] as any);
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      kitMeta("kit-1", "Camera Kit"),
+    ] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].kitId).toBe("kit-1");
+    expect(result.rows[0].bookingCount).toBe(1);
+    // Provenance is on the slice — no membership lookup needed.
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves legacy slices (no sourceKitId) through their live membership row", async () => {
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", [
+        { sourceKitId: null, assetKitId: "ak-legacy" },
+      ]),
+    ] as any);
+    vi.mocked(db.assetKit.findMany).mockResolvedValue([
+      { id: "ak-legacy", kitId: "kit-1" },
+    ] as any);
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      kitMeta("kit-1", "Camera Kit"),
+    ] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].kitId).toBe("kit-1");
+    // The membership lookup is batched and org-scoped.
+    expect(db.assetKit.findMany).toHaveBeenCalledTimes(1);
+    const akArgs = vi.mocked(db.assetKit.findMany).mock.calls[0][0] as any;
+    expect(akArgs.where).toEqual({
+      id: { in: ["ak-legacy"] },
+      organizationId: "org-1",
+    });
+  });
+
+  it("skips slices whose kit can no longer be resolved", async () => {
+    // A legacy slice whose membership row vanished between the two queries
+    // resolves to no kit and is dropped rather than miscounted.
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", [
+        { sourceKitId: null, assetKitId: "ak-gone" },
+      ]),
+    ] as any);
+    vi.mocked(db.assetKit.findMany).mockResolvedValue([] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.topBookedKit).toBeNull();
+    expect(db.kit.findMany).not.toHaveBeenCalled();
+  });
+
   it("scopes the booking scan to the org and excludes DRAFT/CANCELLED bookings", async () => {
     await topBookedKitsReport({
       organizationId: "org-1",
@@ -212,6 +381,8 @@ describe("topBookedKitsReport", () => {
     const where = vi.mocked(db.booking.findMany).mock.calls[0][0]?.where as any;
     expect(where.organizationId).toBe("org-1");
     expect(where.status).toEqual({ notIn: ["DRAFT", "CANCELLED"] });
+    // A booking archived before any check-out was never used.
+    expect(where.archivedWithoutCheckin).toBe(false);
   });
 
   it("uses an interval-overlap timeframe predicate (counts bookings spanning the window)", async () => {
@@ -227,5 +398,97 @@ describe("topBookedKitsReport", () => {
     expect(where.from).toEqual({ lte: TIMEFRAME.to });
     expect(where.to).toEqual({ gte: TIMEFRAME.from });
     expect(where.OR).toBeUndefined();
+  });
+
+  it("matches the filter bar's Category and Location against the kit itself", async () => {
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+    ] as any);
+
+    await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+      kitFilter: {
+        categoryIds: ["cat-1", "cat-2"],
+        locationIds: ["loc-1", WITHOUT_LOCATION_ID],
+      },
+    });
+
+    const where = vi.mocked(db.kit.findMany).mock.calls[0][0]!.where!;
+    expect(where.organizationId).toBe("org-1");
+    expect(where.AND).toEqual([
+      { categoryId: { in: ["cat-1", "cat-2"] } },
+      { OR: [{ locationId: { in: ["loc-1"] } }, { locationId: null }] },
+    ]);
+  });
+
+  it("leaves the kit query unfiltered when no filter is chosen", async () => {
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+    ] as any);
+
+    await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+      kitFilter: { categoryIds: [], locationIds: [] },
+    });
+
+    const where = vi.mocked(db.kit.findMany).mock.calls[0][0]!.where!;
+    expect(where).not.toHaveProperty("AND");
+  });
+
+  it.each([
+    {
+      choice: "one location",
+      locationIds: ["loc-1"],
+      expected: { locationId: { in: ["loc-1"] } },
+    },
+    {
+      choice: "Without location alone",
+      locationIds: [WITHOUT_LOCATION_ID],
+      expected: { locationId: null },
+    },
+  ])(
+    "matches $choice without wrapping it in an OR",
+    async ({ locationIds, expected }) => {
+      vi.mocked(db.booking.findMany).mockResolvedValue([
+        booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+      ] as any);
+
+      await topBookedKitsReport({
+        organizationId: "org-1",
+        timeframe: TIMEFRAME,
+        kitFilter: { categoryIds: [], locationIds },
+      });
+
+      const where = vi.mocked(db.kit.findMany).mock.calls[0][0]!.where!;
+      expect(where.AND).toEqual([expected]);
+    }
+  );
+
+  it("totals only the kits the filter keeps", async () => {
+    // Two kits booked; the location filter keeps kit-2 only, so the kit query
+    // answers with kit-2 alone.
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+      booking("2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", ["kit-1"]),
+      booking("2026-04-12T00:00:00Z", "2026-04-13T00:00:00Z", ["kit-2"]),
+    ] as any);
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      kitMeta("kit-2", "Lighting Kit"),
+    ] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+      kitFilter: { categoryIds: [], locationIds: ["loc-2"] },
+    });
+
+    expect(result.rows.map((r) => r.kitId)).toEqual(["kit-2"]);
+    expect(result.totalRows).toBe(1);
+    const totalBookings = result.kpis.find(
+      (k) => k.id === "total_kit_bookings"
+    );
+    expect(totalBookings?.rawValue).toBe(1);
   });
 });

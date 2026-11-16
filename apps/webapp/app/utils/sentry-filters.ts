@@ -16,6 +16,7 @@
  * @see {@link file://./../../server/instrument.server.ts} — server counterpart
  */
 import type { ErrorEvent } from "@sentry/react-router";
+import { MODULE_LOAD_FAILURE_PATTERN } from "./build-version";
 
 /**
  * HTTP statuses that represent EXPECTED client-side terminal states rather
@@ -111,6 +112,52 @@ function isBareGatewayStatusError(event: ErrorEvent): boolean {
 }
 
 /**
+ * Whether an error message reports a JavaScript chunk that could not be
+ * loaded, as opposed to an interrupted data request.
+ *
+ * @param message - The exception message
+ * @returns `true` for module load failures in any supported browser
+ */
+function isModuleLoadFailure(message: string): boolean {
+  return MODULE_LOAD_FAILURE_PATTERN.test(message);
+}
+
+/**
+ * Whether an event is an unhandled promise rejection whose value is a React
+ * Router route error response (a loader's `throw data(error(reason), { status
+ * })`) carrying an EXPECTED status (403/404/429).
+ *
+ * Sentry cannot serialize a non-Error rejection, so it reports it as "Object
+ * captured as promise rejection with keys: ..." and puts the object itself on
+ * `extra.__serialized__`. React Router renders the same response through the
+ * route's error boundary, where `isExpectedErrorBoundaryStatus` already keeps
+ * it out of Sentry; this applies that policy to the rejection path too. Any
+ * other status, and any rejection that is not a route error response, is kept.
+ *
+ * @param event - The Sentry error event
+ * @returns `true` when the rejection is an expected route error response
+ */
+function isExpectedRouteErrorRejection(event: ErrorEvent): boolean {
+  const isUnhandledRejection = event.exception?.values?.some(
+    (v) => v.mechanism?.type?.includes("onunhandledrejection")
+  );
+  if (!isUnhandledRejection) {
+    return false;
+  }
+  const value = event.extra?.__serialized__;
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const { status, statusText, internal } = value as Record<string, unknown>;
+  const isRouteErrorResponse =
+    typeof status === "number" &&
+    typeof statusText === "string" &&
+    typeof internal === "boolean" &&
+    "data" in value;
+  return isRouteErrorResponse && isExpectedErrorBoundaryStatus(status);
+}
+
+/**
  * Client `beforeSend` hook body: decides whether a captured browser error is
  * worth sending to Sentry. Returns the (unchanged) event to send it, or
  * `null` to drop it.
@@ -180,15 +227,21 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // check `exception.type` for `AbortError` — Sentry serializes the
   // error name into `.type` separately from `.value` (the message),
   // and some AbortErrors arrive with empty/generic messages.
+  //
+  // A JavaScript chunk that fails to download is exempt: Chrome words it
+  // "Failed to fetch dynamically imported module", but it means part of the
+  // app is missing, not that a request was interrupted, and it is the only
+  // trace a broken deploy or a blocking proxy leaves.
   if (
-    message.includes("Load failed") ||
-    message.includes("Failed to fetch") ||
-    message.includes("NetworkError") ||
-    message.includes("fetch failed") ||
-    message.includes("AbortError") ||
-    message.includes("The operation was aborted") ||
-    message.includes("Fetch is aborted") ||
-    event.exception?.values?.some((v) => v.type === "AbortError")
+    !isModuleLoadFailure(message) &&
+    (message.includes("Load failed") ||
+      message.includes("Failed to fetch") ||
+      message.includes("NetworkError") ||
+      message.includes("fetch failed") ||
+      message.includes("AbortError") ||
+      message.includes("The operation was aborted") ||
+      message.includes("Fetch is aborted") ||
+      event.exception?.values?.some((v) => v.type === "AbortError"))
   ) {
     return null;
   }
@@ -198,6 +251,13 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // origin; a real `throw new Error("502")` from our code keeps its
   // first-party frames and is left capturable (see isBareGatewayStatusError).
   if (isBareGatewayStatusError(event)) {
+    return null;
+  }
+
+  // Hard-filter expected route error responses (403/404/429) that reach the
+  // global unhandled-rejection handler instead of the error boundary. Same
+  // policy as the boundary branch below (see isExpectedRouteErrorRejection).
+  if (isExpectedRouteErrorRejection(event)) {
     return null;
   }
 

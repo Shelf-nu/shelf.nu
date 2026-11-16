@@ -19,7 +19,7 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -47,6 +47,7 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { PickerAssetMeta } from "~/modules/location/picker-meta.server";
@@ -58,6 +59,7 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -80,7 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
@@ -123,6 +125,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Ignores the custodian-filter seed — scope it rather than fetch a
         // roster nobody renders.
         canSeeAllCustody: false,
+        // The search matches custodian names only on custody the caller may see.
+        custodySearchScope: custodySearchScopeFor({
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
       }),
     ]);
 
@@ -263,7 +270,7 @@ export default function AddAssetsToLocation() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
@@ -343,7 +350,7 @@ export default function AddAssetsToLocation() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(locationAssets);
+    seedFormSelection(locationAssets);
   }
 
   return (
@@ -710,6 +717,7 @@ const RowComponent = ({
                 <input
                   id={`location-qty-${item.id}`}
                   type="number"
+                  {...numberInputWheelGuard}
                   min={1}
                   max={Number.isFinite(max) ? max : undefined}
                   value={currentValue}
@@ -747,14 +755,19 @@ const RowComponent = ({
           const primary = getPrimaryLocation(item);
           if (!primary) return null;
           return (
-            <LocationBadge
-              location={{
-                id: primary.id,
-                name: primary.name,
-                parentId: primary.parentId ?? undefined,
-                childCount: primary._count?.children ?? 0,
-              }}
-            />
+            // Clicks on the badge or its hierarchy hover card (portalled, but React
+            // events still bubble through it) must not toggle the row's
+            // selection: the row's click handler selects the asset.
+            <span role="presentation" onClick={(e) => e.stopPropagation()}>
+              <LocationBadge
+                location={{
+                  id: primary.id,
+                  name: primary.name,
+                  parentId: primary.parentId ?? undefined,
+                  childCount: primary._count?.children ?? 0,
+                }}
+              />
+            </span>
           );
         })()}
       </Td>

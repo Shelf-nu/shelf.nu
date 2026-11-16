@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 
 // why: stub location note creation to isolate location service tests from note side effects
 const locationNoteMocks = vi.hoisted(() => ({
@@ -47,6 +48,17 @@ const dbMocks = vi.hoisted(() => ({
   assetKit: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  // why: updateLocationAssets reads each quantity-tracked asset's operator
+  // custody before and after its placement writes, to re-home custody taken
+  // from a placement it shrinks or removes; no custody is out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
+  // why: the asset-move lines of the location activity log are written in
+  // one batch; the rows handed over are the output under test.
+  locationNote: {
+    createMany: vi.fn(),
+  },
   // why: user model stubs for resolving actor info in activity events
   user: {
     findUniqueOrThrow: vi.fn(),
@@ -63,6 +75,7 @@ const dbMocks = vi.hoisted(() => ({
       assetKit: dbMocks.assetKit,
       kit: dbMocks.kit,
       user: dbMocks.user,
+      custody: dbMocks.custody,
     };
     return cb(txClient);
   }),
@@ -72,15 +85,40 @@ const geolocateMock = vi.hoisted(() => vi.fn());
 const createNoteMock = vi.hoisted(() => vi.fn());
 const getUserByIDMock = vi.hoisted(() => vi.fn());
 
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: dbMocks,
+}));
+
+// why: updateLocationAssets row-locks every quantity-tracked asset it touches
+// with a raw `SELECT ... FOR UPDATE`, which a mocked tx cannot run.
+vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetsForQuantityUpdate: vi
+    .fn()
+    .mockImplementation((_tx: unknown, ids: string[]) =>
+      Promise.resolve(
+        ids.map((id) => ({ id, type: "QUANTITY_TRACKED", quantity: 80 }))
+      )
+    ),
 }));
 
 vi.mock("~/utils/geolocate.server", () => ({
   geolocate: geolocateMock,
 }));
 
-vi.mock("~/modules/location-note/service.server", () => ({
+// why: the kit and comment note writers are stubbed; the asset-move lines run
+// for real so their rows are asserted from `db.locationNote.createMany`.
+vi.mock("~/modules/location-note/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createSystemLocationNote: locationNoteMocks.createSystemLocationNote,
   createLocationNote: locationNoteMocks.createLocationNote,
 }));
@@ -99,8 +137,13 @@ vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
+// why: select-all expansion is covered by the asset list-where tests; here it
+// only has to yield a where so the org-scope assertion below is reached.
+vi.mock("~/modules/asset/list-where.server", () => ({
+  getAssetListWhereForSelectAll: vi.fn(() => Promise.resolve({})),
+}));
+
 vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: vi.fn(() => ({})),
   getLocationUpdateNoteContent: vi.fn(() => "asset note"),
   getKitLocationUpdateNoteContent: vi.fn(() => "kit asset note"),
 }));
@@ -157,6 +200,15 @@ const {
   updateLocationKits,
   createLocationChangeNote,
 } = await import("./service.server");
+const { readStockStates, recordStockChanges } = await import(
+  "~/modules/consumption-log/stock-ledger.server"
+);
+
+/** Markup the location activity log lines are built from in these tests. */
+const JANE = '{% link to="/settings/team/users/user-1" text="Jane Doe" /%}';
+const CAMERA = '{% link to="/assets/asset-1" text="Camera" /%}';
+const LOC_1 = '{% link to="/locations/loc-1" text="HQ" /%}';
+const WAREHOUSE = '{% link to="/locations/loc-3" text="Warehouse" /%}';
 
 describe("location service activity logging", () => {
   beforeEach(() => {
@@ -164,6 +216,7 @@ describe("location service activity logging", () => {
 
     dbMocks.location.findUniqueOrThrow.mockResolvedValue({
       id: "loc-1",
+      name: "HQ",
       organizationId: "org-1",
       address: "Old St",
       latitude: null,
@@ -191,8 +244,10 @@ describe("location service activity logging", () => {
     dbMocks.kit.findMany.mockResolvedValue([]);
     // why: assertion helpers count submitted IDs; default to "all authorized"
     // so happy-path tests don't have to wire it up explicitly
+    // The archived guard (issue #382) counts ARCHIVED rows among the ids —
+    // none here — so a query naming `archivedAt` answers 0, not the echo.
     dbMocks.asset.count.mockImplementation(({ where }: any) =>
-      Promise.resolve(where?.id?.in?.length ?? 0)
+      Promise.resolve(where?.archivedAt ? 0 : where?.id?.in?.length ?? 0)
     );
     dbMocks.kit.count.mockImplementation(({ where }: any) =>
       Promise.resolve(where?.id?.in?.length ?? 0)
@@ -230,6 +285,32 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("New Name"),
         })
       );
+    });
+  });
+
+  describe("updateLocation with URL-shaped values", () => {
+    it("keeps a URL-shaped name and address inside name tags", async () => {
+      dbMocks.location.findUniqueOrThrow.mockResolvedValueOnce({
+        id: "loc-1",
+        name: "Old Name",
+        description: null,
+        address: "Old St",
+        latitude: null,
+        longitude: null,
+        organizationId: "org-1",
+      });
+
+      await updateLocation({
+        id: "loc-1",
+        name: URL_SHAPED_VALUE,
+        address: URL_SHAPED_VALUE,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      const [{ content }] =
+        locationNoteMocks.createSystemLocationNote.mock.calls.at(-1)!;
+      expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
     });
   });
 
@@ -281,12 +362,133 @@ describe("location service activity logging", () => {
         removedAssetIds: [],
       });
 
-      expect(locationNoteMocks.createSystemLocationNote).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(
+        dbMocks.locationNote.createMany.mock.calls.flatMap(
+          ([args]: Array<{ data: unknown[] }>) => args.data
+        )
+      ).toEqual([
+        {
           locationId: "loc-1",
-          content: expect.stringContaining("Camera"),
-        })
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} added ${CAMERA} to ${LOC_1}. Moved from ${WAREHOUSE}.`,
+        },
+        {
+          locationId: "loc-3",
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} removed ${CAMERA} from ${WAREHOUSE}. Moved to ${LOC_1}.`,
+        },
+      ]);
+    });
+
+    it("logs a quantity-tracked add as an arrival only, since its other placements stay", async () => {
+      dbMocks.asset.findMany.mockResolvedValueOnce([
+        {
+          id: "asset-1",
+          title: "Camera",
+          type: "QUANTITY_TRACKED",
+          quantity: 80,
+          unitOfMeasure: "pcs",
+          assetLocations: [
+            {
+              locationId: "loc-3",
+              quantity: 30,
+              assetKitId: null,
+              location: { id: "loc-3", name: "Warehouse" },
+            },
+          ],
+          user: { id: "user-1", firstName: "Ada", lastName: "Lovelace" },
+        },
+      ]);
+
+      await updateLocationAssets({
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        locationId: "loc-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+        removedAssetIds: [],
+        assetQuantities: { "asset-1": 20 },
+      });
+
+      expect(
+        dbMocks.locationNote.createMany.mock.calls.flatMap(
+          ([args]: Array<{ data: unknown[] }>) => args.data
+        )
+      ).toEqual([
+        {
+          locationId: "loc-1",
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} added 20 pcs of ${CAMERA} to ${LOC_1}.`,
+        },
+      ]);
+    });
+
+    it("records a removal on the location's log when assets are taken off it", async () => {
+      dbMocks.asset.findMany.mockResolvedValueOnce([
+        {
+          id: "asset-1",
+          title: "Camera",
+          type: "INDIVIDUAL",
+          quantity: 1,
+          assetLocations: [
+            {
+              locationId: "loc-1",
+              quantity: 1,
+              assetKitId: null,
+              location: { id: "loc-1", name: "HQ" },
+            },
+          ],
+          user: { id: "user-1", firstName: "Ada", lastName: "Lovelace" },
+        },
+      ]);
+
+      await updateLocationAssets({
+        assetIds: [],
+        organizationId: "org-1",
+        locationId: "loc-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+        removedAssetIds: ["asset-1"],
+      });
+
+      expect(
+        dbMocks.locationNote.createMany.mock.calls.flatMap(
+          ([args]: Array<{ data: unknown[] }>) => args.data
+        )
+      ).toEqual([
+        {
+          locationId: "loc-1",
+          type: "UPDATE",
+          userId: "user-1",
+          content: `${JANE} removed ${CAMERA} from ${LOC_1}.`,
+        },
+      ]);
+    });
+  });
+
+  describe("updateLocationAssets archived guard (issue #382)", () => {
+    it("refuses to move an archived asset into the location", async () => {
+      // why: the org check counts both ids (in the org); the archived check
+      // then finds one of them archived.
+      dbMocks.asset.count.mockImplementation(({ where }: any) =>
+        Promise.resolve(where?.archivedAt ? 1 : where?.id?.in?.length ?? 0)
       );
+
+      await expect(
+        updateLocationAssets({
+          assetIds: ["asset-active", "asset-archived"],
+          organizationId: "org-1",
+          locationId: "loc-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+          removedAssetIds: [],
+        })
+      ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
     });
   });
 
@@ -421,6 +623,14 @@ describe("location service activity logging", () => {
           quantity: 80,
         }),
       ]);
+      const stockBefore = {
+        total: 80,
+        placed: new Map<string, number>(),
+        ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+      };
+      vi.mocked(readStockStates).mockResolvedValueOnce(
+        new Map([["pens", stockBefore]])
+      );
 
       await updateLocationAssets({
         assetIds: ["pens"],
@@ -437,6 +647,19 @@ describe("location service activity logging", () => {
           data: [expect.objectContaining({ assetId: "pens", quantity: 30 })],
         })
       );
+      // The 30 units placed here are a MOVE out of the unplaced units: the
+      // ledger diffs the stock read before the placement write against the
+      // stock after it, with no event.
+      expect(
+        vi.mocked(readStockStates).mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        dbMocks.assetLocation.createMany.mock.invocationCallOrder[0]
+      );
+      expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+        organizationId: "org-1",
+        userId: "user-1",
+        changes: [{ assetId: "pens", before: stockBefore }],
+      });
     });
 
     it("forces INDIVIDUAL qty to 1 even when assetQuantities tries to set it higher", async () => {
@@ -653,6 +876,50 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("Shoot Kit"),
         })
       );
+    });
+  });
+
+  describe("updateLocationKits with archived kit members", () => {
+    it("moves and notes only active members, leaving archived ones where they are", async () => {
+      dbMocks.location.findUniqueOrThrow.mockResolvedValueOnce({
+        id: "loc-1",
+        organizationId: "org-1",
+        kits: [],
+      });
+      dbMocks.location.update.mockResolvedValueOnce({ id: "loc-1" });
+      dbMocks.kit.findMany.mockResolvedValue([
+        { id: "kit-1", name: "Shoot Kit", assetKits: [] },
+      ]);
+
+      await updateLocationKits({
+        locationId: "loc-1",
+        kitIds: ["kit-1"],
+        removedKitIds: [],
+        organizationId: "org-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+      });
+
+      // The members read (for notes) and the pivot writes both skip archived.
+      expect(dbMocks.kit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            assetKits: expect.objectContaining({
+              where: { asset: { archivedAt: null } },
+            }),
+          }),
+        })
+      );
+      expect(dbMocks.assetKit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { kitId: { in: ["kit-1"] }, asset: { archivedAt: null } },
+        })
+      );
+      expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
+        where: {
+          assetKit: { kitId: { in: ["kit-1"] }, asset: { archivedAt: null } },
+        },
+      });
     });
   });
 

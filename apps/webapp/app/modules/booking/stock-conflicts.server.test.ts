@@ -20,7 +20,10 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     asset: { findMany: vitest.fn().mockResolvedValue([]) },
     bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
-    consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+    consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
     custody: { groupBy: vitest.fn().mockResolvedValue([]) },
     assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
   },
@@ -67,7 +70,10 @@ function createMockClient() {
   return {
     asset: { findMany: vitest.fn().mockResolvedValue([]) },
     bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
-    consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+    consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
     custody: { groupBy: vitest.fn().mockResolvedValue([]) },
     assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
   };

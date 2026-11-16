@@ -1,7 +1,12 @@
+import Markdoc from "@markdoc/markdoc";
 import { Decimal } from "@prisma/client/runtime/library";
 import { describe, expect, it } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
+  buildAssetModelChangeNote,
+  buildAvailableToBookChangeNote,
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
   buildNameChangeNote,
@@ -78,33 +83,30 @@ describe("buildNameChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} updated the asset name from **Old Asset** to **New Asset**.`
+      `${userLink} updated the asset name from {% name text="Old Asset" /%} to {% name text="New Asset" /%}.`
     );
   });
 
-  it("escapes markdown special characters in names", () => {
+  it("keeps markdown special characters as typed inside the name tags", () => {
     const result = buildNameChangeNote({
       userLink,
       previous: "Asset*with*stars",
       next: "Asset_with_underscores",
     });
 
-    expect(result).toContain("\\*");
-    expect(result).toContain("\\_");
     expect(result).toBe(
-      `${userLink} updated the asset name from **Asset\\*with\\*stars** to **Asset\\_with\\_underscores**.`
+      `${userLink} updated the asset name from {% name text="Asset*with*stars" /%} to {% name text="Asset_with_underscores" /%}.`
     );
   });
 
-  it("escapes backticks and tildes", () => {
+  it("keeps a URL-shaped name inside a name tag", () => {
     const result = buildNameChangeNote({
       userLink,
-      previous: "Asset`with`backticks",
-      next: "Asset~with~tildes",
-    });
+      previous: "Old Asset",
+      next: URL_SHAPED_VALUE,
+    })!;
 
-    expect(result).toContain("\\`");
-    expect(result).toContain("\\~");
+    expectValueOnlyInTag(result, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("handles names with whitespace trimming", () => {
@@ -115,7 +117,7 @@ describe("buildNameChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} updated the asset name from **Old** to **New**.`
+      `${userLink} updated the asset name from {% name text="Old" /%} to {% name text="New" /%}.`
     );
   });
 });
@@ -217,6 +219,19 @@ describe("buildDescriptionChangeNote", () => {
     expect(result).toBe(
       `${userLink} updated the asset description {% description oldText="Old description" newText="Updated description" /%}.`
     );
+  });
+
+  it("keeps both descriptions whole at the 5,000 character limit", () => {
+    const previous = `${"a".repeat(4999)}"`;
+    const next = "b".repeat(5000);
+
+    const result = buildDescriptionChangeNote({ userLink, previous, next });
+    const attributes = [...Markdoc.parse(result ?? "").walk()].find(
+      (node) => node.type === "tag" && node.tag === "description"
+    )?.attributes;
+
+    expect(attributes?.oldText).toBe(`${"a".repeat(4999)}&quot;`);
+    expect(attributes?.newText).toBe(next);
   });
 
   it("treats whitespace-only as no description", () => {
@@ -365,5 +380,139 @@ describe("buildValuationChangeNote", () => {
     });
 
     expect(result).toContain("changed the asset value from");
+  });
+});
+
+describe("buildAssetModelChangeNote", () => {
+  const userLink = '{% link to="/u/1" text="Dana" /%}';
+  const streamDeck = { id: "am-1", name: "Stream Deck XL" };
+  const amaran = { id: "am-2", name: "Amaran 300C" };
+
+  it("names both sides when the model changes", () => {
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: streamDeck,
+      next: amaran,
+    });
+
+    expect(note).toContain("changed the asset model");
+    expect(note).toContain("Stream Deck XL");
+    expect(note).toContain("Amaran 300C");
+  });
+
+  it("reads as setting when there was no model before", () => {
+    expect(
+      buildAssetModelChangeNote({ userLink, previous: null, next: streamDeck })
+    ).toContain("set the asset model to");
+  });
+
+  it("reads as removing when the model is cleared", () => {
+    expect(
+      buildAssetModelChangeNote({ userLink, previous: streamDeck, next: null })
+    ).toContain("removed the asset model");
+  });
+
+  it("writes nothing when the model did not change", () => {
+    expect(
+      buildAssetModelChangeNote({
+        userLink,
+        previous: streamDeck,
+        next: { ...streamDeck },
+      })
+    ).toBeNull();
+    expect(
+      buildAssetModelChangeNote({ userLink, previous: null, next: null })
+    ).toBeNull();
+  });
+
+  it("names the deletion when the model itself is gone", () => {
+    // Deleting a model unlinks every asset it held. The asset's history has to
+    // say so, or the model simply vanishes from the asset with no explanation.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: streamDeck,
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    expect(note).toContain("deleted the asset model");
+    expect(note).toContain("Stream Deck XL");
+    // No link: the model's page is gone, so linking to it would 404.
+    expect(note).not.toContain("/settings/asset-models/");
+  });
+
+  it("cannot be used to inject a Markdoc tag through a deleted model's name", () => {
+    // The deleted-model branch renders the name in a `name` tag rather than a
+    // link, so it is checked on its own.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: { id: "am-4", name: '{% booking_status status="APPROVED" /%}' },
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    const tags = [...Markdoc.parse(note).walk()].filter(
+      (node) => node.type === "tag" && node.tag === "booking_status"
+    );
+    expect(tags).toHaveLength(0);
+  });
+
+  it("keeps a URL-shaped deleted model's name inside a name tag", () => {
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: { id: "am-5", name: URL_SHAPED_VALUE },
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    expectValueOnlyInTag(note, URL_SHAPED_VALUE, ["name"]);
+  });
+
+  it("cannot be used to inject a Markdoc tag through the model name", () => {
+    // Model names are user-authored and spliced into note content, which the
+    // feed renders as Markdoc. See sanitize-note-content-markdoc.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: null,
+      next: { id: "am-3", name: '{% booking_status status="APPROVED" /%}' },
+    })!;
+
+    const tags = [...Markdoc.parse(note).walk()].filter(
+      (node) => node.type === "tag" && node.tag === "booking_status"
+    );
+    expect(tags).toHaveLength(0);
+  });
+});
+
+describe("buildAvailableToBookChangeNote", () => {
+  it("names the switch being turned on", () => {
+    expect(
+      buildAvailableToBookChangeNote({ userLink, availableToBook: true })
+    ).toBe(`${userLink} marked the asset as available for bookings.`);
+  });
+
+  it("names the switch being turned off", () => {
+    expect(
+      buildAvailableToBookChangeNote({ userLink, availableToBook: false })
+    ).toBe(`${userLink} marked the asset as unavailable for bookings.`);
+  });
+
+  it("renders only the actor's link, whatever the actor's display name holds", () => {
+    // The display name is the one user-chosen value in this note. It travels
+    // inside the link's quoted attribute, so a tag typed into it stays text.
+    const note = buildAvailableToBookChangeNote({
+      userLink: wrapUserLinkForNote({
+        id: "user-1",
+        firstName: null,
+        lastName: null,
+        displayName: '{% booking_status status="APPROVED" /%}',
+      }),
+      availableToBook: true,
+    });
+
+    const tags = [...Markdoc.parse(note).walk()]
+      .filter((node) => node.type === "tag")
+      .map((node) => node.tag);
+    expect(tags).toEqual(["link"]);
   });
 });

@@ -5,12 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { action } from "~/routes/_layout+/kits.$kitId.assets.assign-custody";
 import { requirePermission } from "~/utils/roles.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { accessFor } from "@helpers/role-access";
 
 const dbMocks = vi.hoisted(() => {
   return {
     teamMember: {},
     kit: {
       update: vi.fn(),
+      // The holder guard's read of kits that are checked out.
+      findMany: vi.fn(),
     },
     asset: {
       update: vi.fn(),
@@ -20,6 +23,8 @@ const dbMocks = vi.hoisted(() => {
     },
     custody: {
       createMany: vi.fn(),
+      // The holder guard's read of members already in someone's custody.
+      findMany: vi.fn(),
     },
     note: {
       createMany: vi.fn(),
@@ -53,13 +58,21 @@ vi.mock("~/database/db.server", () => ({
     // via tx.custody.createMany + tx.asset.updateMany.
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
-        kit: { update: dbMocks.kit.update },
+        // why: the holder guard locks the kit row with raw SQL, then reads
+        // memberships and other bookings' slices still out. None by default.
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        assetKit: { findMany: vi.fn().mockResolvedValue([]) },
+        bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
+        kit: { update: dbMocks.kit.update, findMany: dbMocks.kit.findMany },
         asset: {
           update: dbMocks.asset.update,
           findMany: dbMocks.asset.findMany,
           updateMany: dbMocks.asset.updateMany,
         },
-        custody: { createMany: dbMocks.custody.createMany },
+        custody: {
+          createMany: dbMocks.custody.createMany,
+          findMany: dbMocks.custody.findMany,
+        },
       })
     ),
   },
@@ -149,6 +162,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetTeamMember.mockReset();
   mockKitUpdate.mockReset();
+  // No kit is out on a booking unless a test says so.
+  dbMocks.kit.findMany.mockReset().mockResolvedValue([]);
+  // No member is in someone's custody unless a test says so.
+  dbMocks.custody.findMany.mockReset().mockResolvedValue([]);
   mockAssetUpdate.mockReset();
   mockNoteCreateMany.mockReset();
   requirePermissionMock.mockReset();
@@ -168,6 +185,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     // Custodian not found due to org filter
@@ -215,10 +233,80 @@ describe("kits/$kitId/assets/assign-custody", () => {
     expect(mockKitUpdate).not.toHaveBeenCalled();
   });
 
+  it("refuses to put a kit that is checked out on a booking in custody", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+      name: "Valid Team Member",
+      user: { id: "user-456", firstName: "Valid", lastName: "Member" },
+    });
+    // why: the kit is a database row reading CHECKED_OUT; the guard asks for
+    // the requested kits that are out.
+    dbMocks.kit.findMany.mockResolvedValue([
+      { id: "kit-123", name: "Test Kit" },
+    ]);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    const request = new Request(
+      "https://example.com/kits/kit-123/assets/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = await action(createActionArgs({ request }));
+
+    expect((response as Response).status).not.toBe(302);
+    expect(mockKitUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a kit whose asset is already in someone's custody, with a 400", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+      name: "Valid Team Member",
+      user: { id: "user-456", firstName: "Valid", lastName: "Member" },
+    });
+    // why: a member gained custody after the page loaded, so only the guard
+    // inside the transaction sees it.
+    dbMocks.custody.findMany.mockResolvedValue([
+      { asset: { id: "asset-r5", title: "Canon R5" } },
+    ]);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    const request = new Request(
+      "https://example.com/kits/kit-123/assets/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = (await action(createActionArgs({ request }))) as Response;
+
+    // A refusal naming the asset, not the database trigger's 500.
+    expect(response.status).toBe(400);
+    expect(mockKitUpdate).not.toHaveBeenCalled();
+    expect(dbMocks.custody.createMany).not.toHaveBeenCalled();
+  });
+
   it("allows assigning custody to team members from the same organization", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     // Valid team member from same org
@@ -286,6 +374,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
     } as any);
 
     // Valid team member from same org, but different user
@@ -328,6 +417,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
     } as any);
 
     // Valid team member from same org, same user
@@ -377,6 +467,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     mockGetTeamMember.mockResolvedValue({
@@ -472,6 +563,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     mockGetTeamMember.mockResolvedValue({

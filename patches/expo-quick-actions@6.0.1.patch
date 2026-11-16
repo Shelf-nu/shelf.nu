@@ -1,0 +1,144 @@
+diff --git a/build/index.d.ts b/build/index.d.ts
+index 8de91306ba09b781d221a2c2fc7301db6e58d6bc..618629ca00df3d473f5c23287e59008dfa4852a6 100644
+--- a/build/index.d.ts
++++ b/build/index.d.ts	
+@@ -15,6 +15,12 @@ export declare const initial: Action | undefined;
+ export declare const maxCount: number | undefined;
+ export declare const setItems: <TAction extends Action = Action>(data?: TAction[]) => Promise<void>;
+ export declare const isSupported: () => Promise<boolean>;
++/**
++ * Takes the action that launched the app if it arrived before any listener
++ * (iOS scene life cycle). Resolves null when there is none, when the listener
++ * has already received it, or on platforms without it.
++ */
++export declare function takePendingActionAsync<TAction extends Action = Action>(): Promise<TAction | null>;
+ export declare function addListener<TAction extends Action = Action>(listener: (action: TAction) => void): {
+     remove: () => void;
+ };
+diff --git a/build/index.js b/build/index.js
+index 7a14dcc06b1f5449f1f05ba0de83d3b9b65208b7..25fc1ba77bf7cf1ebb4a56b6d74bad61617c2d6e 100644
+--- a/build/index.js
++++ b/build/index.js	
+@@ -4,6 +4,14 @@ export const initial = ExpoQuickActions?.initial;
+ export const maxCount = ExpoQuickActions?.maxCount;
+ export const setItems = ExpoQuickActions?.setItems ?? (() => Promise.resolve());
+ export const isSupported = ExpoQuickActions?.isSupported ?? (() => Promise.resolve(false));
++/**
++ * Takes the action that launched the app if it arrived before any listener
++ * (iOS scene life cycle). Resolves null when there is none, when the listener
++ * has already received it, or on platforms without it.
++ */
++export function takePendingActionAsync() {
++    return ExpoQuickActions?.takePendingActionAsync?.() ?? Promise.resolve(null);
++}
+ export function addListener(listener) {
+     if (!ExpoQuickActions?.addListener) {
+         return { remove: () => { } };
+diff --git a/ios/AppDelegate.swift b/ios/AppDelegate.swift
+index 37558e006b606eae26e2e5be6e44afee93590547..84810c9b7618e73bd96569c2f095985869cfd2c3 100644
+--- a/ios/AppDelegate.swift
++++ b/ios/AppDelegate.swift	
+@@ -17,7 +17,15 @@ public class ExpoQuickActionsAppDelegate: ExpoAppDelegateSubscriber {
+   }
+ 
+   public func application(_ application: UIApplication, performActionFor shortcutItem: UIApplicationShortcutItem, completionHandler: @escaping (Bool) -> Void) {
+-    NotificationCenter.default.post(name: Notification.Name(onQuickAction), object: shortcutItem)
++    // Under the UIKit scene life cycle the action that cold-starts the app is
++    // forwarded here, and JS may not be listening yet. Until it is, keep the
++    // action: takePendingActionAsync returns it, or the listener gets it when
++    // JS starts observing. UIKit calls this on the main queue.
++    if isObservingQuickActions {
++      NotificationCenter.default.post(name: Notification.Name(onQuickAction), object: shortcutItem)
++    } else {
++      pendingAction = shortcutItem
++    }
+     completionHandler(true)
+   }
+ }
+diff --git a/ios/ExpoQuickActionsModule.swift b/ios/ExpoQuickActionsModule.swift
+index 252da492ce374eef886d574a2c38af242de6d6c3..904fd3753337c2aa4a2777390f0d0866cf331b16 100644
+--- a/ios/ExpoQuickActionsModule.swift
++++ b/ios/ExpoQuickActionsModule.swift	
+@@ -73,6 +73,24 @@ func toActionObject(item: UIApplicationShortcutItem?) -> ActionObject? {
+ 
+ var initialAction: UIApplicationShortcutItem?
+ 
++/// Whether JS has a quick-action listener. Main queue only.
++var isObservingQuickActions = false
++
++/// An action forwarded while JS had no listener, until `takePendingActionAsync`
++/// takes it. Main queue only.
++var pendingAction: UIApplicationShortcutItem?
++
++/// Runs `block` on the main queue. Every change to the quick-action state above
++/// goes through the main queue, so it is ordered against `performActionFor`
++/// and `takePendingActionAsync`.
++func onMainQueue(_ block: @escaping () -> Void) {
++    if Thread.isMainThread {
++        block()
++    } else {
++        DispatchQueue.main.async(execute: block)
++    }
++}
++
+ public class ExpoQuickActionsModule: Module {
+     
+     public func definition() -> ModuleDefinition {
+@@ -99,24 +117,46 @@ public class ExpoQuickActionsModule: Module {
+         AsyncFunction("isSupported") { () -> Bool in
+             return true
+         }
++
++        // Returns the action kept before JS listened, once. Starting to observe
++        // sends that same action to the new listener if this has not taken it
++        // first, so it reaches JS exactly once whichever runs first.
++        AsyncFunction("takePendingActionAsync") { () -> ActionObject? in
++            let item = pendingAction
++            pendingAction = nil
++            return toActionObject(item: item)
++        }.runOnQueue(.main)
+         
+         Events(onQuickAction)
+         
+         OnStartObserving {
+-            NotificationCenter.default.addObserver(
+-                self,
+-                selector: #selector(self.quickActionListener),
+-                name: Notification.Name(onQuickAction),
+-                object: nil
+-            )
++            onMainQueue {
++                NotificationCenter.default.addObserver(
++                    self,
++                    selector: #selector(self.quickActionListener),
++                    name: Notification.Name(onQuickAction),
++                    object: nil
++                )
++                // Set after the observer exists, so a posted action always has one.
++                isObservingQuickActions = true
++                // An action kept before JS listened goes to the new listener,
++                // unless takePendingActionAsync has taken it.
++                if let item = pendingAction, let action = toActionObject(item: item) {
++                    pendingAction = nil
++                    self.sendEvent(onQuickAction, action.toDictionary())
++                }
++            }
+         }
+         
+         OnStopObserving {
+-            NotificationCenter.default.removeObserver(
+-                self,
+-                name: Notification.Name(onQuickAction),
+-                object: nil
+-            )
++            onMainQueue {
++                isObservingQuickActions = false
++                NotificationCenter.default.removeObserver(
++                    self,
++                    name: Notification.Name(onQuickAction),
++                    object: nil
++                )
++            }
+         }
+     }
+     

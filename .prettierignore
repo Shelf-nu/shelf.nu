@@ -10,3 +10,6 @@ apps/webapp/app/styles/tailwind.css
 
 # Lock file
 pnpm-lock.yaml
+
+# Generated test fixtures compared byte-for-byte (toMatchFileSnapshot)
+**/__snapshots__/**

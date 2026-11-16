@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { TagUseFor } from "@prisma/client";
+import { CustomFieldFormat, TagUseFor } from "@prisma/client";
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -14,6 +15,7 @@ import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import {
   getAllEntriesForCreateAndEdit,
   getAsset,
@@ -21,15 +23,24 @@ import {
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import {
+  fillAssetFormDataFromModel,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 
-import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import {
+  getActiveCustomFields,
+  getAssetCustomFieldValues,
+} from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -39,16 +50,16 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
-  getRefererPath,
+  getRefererPathExcludingSelf,
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { userCanReinstateAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { slugify } from "~/utils/slugify";
 
 export type AssetEditLoaderData = typeof loader;
 
@@ -101,6 +112,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // An archived asset is read-only (issue #382), and Save would be refused.
+    // Say so before the form is filled in, and send the user back to the asset.
+    if (asset.archivedAt) {
+      sendNotification({
+        title: "Asset is archived",
+        message: archivedAssetBlockedReason({
+          canReinstate: await userCanReinstateAssets({
+            userId,
+            organizationId,
+          }),
+        }),
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+      return redirect(`/assets/${id}/overview`);
+    }
+
     const [
       { categories, totalCategories, tags, locations, totalLocations },
       { assetModels, totalAssetModels },
@@ -114,7 +142,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         tagUseFor: TagUseFor.ASSET,
       }),
-      getAssetModels({ organizationId, page: 1, perPage: 100 }),
+      getAssetModels({
+        organizationId,
+        page: 1,
+        perPage: 100,
+        withCustomFieldDefaults: true,
+        includeId: asset.assetModelId,
+      }),
     ]);
 
     const searchParams = getCurrentSearchParams(request);
@@ -142,7 +176,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalAssetModels,
       currency: currentOrganization?.currency,
       customFields,
-      referer: getRefererPath(request),
+      referer: getRefererPathExcludingSelf(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -178,24 +212,73 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
-    const searchParams = getCurrentSearchParams(request);
+    /**
+     * Moving the asset onto a model fills its empty fields from the model's
+     * defaults. Filled before validation, so the category decides which custom
+     * fields load and a required field the model fills passes. A field the
+     * saved asset already holds is never filled, even if the form left it
+     * blank.
+     */
+    const joiningModelId = formData.get("assetModelId");
+    if (typeof joiningModelId === "string" && joiningModelId) {
+      const saved = await db.asset.findFirst({
+        where: { id, organizationId, archivedAt: null },
+        select: {
+          assetModelId: true,
+          categoryId: true,
+          valuation: true,
+          customFields: { select: { customFieldId: true } },
+        },
+      });
+      const model =
+        saved && saved.assetModelId !== joiningModelId
+          ? await getAssetModelDefaults({
+              assetModelId: joiningModelId,
+              organizationId,
+            })
+          : null;
+      if (saved && model) {
+        fillAssetFormDataFromModel({
+          formData,
+          model,
+          stored: {
+            categoryId: saved.categoryId,
+            valuation: saved.valuation,
+            customFieldIdsWithValue: new Set(
+              saved.customFields.map((value) => value.customFieldId)
+            ),
+          },
+        });
+      }
+    }
 
+    // Fields load for the category the asset is saved with: the submitted
+    // one, after the model fill above. The URL's `?category=` only drives the
+    // form and can lag behind a category the model filled.
     const customFields = await getActiveCustomFields({
       organizationId,
-      category:
-        searchParams.get("category") ?? String(formData.get("category")),
+      category: formData.get("category") as string | null,
     });
+
+    // A Link field may still hold a value saved before it became a Link
+    // field; submitted unchanged, it is kept as stored instead of refused.
+    const linkFieldIds = customFields
+      .filter((field) => field.format === CustomFieldFormat.LINK)
+      .map((field) => field.id);
+    const storedValues = storedCustomFieldTexts(
+      linkFieldIds.length > 0
+        ? await getAssetCustomFieldValues({
+            assetId: id,
+            organizationId,
+            customFieldIds: linkFieldIds,
+          })
+        : []
+    );
 
     const FormSchema = mergedSchema({
       baseSchema: NewAssetFormSchema,
-      customFields: customFields.map((cf) => ({
-        id: cf.id,
-        name: slugify(cf.name),
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      })),
+      customFields: customFields.map(toCustomFieldZodSchema),
+      storedValues,
     });
 
     const parsedData = parseData(formData, FormSchema, {
@@ -205,6 +288,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const customFieldsValues = extractCustomFieldValuesFromPayload({
       payload: parsedData,
       customFieldDef: customFields,
+      storedValues,
     });
 
     const uploadedNewImage = await updateAssetMainImage({
@@ -252,10 +336,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** This checks if tags are passed and build the  */
     const tags = buildTagsSet(parsedData.tags);
 
-    /** Extract barcode data from form */
+    /**
+     * Barcodes are only read when the workspace holds the add-on. Without it
+     * the form has no barcode section, so `undefined` leaves the asset's
+     * existing barcodes untouched: `updateAsset` only reconciles a list it is
+     * given, and an empty list would read as "remove every barcode".
+     */
     const barcodes = canUseBarcodes
       ? extractBarcodesFromFormData(formData)
-      : [];
+      : undefined;
 
     await updateAsset({
       id,
@@ -330,6 +419,7 @@ export default function AssetEditPage() {
       />
       <div className=" items-top flex justify-between">
         <AssetForm
+          key={asset.id}
           id={asset.id}
           sequentialId={asset.sequentialId}
           mainImage={asset.mainImage}

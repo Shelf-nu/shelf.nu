@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assetChangeHistory,
-  auditCompletionStats,
   bookingStatusTransitionCounts,
   custodyDurationsByAsset,
 } from "./reports.server";
@@ -99,37 +98,6 @@ describe("activity event reports", () => {
         { toStatus: "ONGOING", count: 4 },
         { toStatus: "COMPLETE", count: 2 },
       ]);
-    });
-  });
-
-  describe("auditCompletionStats", () => {
-    it("returns rows with meta payload and filters out any with missing auditSessionId", async () => {
-      findManyMock.mockResolvedValueOnce([
-        {
-          auditSessionId: "audit-1",
-          actorUserId: "user-1",
-          occurredAt: new Date("2026-01-15"),
-          meta: { expectedCount: 10, foundCount: 8 },
-        },
-        {
-          auditSessionId: null, // should be filtered
-          actorUserId: "user-2",
-          occurredAt: new Date("2026-01-16"),
-          meta: {},
-        },
-      ] as any);
-
-      const result = await auditCompletionStats({
-        organizationId: org,
-        from,
-        to,
-      });
-
-      expect(result).toHaveLength(1);
-      expect(result[0]).toMatchObject({
-        auditSessionId: "audit-1",
-        meta: { expectedCount: 10, foundCount: 8 },
-      });
     });
   });
 

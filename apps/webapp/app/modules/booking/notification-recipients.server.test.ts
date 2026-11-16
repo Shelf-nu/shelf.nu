@@ -3,9 +3,10 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@prisma/client";
+import { db } from "~/database/db.server";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 
@@ -37,11 +38,21 @@ vitest.mock("~/modules/booking-settings/service.server", () => ({
 
 // why: external database call
 vitest.mock("~/modules/organization/service.server", () => ({
-  getOrganizationAdminsForNotification: vitest.fn(),
+  getOrganizationNotificationAudience: vitest.fn(),
 }));
 
+// why: external database call; the membership check reads UserOrganization
+vitest.mock("~/database/db.server", () => ({
+  db: { userOrganization: { findMany: vitest.fn() } },
+}));
+
+/** Users whose access to the workspace was revoked. */
+const revokedUserIds = new Set<string>();
+
+const mockedFindMemberships = vitest.mocked(db.userOrganization.findMany);
+
 const mockedGetSettings = vitest.mocked(getBookingNotificationSettingsForOrg);
-const mockedGetAdmins = vitest.mocked(getOrganizationAdminsForNotification);
+const mockedGetAdmins = vitest.mocked(getOrganizationNotificationAudience);
 
 /** Helper to build a mock booking that satisfies BookingForEmail shape */
 function buildMockBooking(
@@ -128,6 +139,39 @@ describe("getBookingNotificationRecipients", () => {
     vitest.clearAllMocks();
     mockedGetSettings.mockResolvedValue(defaultSettings());
     mockedGetAdmins.mockResolvedValue([]);
+    revokedUserIds.clear();
+    // Everyone asked about is a member unless the test revoked them
+    mockedFindMemberships.mockImplementation(((args: {
+      where: { userId: { in: string[] } };
+    }) =>
+      Promise.resolve(
+        args.where.userId.in
+          .filter((userId) => !revokedUserIds.has(userId))
+          .map((userId) => ({ userId }))
+      )) as never);
+  });
+
+  it("leaves out a custodian and a creator whose workspace access was revoked", async () => {
+    mockedGetSettings.mockResolvedValue({
+      ...defaultSettings(),
+      notifyBookingCreator: true,
+    });
+    revokedUserIds.add("custodian-user-1");
+    revokedUserIds.add("creator-user-1");
+
+    const result = await getBookingNotificationRecipients({
+      booking: buildMockBooking(),
+      eventType: "CHECKOUT_REMINDER",
+      organizationId: "org-1",
+      isScheduledJob: true,
+    });
+
+    expect(result).toEqual([]);
+    expect(mockedFindMemberships).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: "org-1" }),
+      })
+    );
   });
 
   it("always includes the custodian", async () => {
@@ -210,9 +254,13 @@ describe("getBookingNotificationRecipients", () => {
       booking,
       eventType: "RESERVATION",
       organizationId: "org-1",
-      isSelfServiceOrBase: true,
+      alertsOrgOnReservation: true,
     });
 
+    expect(mockedGetAdmins).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      audience: "orgBookingBroadcasts",
+    });
     const adminRecipients = recipients.filter((r) => r.reason === "admin");
     expect(adminRecipients).toHaveLength(2);
     expect(adminRecipients.map((r) => r.email)).toEqual(
@@ -248,7 +296,7 @@ describe("getBookingNotificationRecipients", () => {
     expect(adminRecipients).toHaveLength(0);
   });
 
-  it("excludes admins for RESERVATION when custodian is admin (not self-service)", async () => {
+  it("excludes admins for RESERVATION when the maker's role does not trigger the broadcast", async () => {
     mockedGetSettings.mockResolvedValue({
       ...defaultSettings(),
       notifyAdminsOnNewBooking: true,
@@ -259,7 +307,7 @@ describe("getBookingNotificationRecipients", () => {
       booking,
       eventType: "RESERVATION",
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      alertsOrgOnReservation: false,
     });
 
     expect(mockedGetAdmins).not.toHaveBeenCalled();
@@ -465,5 +513,119 @@ describe("getBookingNotificationRecipients", () => {
       (r) => r.email === "" || !r.email
     );
     expect(emptyEmailRecipients).toHaveLength(0);
+  });
+  /**
+   * Regression: SSO group-claim revocation.
+   *
+   * When an SSO login drops a workspace's group claim,
+   * `reconcileSsoGroupMembership` revokes access via `revokeMembershipInTx`
+   * (the revocation behind `revokeAccessToOrganization`), which disconnects the `TeamMember` from the
+   * `User` and leaves the row behind so custody and booking history keeps a
+   * name. `TeamMember.user === null` is therefore the shape a revoked member
+   * has here, and it is the ONLY signal this resolver gets — none of the
+   * team-member branches re-check membership.
+   *
+   * Revocation must therefore disconnect every linked team member: a
+   * `TeamMember.user` that still resolves keeps the revoked person on this
+   * workspace's booking emails. An IdP group rollover can revoke a whole
+   * cohort at once.
+   *
+   * @see {@link file://../user/sso-group-claim-revocation.test.ts}
+   */
+  describe("revoked SSO member", () => {
+    /** The post-revocation shape: row survives, user link gone. */
+    const revokedTeamMember = {
+      id: "tm-revoked",
+      name: "Jane Doe",
+      user: null,
+    };
+
+    /** The same person before revocation, for the contrast. */
+    const activeTeamMember = {
+      id: "tm-revoked",
+      name: "Jane Doe",
+      user: {
+        id: "revoked-user",
+        email: "jane@university.edu",
+        firstName: "Jane",
+        lastName: "Doe",
+        displayName: null,
+        profilePicture: null,
+        ...nullFormatPrefs,
+      },
+    };
+
+    it("is dropped from the org's always-notify list", async () => {
+      mockedGetSettings.mockResolvedValue({
+        ...defaultSettings(),
+        alwaysNotifyTeamMembers: [revokedTeamMember] as unknown as ReturnType<
+          typeof defaultSettings
+        >["alwaysNotifyTeamMembers"],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking: buildMockBooking(),
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).not.toContain(
+        "jane@university.edu"
+      );
+    });
+
+    it("is dropped from a booking's own recipient list", async () => {
+      const booking = buildMockBooking({
+        notificationRecipients: [
+          revokedTeamMember,
+        ] as unknown as BookingForEmail["notificationRecipients"],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking,
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).not.toContain(
+        "jane@university.edu"
+      );
+    });
+
+    it("still notifies them via the always-notify list while the group claim holds", async () => {
+      // Guards the always-notify assertion against passing for the wrong
+      // reason: the same fixture WITH the user link must still be notified.
+      mockedGetSettings.mockResolvedValue({
+        ...defaultSettings(),
+        alwaysNotifyTeamMembers: [activeTeamMember],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking: buildMockBooking(),
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).toContain("jane@university.edu");
+    });
+
+    it("still notifies them via the booking's own recipient list while the group claim holds", async () => {
+      // The paired control for the booking-recipient drop above. Without it
+      // that assertion also passes if `notificationRecipients` were ignored
+      // entirely, so this proves the null `user` link is what excludes them.
+      const booking = buildMockBooking({
+        notificationRecipients: [
+          activeTeamMember,
+        ] as unknown as BookingForEmail["notificationRecipients"],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking,
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).toContain("jane@university.edu");
+    });
   });
 });

@@ -9,6 +9,10 @@ import {
 import { createAuditImageEvidenceNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
+import {
+  assertAuditAcceptsComments,
+  assertAuditAcceptsCommentsOnLockedRow,
+} from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -28,9 +32,9 @@ import {
  *
  * Body: multipart/form-data with `image` (required) and optional `content`
  * (note text). `content` is read from the SAME bounded parse that streams
- * the file (`uploadAuditImage` -> `parseFileFormData`, `maxFileSize`
- * enforced; `@remix-run/form-data-parser` passes text fields through) —
- * never via an unbounded `request.clone().formData()`.
+ * the file (`uploadAuditImage` -> `parseFileFormData` with
+ * `AUDIT_IMAGE_TEXT_FIELDS`, `maxFileSize` enforced), never via an unbounded
+ * `request.clone().formData()`.
  *
  * @param args - Remix action args; `request` carries bearer auth, the
  *   query params, and the multipart body
@@ -92,17 +96,33 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
     });
 
-    // Single bounded parse: the file stream AND the optional `content`
-    // text field come from `parseFileFormData` (maxFileSize enforced;
-    // @remix-run/form-data-parser passes text fields through). No separate
-    // `request.clone().formData()` — that buffered the whole upload
-    // unbounded before any size check (closed DoS vector).
+    // Evidence reaches the feed as a note, so a finished audit refuses the
+    // upload before the file is stored — refusing only at the note write below
+    // would leave the stored image behind with nothing pointing at it.
+    const auditForUpload = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { status: true },
+    });
+
+    if (auditForUpload) {
+      assertAuditAcceptsComments(auditForUpload.status, {
+        auditSessionId,
+        organizationId,
+      });
+    }
+
+    // Single bounded parse: the file stream AND the optional `content` text
+    // field come from `parseFileFormData`, which returns `content` because it
+    // is listed in AUDIT_IMAGE_TEXT_FIELDS. Never a separate
+    // `request.clone().formData()`: that buffers the whole upload before any
+    // size check.
     const { image, formData } = await uploadAuditImage({
       request,
       auditSessionId,
       organizationId,
       uploadedById: user.id,
       auditAssetId,
+      uploadedVia: "phone",
       returnParsedFormData: true,
     });
 
@@ -115,6 +135,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // Shared, sanitized, transactional evidence-note writer (same helper
     // the webapp scan route uses — Markdoc injection closed there too).
     await db.$transaction(async (tx) => {
+      // Evidence reaches the feed as a note, so a finished audit refuses it —
+      // the same rule the web upload applies, checked on the locked row.
+      await assertAuditAcceptsCommentsOnLockedRow(tx, {
+        auditSessionId,
+        organizationId,
+      });
+
       await createAuditImageEvidenceNote({
         tx,
         auditSessionId,

@@ -1,6 +1,6 @@
 import type { Booking, TeamMember, User } from "@prisma/client";
 import { Link } from "react-router";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import {
   PermissionAction,
@@ -9,7 +9,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import type { UserNameFields } from "~/utils/user";
-import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { resolveBookingHolderName, resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { DateS } from "../shared/date";
@@ -52,7 +52,7 @@ export function CustodyCard({
     | null;
   className?: string;
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canViewTeamMemberUsers = userHasPermission({
     roles,
     entity: PermissionEntity.teamMemberProfile,
@@ -62,7 +62,7 @@ export function CustodyCard({
   /** Extract the primary custody record from the array */
   const primaryCustody = getPrimaryCustody(custody);
 
-  /** We return null if user is selfService or if neither custody nor booking exists */
+  /** Nothing to show: the viewer may not see this holder, or there is none */
   if (!hasPermission || (!primaryCustody && !booking)) {
     return <div className="my-3" />;
   }
@@ -115,14 +115,8 @@ export function CustodyCard({
 
   /** If booking is present, we render the card showing custody via booking */
   if (booking) {
-    let teamMemberName = "";
-    if (booking.custodianUser) {
-      teamMemberName = resolveUserDisplayName(booking.custodianUser);
-    } else if (booking.custodianTeamMember) {
-      teamMemberName = resolveTeamMemberName({
-        name: booking.custodianTeamMember.name,
-      });
-    }
+    // Named as every booking surface names its holder, mobile included.
+    const teamMemberName = resolveBookingHolderName(booking) ?? "";
 
     return (
       <Card className={tw("my-3", className)}>

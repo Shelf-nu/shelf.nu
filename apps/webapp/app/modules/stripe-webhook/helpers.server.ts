@@ -9,7 +9,7 @@ import {
   STRIPE_WEBHOOK_ENDPOINT_SECRET,
 } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
-import { stripe } from "~/utils/stripe.server";
+import { stripe, subscriptionStatusGrantsPlan } from "~/utils/stripe.server";
 import type { UserNameFields } from "~/utils/user";
 
 /** The user shape returned by the webhook's initial DB query */
@@ -18,6 +18,12 @@ export type WebhookUser = UserNameFields & {
   email: string;
   tierId: TierId;
   warnForNoPaymentMethod: boolean;
+  /**
+   * Support manages this user's plan by hand, so billing events never take a
+   * plan away. A plan the user goes on to pay for that is higher than theirs
+   * still applies.
+   */
+  skipSubscriptionCheck: boolean;
 };
 
 export const subscriptionTiersPriority: Record<TierId, number> = {
@@ -62,6 +68,76 @@ export function isAddonSubscription({
 export function isHigherTier(newTier: TierId, currentTier: TierId): boolean {
   return (
     subscriptionTiersPriority[newTier] > subscriptionTiersPriority[currentTier]
+  );
+}
+
+/**
+ * Whether a value is one of the app's tier ids.
+ *
+ * An own-key check, so a key inherited from `Object.prototype` such as
+ * `"constructor"` is never taken for a tier.
+ *
+ * @param value - Typically a product's `shelf_tier` metadata
+ * @returns `true` when the value names a tier
+ */
+export function isTierId(value: unknown): value is TierId {
+  return (
+    typeof value === "string" && Object.hasOwn(subscriptionTiersPriority, value)
+  );
+}
+
+/** A line item's product: an id until expanded, or a deleted product. */
+type ProductReference =
+  | string
+  | Stripe.Product
+  | Stripe.DeletedProduct
+  | null
+  | undefined;
+
+/**
+ * The highest plan among some Stripe products.
+ *
+ * A plan product carries a `shelf_tier`. Add-on products are never plans, even
+ * if one carries a `shelf_tier`, and a product that is not expanded or has been
+ * deleted says nothing. Every webhook decision about which plan a subscription
+ * grants reads products through this, so they all classify a product the same
+ * way.
+ *
+ * @param products - Expanded products, for instance a subscription's line items
+ * @returns The highest tier among them, or `undefined` when none is a plan
+ */
+export function highestPlanTier(
+  products: Iterable<ProductReference>
+): TierId | undefined {
+  let highest: TierId | undefined;
+  for (const product of products) {
+    if (!product || typeof product === "string" || product.deleted) continue;
+    if (product.metadata?.product_type === "addon") continue;
+    const shelfTier = product.metadata?.shelf_tier;
+    if (!isTierId(shelfTier)) continue;
+    if (!highest || isHigherTier(shelfTier, highest)) highest = shelfTier;
+  }
+  return highest;
+}
+
+/**
+ * The plan a customer's subscriptions grant right now.
+ *
+ * Only subscriptions whose status still grants a plan count
+ * (`subscriptionStatusGrantsPlan`), and each one grants the highest plan among
+ * its line items.
+ *
+ * @param subscriptions - The customer's subscriptions, products expanded
+ *   (`getCustomerSubscriptionsWithProducts`)
+ * @returns The highest tier any of them grants, Free when none grants one
+ */
+export function liveTierOf(subscriptions: Stripe.Subscription[]): TierId {
+  return (
+    highestPlanTier(
+      subscriptions
+        .filter((sub) => subscriptionStatusGrantsPlan(sub.status))
+        .flatMap((sub) => sub.items.data.map((item) => item.price?.product))
+    ) ?? "free"
   );
 }
 
@@ -219,6 +295,7 @@ export async function constructVerifiedWebhookEvent(request: Request): Promise<{
         displayName: true,
         tierId: true,
         warnForNoPaymentMethod: true,
+        skipSubscriptionCheck: true,
       },
     })
     .catch((cause) => {

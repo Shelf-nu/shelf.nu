@@ -1,4 +1,5 @@
 import { loader } from "~/routes/api+/mobile+/barcode.$value";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -38,6 +39,8 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     ...actual,
     requireMobileAuth: vitest.fn(),
     requireOrganizationAccess: vitest.fn(),
+    // why: reads the caller's membership; the tests set custody visibility
+    getMobileUserContext: vitest.fn(),
   };
 });
 
@@ -73,6 +76,12 @@ vitest.mock("~/utils/subscription.server", () => ({
   canUseBarcodes: vitest.fn(),
 }));
 
+// why: the scan record writes to the database; a spy lets the audit cases
+// assert which workspace gets a scan row without a real write.
+vitest.mock("~/modules/scan/service.server", () => ({
+  recordScanNonFatal: vitest.fn(),
+}));
+
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn(),
   ShelfError: class ShelfError extends Error {
@@ -85,13 +94,16 @@ vitest.mock("~/utils/error", () => ({
 }));
 
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { makeShelfError } from "~/utils/error";
+import { mobileSiblingMembership } from "@mocks/mobile-workspace-access";
 
 const mockUser = {
   id: "user-1",
@@ -129,6 +141,46 @@ const mockBarcode = {
   asset: mockAsset,
   kit: null,
 };
+
+/** One operator-assigned custody row, as `MOBILE_ASSET_SELECT` returns it. */
+function custodyRow(
+  custodianId: string,
+  name: string,
+  userId: string | null,
+  quantity: number
+) {
+  return {
+    quantity,
+    kitCustodyId: null,
+    custodian: { id: custodianId, name, userId },
+  };
+}
+
+/**
+ * A quantity-tracked asset held by two people, oldest custody first: a
+ * colleague and the caller (`user-1`).
+ */
+const sharedAsset = {
+  ...mockAsset,
+  type: "QUANTITY_TRACKED",
+  quantity: 20,
+  custody: [
+    custodyRow("tm-colleague", "Colleague One", "user-2", 3),
+    custodyRow("tm-caller", "Test User", "user-1", 2),
+  ],
+};
+
+/** Sets whether the caller may see every holder's custody in the workspace. */
+function asViewer({ canSeeAllCustody }: { canSeeAllCustody: boolean }) {
+  const context = mobileUserContext();
+  vitest.mocked(getMobileUserContext).mockResolvedValue({
+    ...context,
+    access: {
+      ...context.access,
+      custody: { ...context.access.custody, seeAll: canSeeAllCustody },
+    },
+  } as Awaited<ReturnType<typeof getMobileUserContext>>);
+}
 
 function createBarcodeRequest(value: string, orgId = "org-1") {
   return new Request(
@@ -168,6 +220,7 @@ describe("GET /api/mobile/barcode/:value", () => {
     // cross-workspace lookup out of every current-workspace case.
     (db.userOrganization.findMany as any).mockResolvedValue([]);
     (db.barcode.findMany as any).mockResolvedValue([]);
+    asViewer({ canSeeAllCustody: true });
   });
 
   it("should resolve a barcode to its linked asset", async () => {
@@ -242,6 +295,66 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect((result as unknown as Response).status).toBe(404);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("not found");
+    // The companion's barcode fallback reads exactly this shape as a plain
+    // "not found": the error envelope with no `reason`.
+    expect(body.error).not.toHaveProperty("reason");
+  });
+
+  it("records an audit scan in the current workspace", async () => {
+    const request = createBarcodeRequest("BC001234");
+    request.headers.set("X-Scan-Context", "audit");
+    await loader(createLoaderArgs({ request, params: { value: "BC001234" } }));
+
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "AUDIT",
+        organizationId: "org-1",
+        writeNote: false,
+      })
+    );
+  });
+
+  it("records no audit scan for a barcode owned by a sibling workspace", async () => {
+    // The audit runs in org-1; the code resolves in sibling org-2, which the
+    // app rejects as "Different Workspace".
+    (getBarcodeByValue as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      mobileSiblingMembership("org-2", { barcodesEnabled: true }),
+    ]);
+    (db.barcode.findMany as any).mockResolvedValue([
+      { organizationId: "org-2" },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    request.headers.set("X-Scan-Context", "audit");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    const body = await (result as unknown as Response).json();
+    expect(body.barcode.organizationId).toBe("org-2");
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("records a normal scan of a sibling workspace's barcode there", async () => {
+    (getBarcodeByValue as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      mobileSiblingMembership("org-2", { barcodesEnabled: true }),
+    ]);
+    (db.barcode.findMany as any).mockResolvedValue([
+      { organizationId: "org-2" },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    await loader(createLoaderArgs({ request, params: { value: "BC001234" } }));
+
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "COMPANION", organizationId: "org-2" })
+    );
   });
 
   it("resolves a sibling workspace's barcode and names the owning workspace", async () => {
@@ -250,7 +363,7 @@ describe("GET /api/mobile/barcode/:value", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2", { barcodesEnabled: true }),
     ]);
     // Phase 1 answers "which of my workspaces hold this value" in one query.
     (db.barcode.findMany as any).mockResolvedValue([
@@ -277,8 +390,8 @@ describe("GET /api/mobile/barcode/:value", () => {
   it("refuses an ambiguous barcode that exists in several sibling workspaces", async () => {
     (getBarcodeByValue as any).mockResolvedValueOnce(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
-      { organizationId: "org-3", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2", { barcodesEnabled: true }),
+      mobileSiblingMembership("org-3", { barcodesEnabled: true }),
     ]);
     (db.barcode.findMany as any).mockResolvedValue([
       { organizationId: "org-2" },
@@ -305,7 +418,7 @@ describe("GET /api/mobile/barcode/:value", () => {
     // barcode that does not exist — no name, no workspace, no 4xx that differs.
     (getBarcodeByValue as any).mockResolvedValue(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      mobileSiblingMembership("org-2", { barcodesEnabled: true }),
     ]);
     // Phase 1 is scoped to the membership list, so a stranger workspace holding
     // this value can never match.
@@ -340,7 +453,7 @@ describe("GET /api/mobile/barcode/:value", () => {
   it("never resolves through a sibling workspace without the barcode capability", async () => {
     (getBarcodeByValue as any).mockResolvedValue(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
-      { organizationId: "org-2", organization: { barcodesEnabled: false } },
+      mobileSiblingMembership("org-2", { barcodesEnabled: false }),
     ]);
 
     const request = createBarcodeRequest("BC001234");
@@ -392,6 +505,12 @@ describe("GET /api/mobile/barcode/:value", () => {
     ["ABC%41", "ABC%41"], // a literal escape that must not be decoded
     ["50%", "50%"], // a lone % that decodeURIComponent would throw on
     ["PLAIN123", "PLAIN123"],
+    // An outside QR label linked as a barcode: the whole URL, case kept. The
+    // companion sends these to this route (see planScan in lib/qr-utils.ts).
+    [
+      "http://other-vendor.example/qr/a1B2c3D4",
+      "http:%2F%2Fother-vendor.example%2Fqr%2Fa1B2c3D4",
+    ],
   ])("looks up %s from the request URL", async (scanned, param) => {
     const result = await loader(
       createLoaderArgs({
@@ -483,5 +602,96 @@ describe("GET /api/mobile/barcode/:value", () => {
     const body = await (result as unknown as Response).json();
     expect(body.barcode.kitId).toBe("kit-1");
     expect(body.barcode.asset).toBeNull();
+  });
+  describe("custody visibility", () => {
+    beforeEach(() => {
+      (getBarcodeByValue as any).mockResolvedValue({
+        ...mockBarcode,
+        asset: sharedAsset,
+      });
+    });
+
+    it("sends a caller without custody visibility only their own holding and a count of the others", async () => {
+      asViewer({ canSeeAllCustody: false });
+
+      const result = await loader(
+        createLoaderArgs({
+          request: createBarcodeRequest("BC001234"),
+          params: { value: "BC001234" },
+        })
+      );
+
+      const body = await (result as unknown as Response).json();
+      expect(body.barcode.asset.custodyList).toEqual([
+        {
+          custodian: { id: "tm-caller", name: "Test User", userId: "user-1" },
+          quantity: 2,
+          releasableQuantity: 2,
+        },
+      ]);
+      expect(body.barcode.asset.custodyListOthersCount).toBe(1);
+      expect(body.barcode.asset.custody).toBeNull();
+      const payload = JSON.stringify(body);
+      expect(payload).not.toContain("Colleague One");
+      expect(payload).not.toContain("user-2");
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-1");
+    });
+
+    it("sends every holder to a caller who may see all custody", async () => {
+      asViewer({ canSeeAllCustody: true });
+
+      const result = await loader(
+        createLoaderArgs({
+          request: createBarcodeRequest("BC001234"),
+          params: { value: "BC001234" },
+        })
+      );
+
+      const body = await (result as unknown as Response).json();
+      expect(
+        body.barcode.asset.custodyList.map(
+          (entry: { custodian: { id: string } }) => entry.custodian.id
+        )
+      ).toEqual(["tm-colleague", "tm-caller"]);
+      expect(body.barcode.asset.custodyListOthersCount).toBe(0);
+      expect(body.barcode.asset.custody).toEqual({
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague One",
+          userId: "user-2",
+        },
+      });
+    });
+
+    it("reads custody visibility in the sibling workspace that owns the barcode", async () => {
+      // The caller's role and that workspace's settings apply there, not the
+      // ones of the workspace they scanned from.
+      (getBarcodeByValue as any)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          ...mockBarcode,
+          organizationId: "org-2",
+          asset: sharedAsset,
+        });
+      (db.userOrganization.findMany as any).mockResolvedValue([
+        mobileSiblingMembership("org-2", { barcodesEnabled: true }),
+      ]);
+      (db.barcode.findMany as any).mockResolvedValue([
+        { organizationId: "org-2" },
+      ]);
+      asViewer({ canSeeAllCustody: false });
+
+      const result = await loader(
+        createLoaderArgs({
+          request: createBarcodeRequest("BC001234"),
+          params: { value: "BC001234" },
+        })
+      );
+
+      const body = await (result as unknown as Response).json();
+      expect(body.barcode.organizationId).toBe("org-2");
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-2");
+      expect(body.barcode.asset.custodyListOthersCount).toBe(1);
+    });
   });
 });

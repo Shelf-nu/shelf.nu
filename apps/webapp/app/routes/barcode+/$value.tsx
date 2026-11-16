@@ -1,10 +1,12 @@
 import type { Organization } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { redirect, data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -109,6 +111,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    // The web scanner's "View asset" for a barcode lands here, so this is a
+    // real scan. Non-fatal: a failed record must not block opening the item.
+    await recordScanNonFatal({
+      codeType: ScanCodeType.BARCODE,
+      code: value,
+      source: ScanSource.WEB_SCANNER,
+      userAgent: request.headers.get("user-agent"),
+      userId,
+      barcodeId: barcode.id,
+      assetId: barcode.assetId,
+      kitId: barcode.kitId,
+      organizationId: barcode.organizationId,
+      writeNote: true,
+    });
 
     /** If its linked to an asset, redirect to the asset */
     if (barcode.assetId) {

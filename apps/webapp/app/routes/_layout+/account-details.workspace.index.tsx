@@ -55,7 +55,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 include: {
                   _count: {
                     select: {
-                      assets: true,
+                      // Active inventory: archived assets are out of service.
+                      assets: { where: { archivedAt: null } },
                       members: true,
                       locations: true,
                     },

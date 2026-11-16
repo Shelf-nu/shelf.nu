@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveCancelTo } from "./cancel-destination";
+import { isSelfReferer, resolveCancelTo } from "./cancel-destination";
 
 describe("resolveCancelTo", () => {
   it("returns the referer when it points somewhere else", () => {
@@ -87,5 +87,18 @@ describe("resolveCancelTo", () => {
         fallback: "/kits",
       })
     ).toBe("/kits");
+  });
+});
+
+describe("isSelfReferer", () => {
+  it("matches the same pathname whatever the query string", () => {
+    expect(isSelfReferer("/assets/new?category=cat-1", "/assets/new")).toBe(
+      true
+    );
+    expect(isSelfReferer("/assets/new", "/assets/new")).toBe(true);
+  });
+
+  it("does not match a different page, even a filtered list", () => {
+    expect(isSelfReferer("/assets?search=x", "/assets/new")).toBe(false);
   });
 });

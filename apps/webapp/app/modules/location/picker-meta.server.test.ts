@@ -39,6 +39,8 @@ type FetchedRow = {
   assetLocations: Array<{
     locationId: string;
     quantity: number;
+    /** Omitted by most fixtures, which read as manual placements. */
+    assetKitId?: string | null;
     location: { id: string; name: string };
   }>;
 };
@@ -291,5 +293,92 @@ describe("getLocationPickerMeta", () => {
       assetQuantity: 0,
       maxAllowedForThisLocation: 0,
     });
+  });
+  it("reports one row per other location, not one per placement", async () => {
+    // A quantity-tracked asset legitimately holds a manual row AND kit-driven
+    // rows at the same place: the two axes are bounded separately, so 12 placed
+    // by hand plus 8 arriving with a kit is a valid 20 at Warehouse. The picker
+    // edits only the manual row at THIS location, so for other locations the
+    // answer it needs is how many units sit there, named once.
+    findManyMock.mockResolvedValue([
+      row({
+        id: "pens",
+        quantity: 80,
+        assetLocations: [
+          {
+            locationId: "loc-1",
+            quantity: 30,
+            assetKitId: null,
+            location: { id: "loc-1", name: "Office" },
+          },
+          {
+            locationId: "loc-2",
+            quantity: 12,
+            assetKitId: null,
+            location: { id: "loc-2", name: "Warehouse" },
+          },
+          {
+            locationId: "loc-2",
+            quantity: 8,
+            assetKitId: "ak-1",
+            location: { id: "loc-2", name: "Warehouse" },
+          },
+        ],
+      }),
+    ]);
+
+    const result = await getLocationPickerMeta({
+      locationId: "loc-1",
+      organizationId: "org-1",
+      assetIds: ["pens"],
+    });
+
+    expect(result.get("pens")?.inOtherLocations).toEqual([
+      { locationId: "loc-2", locationName: "Warehouse", quantity: 20 },
+    ]);
+    // The bound was always summed across every row, so it does not move.
+    expect(result.get("pens")).toMatchObject({
+      maxAllowedForThisLocation: 60,
+    });
+  });
+
+  it("keeps the order other locations first appear in", async () => {
+    findManyMock.mockResolvedValue([
+      row({
+        id: "pens",
+        quantity: 100,
+        assetLocations: [
+          {
+            locationId: "loc-3",
+            quantity: 5,
+            assetKitId: "ak-1",
+            location: { id: "loc-3", name: "Field" },
+          },
+          {
+            locationId: "loc-2",
+            quantity: 7,
+            assetKitId: null,
+            location: { id: "loc-2", name: "Warehouse" },
+          },
+          {
+            locationId: "loc-3",
+            quantity: 6,
+            assetKitId: null,
+            location: { id: "loc-3", name: "Field" },
+          },
+        ],
+      }),
+    ]);
+
+    const result = await getLocationPickerMeta({
+      locationId: "loc-1",
+      organizationId: "org-1",
+      assetIds: ["pens"],
+    });
+
+    expect(result.get("pens")?.inOtherLocations).toEqual([
+      { locationId: "loc-3", locationName: "Field", quantity: 11 },
+      { locationId: "loc-2", locationName: "Warehouse", quantity: 7 },
+    ]);
   });
 });

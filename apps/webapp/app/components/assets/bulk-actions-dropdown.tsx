@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { lazy, useState } from "react";
+import type { ReactNode } from "react";
+import { KIT_MEMBERS_CUSTODY_BLOCKED_REASON } from "@shelf/labels";
 import { useAtomValue } from "jotai";
+import { DownloadIcon } from "lucide-react";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getRowKitStatus, isIndividualKitMember } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
@@ -15,21 +23,29 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { Dialog, DialogPortal } from "../layout/dialog";
+import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
+import { Spinner } from "../shared/spinner";
+import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
+import BulkArchiveDialog from "./bulk-archive-dialog";
 import BulkAssetModelRemoveDialog from "./bulk-asset-model-remove-dialog";
 import BulkAssetModelUpdateDialog from "./bulk-asset-model-update-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
+import BulkCustomFieldUpdateDialog from "./bulk-custom-field-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
+import BulkSetReorderPointDialog from "./bulk-set-reorder-point-dialog";
 import BulkStartAuditDialog from "./bulk-start-audit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
+import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
 import {
@@ -40,9 +56,42 @@ import {
 } from "../shared/dropdown";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
-import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
-import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
-import Icon from "../icons/icon";
+
+/* Lazy: the dialog renders every selected asset's QR label for the download,
+ * and the label lives in the code preview module with its barcode scanner.
+ * It loads the first time someone opens it. */
+const BulkDownloadQrDialog = lazy(() => import("./bulk-download-qr-dialog"));
+
+/**
+ * The download dialog's frame, shown while its chunk loads or if it failed
+ * to, so picking the action always opens something.
+ */
+function BulkDownloadQrPlaceholder({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <DialogPortal>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        ariaLabel="Download QR codes"
+        title={
+          <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
+            <DownloadIcon />
+          </div>
+        }
+      >
+        <div className="flex flex-col items-center px-6 py-8">{children}</div>
+      </Dialog>
+    </DialogPortal>
+  );
+}
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -70,10 +119,14 @@ function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
   const [isBulkDownloadQrOpen, setIsBulkDownloadQrOpen] = useState(false);
+  /* Mounted from the first opening on: the dialog stays mounted between
+   * openings so it can drop a download that resolves after it closed. */
+  const [hasOpenedBulkDownloadQr, setHasOpenedBulkDownloadQr] = useState(false);
+  const closeBulkDownloadQr = () => setIsBulkDownloadQrOpen(false);
 
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -84,7 +137,68 @@ function ConditionalDropdown() {
 
   const allSelected = isSelectingAllItems(selectedAssets);
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const [searchParams] = useSearchParams();
+  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
+  const canArchiveAssets = useCanArchiveAssets();
+  const canViewArchivedAssets = useCanViewArchivedAssets();
+  /**
+   * The view the list actually shows. The server honours `?archived=` only
+   * for members who may see archived assets; anyone else sees the Active view
+   * whatever the URL says, so their menu must not act as if it were the
+   * Archived one.
+   */
+  const viewParam = canViewArchivedAssets ? searchParams.get("archived") : null;
+  // In the Archived view the selection is archived assets, which are frozen:
+  // every bulk action is disabled except Reinstate (the calm "archived =
+  // read-only except reinstate" rule, issue #382).
+  const archivedView = viewParam === "archived";
+  /**
+   * Whether this selection is frozen. The view alone is not enough: the All
+   * view mixes active and archived rows, so an archived asset picked there
+   * would otherwise light up custody, tags, location, category, kit and
+   * availability. Check the rows themselves, and when "select all" is active
+   * (which puts only the ALL_SELECTED_KEY marker in the selection) fall back
+   * to the view, since any view other than Active can contain archived rows.
+   */
+  const selectionIsArchived = archivedView
+    ? true
+    : allSelected
+    ? viewParam === "all"
+    : selectedAssets.some((asset) => !!asset.archivedAt);
+  // Only members holding `asset: archive` can reinstate, so anyone else who
+  // sees the Archived view (a Manager) is pointed at who can.
+  const archivedBulkDisabled: { reason: string } | false = selectionIsArchived
+    ? {
+        reason: canArchiveAssets
+          ? "Archived assets are read-only. Reinstate them to make changes."
+          : "Archived assets are read-only. Ask an admin to reinstate them.",
+      }
+    : false;
+
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
+
+  /** Bulk location, the one bulk edit a workspace switch can open. */
+  const canBulkUpdateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+  /**
+   * Every other bulk edit answers from the matrix alone, as its route does
+   * (`matrixOnly: true`), so a switched-on Manager never sees it.
+   */
+  const canBulkEdit = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+    matrixOnly: true,
+  });
+  const canBulkDelete = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.delete,
+  });
   const user = useUserData();
 
   /**
@@ -104,8 +218,25 @@ function ConditionalDropdown() {
     (asset) => asset.status === "CHECKED_OUT"
   );
 
-  const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
+  /**
+   * A selected asset whose kit is not available (in custody or checked out):
+   * its custody is the kit's to change. Read through `getRowKitStatus`, which
+   * understands both index row shapes; simple-mode rows carry no `kit` field.
+   */
+  const someAssetPartOfUnavailableKit = selectedAssets.some((asset) => {
+    const kitStatus = getRowKitStatus(asset);
+    return kitStatus !== null && kitStatus !== "AVAILABLE";
+  });
+
+  /**
+   * An individually tracked kit member takes custody through its kit, so bulk
+   * "Assign custody" is disabled while one is selected. Reads both index row
+   * shapes (`assetKits` in simple mode, `kit` in advanced mode). Advisory: the
+   * server refuses the same request (`assertNotKitMembers`), including for a
+   * "select all" whose rows are not loaded here.
+   */
+  const someAssetIsIndividualKitMember = selectedAssets.some((asset) =>
+    isIndividualKitMember(asset)
   );
 
   const selfUserCustody = selectedAssets.some((a) => {
@@ -114,7 +245,7 @@ function ConditionalDropdown() {
     ) as { custodian?: { userId?: string } } | null;
     return primary?.custodian?.userId === user?.id;
   });
-  const disableReleaseCustody = isSelfService && !selfUserCustody;
+  const disableReleaseCustody = assignsSelfOnly && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -129,50 +260,83 @@ function ConditionalDropdown() {
           )}
         />
       )}
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.update,
-        })}
-      >
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.audit,
-            action: PermissionAction.create,
-          })}
-        >
-          <BulkStartAuditDialog />
-        </When>
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.audit,
-            action: PermissionAction.update,
-          })}
-        >
-          <BulkAddToAuditDialog />
-        </When>
+      <When truthy={canBulkUpdateLocation}>
         <BulkLocationUpdateDialog />
+      </When>
+      <When truthy={canBulkEdit}>
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
         <BulkCategoryUpdateDialog />
+        <BulkCustomFieldUpdateDialog />
+        <BulkSetReorderPointDialog />
         <BulkAssetModelUpdateDialog />
         <BulkAssetModelRemoveDialog />
-        <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
       </When>
+      <When truthy={canBulkDelete}>
+        <BulkDeleteDialog />
+      </When>
+      {/* Archive and Reinstate share their own grant, `asset: archive`. */}
+      <When truthy={canArchiveAssets}>
+        <BulkArchiveDialog type="archive" />
+        <BulkArchiveDialog type="reinstate" />
+      </When>
 
-      <BulkDownloadQrDialog
-        isDialogOpen={isBulkDownloadQrOpen}
-        onClose={() => {
-          setIsBulkDownloadQrOpen(false);
-        }}
-      />
+      {/* Audit dialogs follow the audit grants alone: a Manager runs audits
+          without editing assets. */}
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.create,
+        })}
+      >
+        <BulkStartAuditDialog />
+      </When>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.update,
+        })}
+      >
+        <BulkAddToAuditDialog />
+      </When>
+
+      {hasOpenedBulkDownloadQr ? (
+        <LazyLoadBoundary
+          loading={
+            <BulkDownloadQrPlaceholder
+              open={isBulkDownloadQrOpen}
+              onClose={closeBulkDownloadQr}
+            >
+              <div role="status" className="flex flex-col items-center gap-2">
+                <Spinner />
+                <span className="sr-only">Loading the QR code download</span>
+              </div>
+            </BulkDownloadQrPlaceholder>
+          }
+          failed={
+            <BulkDownloadQrPlaceholder
+              open={isBulkDownloadQrOpen}
+              onClose={closeBulkDownloadQr}
+            >
+              <p className="text-center text-error-500">
+                The QR code download could not be loaded. Reload the page and
+                try again.
+              </p>
+            </BulkDownloadQrPlaceholder>
+          }
+        >
+          <BulkDownloadQrDialog
+            isDialogOpen={isBulkDownloadQrOpen}
+            onClose={closeBulkDownloadQr}
+          />
+        </LazyLoadBoundary>
+      ) : null}
 
       <When
         truthy={userHasPermission({
@@ -187,15 +351,12 @@ function ConditionalDropdown() {
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className="actions-dropdown hidden font-medium sm:flex"
-          onClick={() => setOpen(!open)}
+          className="actions-dropdown hidden font-medium md:flex"
           asChild
           disabled={disabled}
         >
@@ -218,7 +379,7 @@ function ConditionalDropdown() {
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="secondary"
-          className="asset-actions flex-1 sm:hidden"
+          className="asset-actions flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           type="button"
@@ -229,6 +390,7 @@ function ConditionalDropdown() {
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
@@ -238,6 +400,7 @@ function ConditionalDropdown() {
             <DropdownMenuItem
               onClick={() => {
                 closeMenu();
+                setHasOpenedBulkDownloadQr(true);
                 setIsBulkDownloadQrOpen(true);
               }}
               className="border-b py-1 lg:p-0"
@@ -265,7 +428,7 @@ function ConditionalDropdown() {
                   type="start-audit"
                   label="Create audit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
             </When>
@@ -282,7 +445,7 @@ function ConditionalDropdown() {
                   type="add-to-audit"
                   label="Add to existing audit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
             </When>
@@ -300,7 +463,8 @@ function ConditionalDropdown() {
                   label="Release custody"
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreInCustody ||
+                    archivedBulkDisabled ||
+                    (!allAssetsAreInCustody ||
                     someAssetPartOfUnavailableKit ||
                     disableReleaseCustody
                       ? {
@@ -310,40 +474,39 @@ function ConditionalDropdown() {
                             ? "Self service can only release their own custody."
                             : "Some of the selected assets are not in custody.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="assign-custody"
-                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  label={assignsSelfOnly ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreAvailable || someAssetPartOfUnavailableKit
+                    archivedBulkDisabled ||
+                    (!allAssetsAreAvailable ||
+                    someAssetPartOfUnavailableKit ||
+                    someAssetIsIndividualKitMember
                       ? {
                           reason: someAssetPartOfUnavailableKit
                             ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
+                            : someAssetIsIndividualKitMember
+                            ? KIT_MEMBERS_CUSTODY_BLOCKED_REASON
                             : "Some of the selected assets are not available.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
             </When>
 
-            <When
-              truthy={userHasPermission({
-                roles,
-                entity: PermissionEntity.asset,
-                action: PermissionAction.update,
-              })}
-            >
+            <When truthy={canBulkEdit}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="tag-add"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                   label="Assign tags"
                 />
               </DropdownMenuItem>
@@ -351,22 +514,46 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="tag-remove"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                   label="Remove tags"
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkUpdateLocation}>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="location"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkEdit}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="custom-field"
+                  label="Set custom field"
+                  onClick={closeMenu}
+                  disabled={archivedBulkDisabled || isLoading}
+                />
+              </DropdownMenuItem>
+              {/* Sits beside category rather than at the bottom of the menu:
+                  min quantity is the input Stock status depends on, and
+                  10 of 12 quantity assets in a real workspace have none. This
+                  is the only bulk way to fix that. */}
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="reorder-point"
+                  label="Set min quantity"
+                  onClick={closeMenu}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
@@ -374,7 +561,7 @@ function ConditionalDropdown() {
                   type="asset-model"
                   label="Update asset model"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
@@ -382,7 +569,7 @@ function ConditionalDropdown() {
                   type="asset-model-remove"
                   label="Remove from asset model"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
@@ -391,12 +578,13 @@ function ConditionalDropdown() {
                   type="add-to-kit"
                   onClick={closeMenu}
                   disabled={
-                    someAssetCheckedOut
+                    archivedBulkDisabled ||
+                    (someAssetCheckedOut
                       ? {
                           reason:
                             "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -405,7 +593,7 @@ function ConditionalDropdown() {
                   label="Remove from kit"
                   type="remove-from-kit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
@@ -413,7 +601,7 @@ function ConditionalDropdown() {
                   label="Mark as available"
                   type="available"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-b py-1 lg:p-0">
@@ -421,16 +609,49 @@ function ConditionalDropdown() {
                   label="Mark as unavailable"
                   type="unavailable"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
 
+              <When truthy={canArchiveAssets}>
+                <DropdownMenuItem className="py-1 lg:p-0">
+                  <BulkUpdateDialogTrigger
+                    type="archive"
+                    label="Archive"
+                    onClick={closeMenu}
+                    disabled={
+                      archivedView
+                        ? { reason: "These assets are already archived." }
+                        : isLoading
+                    }
+                  />
+                </DropdownMenuItem>
+                <DropdownMenuItem className="border-b py-1 lg:p-0">
+                  <BulkUpdateDialogTrigger
+                    type="reinstate"
+                    label="Reinstate"
+                    onClick={closeMenu}
+                    disabled={
+                      archivedView
+                        ? isLoading
+                        : {
+                            reason:
+                              "Switch to the Archived view to reinstate assets.",
+                          }
+                    }
+                  />
+                </DropdownMenuItem>
+              </When>
+            </When>
+            <When truthy={canBulkDelete}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="trash"
                   label="Delete"
                   onClick={closeMenu}
                   disabled={
+                    // Archived assets can still be permanently deleted in bulk
+                    // (Delete + Reinstate are the only allowed bulk actions).
                     someAssetCheckedOut
                       ? {
                           reason:
@@ -440,19 +661,19 @@ function ConditionalDropdown() {
                   }
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem className="border-t md:hidden lg:p-0">
-                <Button
-                  type="button"
-                  role="button"
-                  variant="secondary"
-                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                  width="full"
-                  onClick={() => setOpen(false)}
-                >
-                  Close
-                </Button>
-              </DropdownMenuItem>
             </When>
+            <DropdownMenuItem className="border-t md:hidden lg:p-0">
+              <Button
+                type="button"
+                role="button"
+                variant="secondary"
+                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                width="full"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </Button>
+            </DropdownMenuItem>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

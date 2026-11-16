@@ -5,7 +5,14 @@
  * Returns JSON that the client renders as a styled HTML preview,
  * then converts to PDF via react-to-print.
  *
- * @see {@link file://../../components/reports/compliance-report-pdf.tsx}
+ * Serves the three reports that ship a PDF: booking compliance, asset
+ * inventory and custody snapshot. `REPORTS_WITH_PDF` in
+ * `report-export-actions.tsx` gates which pages offer the button, and the
+ * switch below must cover exactly that list. Sends one `pdf_preview_opened`
+ * event per preview.
+ *
+ * @see {@link file://../../components/reports/report-pdf.tsx} the renderer this feeds
+ * @see {@link file://../../components/reports/report-export-actions.tsx} `REPORTS_WITH_PDF`
  */
 
 import { data } from "react-router";
@@ -13,11 +20,14 @@ import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { resolveReportFilters } from "~/modules/reports/filters.server";
 import {
   resolveTimeframe,
   bookingComplianceReport,
   assetInventoryReport,
   custodySnapshotReport,
+  type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { sumQuantityAwareValue } from "~/modules/reports/pdf-totals";
 import { getReportById } from "~/modules/reports/registry";
@@ -43,6 +53,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanUseReports } from "~/utils/subscription.server";
 
 /**
  * Format return status for PDF - matches the CSV export format.
@@ -80,6 +91,14 @@ function formatReturnStatus(
   return latenessMs > 0 ? `${value} late` : `${value} early`;
 }
 
+/**
+ * Returns the data the client renders into a report PDF, with the same filters
+ * as the report page and every row instead of one page.
+ *
+ * @returns `{ pdfMeta }` for the report named by `reportId`
+ * @throws {ShelfError} 403 when the caller lacks `reports: export` or the
+ *   workspace's plan does not include reports; 404 for an unknown report
+ */
 export const loader = async ({
   context,
   request,
@@ -97,7 +116,7 @@ export const loader = async ({
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.reports,
@@ -106,12 +125,9 @@ export const loader = async ({
       action: PermissionAction.export,
     });
 
-    // Acting user's resolved prefs drive both the timeframe label ordering and
-    // the PDF table date formatter below (resolved once, reused twice).
-    const prefs = await resolveUserFormatPrefsById(
-      userId,
-      getClientHint(request)
-    );
+    // Reports are part of the Plus and Team plans. Refuse the data with a 403
+    // before anything else is read for this request.
+    await assertUserCanUseReports({ organizationId, organizations });
 
     // Validate report exists
     const reportDef = getReportById(reportId);
@@ -131,6 +147,13 @@ export const loader = async ({
     const customFrom = searchParams.get("from");
     const customTo = searchParams.get("to");
 
+    // Acting user's resolved prefs drive both the timeframe label ordering and
+    // the PDF table date formatter below (resolved once, reused twice).
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     const timeframe = resolveTimeframe(
       timeframePreset,
       customFrom ? new Date(customFrom) : undefined,
@@ -140,15 +163,20 @@ export const loader = async ({
 
     // Get organization info. `currency` is required so PDF monetary values
     // render in the workspace's configured currency rather than a hardcoded "$".
-    const organization = await db.organization.findUnique({
-      where: { id: organizationId },
-      select: {
-        name: true,
-        imageId: true,
-        updatedAt: true,
-        currency: true,
-      },
-    });
+    // Same resolution the report page runs, so the PDF holds exactly the
+    // rows the filtered page shows.
+    const [organization, reportFilters] = await Promise.all([
+      db.organization.findUnique({
+        where: { id: organizationId },
+        select: {
+          name: true,
+          imageId: true,
+          updatedAt: true,
+          currency: true,
+        },
+      }),
+      resolveReportFilters({ organizationId, searchParams, reportDef }),
+    ]);
 
     if (!organization) {
       throw new ShelfError({
@@ -180,18 +208,36 @@ export const loader = async ({
         }),
     };
 
-    // Generate report data based on type
+    // Generate report data based on type. Each case parses the same filter
+    // params its page-loader counterpart honors (see reports.$reportId.tsx)
+    // and hands them to the same query function — the client forwards the
+    // page's full query string, so the PDF contains exactly the rows the
+    // filtered page shows.
     let pdfMeta: ReportPdfMeta;
 
     switch (reportId) {
       case "booking-compliance": {
+        // Sort params mirror the page so the PDF row order matches the table.
+        const sortBy = (searchParams.get("sortBy") ||
+          "scheduledEnd") as BookingComplianceSortColumn;
+        const sortOrder = (searchParams.get("sortOrder") || "desc") as
+          | "asc"
+          | "desc";
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
           // Anchor trend-chart axis labels in the acting user's timezone (D2).
           timeZone: prefs.timeZone,
+          statusFilter:
+            reportFilters.bookingStatuses.length > 0
+              ? reportFilters.bookingStatuses
+              : undefined,
+          custodianTeamMemberId: reportFilters.teamMemberId ?? undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000, // PDF can handle large tables
+          sortBy,
+          sortOrder,
         });
 
         const overdueKpi = reportData.kpis.find(
@@ -246,6 +292,8 @@ export const loader = async ({
       case "asset-inventory": {
         const reportData = await assetInventoryReport({
           organizationId,
+          currency: organization.currency,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -294,6 +342,9 @@ export const loader = async ({
       case "custody-snapshot": {
         const reportData = await custodySnapshotReport({
           organizationId,
+          currency: organization.currency,
+          teamMemberId: reportFilters.teamMemberId ?? undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -342,6 +393,18 @@ export const loader = async ({
           status: 500,
         });
     }
+
+    captureServerEvent({
+      distinctId: userId,
+      event: "pdf_preview_opened",
+      properties: {
+        sheet: "report",
+        organizationId,
+        rowCount: pdfMeta.rows.length,
+        totalCount: pdfMeta.totalCount,
+        reportId,
+      },
+    });
 
     return data(payload({ pdfMeta }));
   } catch (cause) {

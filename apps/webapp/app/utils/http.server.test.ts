@@ -1,3 +1,4 @@
+/** Unit tests for the shared HTTP server utilities. */
 import { z } from "zod";
 import type { FailureReason } from "./error";
 import { ShelfError } from "./error";
@@ -6,6 +7,7 @@ import {
   getCurrentPath,
   getRedirectTo,
   getRefererPath,
+  getRefererPathExcludingSelf,
   makeRedirectToFromHere,
   isPost,
   safeRedirect,
@@ -117,6 +119,42 @@ describe(getRefererPath.name, () => {
       headers: { referer: `${BASE_URL}/assets/123/edit` },
     });
     expect(getRefererPath(request)).toBe("/assets/123/edit");
+  });
+});
+
+describe(getRefererPathExcludingSelf.name, () => {
+  const EDIT_URL = `${BASE_URL}/assets/123/edit`;
+
+  it("returns null when the referer is the requested page with a query", () => {
+    const request = new Request(`${EDIT_URL}?category=cat-1`, {
+      headers: { referer: `${EDIT_URL}?category=cat-1` },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe(null);
+  });
+
+  it("returns null when only the query string differs", () => {
+    const request = new Request(`${EDIT_URL}?category=cat-2`, {
+      headers: { referer: EDIT_URL },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe(null);
+  });
+
+  it("keeps a filtered list the user came from", () => {
+    const request = new Request(EDIT_URL, {
+      headers: { referer: `${BASE_URL}/assets?search=laptop` },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe("/assets?search=laptop");
+  });
+
+  it("returns null when the referer header is missing", () => {
+    expect(getRefererPathExcludingSelf(new Request(EDIT_URL))).toBe(null);
+  });
+
+  it("returns null for an invalid referer header", () => {
+    const request = new Request(EDIT_URL, {
+      headers: { referer: "not-a-valid-url" },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe(null);
   });
 });
 
@@ -540,6 +578,30 @@ describe(buildContentDisposition.name, () => {
     });
 
     expect(result).toContain('filename="My Asset-2024-06-15T1230.csv"');
+  });
+
+  it("should preserve a finished filename without adding a timestamp or suffix", () => {
+    const result = buildContentDisposition(null, {
+      fallback: "asset",
+      filename: "assets-import-ready-2026-09-14-123456.csv",
+    });
+
+    expect(result).toBe(
+      'attachment; filename="assets-import-ready-2026-09-14-123456.csv"; ' +
+        "filename*=UTF-8''assets-import-ready-2026-09-14-123456.csv"
+    );
+  });
+
+  it("should sanitize control characters and quotes in an explicit filename", () => {
+    const result = buildContentDisposition(null, {
+      fallback: "asset",
+      filename: 'assets\r\n"quoted".csv',
+    });
+
+    expect(result).toBe(
+      'attachment; filename="assets-quoted-.csv"; ' +
+        "filename*=UTF-8''assets%22quoted%22.csv"
+    );
   });
 
   it("should produce a header that does not throw when used in a Response", () => {

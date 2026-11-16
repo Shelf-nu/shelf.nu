@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -11,7 +12,7 @@ import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
-import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
+import { LazyAvailabilityCalendar } from "~/components/availability-calendar/availability-calendar.lazy";
 import { ResourceTitleLink } from "~/components/availability-calendar/resource-title-link";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -34,9 +35,13 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import {
+  type ListContextLinkState,
+  useListContextLinkState,
+} from "~/hooks/use-list-context";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import type { EntityForCodeResolution } from "~/modules/barcode/display";
@@ -46,6 +51,7 @@ import {
   updateKitsWithBookingCustodians,
 } from "~/modules/kit/service.server";
 import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
@@ -76,13 +82,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
     const searchParams = getCurrentSearchParams(request);
     const hasActiveFilters = computeHasActiveFilters(searchParams);
@@ -110,7 +116,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const custodianFilterWhere = {
       deletedAt: null,
       organizationId,
-      userId: !canSeeAllCustody ? userId : undefined,
+      userId: !access.custody.seeAll ? userId : undefined,
     };
 
     let [
@@ -124,11 +130,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         // Governs `?teamMember=`: a viewer who may not see all custody may
         // only ever filter this list by their own custody.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
+          // Active members only: an archived member is left out of the kit's
+          // bookings, so it must not mark the kit unavailable to book.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               // AssetKit.id surfaces the kit-slice discriminator. The
               // consumer filters `bookingAssets[].assetKitId === ak.id`
@@ -151,6 +160,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   // PrismaClientValidationError on every kit search with
                   // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
+                    // why: out of this rule — a kit bar means "every member
+                    // slice returned", which needs a per-kit fold this select
+                    // does not carry, so kit bars keep the booking's period.
                     bookingAssets: {
                       where: {
                         booking: {
@@ -243,7 +255,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    const currentUserTeamMember = isSelfService
+    const currentUserTeamMember = assignsSelfOnly
       ? teamMembers.find((tm) => tm.userId === userId) ?? null
       : null;
 
@@ -269,7 +281,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // name and `user.email` shipped in this payload regardless, so a
         // restricted viewer read them straight out of `/kits.data` while the
         // page showed "private". Redact server-side.
-        items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+        items: redactCustodianForViewer(kits, {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         page,
         totalItems: totalKits,
         totalPages,
@@ -307,15 +322,30 @@ export const handle = {
 };
 
 export default function KitsIndexPage() {
-  const { items } = useLoaderData<typeof loader>();
-  const { roles, isBase } = useUserRoleHelper();
+  const { items, perPage } = useLoaderData<typeof loader>();
+  const linkState = useListContextLinkState("kit", perPage);
+  const listItemProps = useMemo(() => ({ linkState }), [linkState]);
+  const roles = useOrganizationRoles();
+  /**
+   * The bulk menu holds custody, edit and delete actions; any one opens it.
+   * Each item inside stays gated on its own permission.
+   */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
     action: PermissionAction.create,
   });
   const { isAvailabilityView, shouldShowAvailabilityView } =
-    useIsAvailabilityView();
+    useAssetIndexView();
   const { resources, events } = useKitAvailabilityData(items);
 
   const organization = useCurrentOrganization();
@@ -384,7 +414,7 @@ export default function KitsIndexPage() {
         </Filters>
         {isAvailabilityView && shouldShowAvailabilityView ? (
           <>
-            <AvailabilityCalendar
+            <LazyAvailabilityCalendar
               resources={resources}
               events={events}
               resourceLabelContent={({ resource }) => (
@@ -430,7 +460,8 @@ export default function KitsIndexPage() {
           <List
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
-            bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            extraItemComponentProps={listItemProps}
+            bulkActions={canBulkAct ? <BulkActionsDropdown /> : undefined}
             customEmptyStateContent={{
               title: "No kits yet",
               text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",
@@ -510,6 +541,7 @@ function KitCalendarCodeBadge({
 function ListContent({
   item,
   bulkActions,
+  extraProps,
 }: {
   item: Prisma.KitGetPayload<{
     include: MergeInclude<
@@ -529,6 +561,8 @@ function ListContent({
     >;
   }>;
   bulkActions?: ReactNode;
+  /** History state for the row link, so the kit page can step through this list. */
+  extraProps: { linkState: ListContextLinkState };
 }) {
   const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
     typeof LOCATION_WITH_HIERARCHY
@@ -550,7 +584,8 @@ function ListContent({
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
-          to={`/kits/${item.id}/assets`}
+          to={LIST_DETAIL_PATH.kit(item.id)}
+          state={extraProps.linkState}
           className={tw(
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"

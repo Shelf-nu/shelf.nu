@@ -1,0 +1,81 @@
+appId: com.shelf.companion.carlos
+name: "Roles - Manager creates and edits an asset (switch on)"
+tags:
+  - roles
+  - manager
+  - permissions
+
+---
+# Test: with "Managers can add and edit assets and kits" switched on for the
+# workspace, a Manager creates an asset on the phone and then edits it.
+#
+# Setup (by hand, before the run):
+# - SHELF_TEST_MANAGER_EMAIL / SHELF_TEST_MANAGER_PASSWORD sign in a user who
+#   is a Manager on ${SHELF_TEST_WORKSPACE}.
+# - The workspace owner has switched on Settings > General > Permissions >
+#   Managers > "Add and edit assets and kits".
+#
+# Every step below is required (no `optional`): with the switch off the
+# "Create new asset" and "Edit asset" buttons are hidden and the flow fails.
+
+- runFlow: ../../shared/login-manager.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# ── Create ─────────────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Assets"
+    index: 1
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+- tapOn: "Create new asset"
+- extendedWaitUntil:
+    visible: "Title, required"
+    timeout: 8000
+
+- tapOn: "Title, required"
+- inputText: "Maestro Manager Asset"
+# Dismiss the keyboard by tapping static text (hideKeyboard is unreliable):
+# the screen title
+- tapOn: "New Asset"
+
+- takeScreenshot: roles-manager-create-form
+
+- tapOn: "Create asset"
+- extendedWaitUntil:
+    visible: "Success"
+    timeout: 15000
+- tapOn: "View Asset"
+
+- extendedWaitUntil:
+    visible: "Maestro Manager Asset"
+    timeout: 10000
+- takeScreenshot: roles-manager-created-asset
+
+# ── Edit ───────────────────────────────────────────────────────────────
+
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Title, required"
+    timeout: 8000
+
+- tapOn: "Title, required"
+- eraseText: 40
+- inputText: "Maestro Manager Asset Edited"
+# Dismiss the keyboard on the screen title ("Edit: <title>")
+- tapOn: "Edit: .*"
+
+- tapOn: "Save changes"
+- extendedWaitUntil:
+    visible: "Updated"
+    timeout: 15000
+- tapOn: "OK"
+
+- extendedWaitUntil:
+    visible: "Maestro Manager Asset Edited"
+    timeout: 10000
+- takeScreenshot: roles-manager-edited-asset

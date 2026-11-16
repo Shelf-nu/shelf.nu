@@ -1,0 +1,138 @@
+/**
+ * Tests for the archived-asset helpers.
+ *
+ * These run under Node's test runner via tsx, so this file and the module it
+ * tests must not import React Native, Expo, or `@/`-aliased paths.
+ *
+ * @see ./archived-assets.ts
+ */
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  archivedIdsFromError,
+  archivedLeftOutNote,
+  assetBadgeStatus,
+  isArchivedAsset,
+  kitAssignCustodyBlockedReason,
+  markArchivedRows,
+} from "./archived-assets";
+
+test("an asset with an archive stamp is archived", () => {
+  assert.equal(
+    isArchivedAsset({ archivedAt: "2026-10-09T13:44:00.000Z" }),
+    true
+  );
+});
+
+test("an active asset, or one from a server that predates archiving, is not", () => {
+  assert.equal(isArchivedAsset({ archivedAt: null }), false);
+  assert.equal(isArchivedAsset({}), false);
+  assert.equal(isArchivedAsset(null), false);
+});
+
+test("the badge says Archived instead of the live status", () => {
+  assert.equal(
+    assetBadgeStatus({
+      status: "AVAILABLE",
+      archivedAt: "2026-10-09T13:44:00.000Z",
+    }),
+    "ARCHIVED"
+  );
+  assert.equal(
+    assetBadgeStatus({ status: "IN_CUSTODY", archivedAt: null }),
+    "IN_CUSTODY"
+  );
+});
+
+test("only an archived refusal names archived ids", () => {
+  assert.deepEqual(
+    archivedIdsFromError({ reason: "archived", archivedAssetIds: ["a", "b"] }),
+    ["a", "b"]
+  );
+  // Another refusal, or a server that predates the field, names none.
+  assert.deepEqual(
+    archivedIdsFromError({ reason: "unclaimed", archivedAssetIds: ["a"] }),
+    []
+  );
+  assert.deepEqual(archivedIdsFromError({ reason: "archived" }), []);
+  assert.deepEqual(archivedIdsFromError(null), []);
+});
+
+test("a refusal marks only the asset rows it names as archived", () => {
+  // A fulfil, add-to-booking or location submit the server refused because
+  // one row was archived after it was scanned.
+  const rows = [
+    { type: "asset" as const, targetId: "asset-1", title: "Old camera" },
+    { type: "asset" as const, targetId: "asset-2", title: "Tripod" },
+    {
+      type: "kit" as const,
+      targetId: "asset-1",
+      title: "Kit with a clashing id",
+    },
+  ];
+  assert.deepEqual(markArchivedRows(rows, ["asset-1"]), [
+    {
+      type: "asset",
+      targetId: "asset-1",
+      title: "Old camera",
+      archived: true,
+      submitError: "Archived. Remove it from the list.",
+    },
+    { type: "asset", targetId: "asset-2", title: "Tripod" },
+    // A kit row is never an archived asset, whatever its id.
+    { type: "kit", targetId: "asset-1", title: "Kit with a clashing id" },
+  ]);
+});
+
+test("an archived refusal clears the errors an earlier submit left on the other rows", () => {
+  const rows = [
+    { type: "asset" as const, targetId: "asset-1" },
+    {
+      type: "asset" as const,
+      targetId: "asset-2",
+      submitError: "Only 2 units are free.",
+    },
+  ];
+  assert.deepEqual(
+    markArchivedRows(rows, ["asset-1"]).map((row) => row.submitError),
+    ["Archived. Remove it from the list.", undefined]
+  );
+});
+
+test("a refusal that names no archived rows leaves the list as it was", () => {
+  const rows = [{ type: "asset" as const, targetId: "asset-1" }];
+  assert.equal(markArchivedRows(rows, []), rows);
+});
+
+test("a kit with an active member can be put in custody", () => {
+  assert.equal(
+    kitAssignCustodyBlockedReason([
+      { archivedAt: "2026-10-09T13:44:00.000Z" },
+      { archivedAt: null },
+    ]),
+    undefined
+  );
+});
+
+test("a kit holding only archived assets says so, and so does an empty one", () => {
+  // Kit custody leaves archived members out, so the server refuses both.
+  assert.equal(
+    kitAssignCustodyBlockedReason([{ archivedAt: "2026-10-09T13:44:00.000Z" }]),
+    "This kit holds only archived assets. Add an active asset to assign custody."
+  );
+  assert.equal(
+    kitAssignCustodyBlockedReason([]),
+    "This kit has no assets. Add assets to assign custody."
+  );
+});
+
+test("a success message says how many archived assets were left out", () => {
+  assert.equal(archivedLeftOutNote(1), "1 archived asset was left out.");
+  assert.equal(archivedLeftOutNote(3), "3 archived assets were left out.");
+});
+
+test("nothing left out, or a server that predates the count, adds no sentence", () => {
+  assert.equal(archivedLeftOutNote(0), null);
+  assert.equal(archivedLeftOutNote(undefined), null);
+});

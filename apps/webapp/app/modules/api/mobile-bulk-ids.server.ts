@@ -65,3 +65,19 @@ export function mobileIdSchema(field: string) {
       message: `${field} must be an explicit id. "Select all" is not supported on mobile.`,
     });
 }
+
+/**
+ * Units per asset id for the mobile bulk custody routes, sent by the
+ * companion's Scan tab for its quantity-tracked rows.
+ *
+ * Optional, and an absent field reads as `{}`, so a body without it is handled
+ * exactly as before. Every value must be a whole number of at least 1. An entry
+ * for an id that is not in `assetIds` is ignored by the routes.
+ *
+ * The web routes take the same map as a JSON string inside form data
+ * (`AssetQuantitiesSchema`); a JSON request body carries it as an object.
+ */
+export const mobileQuantitiesSchema = z
+  .record(z.string().min(1), z.number().int().positive())
+  .optional()
+  .default({});

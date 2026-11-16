@@ -103,11 +103,8 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    // canSeeAllCustody shapes the refreshed asset returned to the app.
-    const { canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    // `access.custody.seeAll` shapes the refreshed asset returned to the app.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // why: safeParse + a 400 ShelfError mirrors the web route's parseData
     // behavior; raw `.parse` would surface a ZodError as a 500 through
@@ -217,7 +214,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assetId,
         organizationId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
     } catch (refreshError) {
       Logger.error(

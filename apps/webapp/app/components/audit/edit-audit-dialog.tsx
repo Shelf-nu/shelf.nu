@@ -15,6 +15,7 @@ import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
+import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 
 export const EditAuditSchema = z.object({
   name: z.string().trim().min(1, "Audit name is required"),
@@ -197,8 +198,8 @@ export function EditAuditDialog({
                 Select assignees (optional)
               </p>
               <p className="border-b p-3">
-                Admins can perform any audit. Choosing assignees also lets those
-                people perform it, including several at different times.
+                {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets
+                those people perform it, including several at different times.
               </p>
               <AuditTeamMemberSelector
                 error={assigneeError}

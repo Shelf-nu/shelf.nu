@@ -10,8 +10,13 @@
   @apply pointer-events-none text-primary truncate;
 }
 
+/* `:not(.sr-only)`: this selector outranks `.sr-only`, and a visually hidden
+   label (the sidebar toggle's "Toggle Sidebar") is absolutely positioned, so
+   `h-full` would stretch it to the height of the nearest positioned ancestor.
+   On a full-screen page that runs past the bottom edge and makes the page
+   scroll behind fixed content such as the scanner drawer. */
 .breadcrumb a,
-.breadcrumb span {
+.breadcrumb span:not(.sr-only) {
   @apply mb-[-1px] block h-full text-[12px] md:text-[14px];
 }
 

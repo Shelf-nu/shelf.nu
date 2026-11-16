@@ -1,4 +1,4 @@
-import type { Prisma, User } from "@prisma/client";
+import type { User } from "@prisma/client";
 
 export interface UpdateUserPayload {
   id: User["id"];
@@ -33,7 +33,3 @@ export interface UpdateUserResponse {
   /** Used when sending a pwd reset link for the user */
   passwordReset?: boolean;
 }
-
-export const USER_STATIC_INCLUDE = {
-  userOrganizations: true,
-} satisfies Prisma.UserInclude;

@@ -690,3 +690,21 @@ test("classifyServerChange treats a capability change as a credentials refresh",
   assert.equal(capabilityOnly.supabaseUrl, baseServer.supabaseUrl);
   assert.equal(capabilityOnly.supabaseAnonKey, baseServer.supabaseAnonKey);
 });
+
+test("isSameOrigin ignores the case of either host", () => {
+  assert.equal(
+    isSameOrigin("https://App.Shelf.nu/qr/abc", "https://app.shelf.nu"),
+    true
+  );
+  assert.equal(
+    isSameOrigin("https://app.shelf.nu/qr/abc", "https://Assets.Example.org"),
+    false
+  );
+  assert.equal(
+    isSameOrigin(
+      "https://assets.example.org/qr/abc",
+      "https://Assets.Example.org"
+    ),
+    true
+  );
+});

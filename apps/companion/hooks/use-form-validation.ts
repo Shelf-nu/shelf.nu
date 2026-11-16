@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { Alert } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { usePreventRemove } from "@react-navigation/native";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
+import { valuationFromInput } from "@/lib/asset-valuation";
+import { editLeaveGuard } from "@/lib/edit-leave-guard";
 import type { AssetDetail, Category, Location, Tag } from "@/lib/api";
 import type { CustomFieldState } from "./use-edit-asset-form";
 
@@ -15,11 +15,23 @@ type FormValidationArgs = {
   customFields: CustomFieldState[];
   originalAsset: AssetDetail | null;
   isSubmitting: boolean;
+  /**
+   * True once the server accepted the edit; the guard stands down from then
+   * on. The form keeps differing from `originalAsset`, which is the asset as
+   * loaded and is not reloaded after a save.
+   */
+  didSave: boolean;
 };
 
 /**
  * Tracks dirty state for the edit asset form and warns on navigation
  * if there are unsaved changes.
+ *
+ * This guard is the only "Discard Changes?" prompt on the screen: every way
+ * out (header back, swipe back, the Cancel button) navigates and lets the
+ * guard decide, so the user is asked at most once. It returns nothing on
+ * purpose: a caller that reads the dirty state to prompt on its own would
+ * ask twice.
  */
 export function useFormValidation({
   title,
@@ -31,9 +43,8 @@ export function useFormValidation({
   customFields,
   originalAsset,
   isSubmitting,
-}: FormValidationArgs): { isDirty: boolean } {
-  const navigation = useNavigation();
-
+  didSave,
+}: FormValidationArgs): void {
   const isDirty = useMemo(() => {
     if (!originalAsset) return false;
     if (title.trim() !== originalAsset.title) return true;
@@ -50,7 +61,7 @@ export function useFormValidation({
       origTagIds.some((id, i) => id !== newTagIds[i])
     )
       return true;
-    const numVal = valuation.trim() ? parseFloat(valuation.trim()) : null;
+    const numVal = valuationFromInput(valuation);
     if (numVal !== (originalAsset.valuation ?? null)) return true;
     if (customFields.some((cf) => cf.value !== cf.originalValue)) return true;
     return false;
@@ -65,21 +76,13 @@ export function useFormValidation({
     originalAsset,
   ]);
 
-  // Warn on back navigation if there are unsaved changes
-  usePreventRemove(isDirty && !isSubmitting, ({ data }) => {
-    Alert.alert(
-      "Discard Changes?",
-      "You have unsaved changes. Are you sure you want to go back?",
-      [
-        { text: "Keep Editing", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => navigation.dispatch(data.action),
-        },
-      ]
-    );
-  });
+  // Rules (held while saving, released after a save) in lib/edit-leave-guard.ts
+  const guard = editLeaveGuard({ isDirty, didSave, isSubmitting });
 
-  return { isDirty };
+  useDiscardGuard({
+    active: guard.hold,
+    decide: () => (guard.prompt ? "prompt" : "hold"),
+    title: "Discard Changes?",
+    message: "You have unsaved changes. Are you sure you want to go back?",
+  });
 }

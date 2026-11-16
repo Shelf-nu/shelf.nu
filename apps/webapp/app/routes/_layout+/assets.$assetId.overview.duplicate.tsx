@@ -1,3 +1,4 @@
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -16,8 +17,10 @@ import Icon from "~/components/icons/icon";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
+import { canDuplicateAsset } from "~/modules/asset/utils";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
@@ -34,6 +37,16 @@ import { requirePermission } from "~/utils/roles.server";
 
 export const meta = () => [{ title: appendToMetaTitle("Duplicate asset") }];
 
+/**
+ * Loads the source asset for the duplicate dialog.
+ *
+ * Requires `asset: create`, since duplicating creates assets. The asset is read
+ * org-scoped and carries its `type` and `quantity`, which the dialog uses to
+ * refuse a quantity-tracked asset with no units in stock before submitting.
+ *
+ * @throws {Response} The error payload with its status when the user lacks
+ *   permission or the asset is not in the active organization
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -85,6 +98,13 @@ const DuplicateAssetSchema = z.object({
     }),
 });
 
+/**
+ * Creates `amountOfDuplicates` copies of the asset through `duplicateAsset`.
+ *
+ * Redirects to the new asset for a single copy and to the assets index for
+ * several. A client error from the service (for example a quantity-tracked
+ * asset with no units in stock) is returned to the dialog as written.
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -108,8 +128,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         custody: { include: { custodian: true } },
         tags: true,
         customFields: true,
-        // Pulled so the duplicate inherits the source asset's primary
-        // placement (`duplicateAsset` reads it via `getPrimaryLocation`).
+        // Pulled so an individual duplicate inherits the source asset's
+        // primary placement (`duplicateAsset` reads it via
+        // `getPrimaryLocation`). A quantity-tracked duplicate starts unplaced.
         assetLocations: {
           select: { location: { select: { id: true } } },
         },
@@ -148,12 +169,28 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
+/**
+ * Dialog for duplicating an asset, opened from the asset's Actions menu and the
+ * assets index quick actions.
+ *
+ * Previews the source asset and asks how many copies to create. For a
+ * quantity-tracked asset with no units in stock it explains why and disables
+ * the form, matching the refusal in `duplicateAsset`. Server errors from the
+ * action are shown below the buttons.
+ */
 export default function DuplicateAsset() {
   const zo = useZorm("DuplicateAsset", DuplicateAssetSchema);
   const { asset } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isProcessing = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
+  /** False for a quantity-tracked asset with no units in stock, which the
+   * service refuses; the dialog says so before the user submits. */
+  const canDuplicate = canDuplicateAsset(asset);
+  /** An archived asset is out of service; `duplicateAsset` refuses it too. */
+  const isArchived = Boolean(asset.archivedAt);
+  const canReinstate = useCanArchiveAssets();
+  const disabled = isProcessing || !canDuplicate || isArchived;
 
   return (
     <Form ref={zo.ref} method="post">
@@ -188,6 +225,7 @@ export default function DuplicateAsset() {
                   status={asset.status}
                   availableToBook={asset.availableToBook}
                   asset={asset}
+                  isArchived={isArchived}
                 />
               </div>
             </div>
@@ -200,7 +238,7 @@ export default function DuplicateAsset() {
             defaultValue={1}
             placeholder="How many duplicates assets you want to create for this asset ?"
             className="w-full"
-            disabled={isProcessing}
+            disabled={disabled}
             required
             /* We have to find a way to normalize the error object when it comes from zod */
             error={
@@ -210,6 +248,28 @@ export default function DuplicateAsset() {
               )?.amountOfDuplicates?.message
             }
           />
+
+          {isArchived ? (
+            <p
+              id="duplicate-archived"
+              className="w-full rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
+            >
+              <span className="block font-medium">Asset is archived</span>
+              {archivedAssetBlockedReason({ canReinstate })}
+            </p>
+          ) : null}
+
+          {canDuplicate ? null : (
+            <p
+              id="duplicate-no-units"
+              className="w-full rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
+            >
+              <span className="block font-medium">No units to copy</span>
+              This asset has no units in stock, and a quantity-tracked asset
+              needs at least 1. Add stock with Adjust quantity, then duplicate
+              it.
+            </p>
+          )}
         </div>
         <div className="mt-6 flex gap-3">
           <Button
@@ -224,7 +284,14 @@ export default function DuplicateAsset() {
             variant="primary"
             width="full"
             type="submit"
-            disabled={isProcessing}
+            disabled={disabled}
+            aria-describedby={
+              isArchived
+                ? "duplicate-archived"
+                : canDuplicate
+                ? undefined
+                : "duplicate-no-units"
+            }
           >
             {isProcessing ? <Spinner /> : "Duplicate"}
           </Button>

@@ -9,6 +9,7 @@
 import type { Asset, CustomField } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { getRandomColor } from "~/utils/get-random-color";
 import type {
   AssetChangePreview,
@@ -35,6 +36,7 @@ export async function fetchAssetsForUpdate(
   dbField: "sequentialId" | "id"
 ): Promise<Map<string, AssetForUpdate>> {
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archived rows must be found so the preview reports them as archived instead of not found
     where: { [dbField]: { in: identifierValues }, organizationId },
     include: {
       category: { select: { name: true } },
@@ -141,9 +143,8 @@ export async function detectNewEntities(
       } else if (col.internalKey === "location") {
         locationNames.add(change.newValue.trim());
       } else if (col.internalKey === "tags") {
-        for (const tag of change.newValue.split(",")) {
-          const t = tag.trim();
-          if (t) tagNames.add(t);
+        for (const tag of decodeCsvListCell(change.newValue)) {
+          tagNames.add(tag);
         }
       }
     }

@@ -1,7 +1,14 @@
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { claimQrCode, parseQrCodesFromImportData } from "./service.server";
+import {
+  claimImportQrCodes,
+  claimQrCode,
+  getQrByAssetId,
+  getQrByKitId,
+  parseQrCodesFromImportData,
+  validateImportQrCodes,
+} from "./service.server";
 
 // why: parseQrCodesFromImportData reads QR rows from the database to detect
 // invalid imports, and claimQrCode reads (findUniqueOrThrow via getQr) then
@@ -11,6 +18,7 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     qr: {
       findMany: vitest.fn().mockResolvedValue([]),
+      findFirst: vitest.fn().mockResolvedValue(null),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findUniqueOrThrow: vitest.fn(),
       update: vitest.fn(),
@@ -93,6 +101,32 @@ describe("parseQrCodesFromImportData — import validation errors", () => {
 
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+describe("getQrByAssetId / getQrByKitId", () => {
+  it("only finds an asset's code that is unclaimed or claimed by this workspace", async () => {
+    await getQrByAssetId({ assetId: "asset-1", organizationId });
+
+    expect(db.qr.findFirst).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
+    });
+  });
+
+  it("only finds a kit's code that is unclaimed or claimed by this workspace", async () => {
+    await getQrByKitId({ kitId: "kit-1", organizationId });
+
+    expect(db.qr.findFirst).toHaveBeenCalledWith({
+      where: {
+        kitId: "kit-1",
+        kit: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
+    });
   });
 });
 
@@ -191,5 +225,99 @@ describe("claimQrCode", () => {
         data: { organizationId, userId },
       })
     );
+  });
+});
+
+describe("validateImportQrCodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.qr.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+  });
+
+  it("never writes", async () => {
+    (db.qr.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "QR1", organizationId: null, assetId: null, kitId: null },
+    ]);
+
+    const result = await validateImportQrCodes({
+      data: [{ key: "k1", title: "A", qrId: "QR1" }] as Parameters<
+        typeof validateImportQrCodes
+      >[0]["data"],
+      organizationId,
+    });
+
+    expect(result).toEqual([{ key: "k1", title: "A", qrId: "QR1" }]);
+    expect(db.qr.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws 400 listing a code linked to another asset", async () => {
+    (db.qr.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "QR1", organizationId, assetId: "a9", kitId: null },
+    ]);
+
+    await expect(
+      validateImportQrCodes({
+        data: [{ key: "k1", title: "A", qrId: "QR1" }] as Parameters<
+          typeof validateImportQrCodes
+        >[0]["data"],
+        organizationId,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: expect.objectContaining({
+        linkedCodes: expect.any(Array),
+      }),
+    });
+  });
+});
+
+describe("claimImportQrCodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("claims only codes without a workspace", async () => {
+    await claimImportQrCodes({
+      qrIds: ["QR1", "QR2"],
+      organizationId,
+      userId,
+    });
+
+    expect(db.qr.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["QR1", "QR2"] }, organizationId: null },
+      data: { organizationId, userId },
+    });
+  });
+
+  it("does nothing for an empty list", async () => {
+    await claimImportQrCodes({ qrIds: [], organizationId, userId });
+
+    expect(db.qr.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseQrCodesFromImportData claiming", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("claims the validated codes after validation passes", async () => {
+    (db.qr.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "QR1", organizationId: null, assetId: null, kitId: null },
+    ]);
+
+    const result = await parseQrCodesFromImportData({
+      data: [{ key: "k1", title: "A", qrId: "QR1" }] as Parameters<
+        typeof parseQrCodesFromImportData
+      >[0]["data"],
+      userId,
+      organizationId,
+    });
+
+    expect(result).toEqual([{ key: "k1", title: "A", qrId: "QR1" }]);
+    expect(db.qr.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["QR1"] }, organizationId: null },
+      data: { organizationId, userId },
+    });
   });
 });

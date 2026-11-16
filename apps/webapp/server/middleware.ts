@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
@@ -56,6 +57,75 @@ export function ensureHostHeaders() {
 }
 
 /**
+ * Make the request URL carry the scheme the browser used.
+ *
+ * Fly and most self-hosted setups terminate HTTPS at a proxy and forward plain
+ * HTTP to Node, so the request URL is `http://` while the browser's `Origin`
+ * header is `https://`. React Router's action CSRF check compares the full
+ * origin, scheme included, so without this every form submission (login,
+ * logout, every action) is rejected with a 400.
+ *
+ * The proxy reports the original scheme in `X-Forwarded-Proto`. Only the scheme
+ * is taken from it: the host is untouched, so a submission from another site
+ * still fails the origin check, and a client that sends its own value can only
+ * make its own request fail. Read `X-Forwarded-Proto`, not `Fly-Forwarded-Proto`:
+ * behind Cloudflare, Fly's header describes the Cloudflare-to-Fly hop rather
+ * than the browser's scheme, and `isHttpsRequest` in `security-headers.ts`
+ * reads the same header. Must run before React Router handles the request, in
+ * every environment.
+ */
+export function applyForwardedProto() {
+  return createMiddleware(async (c, next) => {
+    // A proxy chain may send a list ("https, http"); the first entry is the
+    // scheme the client used.
+    const forwardedProto = c.req
+      .header("x-forwarded-proto")
+      ?.split(",")[0]
+      ?.trim()
+      .toLowerCase();
+
+    if (forwardedProto !== "https" && forwardedProto !== "http") {
+      return next();
+    }
+
+    const originalRequest = c.req.raw;
+    const url = new URL(originalRequest.url);
+    if (url.protocol === `${forwardedProto}:`) {
+      return next();
+    }
+
+    url.protocol = `${forwardedProto}:`;
+    c.req.raw = new Request(url, {
+      method: originalRequest.method,
+      headers: originalRequest.headers,
+      body: originalRequest.body,
+      signal: originalRequest.signal,
+      // @ts-expect-error - duplex is required for streaming bodies
+      duplex: "half",
+    });
+
+    return next();
+  });
+}
+
+/**
+ * Context flag the refresh middleware sets when it ends the request's session
+ * because the refresh failed, so `protect` can tell a member who was just
+ * logged out from a visitor who never signed in.
+ */
+const SESSION_ENDED_KEY = "shelf.sessionEnded";
+
+/**
+ * Appended to the login URL when a member's session ended (revoked by an
+ * admin, expired or failed to refresh). The login page reads it to say they
+ * were logged out. It travels in the URL rather than as a flashed session
+ * message because the flash is read, and so consumed, by whichever request
+ * reaches the app first, which during a client-side redirect is usually the
+ * route-manifest request rather than the login page.
+ */
+const LOGGED_OUT_PARAM = "&logged_out=1";
+
+/**
  * Protected routes middleware
  *
  * @param options.publicPath - The public paths
@@ -101,14 +171,26 @@ export function protect({
         "This content is only available to logged in users."
       );
 
-      return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
+      // The refresh middleware ended this session on the same request, so the
+      // member was signed in a moment ago and is told they were logged out
+      const loggedOut = c.get(SESSION_ENDED_KEY) === true;
+
+      return redirectToLogin(
+        c,
+        `${onFailRedirectTo}?redirectTo=${pathToCheck}${
+          loggedOut ? LOGGED_OUT_PARAM : ""
+        }`
+      );
     }
-    const isValidSession = await validateSession(auth.refreshToken);
+    const isValidSession = await validateSession(
+      auth.refreshToken,
+      auth.userId
+    );
 
     if (!isValidSession) {
       session.flash(
         "errorMessage",
-        "Session might have expired. Please log in again."
+        "You have been logged out. Please log in again."
       );
       session.unset(authSessionKey);
       Logger.error(
@@ -119,10 +201,37 @@ export function protect({
           shouldBeCaptured: false,
         })
       );
-      return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
+      return redirectToLogin(
+        c,
+        `${onFailRedirectTo}?redirectTo=${pathToCheck}${LOGGED_OUT_PARAM}`
+      );
     }
     return next();
   });
+}
+
+/**
+ * Sends a signed-out request to the login page.
+ *
+ * A client-side navigation is a single-fetch `*.data` request, and `fetch`
+ * follows a plain 302 on its own: it would land on the HTML login page, which
+ * React Router cannot decode, so the member would see the error boundary. For
+ * those requests answer with the single-fetch redirect React Router reads
+ * (204 + `X-Remix-Redirect`); it then navigates to the login page itself.
+ * Document requests get a plain 302.
+ *
+ * @param c - The request context
+ * @param location - Where to send the member, already carrying `redirectTo`
+ * @returns The redirect response
+ */
+function redirectToLogin(c: Context, location: string) {
+  if (c.req.path.endsWith(".data")) {
+    return c.body(null, 204, {
+      "X-Remix-Redirect": location,
+      "X-Remix-Status": "302",
+    });
+  }
+  return c.redirect(location);
 }
 
 /** Match against pre-compiled regexes (used by protect middleware) */
@@ -172,6 +281,7 @@ export function refreshSession() {
       );
 
       session.unset(authSessionKey);
+      c.set(SESSION_ENDED_KEY, true);
     }
 
     return next();

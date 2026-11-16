@@ -1,8 +1,14 @@
 /**
- * Route action tests for `/audits/:auditId` — `edit-audit` intent.
+ * Route action tests for `/audits/:auditId`, `edit-audit` intent only.
  *
- * The service tests cover the assignee set-diff; these cover the wiring the
- * service cannot see:
+ * `audit:update` is held by every role that runs audits, so it cannot decide
+ * who may change an audit's details or reassign it. These tests pin the gate
+ * the route applies on top: only callers whose access manages others' audits
+ * reach `updateAuditSession`. A direct POST from anyone else is refused before
+ * the service runs, whatever the actions menu offered them.
+ *
+ * The service tests cover the assignee set-diff; these also cover the wiring
+ * the service cannot see:
  *   - every `assignees[i]` picker blob is resolved to a user id and forwarded
  *     as the FULL desired set (an empty selection means "remove everyone");
  *   - the pre-multi-assign singular `assignee` field is still honoured, so a
@@ -10,24 +16,22 @@
  *   - only the people the service reports as ADDED are emailed, never the
  *     editor themselves.
  *
- * Lives under `test/routes-tests/` rather than next to the route itself
- * because React Router's flat-routes scanner auto-registers any `*.ts` /
- * `*.tsx` file inside `app/routes/` as a route module.
- *
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.tsx}
  * @see {@link file://../../../app/modules/audit/assignee-form.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createActionArgs } from "@mocks/remix";
 
-import { action } from "~/routes/_layout+/audits.$auditId";
 import { sendAuditAssignedEmails } from "~/modules/audit/assignment-emails.server";
 import { updateAuditSession } from "~/modules/audit/service.server";
+import { action } from "~/routes/_layout+/audits.$auditId";
 import { requirePermission } from "~/utils/roles.server";
 
 // @vitest-environment node
 
-// why: these tests assert the route's wiring (parsing, guards, who gets
+// why: these tests assert the route's gate and wiring (parsing, who gets
 // emailed), not the set diff itself, which service.server.test.ts covers; the
 // real service would also open a database transaction.
 vi.mock("~/modules/audit/service.server", () => ({
@@ -45,20 +49,20 @@ vi.mock("~/modules/audit/assignment-emails.server", () => ({
   sendAuditAssignedEmails: vi.fn(),
 }));
 
-// why: the route imports the completion helper for a different intent; the
-// stub keeps its storage and image imports out of the node test graph.
+// why: the route imports completeAuditWithImages for a different intent;
+// stub the module so the import graph loads under the node environment.
 vi.mock("~/modules/audit/complete-audit-with-images.server", () => ({
   completeAuditWithImages: vi.fn(),
 }));
 
-// why: permission resolution is driven per test (admin vs BASE) without a
-// session or database.
+// why: permission resolution is mocked so each test can hand the route the
+// access of the role under test.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-// why: the real db.server calls db.$connect() at module load outside of
-// production. Nothing here touches the DB directly.
+// why: the real db.server connects at module load outside production; no test
+// here reaches the database.
 vi.mock("~/database/db.server", () => ({
   db: {
     auditScan: { count: vi.fn() },
@@ -75,37 +79,44 @@ const mockContext = {
   errorMessage: null,
 } as any;
 
+/** A picker blob for one team member, as the assignee selector submits it. */
 const blob = (userId: string) =>
   JSON.stringify({ id: `tm-${userId}`, name: userId, userId });
 
+/** A POST for the edit-audit intent with the given extra form fields. */
 function makeEditRequest(fields: Record<string, string> = {}): Request {
   return new Request("http://localhost/audits/audit-1", {
     method: "POST",
     body: new URLSearchParams({
       intent: "edit-audit",
-      name: "Q4 audit",
+      name: "Renamed audit",
       ...fields,
     }),
   });
 }
 
-async function runEdit(fields: Record<string, string> = {}) {
-  return action(
+/** Runs the action with the given role's access and form fields. */
+async function editAs(
+  role: OrganizationRoles,
+  fields: Record<string, string> = {}
+) {
+  vi.mocked(requirePermission).mockResolvedValue({
+    organizationId: "org-1",
+    access: accessFor([role]),
+  } as any);
+
+  return (await action(
     createActionArgs({
       request: makeEditRequest(fields),
       params: { auditId: "audit-1" },
       context: mockContext,
     })
-  );
+  )) as any;
 }
 
-describe("audits.$auditId action — edit-audit intent (assignees)", () => {
+describe("audits.$auditId action, edit-audit intent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      isSelfServiceOrBase: false,
-    } as any);
     vi.mocked(updateAuditSession).mockResolvedValue({
       audit: { id: "audit-1" },
       addedAssigneeIds: [],
@@ -113,23 +124,38 @@ describe("audits.$auditId action — edit-audit intent (assignees)", () => {
     } as any);
   });
 
-  it("refuses a BASE/SELF_SERVICE caller with 403 before touching the service", async () => {
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      isSelfServiceOrBase: true,
-    } as any);
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s with a 403 and never reaches the service",
+    async (role) => {
+      const response = await editAs(role, { "assignees[0]": blob("user-1") });
 
-    const response = await runEdit({ "assignees[0]": blob("user-1") });
+      expect(response.init?.status).toBe(403);
+      expect(updateAuditSession).not.toHaveBeenCalled();
+      expect(sendAuditAssignedEmails).not.toHaveBeenCalled();
+    }
+  );
 
-    expect((response as any).init?.status ?? (response as any).status).toBe(
-      403
-    );
-    expect(updateAuditSession).not.toHaveBeenCalled();
-    expect(sendAuditAssignedEmails).not.toHaveBeenCalled();
-  });
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "lets %s edit and reassign the audit",
+    async (role) => {
+      await editAs(role, { "assignees[0]": blob("user-1") });
+
+      expect(updateAuditSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "audit-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          data: expect.objectContaining({
+            name: "Renamed audit",
+            assigneeUserIds: ["user-1"],
+          }),
+        })
+      );
+    }
+  );
 
   it("forwards the full selected set of user ids, deduplicated", async () => {
-    await runEdit({
+    await editAs(OrganizationRoles.ADMIN, {
       "assignees[0]": blob("user-2"),
       "assignees[1]": blob("user-3"),
       "assignees[2]": blob("user-2"),
@@ -137,11 +163,7 @@ describe("audits.$auditId action — edit-audit intent (assignees)", () => {
 
     expect(updateAuditSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "audit-1",
-        organizationId: "org-1",
-        userId: "user-1",
         data: expect.objectContaining({
-          name: "Q4 audit",
           assigneeUserIds: ["user-2", "user-3"],
         }),
       })
@@ -149,7 +171,7 @@ describe("audits.$auditId action — edit-audit intent (assignees)", () => {
   });
 
   it("treats an empty selection as 'remove everyone'", async () => {
-    await runEdit();
+    await editAs(OrganizationRoles.ADMIN);
 
     expect(updateAuditSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -159,7 +181,7 @@ describe("audits.$auditId action — edit-audit intent (assignees)", () => {
   });
 
   it("still honours the singular pre-multi-assign field", async () => {
-    await runEdit({ assignee: blob("user-7") });
+    await editAs(OrganizationRoles.ADMIN, { assignee: blob("user-7") });
 
     expect(updateAuditSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -175,7 +197,7 @@ describe("audits.$auditId action — edit-audit intent (assignees)", () => {
       removedAssigneeIds: ["user-9"],
     } as any);
 
-    await runEdit({
+    await editAs(OrganizationRoles.ADMIN, {
       "assignees[0]": blob("user-2"),
       "assignees[1]": blob("user-3"),
       "assignees[2]": blob("user-1"),

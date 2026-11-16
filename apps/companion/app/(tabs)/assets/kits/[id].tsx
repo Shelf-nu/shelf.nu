@@ -19,17 +19,14 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Modal,
-  Platform,
-  Dimensions,
 } from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { api, getApiBaseUrl } from "@/lib/api";
-import type { KitDetail } from "@/lib/api/types";
+import { api } from "@/lib/api";
+import type { KitDetail, KitDetailAsset } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { useAssetScreenNavigation } from "@/lib/asset-host-stack";
 import {
   fontSize,
   spacing,
@@ -42,25 +39,19 @@ import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
+import { ImageZoomModal } from "@/components/shared/image-zoom-modal";
+import { CodeSection } from "@/components/shared/code-section";
+import { LinkedParagraph } from "@/components/links/linked-paragraph";
 import { KitActions } from "@/components/kit-detail/kit-actions";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { useKitActions } from "@/hooks/use-kit-actions";
 import { userHasPermission } from "@/lib/permissions";
-
-// Lazy-loaded: ~50KB library only needed when viewing the kit's QR code.
-let QRCode: typeof import("react-native-qrcode-svg").default | null = null;
-try {
-  // why: dynamic require keeps react-native-qrcode-svg out of the initial JS
-  // bundle for screens that don't render a QR code.
-  QRCode =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("react-native-qrcode-svg").default ??
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("react-native-qrcode-svg");
-} catch {
-  QRCode = null;
-}
+import {
+  assetBadgeStatus,
+  isArchivedAsset,
+  kitAssignCustodyBlockedReason,
+} from "@/lib/archived-assets";
 
 /**
  * Kit detail screen, resolved from the `id` route param scoped to the current
@@ -71,6 +62,9 @@ try {
 export default function KitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
+  // Asset rows open in whichever stack mounts this screen (the Assets tab, or
+  // the Audits stack when reached from an audit). See lib/asset-routes.ts.
+  const assetNavigation = useAssetScreenNavigation();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
@@ -79,11 +73,13 @@ export default function KitDetailScreen() {
   const roles = currentOrg?.roles;
   const canCustody = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "kit",
     action: "custody",
   });
   const canUpdate = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "kit",
     action: "update",
   });
@@ -147,6 +143,11 @@ export default function KitDetailScreen() {
         text: colors.muted,
       }
     : null;
+
+  // Archived members are out of service: listed apart, counted nowhere.
+  const members = kit?.assets ?? [];
+  const activeMembers = members.filter((asset) => !isArchivedAsset(asset));
+  const archivedMembers = members.filter(isArchivedAsset);
 
   return (
     <View style={styles.container}>
@@ -226,7 +227,11 @@ export default function KitDetailScreen() {
           </View>
 
           {kit.description ? (
-            <Text style={styles.description}>{kit.description}</Text>
+            <LinkedParagraph
+              text={kit.description}
+              style={styles.description}
+              containerStyle={styles.descriptionBlock}
+            />
           ) : null}
 
           {/* ── Actions — custody + location ───────────── */}
@@ -238,6 +243,7 @@ export default function KitDetailScreen() {
             isActionLoading={isActionLoading}
             canCustody={canCustody}
             canUpdate={canUpdate}
+            assignBlockedReason={kitAssignCustodyBlockedReason(members)}
           />
 
           {/* ── Details ────────────────────────────────── */}
@@ -290,7 +296,12 @@ export default function KitDetailScreen() {
             <InfoRow
               icon="cube-outline"
               label="Assets"
-              value={String(kit.assets.length)}
+              value={String(activeMembers.length)}
+              hint={
+                archivedMembers.length > 0
+                  ? `${archivedMembers.length} archived, not counted`
+                  : undefined
+              }
             />
             <InfoRow
               icon="calendar-outline"
@@ -304,152 +315,72 @@ export default function KitDetailScreen() {
             />
           </View>
 
-          {/* ── QR Code ────────────────────────────────── */}
-          {kit.qrCodes.length > 0 ? (
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>QR Code</Text>
-              <View style={styles.qrCard}>
-                {QRCode ? (
-                  <QRCode
-                    value={`${getApiBaseUrl()}/qr/${kit.qrCodes[0].id}`}
-                    size={160}
-                    backgroundColor={colors.white}
-                    color={colors.foreground}
-                  />
-                ) : (
-                  <View style={styles.qrPlaceholder}>
-                    <Ionicons
-                      name="qr-code-outline"
-                      size={64}
-                      color={colors.muted}
-                    />
-                  </View>
-                )}
-                <Text style={styles.qrIdText} selectable numberOfLines={1}>
-                  {kit.qrCodes[0].id}
-                </Text>
-              </View>
-            </View>
-          ) : null}
+          {/* ── Codes ──────────────────────────────────── */}
+          {/* Same block the asset screen uses: leads with the workspace's
+              preferred code, resolved server-side. A workspace preferring SAM
+              IDs resolves to the QR here, because kits carry no SAM ID. */}
+          <CodeSection
+            displayCode={kit.displayCode}
+            barcodes={kit.barcodes}
+            qrCodes={kit.qrCodes}
+          />
 
           {/* ── Assets ─────────────────────────────────── */}
+          {/* Members still in service, then the archived ones in their own
+              group: an archived member stays in the kit but counts toward
+              nothing, and the kit is booked and handed over without it. */}
           <View style={styles.sectionContainer}>
             <Text style={styles.sectionTitle}>
-              Assets ({kit.assets.length})
+              Assets ({activeMembers.length})
             </Text>
-            {kit.assets.length === 0 ? (
-              <Text style={styles.stateText}>This kit has no assets yet.</Text>
+            {activeMembers.length === 0 ? (
+              <Text style={styles.stateText}>
+                {archivedMembers.length > 0
+                  ? "Every asset in this kit is archived."
+                  : "This kit has no assets yet."}
+              </Text>
             ) : (
               <View style={styles.assetList}>
-                {kit.assets.map((asset) => {
-                  const assetBadge = statusBadge[asset.status] ?? {
-                    bg: colors.backgroundTertiary,
-                    text: colors.muted,
-                  };
-                  // Only show the "×N" kit-quantity line when we have a
-                  // formatted value — never a bare "×". Mirrors the assets
-                  // list/detail screens, which render nothing when
-                  // formatQuantity returns null (missing/non-finite qty).
-                  const kitQuantityLabel = isQuantityTracked(asset)
-                    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
-                    : null;
-                  return (
-                    <TouchableOpacity
-                      key={asset.id}
-                      style={styles.assetRow}
-                      onPress={() =>
-                        pushIntoTab(
-                          "/(tabs)/assets",
-                          `/(tabs)/assets/${asset.id}`
-                        )
-                      }
-                      activeOpacity={0.7}
-                      accessibilityLabel={`View asset ${asset.title}`}
-                      accessibilityRole="button"
-                    >
-                      {asset.thumbnailImage || asset.mainImage ? (
-                        <Image
-                          source={{
-                            uri: asset.thumbnailImage || asset.mainImage!,
-                          }}
-                          style={styles.assetImage}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.assetImage,
-                            styles.assetImagePlaceholder,
-                          ]}
-                        >
-                          <Ionicons
-                            name="cube-outline"
-                            size={16}
-                            color={colors.muted}
-                          />
-                        </View>
-                      )}
-                      <View style={styles.assetInfo}>
-                        <Text style={styles.assetTitle} numberOfLines={1}>
-                          {asset.title}
-                        </Text>
-                        {kitQuantityLabel ? (
-                          <Text style={styles.assetMeta} numberOfLines={1}>
-                            {`×${kitQuantityLabel}`}
-                          </Text>
-                        ) : null}
-                        <Text style={styles.assetMeta} numberOfLines={1}>
-                          {asset.category?.name || "Uncategorized"}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          { backgroundColor: assetBadge.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusText,
-                            { color: assetBadge.text },
-                          ]}
-                        >
-                          {formatStatus(asset.status)}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                {activeMembers.map((asset) => (
+                  <KitMemberRow
+                    key={asset.id}
+                    asset={asset}
+                    onOpen={assetNavigation.openAsset}
+                  />
+                ))}
               </View>
             )}
           </View>
+          {archivedMembers.length > 0 ? (
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>
+                Archived ({archivedMembers.length})
+              </Text>
+              <Text style={styles.archivedNote}>
+                Archived assets stay in the kit but are not counted, booked or
+                put in custody with it.
+              </Text>
+              <View style={styles.assetList}>
+                {archivedMembers.map((asset) => (
+                  <KitMemberRow
+                    key={asset.id}
+                    asset={asset}
+                    onOpen={assetNavigation.openAsset}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : null}
         </ScrollView>
       )}
 
-      {/* ── Image zoom modal ─────────────────────────────── */}
+      {/* ── Image zoom ─────────────────────────────── */}
       {kit?.image ? (
-        <Modal
+        <ImageZoomModal
+          uri={kit.image}
           visible={showImageZoom}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowImageZoom(false)}
-        >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
-            <TouchableOpacity
-              style={styles.zoomCloseBtn}
-              onPress={() => setShowImageZoom(false)}
-              accessibilityLabel="Close image viewer"
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: kit.image }}
-              style={styles.zoomImage}
-              contentFit="contain"
-            />
-          </View>
-        </Modal>
+          onClose={() => setShowImageZoom(false)}
+        />
       ) : null}
 
       {/* ── Custody + Location pickers ───────────────────── */}
@@ -477,6 +408,79 @@ export default function KitDetailScreen() {
         </>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * One kit member row: photo, title, kit units and category, and its status
+ * badge ("Archived" for an archived member). Tapping opens the asset.
+ *
+ * @param props.asset - The kit member
+ * @param props.onOpen - Opens the asset's screen in the current stack
+ * @returns The row element
+ */
+function KitMemberRow({
+  asset,
+  onOpen,
+}: {
+  asset: KitDetailAsset;
+  onOpen: (assetId: string) => void;
+}) {
+  const { colors, statusBadge } = useTheme();
+  const styles = useStyles();
+  const memberStatus = assetBadgeStatus(asset);
+  const assetBadge = statusBadge[memberStatus] ?? {
+    bg: colors.backgroundTertiary,
+    text: colors.muted,
+  };
+  // Only show the "×N" kit-quantity line when we have a formatted value,
+  // never a bare "×". Mirrors the assets list/detail screens, which render
+  // nothing when formatQuantity returns null (missing/non-finite qty).
+  const kitQuantityLabel = isQuantityTracked(asset)
+    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
+    : null;
+  return (
+    <TouchableOpacity
+      style={styles.assetRow}
+      onPress={() => onOpen(asset.id)}
+      activeOpacity={0.7}
+      accessibilityLabel={`View asset ${asset.title}${
+        isArchivedAsset(asset) ? ", archived" : ""
+      }`}
+      accessibilityRole="button"
+    >
+      {asset.thumbnailImage || asset.mainImage ? (
+        <Image
+          source={{
+            uri: asset.thumbnailImage || asset.mainImage!,
+          }}
+          style={styles.assetImage}
+          contentFit="cover"
+        />
+      ) : (
+        <View style={[styles.assetImage, styles.assetImagePlaceholder]}>
+          <Ionicons name="cube-outline" size={16} color={colors.muted} />
+        </View>
+      )}
+      <View style={styles.assetInfo}>
+        <Text style={styles.assetTitle} numberOfLines={1}>
+          {asset.title}
+        </Text>
+        {kitQuantityLabel ? (
+          <Text style={styles.assetMeta} numberOfLines={1}>
+            {`×${kitQuantityLabel}`}
+          </Text>
+        ) : null}
+        <Text style={styles.assetMeta} numberOfLines={1}>
+          {asset.category?.name || "Uncategorized"}
+        </Text>
+      </View>
+      <View style={[styles.statusBadge, { backgroundColor: assetBadge.bg }]}>
+        <Text style={[styles.statusText, { color: assetBadge.text }]}>
+          {formatStatus(memberStatus)}
+        </Text>
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -520,6 +524,8 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  descriptionBlock: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
@@ -541,28 +547,6 @@ const useStyles = createStyles((colors, shadows) => ({
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: spacing.sm,
-  },
-  qrCard: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
-    ...shadows.sm,
-  },
-  qrPlaceholder: {
-    width: 160,
-    height: 160,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  qrIdText: {
-    fontSize: fontSize.xs,
-    color: colors.mutedLight,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   assetList: { gap: spacing.sm },
   assetRow: {
@@ -593,28 +577,6 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.muted,
   },
-  zoomOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomCloseBtn: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomImage: {
-    width: Dimensions.get("window").width,
-    height: Dimensions.get("window").height * 0.7,
-  },
   centered: {
     flex: 1,
     justifyContent: "center",
@@ -626,6 +588,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     color: colors.muted,
     textAlign: "center",
+  },
+  archivedNote: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+    marginBottom: spacing.sm,
   },
   retryButton: {
     backgroundColor: colors.primary,

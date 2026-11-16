@@ -1,14 +1,34 @@
 import type { ComponentProps, ReactElement } from "react";
-import { cloneElement, useCallback, useMemo, useState } from "react";
+import { cloneElement, lazy, useCallback, useMemo, useState } from "react";
 import type { Asset, Kit, BarcodeType } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
-import { CodePreview, type CodeType } from "./code-preview";
+import type { CodePreview, CodeType } from "./code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import { LazyLoadBoundary } from "../shared/lazy-load-boundary";
 import When from "../when/when";
+
+/* Lazy: the dialog sits on every row of the asset and kit indexes, but the
+ * preview pulls in barcode rendering, image export and the barcode scanner.
+ * The chunk loads when someone opens the dialog, which renders nothing while
+ * closed. */
+const LazyCodePreview = lazy(() =>
+  import("./code-preview").then((module) => ({ default: module.CodePreview }))
+);
+
+/** Placeholder while the codes or the preview chunk load. */
+function CodesLoading() {
+  return (
+    <div className="relative size-full animate-pulse bg-gray-200">
+      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-2">
+        <p>Fetching codes...</p>
+      </div>
+    </div>
+  );
+}
 
 type CodePreviewDialogProps = {
   className?: string;
@@ -118,31 +138,39 @@ export function CodePreviewDialog({
           >
             <div className="flex max-h-[calc(100%-4rem)] grow flex-col items-center justify-center border-y border-gray-200 bg-gray-50">
               <When truthy={isLoading}>
-                <div className="relative size-full animate-pulse bg-gray-200">
-                  <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-2">
-                    <p>Fetching codes...</p>
-                  </div>
-                </div>
+                <CodesLoading />
               </When>
               <When truthy={!!error}>
                 <p className="text-center text-error-500">{error}</p>
               </When>
-              <When truthy={!isLoading}>
-                <Card className="min-w-[360px] px-0">
-                  <CodePreview
-                    className="mb-0 flex size-full flex-col items-center justify-center border-0"
-                    item={codePreviewItem}
-                    qrObj={data?.qrObj}
-                    barcodes={barcodes}
-                    onCodeChange={handleCodeChange}
-                    selectedBarcodeId={selectedBarcodeId}
-                    onRefetchData={refetch}
-                    sequentialId={
-                      item.type === "asset" ? item.sequentialId : undefined
-                    }
-                    showShelfBranding={data?.showShelfBranding}
-                  />
-                </Card>
+              {/* No preview on a failed request: it would load the chunk to render
+                  nothing, and the error above already says what went wrong. */}
+              <When truthy={!isLoading && !error}>
+                <LazyLoadBoundary
+                  loading={<CodesLoading />}
+                  failed={
+                    <p className="text-center text-error-500">
+                      The code preview could not be loaded. Reload the page and
+                      try again.
+                    </p>
+                  }
+                >
+                  <Card className="min-w-[360px] px-0">
+                    <LazyCodePreview
+                      className="mb-0 flex size-full flex-col items-center justify-center border-0"
+                      item={codePreviewItem}
+                      qrObj={data?.qrObj}
+                      barcodes={barcodes}
+                      onCodeChange={handleCodeChange}
+                      selectedBarcodeId={selectedBarcodeId}
+                      onRefetchData={refetch}
+                      sequentialId={
+                        item.type === "asset" ? item.sequentialId : undefined
+                      }
+                      showShelfBranding={data?.showShelfBranding}
+                    />
+                  </Card>
+                </LazyLoadBoundary>
               </When>
             </div>
             <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">

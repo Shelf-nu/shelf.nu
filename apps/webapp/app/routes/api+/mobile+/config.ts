@@ -20,12 +20,15 @@
  */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { config } from "~/config/shelf.config";
+import { readCompanionVersion } from "~/utils/companion-version";
 import {
   INSTANCE_NAME,
+  LATEST_COMPANION_VERSION,
   MIN_COMPANION_VERSION,
   SUPABASE_ANON_PUBLIC,
   SUPABASE_URL,
 } from "~/utils/env";
+import { Logger } from "~/utils/logger";
 
 /**
  * Wire-contract version of the mobile API surface.
@@ -36,6 +39,28 @@ import {
  * fail with a clear message instead of a pile of 404s.
  */
 export const MOBILE_API_VERSION = 1;
+
+/** Env vars already warned about, so a bad value logs once per process. */
+const warnedInvalidEnv = new Set<string>();
+
+/**
+ * Reads a companion version env var, warning once when the app could not read
+ * it. The app ignores such a value anyway; serving null says so honestly.
+ *
+ * @param name - The env var's name, for the warning.
+ * @param value - Its raw value.
+ * @returns The version, or null when unset or unreadable.
+ */
+function companionVersionFromEnv(name: string, value: string): string | null {
+  const { version, invalid } = readCompanionVersion(value);
+  if (invalid && !warnedInvalidEnv.has(name)) {
+    warnedInvalidEnv.add(name);
+    Logger.warn(
+      `${name}="${value}" is not a version the companion app can read (expected e.g. "1.6.0"); serving null.`
+    );
+  }
+  return version;
+}
 
 /**
  * GET /api/mobile/config
@@ -54,7 +79,16 @@ export function loader(_args: LoaderFunctionArgs) {
     // shows a blocking update prompt when it is older than this. `mobileApiVersion`
     // guards the other direction (server too old for the app); the two are
     // independent because neither side can update the other.
-    minCompanionVersion: MIN_COMPANION_VERSION || null,
+    minCompanionVersion: companionVersionFromEnv(
+      "MIN_COMPANION_VERSION",
+      MIN_COMPANION_VERSION
+    ),
+    // Newest app version in the stores, or null for "no banner". An older app
+    // shows a dismissible "new version available" banner; it blocks nothing.
+    latestCompanionVersion: companionVersionFromEnv(
+      "LATEST_COMPANION_VERSION",
+      LATEST_COMPANION_VERSION
+    ),
     ssoEnabled: !config.disableSSO,
     // Password login is an organisation-level concern (SSO orgs disable it per
     // organisation), not an instance-level one, so this is always true today.

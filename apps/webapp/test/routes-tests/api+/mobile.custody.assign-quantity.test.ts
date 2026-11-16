@@ -12,6 +12,7 @@
  */
 import { action } from "~/routes/api+/mobile+/custody.assign-quantity";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -49,7 +50,15 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
 // why: external service — we mock the quantity checkout without hitting the
 // database (whole-module mock also keeps the heavy component import graph out)
 vitest.mock("~/modules/asset/service.server", () => ({
-  checkOutQuantity: vitest.fn().mockResolvedValue({ id: "asset-1" }),
+  checkOutQuantity: vitest.fn().mockResolvedValue({
+    asset: { id: "asset-1" },
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  }),
 }));
 
 // why: external service — we mock the team member lookup without hitting the database
@@ -71,6 +80,12 @@ vitest.mock("~/modules/note/service.server", () => ({
 // only assert WHEN the route calls it, never its internals
 vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
   checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: the limiter is in-memory and shared by every call in this file; the
+// route's rate limiting is not what these tests are about.
+vitest.mock("~/utils/rate-limit.server", () => ({
+  enforceUserRateLimit: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: keep pino/Sentry out of the test graph; the note-failure test asserts
@@ -160,10 +175,9 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     });
 
     (getTeamMember as any).mockResolvedValue({
@@ -181,7 +195,15 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
 
     (createNote as any).mockResolvedValue(undefined);
 
-    (checkOutQuantity as any).mockResolvedValue({ id: "asset-1" });
+    (checkOutQuantity as any).mockResolvedValue({
+      asset: { id: "asset-1" },
+      source: {
+        locationId: null,
+        locationName: null,
+        explicit: false,
+        multiSource: false,
+      },
+    });
 
     (checkAndNotifyLowStock as any).mockResolvedValue(undefined);
 
@@ -242,6 +264,59 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
     );
   });
 
+  it("forwards the source location, and null for the unplaced units", async () => {
+    for (const locationId of ["loc-studio", null]) {
+      const request = createAssignQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 2,
+        locationId,
+      });
+      await action(createActionArgs({ request }));
+      expect(checkOutQuantity).toHaveBeenLastCalledWith(
+        expect.objectContaining({ locationId })
+      );
+    }
+  });
+
+  it("leaves the source to the server when an older app sends none", async () => {
+    const request = createAssignQuantityRequest({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 2,
+    });
+    await action(createActionArgs({ request }));
+    expect(
+      (checkOutQuantity as any).mock.calls.at(-1)[0].locationId
+    ).toBeUndefined();
+  });
+
+  it("names the source location in the note for a pool with several sources", async () => {
+    (checkOutQuantity as any).mockResolvedValueOnce({
+      asset: { id: "asset-1" },
+      source: {
+        locationId: "loc-studio",
+        locationName: "Studio",
+        explicit: true,
+        multiSource: true,
+      },
+    });
+    const request = createAssignQuantityRequest({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 2,
+      locationId: "loc-studio",
+    });
+    await action(createActionArgs({ request }));
+    expect(createNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          'from {% link to="/locations/loc-studio" text="Studio" /%}'
+        ),
+      })
+    );
+  });
+
   it("surfaces the service's 400 when quantity exceeds availability", async () => {
     (checkOutQuantity as any).mockRejectedValue({
       message:
@@ -266,10 +341,9 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
 
   it("returns 403 when a SELF_SERVICE user assigns to someone else", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
       id: "tm-1",
@@ -296,10 +370,9 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
 
   it("allows a SELF_SERVICE user to assign to themselves", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
       id: "tm-1",

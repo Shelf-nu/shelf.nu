@@ -1,6 +1,6 @@
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   Asset,
-  AssetStatus,
   AssetType,
   Location,
   Prisma,
@@ -11,16 +11,20 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { db } from "~/database/db.server";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  wrapUserLinkForNote,
+  wrapLinkForNote,
+  wrapNameForNote,
+} from "~/utils/markdoc-wrappers";
 import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
-import type { ICustomFieldValueJson } from "./types";
+import type { ArchivedFilter, ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -201,7 +205,8 @@ export function getInitialPlacementNoteContent(asset: {
  *   lastName: "Doe",
  *   isFirstTimeSet: true
  * })
- * // Returns: "**John Doe** set **Serial Number** of **Laptop** to **SN123456**"
+ * // Returns: '{% link to="/settings/team/users/..." text="John Doe" /%} set
+ * //   {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
  *
  * // Updating existing value
  * getCustomFieldUpdateNoteContent({
@@ -212,7 +217,9 @@ export function getInitialPlacementNoteContent(asset: {
  *   lastName: "Smith",
  *   isFirstTimeSet: false
  * })
- * // Returns: "**Jane Smith** updated **Status** of **Camera** from **Active** to **Inactive**"
+ * // Returns: '{% link to="/settings/team/users/..." text="Jane Smith" /%} updated
+ * //   {% name text="Status" /%} from {% name text="Active" chips=true /%} to
+ * //   {% name text="Inactive" chips=true /%}.'
  */
 export function getCustomFieldUpdateNoteContent({
   customFieldName,
@@ -240,22 +247,23 @@ export function getCustomFieldUpdateNoteContent({
     firstName,
     lastName,
   });
-  // Custom field NAMES and VALUES are both free-form user input and render
-  // as literal text in this Markdoc note.
-  const fieldName = stripMarkdocDelimiters(customFieldName);
-  const safeNew = stripMarkdocDelimiters(newValue);
-  const safePrevious = stripMarkdocDelimiters(previousValue);
+  // Custom field NAMES and VALUES are both free-form user input, so each goes
+  // inside a `name` tag. Values show their web links as chips, like the asset
+  // page does; field names never do.
+  const fieldName = wrapNameForNote(customFieldName);
+  const safeNew = wrapNameForNote(newValue, { chips: true });
+  const safePrevious = wrapNameForNote(previousValue, { chips: true });
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${fieldName}** to **${safeNew}**.`;
+    message = `${userLink} set ${fieldName} to ${safeNew}.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${fieldName}** from **${safePrevious}** to **${safeNew}**.`;
+    message = `${userLink} updated ${fieldName} from ${safePrevious} to ${safeNew}.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${fieldName}** value **${safePrevious}**.`;
+    message = `${userLink} removed ${fieldName} value ${safePrevious}.`;
   }
 
   return message;
@@ -340,6 +348,76 @@ export function compareCustomFieldValues(
       // For text and other types, do deep comparison
       return JSON.stringify(oldValue) !== JSON.stringify(newValue);
   }
+}
+
+/** The custom-field writes an asset save has to make, split by kind. */
+export type CustomFieldValueWritePlan = {
+  /** Fields with a value and no stored row yet. */
+  toCreate: Array<{ customFieldId: string; value: ICustomFieldValueJson }>;
+  /** Stored rows whose value differs from the submitted one. */
+  toUpdate: Array<{ valueId: string; value: ICustomFieldValueJson }>;
+  /** Fields submitted empty that still have a stored row. */
+  toRemoveFieldIds: string[];
+};
+
+/**
+ * Decides which custom-field value rows an asset save must create, update or
+ * delete, given the rows already stored for the asset.
+ *
+ * The edit form submits every custom field, changed or not, and each nested
+ * update or delete costs Prisma a lookup query plus the write. So a field is
+ * only written when its stored value actually differs (compared in full, not
+ * just `raw`), and only deleted when a stored row exists.
+ *
+ * The schema does not enforce one row per (asset, custom field); the app keeps
+ * it to one by creating a row only when none is stored. If duplicates exist,
+ * every stored row that differs is updated, so they converge on the submitted
+ * value, and clearing the field deletes them all.
+ *
+ * @param existingValues - The asset's stored value rows
+ * @param formValues - The submitted values, keyed by custom field id (`id`);
+ *   a falsy `value` means the field was cleared
+ * @returns The writes to make, each list possibly empty
+ */
+export function planCustomFieldValueWrites(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: unknown;
+  }>,
+  formValues: Array<{ id: string; value: ICustomFieldValueJson | null }>
+): CustomFieldValueWritePlan {
+  const existingByFieldId = new Map<
+    string,
+    Array<(typeof existingValues)[number]>
+  >();
+  for (const row of existingValues) {
+    const rows = existingByFieldId.get(row.customFieldId) ?? [];
+    rows.push(row);
+    existingByFieldId.set(row.customFieldId, rows);
+  }
+  const plan: CustomFieldValueWritePlan = {
+    toCreate: [],
+    toUpdate: [],
+    toRemoveFieldIds: [],
+  };
+
+  for (const { id: customFieldId, value } of formValues) {
+    const existing = existingByFieldId.get(customFieldId) ?? [];
+    if (!value) {
+      if (existing.length > 0) plan.toRemoveFieldIds.push(customFieldId);
+    } else if (existing.length === 0) {
+      plan.toCreate.push({ customFieldId, value });
+    } else {
+      for (const row of existing) {
+        if (!_.isEqual(row.value, value)) {
+          plan.toUpdate.push({ valueId: row.id, value });
+        }
+      }
+    }
+  }
+
+  return plan;
 }
 
 /**
@@ -583,6 +661,70 @@ export const CurrentSearchParamsSchema = z.object({
   currentSearchParams: z.string().optional().nullable(),
 });
 
+// Defined in `./types` so `query.server.ts` can share it without an import
+// cycle (this module already imports from there); re-exported for callers.
+export type { ArchivedFilter } from "./types";
+
+/**
+ * Reads the `archived` view dimension from URL search params. Defaults to
+ * `active` so every list hides archived assets unless explicitly asked.
+ *
+ * @param searchParams - The request's search params.
+ * @returns The resolved {@link ArchivedFilter}.
+ */
+export function getArchivedFilterFromParams(
+  searchParams: URLSearchParams
+): ArchivedFilter {
+  const value = searchParams.get("archived");
+  if (value === "archived" || value === "all") {
+    return value;
+  }
+  return "active";
+}
+
+/**
+ * Adds one filter group to a Prisma asset `where` clause with AND semantics.
+ * Mutates the passed `where`.
+ *
+ * Every list filter (search, category, tag, location, custodian) is one group.
+ * The options inside a group combine with OR ("untagged" or tag X), and groups
+ * combine with AND, so adding a filter can only narrow the list. Writing a
+ * group to the shared `where.OR` instead would merge its options with every
+ * other group's, and a tag would then widen a search rather than narrow it.
+ *
+ * @param where - The Prisma asset where clause to narrow.
+ * @param clause - The filter group to require.
+ */
+export function andAssetWhere(
+  where: Prisma.AssetWhereInput,
+  clause: Prisma.AssetWhereInput
+): void {
+  where.AND = [
+    ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+    clause,
+  ];
+}
+
+/**
+ * Applies an {@link ArchivedFilter} to a Prisma asset `where` clause.
+ * Mutates and returns the passed `where` for chaining.
+ *
+ * @param where - The Prisma asset where clause to narrow.
+ * @param archivedFilter - The resolved view dimension.
+ */
+export function applyArchivedFilter(
+  where: Prisma.AssetWhereInput,
+  archivedFilter: ArchivedFilter
+): Prisma.AssetWhereInput {
+  if (archivedFilter === "active") {
+    where.archivedAt = null;
+  } else if (archivedFilter === "archived") {
+    where.archivedAt = { not: null };
+  }
+  // "all" → leave the archived dimension unconstrained.
+  return where;
+}
+
 /**
  * Which custodian ids a caller may filter a "select all" query by.
  *
@@ -601,36 +743,88 @@ export type AllowedCustodianFilterIds = string[] | "all";
  * `"all"` passes them through. Otherwise only ids on the list survive, and a
  * request that asked ONLY for others collapses to a single unmatchable id.
  *
- * That id alone is NOT sufficient: it lands in `where.OR`, where a sibling
- * branch (`uncategorized` / `untagged` / `without-location`) can still match.
- * `getAssetsWhereInput` therefore also AND-s an unsatisfiable predicate when it
- * sees the sentinel — see the note at that call site. Dropping the filter
+ * `getAssetsWhereInput` also AND-s a predicate nothing satisfies when it sees
+ * that id, so the refusal holds regardless of how the custodian group is
+ * built (see the note at that call site). Dropping the filter
  * instead of refusing it would widen the query to every row, which is the
  * opposite of what a refusal should do.
  */
-function applyCustodianAllowList(
+export function applyCustodianAllowList(
   requestedIds: string[],
   allowedTeamMemberIds: AllowedCustodianFilterIds
 ): string[] {
+  /**
+   * A blank value is not a selection. `?teamMember=` arrives as `[""]`, from a
+   * cleared filter or a stale link, and it has to fall through to "no filter":
+   * carried forward it becomes an unmatchable id and answers "nothing found"
+   * where the caller asked for no restriction at all. Dropping it before the
+   * count below also keeps it out of the refusal branch, since asking for nobody
+   * is not asking after someone else's custody.
+   */
+  const requested = requestedIds.filter((id) => id.trim() !== "");
+
   if (allowedTeamMemberIds === "all") {
-    return requestedIds;
+    return requested;
   }
 
   const allowed = new Set(allowedTeamMemberIds);
-  const kept = requestedIds.filter((id) => allowed.has(id));
+  const kept = requested.filter((id) => allowed.has(id));
 
-  return requestedIds.length > 0 && kept.length === 0
+  return requested.length > 0 && kept.length === 0
     ? [CUSTODY_FILTER_REFUSED]
     : kept;
 }
 
+/**
+ * Low-stock fragment for the simple list: QUANTITY_TRACKED assets whose TOTAL
+ * quantity is at or below their minimum.
+ *
+ * Deliberately not the advanced index's `lowStockOnly` rule, which compares
+ * Free now (total minus custody, kits and units out) and needs the SQL pool
+ * aggregate this Prisma query cannot express. The two lists can therefore
+ * disagree on an asset with units held or out; the low-stock email follows
+ * the advanced rule. A function, not a constant, because the field reference
+ * comes from the live client.
+ */
+export function buildLowStockWhere(): Prisma.AssetWhereInput {
+  return {
+    type: "QUANTITY_TRACKED",
+    minQuantity: { not: null },
+    quantity: { lte: db.asset.fields.minQuantity },
+  };
+}
+
+/**
+ * Prisma `where` clause for "select all" on a location's assets tab, built
+ * from a serialized list query string (search by title, status, category,
+ * tag, location, custodian), always scoped to the organization.
+ *
+ * Lists served by `getAssets` (the asset index and the kit, location and
+ * booking pickers) do not use this: their select-all runs the list's own query
+ * through `getAssetListWhereForSelectAll` in `list-where.server.ts`.
+ *
+ * @returns The clause; just `{ organizationId }` when there is no query string
+ */
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
   allowedTeamMemberIds,
+  locationIdsOverride,
+  honorArchivedView = false,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Location ids the clause matches, in place of the `location` values in
+   * `currentSearchParams`. Omitted, the URL's own values are matched exactly.
+   *
+   * For surfaces whose visible list widens the ticked locations (to include
+   * their child locations): pass the same resolved set the list used, so
+   * "select all" acts on exactly the rows the user was shown.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: string[];
   /**
    * Required, with no default, so every call site states an answer.
    *
@@ -641,27 +835,54 @@ export function getAssetsWhereInput({
    * which a BASE user can reach with `qr: read`.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Apply the `?archived=` view (issue #382). Off by default: the param is raw
+   * URL input, so a "select all" caller gets active assets unless it opts in
+   * for a member allowed to see archived ones. See
+   * `resolveAssetIdsForBulkOperation`.
+   */
+  honorArchivedView?: boolean;
 }) {
   const where: Prisma.AssetWhereInput = { organizationId };
 
   if (!currentSearchParams) {
+    // No params at all means the default "active" view — hide archived assets.
+    applyArchivedFilter(where, "active");
     return where;
   }
 
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
-  const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
+  // Active/Archived/All dimension: active unless the caller opted in.
+  applyArchivedFilter(
+    where,
+    honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
+  );
+
+  const { categoriesIds, tagsIds, search } = paramsValues;
+  const locationIds = locationIdsOverride ?? paramsValues.locationIds;
 
   const teamMemberIds = applyCustodianAllowList(
     paramsValues.teamMemberIds ?? [],
     allowedTeamMemberIds
   );
 
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
+  /**
+   * Only a real `AssetStatus` narrows the list. Anything else (`ALL`, or
+   * advanced-mode syntax such as `is:AVAILABLE` carried in a stale URL) is
+   * ignored: Prisma rejects an unknown enum value and the request would fail.
+   */
+  const statusParam = searchParams.get("status");
+  const status = (Object.values(AssetStatus) as string[]).includes(
+    statusParam ?? ""
+  )
+    ? (statusParam as AssetStatus)
+    : null;
+
+  if (searchParams.get("lowStockOnly") === "true") {
+    andAssetWhere(where, buildLowStockWhere());
+  }
 
   if (search) {
     where.title = {
@@ -676,15 +897,8 @@ export function getAssetsWhereInput({
     // units, so AVAILABLE filter must include them.
     if (status === "AVAILABLE") {
       // QT-aware fragment shared with getAssets and the mobile assets
-      // endpoint — see buildAssetStatusWhere for the rationale.
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        buildAssetStatusWhere(status),
-      ];
+      // endpoint. See buildAssetStatusWhere for the rationale.
+      andAssetWhere(where, buildAssetStatusWhere(status));
     } else {
       where.status = status;
     }
@@ -692,16 +906,9 @@ export function getAssetsWhereInput({
 
   if (categoriesIds && categoriesIds.length > 0) {
     if (categoriesIds.includes("uncategorized")) {
-      where.OR = [
-        {
-          categoryId: {
-            in: categoriesIds,
-          },
-        },
-        {
-          categoryId: null,
-        },
-      ];
+      andAssetWhere(where, {
+        OR: [{ categoryId: { in: categoriesIds } }, { categoryId: null }],
+      });
     } else {
       where.categoryId = {
         in: categoriesIds,
@@ -711,11 +918,12 @@ export function getAssetsWhereInput({
 
   if (tagsIds && tagsIds.length > 0) {
     if (tagsIds.includes("untagged")) {
-      where.OR = [
-        ...(where.OR ?? []),
-        { tags: { some: { id: { in: tagsIds } } } },
-        { tags: { none: {} } },
-      ];
+      andAssetWhere(where, {
+        OR: [
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ],
+      });
     } else {
       where.tags = {
         some: {
@@ -731,11 +939,12 @@ export function getAssetsWhereInput({
     if (locationIds.includes("without-location")) {
       // "in these locations" → at least one pivot row matches; "without
       // location" → no pivot rows at all.
-      where.OR = [
-        ...(where.OR ?? []),
-        { assetLocations: { some: { locationId: { in: locationIds } } } },
-        { assetLocations: { none: {} } },
-      ];
+      andAssetWhere(where, {
+        OR: [
+          { assetLocations: { some: { locationId: { in: locationIds } } } },
+          { assetLocations: { none: {} } },
+        ],
+      });
     } else {
       where.assetLocations = {
         some: { locationId: { in: locationIds } },
@@ -744,58 +953,52 @@ export function getAssetsWhereInput({
   }
 
   if (teamMemberIds && teamMemberIds.length) {
-    where.OR = [
-      ...(where.OR ?? []),
-      {
-        custody: { some: { teamMemberId: { in: teamMemberIds } } },
-      },
-      {
-        custody: {
-          some: { custodian: { userId: { in: teamMemberIds } } },
+    andAssetWhere(where, {
+      OR: [
+        {
+          custody: { some: { teamMemberId: { in: teamMemberIds } } },
         },
-      },
-      {
-        bookingAssets: {
-          some: {
-            booking: { custodianTeamMemberId: { in: teamMemberIds } },
+        {
+          custody: {
+            some: { custodian: { userId: { in: teamMemberIds } } },
           },
         },
-      },
-      {
-        bookingAssets: {
-          some: { booking: { custodianUserId: { in: teamMemberIds } } },
+        // A booking custodian holds the asset only while the booking is out,
+        // the same rule the lists apply.
+        {
+          bookingAssets: {
+            some: {
+              booking: {
+                custodianTeamMemberId: { in: teamMemberIds },
+                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+              },
+            },
+          },
         },
-      },
-      ...(teamMemberIds.includes("without-custody")
-        ? [{ custody: { none: {} } }]
-        : []),
-    ];
+        {
+          bookingAssets: {
+            some: {
+              booking: {
+                custodianUserId: { in: teamMemberIds },
+                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+              },
+            },
+          },
+        },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: { none: {} } }]
+          : []),
+      ],
+    });
 
     /**
-     * A refusal has to survive a sibling OR branch.
-     *
-     * The custody clause is attached with `OR`, and three other filters write
-     * there too — `uncategorized`, `untagged`, `without-location`. Under OR
-     * semantics the refused branch matches nothing while the sibling still
-     * matches plenty, so `?teamMember=<colleague>&category=uncategorized`
-     * returned the sibling's rows rather than none. That leaked nothing (the
-     * result equals the same request with `teamMember` omitted, which anyone
-     * may issue) but it broke the invariant this function documents, and a
-     * future OR branch carrying custody signal would make it a real hole.
-     *
-     * Fixed by AND-ing a predicate nothing satisfies, NOT by moving the custody
-     * clause from OR to AND — that would intersect custody with category/tag/
-     * location for every caller and silently change existing filter results.
+     * A refused custodian filter matches nothing, whatever else it is
+     * combined with. The custodian group above already matches no row for
+     * the sentinel id; this predicate keeps the refusal true even if a
+     * branch is ever added to that group that does not test the id.
      */
     if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        { id: CUSTODY_FILTER_REFUSED },
-      ];
+      andAssetWhere(where, { id: CUSTODY_FILTER_REFUSED });
     }
   }
 

@@ -16,6 +16,15 @@ const createHash = init({
 
 const buildHash = process.env.BUILD_HASH || createHash();
 
+// Ordered build id (a build timestamp) baked into both the client and the
+// server bundle as `__SHELF_BUILD_ID__`. Unlike `buildHash`, two ids compare,
+// so a tab can tell whether the server it reached runs a newer build than its
+// own (see `app/utils/build-version.ts`). It is stored on `process.env` so
+// every evaluation of this config inside one build process (client and server
+// environments) reads the same value and both bundles get the same literal.
+process.env.SHELF_BUILD_ID ??= String(Date.now());
+const buildId = process.env.SHELF_BUILD_ID;
+
 // Resolve the generated Prisma browser entry that contains enum runtime values.
 // In pnpm, .prisma/client lives inside the @prisma/client store directory,
 // not at the project root, so we resolve the path dynamically.
@@ -72,13 +81,19 @@ const httpsConfig =
     ? { key: certKeyPath, cert: certPath }
     : undefined;
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   envDir: "../..",
+  define: {
+    // `vite serve` (dev) has no deploy to compare against, so every check
+    // reads "dev" and answers "unknown".
+    __SHELF_BUILD_ID__: JSON.stringify(command === "build" ? buildId : "dev"),
+  },
   ssr: {
     noExternal: [
       "@shelf/database",
       "@shelf/datetime",
       "@shelf/labels",
+      "@shelf/links",
       "@shelf/permissions",
       "@shelf/quantity-control",
     ],
@@ -110,10 +125,26 @@ export default defineConfig({
     include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
   },
   build: {
-    target: "ES2022",
+    // Browser floor for the client bundle. Pinned explicitly (not a Vite alias
+    // such as "baseline-widely-available", which moves between releases) and
+    // equal to the runtime floor probed by `app/utils/browser-support.ts`:
+    // syntax newer than this set is lowered at build time, so a browser below
+    // the floor fails only on the missing runtime APIs that check detects and
+    // turns into an explicit message. Change the two together. Regex lookbehind
+    // is the exception: it cannot be lowered, so ESLint rejects it in client code.
+    target: ["chrome98", "edge98", "firefox94", "safari15.4"],
     assetsDir: `file-assets`,
     rollupOptions: {
       output: {
+        // Every Lucide icon the app uses goes into one shared file (about
+        // 11 KB compressed) instead of one tiny file per icon. A page cannot
+        // start until every file it lists has loaded, so fewer files means
+        // fewer chances for one slow request to stall it. This relies on
+        // icons being imported by name: a whole-namespace import of
+        // "lucide-react" would put every icon into this file, on every page.
+        manualChunks(id) {
+          if (id.includes("/node_modules/lucide-react/")) return "icons";
+        },
         entryFileNames: `file-assets/${buildHash}/[name]-[hash].js`,
         chunkFileNames() {
           return `file-assets/${buildHash}/[name]-[hash].js`;
@@ -142,4 +173,4 @@ export default defineConfig({
     reactRouter(),
     tsconfigPaths(),
   ],
-});
+}));

@@ -27,8 +27,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
-import { useIsMobile } from "~/hooks/use-mobile";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
+import { useIsCompactViewport, useIsMobile } from "~/hooks/use-mobile";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 
@@ -88,7 +88,30 @@ const SidebarProvider = forwardRef<
     // This is the internal state of the sidebar.
     // We use openProp and setOpenProp for control from outside the component.
     const [_open, _setOpen] = useState(defaultOpen);
-    const open = openProp ?? _open;
+
+    /**
+     * On a compact desktop viewport (768px-1279px) the expanded sidebar leaves
+     * too little room for the page, so it starts collapsed whatever the saved
+     * preference says. Opening it there is a temporary choice: it is kept in
+     * `compactOpen`, never persisted, and dropped when the window widens, so
+     * the saved preference applies again on a wide screen.
+     */
+    const isCompactViewport = useIsCompactViewport();
+    const [compactOpen, setCompactOpen] = useState(false);
+    const isCompactViewportRef = useRef(isCompactViewport);
+    isCompactViewportRef.current = isCompactViewport;
+
+    // Every time the window becomes compact, start from collapsed again.
+    // Adjusted during render (React's "store the previous value" pattern) so
+    // the collapsed state lands in the same render as the viewport change.
+    const [prevIsCompactViewport, setPrevIsCompactViewport] =
+      useState(isCompactViewport);
+    if (isCompactViewport !== prevIsCompactViewport) {
+      setPrevIsCompactViewport(isCompactViewport);
+      if (isCompactViewport) setCompactOpen(false);
+    }
+
+    const open = openProp ?? (isCompactViewport ? compactOpen : _open);
 
     // Debounce cookie persistence so rapid CMD+B toggling only fires
     // one request with the final state, instead of a POST per toggle.
@@ -139,6 +162,10 @@ const SidebarProvider = forwardRef<
 
         if (setOpenProp) {
           setOpenProp(openState);
+        } else if (isCompactViewportRef.current) {
+          // Compact viewport: a temporary choice, see `compactOpen`.
+          setCompactOpen(openState);
+          return;
         } else {
           _setOpen(openState);
         }
@@ -390,7 +417,7 @@ SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = forwardRef<HTMLDivElement, ComponentProps<"main">>(
   ({ className, ...props }, ref) => {
-    const { isAvailabilityView } = useIsAvailabilityView();
+    const { isAvailabilityView } = useAssetIndexView();
     const location = useLocation();
     const isKitIndex = location.pathname.includes("/kits");
     return (
@@ -776,7 +803,8 @@ const SidebarMenuSubButton = forwardRef<
       data-size={size}
       data-active={isActive}
       className={tw(
-        "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground outline-none ring-primary-500 aria-disabled:pointer-events-none aria-disabled:opacity-50  focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+        // why: min-h (not h) so a label that wraps grows the row instead of being clipped
+        "flex min-h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 py-1 leading-tight text-sidebar-foreground outline-none ring-primary-500 aria-disabled:pointer-events-none aria-disabled:opacity-50  focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
         "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
         size === "sm" && "text-xs",
         size === "md" && "text-sm",

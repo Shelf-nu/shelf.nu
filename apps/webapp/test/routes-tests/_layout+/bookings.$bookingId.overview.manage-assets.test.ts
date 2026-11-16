@@ -1,15 +1,25 @@
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
 import * as assetService from "~/modules/asset/service.server";
 import * as bookingService from "~/modules/booking/service.server";
 import * as modelRequestService from "~/modules/booking-model-request/service.server";
 import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
+import { getDescendantIdsOfLocations } from "~/modules/location/descendants.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import * as rolesServer from "~/utils/roles.server";
 
 // Import the action + loader functions
@@ -18,6 +28,7 @@ import {
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -29,6 +40,10 @@ vi.mock("~/database/db.server", () => ({
     },
     asset: {
       findMany: vi.fn(),
+      // why: the action refuses to add archived assets to a booking
+      // (issue #382) via a count on the newly added ids. Default 0 = none
+      // archived, so these tests reach the behaviour they are about.
+      count: vi.fn().mockResolvedValue(0),
     },
     // Phase 3c: the quantity-reduction guardrail groupBys over ConsumptionLog
     // to figure out how many units have already been dispositioned on this
@@ -36,7 +51,25 @@ vi.mock("~/database/db.server", () => ({
     consumptionLog: {
       groupBy: vi.fn(),
     },
+    // why: the loader counts the standalone units the booking already holds
+    // of each model on the page; they count on the booking's side of the
+    // pool. Tests stage held units per case.
+    bookingAsset: {
+      findMany: vi.fn(),
+    },
+    // why: the loader asks whether a ticked location has child locations,
+    // which decides if "Include assets from child locations" is offered.
+    // Tests stage the answer per case.
+    location: {
+      findFirst: vi.fn(),
+    },
   },
+}));
+
+// why: the descendant lookup is a recursive SQL query against Postgres, which
+// the unit suite cannot reach. Tests stand in a location tree for it.
+vi.mock("~/modules/location/descendants.server", () => ({
+  getDescendantIdsOfLocations: vi.fn(),
 }));
 
 vi.mock("~/modules/booking/service.server", () => ({
@@ -45,7 +78,7 @@ vi.mock("~/modules/booking/service.server", () => ({
   removeAssets: vi.fn(),
   // Loader-only — used by the F2 loader tests below.
   getBooking: vi.fn(),
-  getKitIdsByAssets: vi.fn(),
+  getKitIdsByBookingSlices: vi.fn(),
 }));
 
 // Loader-only — `getPaginatedAndFilterableAssets` backs the Assets tab list.
@@ -59,6 +92,17 @@ vi.mock("~/modules/asset/service.server", () => ({
 // `booking-model-request/service.server.test.ts`.
 vi.mock("~/modules/booking-model-request/service.server", () => ({
   getBookingModelTabData: vi.fn(),
+  // why: the loader flags picker rows whose model pool is exhausted through
+  // this primitive. Its pool math has its own unit test; here the tests
+  // control its answer per model and assert which rows the loader flags.
+  getAssetModelAvailability: vi.fn(),
+  // why: the loader only measures models another booking is owed units of.
+  // Which models those are is this primitive's own unit test; here the tests
+  // control the answer and assert what the loader does and does not read.
+  findModelsReservedByOtherBookings: vi.fn(),
+  // why: what the booking already holds comes from the same primitive the
+  // write guard uses, so the badge and the refusal cannot disagree.
+  readOwnNamedUnits: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -89,7 +133,9 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
     getParams: vi.fn(),
     parseData: vi.fn(),
     json: vi.fn((data) => data),
-    getCurrentSearchParams: vi.fn(),
+    // why: the real helper always returns the request's search params; an
+    // empty set is the "no filters" URL every test starts from.
+    getCurrentSearchParams: vi.fn(() => new URLSearchParams()),
     error: vi.fn((reason) => reason),
     // why: mirror the real `payload()` shape (`{ error: null, ...data }`) so
     // the Models-tab loader tests can inspect the returned keys directly.
@@ -101,9 +147,17 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
   };
 });
 
-vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: vi.fn(),
-}));
+// why: a spy over the REAL builder. Select-all must hand findMany the where
+// the list's own query builds, so the tests read both the options the action
+// passed and the where it produced.
+vi.mock("~/modules/asset/list-where.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("~/modules/asset/list-where.server")>();
+  return {
+    ...actual,
+    getAssetListWhereForSelectAll: vi.fn(actual.getAssetListWhereForSelectAll),
+  };
+});
 
 // Mock request and context objects
 const mockContext = {
@@ -164,14 +218,15 @@ describe("manage-assets route validation", () => {
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      isSelfServiceOrBase: false,
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -240,7 +295,8 @@ describe("manage-assets route validation", () => {
 
       // Should return error response for checked out assets
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
 
       // Should only validate newly added assets (asset3, asset4).
       // Phase 3c added bookingStatus as the 3rd arg so the helper can
@@ -389,7 +445,8 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
     });
 
     it("should allow available assets regardless of partial check-in status", async () => {
@@ -502,7 +559,8 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
     });
 
     it("should validate for OVERDUE bookings", async () => {
@@ -544,7 +602,67 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
+    });
+  });
+
+  describe("quantity-tracked assets are not judged by the row-level flag", () => {
+    /**
+     * `Asset.status` is one flag over the whole row, so a 27-unit pool with 18
+     * units out on other bookings reads CHECKED_OUT while 9 units are free.
+     * The loader lists a qty asset only while its `bookable` pool is above
+     * zero, so the row-level guard must not refuse what the picker offers —
+     * per-unit capacity is `assertAssetQuantitiesAvailable`'s job inside
+     * `updateBookingAssets`.
+     */
+    it("scopes the checked-out query to INDIVIDUAL assets", async () => {
+      const ongoingBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+      // why: the action reads its asset list from the parsed form body; this
+      // supplies one NEW qty asset alongside two already on the booking, which
+      // is what narrows the guard's query to `["qty-asset"]`.
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2", "qty-asset"],
+        removedAssetIds: [],
+        redirectTo: null,
+      });
+      // why: the guard only runs for ONGOING/OVERDUE bookings, so the booking
+      // read has to return an ONGOING one for this case to exercise it at all.
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ongoingBooking);
+      // why: stands in for the guard's checked-out query. It returns nothing
+      // because the qty row is filtered out by `type` in the WHERE clause
+      // asserted below — the real query is the assertion, not this value.
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      // why: the partial-check-in helper is exercised by its own tests; pinning
+      // it false keeps this case about the `type` predicate alone.
+      vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      // The add goes through — a redirect, not an error payload.
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+
+      expect(db.asset.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ["qty-asset"] },
+            organizationId: "org123",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+          }),
+        })
+      );
+      expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
+        expect.objectContaining({ assetIds: ["qty-asset"] })
+      );
     });
   });
 
@@ -660,6 +778,15 @@ describe("manage-assets route validation", () => {
         // form makes a silent regression impossible: dropping the flag fails
         // this test rather than quietly restoring the duplicate.
         skipBookingNote: true,
+        // The caller's access, so the service re-checks the add rule against
+        // the booking status it reads under the row lock.
+        // `bookings.seeAll` decides whether a pool refusal names other
+        // members' bookings.
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ writeAll: true, seeAll: true }),
+        }),
+        // The pool refusal names its day in the acting user's time zone.
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
       });
 
       // Verify per-asset note creation. The route now uses markdoc link
@@ -777,7 +904,8 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
     });
   });
 
@@ -896,6 +1024,12 @@ describe("manage-assets route validation", () => {
           organizationId: "org123",
           assetIds: ["asset-pens"],
           quantities: { "asset-pens": 6 },
+          // The quantity edit re-measures the pool too, so its refusal is
+          // formatted for the caller and scoped by what they may see.
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ seeAll: true }),
+          }),
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
         })
       );
 
@@ -1018,6 +1152,140 @@ describe("manage-assets route validation", () => {
       );
     });
   });
+
+  /**
+   * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
+   * `requirePermission` alone cannot stop a restricted user from writing
+   * assets to a booking that is not theirs. These cases would pass (no
+   * refusal) without the ownership check the action runs right after
+   * fetching the booking.
+   */
+  describe("ownership guard: SELF_SERVICE / BASE may only manage their own booking's assets", () => {
+    /** A DRAFT booking, both custody links defaulting to someone else. */
+    function ownedBooking(overrides: Record<string, unknown> = {}) {
+      return {
+        ...mockBooking,
+        status: BookingStatus.DRAFT,
+        creatorId: "someone-else",
+        custodianUserId: "someone-else-too",
+        ...overrides,
+      };
+    }
+
+    function mockRole(role: OrganizationRoles) {
+      vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role], organizationId: "org123" }) as any
+      );
+    }
+
+    beforeEach(() => {
+      // No new assets and nothing removed, isolating the ownership guard from
+      // the add/remove/adjust flows those already have their own coverage for.
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2"],
+        removedAssetIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+    });
+
+    it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
+      mockRole(OrganizationRoles.SELF_SERVICE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ownedBooking());
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(403);
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    });
+
+    it("refuses a BASE user who is neither creator nor custodian", async () => {
+      mockRole(OrganizationRoles.BASE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ownedBooking());
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(403);
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    });
+
+    it("allows the creator to manage their own booking's assets", async () => {
+      mockRole(OrganizationRoles.SELF_SERVICE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(
+        ownedBooking({ creatorId: "user123", custodianUserId: null })
+      );
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+    });
+
+    it("allows the custodian to manage the booking's assets", async () => {
+      mockRole(OrganizationRoles.BASE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(
+        ownedBooking({ creatorId: "someone-else", custodianUserId: "user123" })
+      );
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+    });
+
+    it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+      "leaves %s able to manage a booking they neither created nor hold custody of",
+      async (role) => {
+        mockRole(role);
+        vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(
+          // ADMIN/OWNER are not restricted to DRAFT, so the base ONGOING
+          // status from `mockBooking` is left as-is here.
+          {
+            ...mockBooking,
+            creatorId: "someone-else",
+            custodianUserId: "someone-else-too",
+          }
+        );
+
+        const response = await action(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        );
+
+        expect(response).toBeInstanceOf(Response);
+        expect((response as Response).status).toBe(302);
+      }
+    );
+  });
 });
 
 /**
@@ -1048,6 +1316,10 @@ describe("manage-assets loader — Models tab payload", () => {
     id: "booking123",
     name: "Test Booking",
     status: BookingStatus.DRAFT,
+    // The signed-in caller's own booking, so a restricted role passes the
+    // ownership check and the case stays about what the payload carries.
+    creatorId: "user123",
+    custodianUserId: null,
     from: new Date("2026-01-01"),
     to: new Date("2026-01-02"),
     bookingAssets: [],
@@ -1070,13 +1342,16 @@ describe("manage-assets loader — Models tab payload", () => {
     totalLocations: 0,
   };
 
-  /** Known `getBookingModelTabData` output — the five keys F2 is about. */
+  /** Known `getBookingModelTabData` output, as the Models tab consumes it. */
   const mockModelTabData = {
     showModelsTab: true,
     assetModels: [
       {
         id: "model1",
         name: "Dell XPS",
+        image: null,
+        thumbnailImage: null,
+        defaultCategory: null,
         total: 5,
         available: 3,
         reservedConcrete: 1,
@@ -1084,21 +1359,10 @@ describe("manage-assets loader — Models tab payload", () => {
         inCustody: 0,
       },
     ],
-    initialAssetModels: [
-      {
-        id: "model1",
-        name: "Dell XPS",
-        metadata: {
-          total: 5,
-          available: 3,
-          reservedConcrete: 1,
-          reservedViaRequest: 1,
-          inCustody: 0,
-        },
-      },
-    ],
-    totalAssetModels: 1,
+    totalAssetModels: 3,
     matchedAssetModels: 1,
+    modelsPage: 1,
+    modelsPerPage: 50,
     modelRequests: [
       {
         assetModelId: "model1",
@@ -1114,14 +1378,15 @@ describe("manage-assets loader — Models tab payload", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1134,7 +1399,9 @@ describe("manage-assets loader — Models tab payload", () => {
       mockPaginatedAssets as any
     );
     vi.mocked(bookingService.getBooking).mockResolvedValue(mockLoaderBooking);
-    vi.mocked(bookingService.getKitIdsByAssets).mockReturnValue([]);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue(
       mockModelTabData as any
     );
@@ -1148,17 +1415,54 @@ describe("manage-assets loader — Models tab payload", () => {
     expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
       organizationId: "org123",
       booking: mockLoaderBooking,
+      // Models without assets are hidden unless the URL turns them on.
+      showModelsWithoutAssets: false,
+      clampPageToResults: true,
+      pinReservedModels: true,
     });
 
-    // Byte-identical parity check: same five keys, same values, nothing
+    // Parity check: same keys, same values, nothing
     // dropped or reshaped on the way from helper → payload.
     expect(result).toMatchObject({
       showModelsTab: mockModelTabData.showModelsTab,
       assetModels: mockModelTabData.assetModels,
-      initialAssetModels: mockModelTabData.initialAssetModels,
+      modelsPage: mockModelTabData.modelsPage,
+      modelsPerPage: mockModelTabData.modelsPerPage,
       totalAssetModels: mockModelTabData.totalAssetModels,
-      matchedAssetModels: mockModelTabData.totalAssetModels,
+      matchedAssetModels: mockModelTabData.matchedAssetModels,
       modelRequests: mockModelTabData.modelRequests,
+    });
+  });
+
+  it("forwards the Models tab search and page from the URL", async () => {
+    // why: this file stubs the URL reader to an empty set; this test needs the
+    // Models tab keys beside the asset list's own `s`. Restored after, because
+    // clearAllMocks keeps implementations.
+    vi.mocked(httpServer.getCurrentSearchParams).mockImplementation(
+      () =>
+        new URLSearchParams(
+          "s=laptop&modelSearch=dell&modelPage=2&showEmptyModels=true"
+        )
+    );
+    try {
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+    } finally {
+      vi.mocked(httpServer.getCurrentSearchParams).mockImplementation(
+        () => new URLSearchParams()
+      );
+    }
+
+    // The asset list's `s` never reaches the model lookup.
+    expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
+      organizationId: "org123",
+      booking: mockLoaderBooking,
+      search: "dell",
+      page: 2,
+      showModelsWithoutAssets: true,
+      clampPageToResults: true,
+      pinReservedModels: true,
     });
   });
 
@@ -1166,7 +1470,8 @@ describe("manage-assets loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1179,7 +1484,8 @@ describe("manage-assets loader — Models tab payload", () => {
     expect(result).toMatchObject({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1187,6 +1493,15 @@ describe("manage-assets loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // why: a real SELF_SERVICE membership with every workspace toggle off: it may
+    // manage items on its own DRAFT booking but may not see others' custody.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.SELF_SERVICE],
+      }) as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>
+    );
+
     // why: this fixture mirrors what `assetIndexFields()` actually selects —
     // the full `custody.custodian.user` including `email` — so the assertion
     // measures redaction rather than the shape of a real query. The picker is
@@ -1231,5 +1546,833 @@ describe("manage-assets loader — Models tab payload", () => {
     // The custody row survives: the availability label tests it for presence,
     // so dropping it would change which assets read as available.
     expect(result.items[0].custody).toHaveLength(1);
+  });
+
+  it("hands each picker row its placements from the shared ordered include", async () => {
+    const warehouse = {
+      id: "loc-warehouse",
+      name: "Warehouse",
+      parentId: null,
+      _count: { children: 2 },
+    };
+    const placements = [
+      { quantity: 1, assetKitId: null, assetKit: null, location: warehouse },
+    ];
+    // why: the list query is a DB read; the fixture mirrors the
+    // `assetLocations` shape `assetIndexFields()` selects (oldest first).
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
+      ...mockPaginatedAssets,
+      assets: [
+        {
+          id: "placed",
+          title: "Camera",
+          type: "INDIVIDUAL",
+          custody: [],
+          assetLocations: placements,
+        },
+      ],
+    } as any);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The Location column reads `getPrimaryLocation(item)`, the first of
+    // these placements, so the rows must arrive with them untouched.
+    expect(result.items[0].assetLocations).toEqual(placements);
+    // The shared include orders `assetLocations` oldest first, so the column
+    // matches the assets index. Overriding it here would drop that ordering.
+    expect(
+      vi.mocked(assetService.getPaginatedAndFilterableAssets).mock.calls[0][0]
+    ).not.toHaveProperty("extraInclude");
+  });
+});
+
+/**
+ * The picker flags an INDIVIDUAL unit that this booking cannot take by name
+ * because other bookings' model reservations leave the pool no room for one
+ * more unit in the booking's window. The flag mirrors the write-time guard
+ * for a single added unit, so the row reads "Reserved by model" and cannot be
+ * selected wherever Confirm would be refused.
+ */
+describe("manage-assets loader — units reserved by model elsewhere", () => {
+  const mockContext = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const mockParams = { bookingId: "booking123" };
+  const from = new Date("2027-03-01T09:00:00Z");
+  const to = new Date("2027-03-03T17:00:00Z");
+
+  /** A dated DRAFT with no rows and no requests unless a test adds them. */
+  function bookingFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      from,
+      to,
+      bookingAssets: [],
+      modelRequests: [],
+      ...overrides,
+    } as any;
+  }
+
+  /** An outstanding request of this booking for `model1`. */
+  function ownRequest(quantity: number, fulfilledQuantity = 0) {
+    return {
+      assetModelId: "model1",
+      quantity,
+      fulfilledQuantity,
+      fulfilledAt: null,
+      assetModel: { name: "Model" },
+    };
+  }
+
+  /** Two units of one model, plus a unit with no model. */
+  const pageAssets = [
+    {
+      id: "unit-1",
+      title: "Pad",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: "model1",
+    },
+    {
+      id: "unit-2",
+      title: "Simulator",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: "model1",
+    },
+    {
+      id: "loose",
+      title: "Tripod",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: null,
+    },
+  ];
+
+  const paginated = {
+    search: null,
+    totalAssets: pageAssets.length,
+    perPage: 20,
+    page: 1,
+    categories: [],
+    tags: [],
+    assets: pageAssets,
+    totalPages: 1,
+    totalCategories: 0,
+    totalTags: 0,
+    locations: [],
+    totalLocations: 0,
+  };
+
+  /** `available` for the model reads the loader issues. */
+  function poolAvailability(available: number) {
+    vi.mocked(modelRequestService.getAssetModelAvailability).mockResolvedValue({
+      total: 3,
+      inCustody: 1,
+      reservedConcrete: 0,
+      reservedViaRequest: 3 - 1 - available,
+      reserved: 3 - 1 - available,
+      available,
+      peak: { at: null, requestedBy: [] },
+    });
+  }
+
+  /** The units of `model1` the booking already holds by name. */
+  function heldUnits(count: number, inCustody = 0) {
+    vi.mocked(modelRequestService.readOwnNamedUnits).mockResolvedValue(
+      count === 0
+        ? new Map()
+        : new Map([
+            [
+              "model1",
+              {
+                unitIds: new Set(
+                  Array.from({ length: count }, (_, i) => `held-${i}`)
+                ),
+                inCustody,
+              },
+            ],
+          ])
+    );
+  }
+
+  /** Which models another booking is still owed unnamed units of. */
+  function reservedElsewhere(modelIds: string[]) {
+    vi.mocked(
+      modelRequestService.findModelsReservedByOtherBookings
+    ).mockResolvedValue(new Set(modelIds));
+  }
+
+  /** The flag per row id in the returned payload. */
+  async function flagsByAssetId() {
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+    return Object.fromEntries(
+      result.items.map(
+        (item: { id: string; modelReservedElsewhere: boolean }) => [
+          item.id,
+          item.modelReservedElsewhere,
+        ]
+      )
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
+      userOrganizations: [],
+      organizations: [],
+      currentOrganization: {} as any,
+      canUseBarcodes: false,
+      canUseAudits: false,
+    });
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue(
+      paginated as any
+    );
+    vi.mocked(bookingService.getBooking).mockResolvedValue(bookingFixture());
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: true,
+      assetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
+      totalAssetModels: 1,
+      matchedAssetModels: 1,
+      modelRequests: [],
+    });
+    poolAvailability(0);
+    heldUnits(0);
+    reservedElsewhere(["model1"]);
+  });
+
+  it("flags every unit of a model whose free pool is exhausted, reading each model once", async () => {
+    const flags = await flagsByAssetId();
+
+    expect(flags).toEqual({ "unit-1": true, "unit-2": true, loose: false });
+    expect(modelRequestService.getAssetModelAvailability).toHaveBeenCalledTimes(
+      1
+    );
+    expect(modelRequestService.getAssetModelAvailability).toHaveBeenCalledWith({
+      assetModelId: "model1",
+      organizationId: "org123",
+      bookingId: "booking123",
+      from,
+      to,
+    });
+  });
+
+  it("leaves units alone while the model still has a free unit", async () => {
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+  });
+
+  it("counts the units the booking already holds against the free unit", async () => {
+    // One unit is on the booking already and one unit is free: a second
+    // named unit would not fit. The held unit itself claims nothing new.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({
+        bookingAssets: [{ assetId: "unit-1", assetKitId: null, quantity: 1 }],
+      })
+    );
+    heldUnits(1);
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": true,
+      loose: false,
+    });
+  });
+
+  it("never flags a model an active booking reserves itself", async () => {
+    // A unit of that model fulfils the booking's own request.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({
+        status: BookingStatus.RESERVED,
+        modelRequests: [ownRequest(2)],
+      })
+    );
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+  });
+
+  it("flags a draft's units when its own request no longer fits the pool", async () => {
+    // The draft promises itself two units; naming one would still leave one
+    // to assign, and the pool has one free unit for the two of them.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ modelRequests: [ownRequest(2)] })
+    );
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": true,
+      "unit-2": true,
+      loose: false,
+    });
+  });
+
+  it("leaves a draft's units alone while its own request still fits", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ modelRequests: [ownRequest(1)] })
+    );
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+  });
+
+  it("skips the model reads on a draft without dates", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ from: null, to: null })
+    );
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+    expect(modelRequestService.readOwnNamedUnits).not.toHaveBeenCalled();
+  });
+
+  it("reads no pool at all when no other booking has reserved the model", async () => {
+    // The shape of every picker load in a workspace that does not reserve by
+    // model: one lookup, then nothing. Naming a unit cannot over-commit a
+    // model nobody is owed units of, so there is nothing to measure.
+    reservedElsewhere([]);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+    expect(modelRequestService.readOwnNamedUnits).not.toHaveBeenCalled();
+  });
+
+  it("asks about the models on the page, over the booking's own window", async () => {
+    await flagsByAssetId();
+
+    expect(
+      modelRequestService.findModelsReservedByOtherBookings
+    ).toHaveBeenCalledWith({
+      assetModelIds: ["model1"],
+      excludeBookingId: "booking123",
+      organizationId: "org123",
+      from,
+      to,
+    });
+  });
+
+  it("ships the headroom a contested model still has", async () => {
+    poolAvailability(2);
+    heldUnits(1);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // Two free units, one of them already claimed by a unit on the booking.
+    expect(result.modelHeadroom).toEqual({ model1: 1 });
+  });
+
+  it("does not count a held unit a custodian has against the headroom", async () => {
+    poolAvailability(2);
+    heldUnits(1, 1);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The pool already deducted that unit; charging it again would understate
+    // what the booking may still take.
+    expect(result.modelHeadroom).toEqual({ model1: 2 });
+  });
+});
+
+/**
+ * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
+ * `requirePermission` alone cannot stop a restricted user from opening this
+ * picker for a booking that is not theirs. These cases would pass (no throw)
+ * without the ownership check the loader runs right after fetching the
+ * booking.
+ */
+describe("manage-assets loader: ownership gate", () => {
+  const mockContext = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const mockParams = { bookingId: "booking123" };
+
+  const mockPaginatedAssets = {
+    search: null,
+    totalAssets: 0,
+    perPage: 20,
+    page: 1,
+    categories: [],
+    tags: [],
+    assets: [],
+    totalPages: 0,
+    totalCategories: 0,
+    totalTags: 0,
+    locations: [],
+    totalLocations: 0,
+  };
+
+  /** A DRAFT booking with no rows and no requests, both custody links overridable per case. */
+  function bookingWith(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      from: new Date("2026-01-01"),
+      to: new Date("2026-01-02"),
+      bookingAssets: [],
+      modelRequests: [],
+      creatorId: "someone-else",
+      custodianUserId: "someone-else-too",
+      ...overrides,
+    } as any;
+  }
+
+  function mockRole(role: OrganizationRoles) {
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({ roles: [role], organizationId: "org123" }) as any
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue(
+      mockPaginatedAssets as any
+    );
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    } as any);
+  });
+
+  /** Runs the loader expecting the ownership guard to throw a 403. */
+  async function runLoaderExpectingRefusal() {
+    try {
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+    } catch (thrown) {
+      return thrown as { init?: { status?: number } };
+    }
+    throw new Error("expected the loader to throw, but it resolved");
+  }
+
+  it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
+    mockRole(OrganizationRoles.SELF_SERVICE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(bookingWith());
+
+    const refusal = await runLoaderExpectingRefusal();
+    expect(refusal.init?.status).toBe(403);
+  });
+
+  it("refuses a BASE user who is neither creator nor custodian", async () => {
+    mockRole(OrganizationRoles.BASE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(bookingWith());
+
+    const refusal = await runLoaderExpectingRefusal();
+    expect(refusal.init?.status).toBe(403);
+  });
+
+  it("allows the creator to open the picker for their own booking", async () => {
+    mockRole(OrganizationRoles.SELF_SERVICE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingWith({ creatorId: "user123", custodianUserId: null })
+    );
+
+    await expect(
+      loader(createLoaderArgs({ context: mockContext, params: mockParams }))
+    ).resolves.toBeTruthy();
+  });
+
+  it("allows the custodian to open the picker", async () => {
+    mockRole(OrganizationRoles.BASE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingWith({ creatorId: "someone-else", custodianUserId: "user123" })
+    );
+
+    await expect(
+      loader(createLoaderArgs({ context: mockContext, params: mockParams }))
+    ).resolves.toBeTruthy();
+  });
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "leaves %s able to open a booking they neither created nor hold custody of",
+    async (role) => {
+      mockRole(role);
+      vi.mocked(bookingService.getBooking).mockResolvedValue(bookingWith());
+
+      await expect(
+        loader(createLoaderArgs({ context: mockContext, params: mockParams }))
+      ).resolves.toBeTruthy();
+    }
+  );
+});
+
+/**
+ * "Include assets from child locations" on the booking's Add assets list.
+ *
+ * The list (loader) and "select all" (action) both read the Locations filter
+ * from the URL. With the checkbox on, both must match the ticked locations plus
+ * every location nested under them, and it must be the SAME set: otherwise
+ * select-all adds assets the user was never shown, or skips ones they were.
+ * With the checkbox off, both stay on the ticked locations exactly.
+ */
+describe("manage-assets: include assets from child locations", () => {
+  const context = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const params = { bookingId: "booking123" };
+
+  /**
+   * The workspace's location tree, as the descendant lookup answers it
+   * (self first, then everything nested under it):
+   *
+   *   campus ─┬─ building-a ─── room-a1
+   *           └─ building-b
+   */
+  const SELF_AND_DESCENDANTS: Record<string, string[]> = {
+    campus: ["campus", "building-a", "building-b", "room-a1"],
+    "building-a": ["building-a", "room-a1"],
+    "building-b": ["building-b"],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      organizations: [],
+      currentOrganization: {} as any,
+      userOrganizations: [],
+      canUseBarcodes: false,
+      canUseAudits: false,
+    });
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+    vi.mocked(getDescendantIdsOfLocations).mockImplementation(
+      ({ locationIds }) =>
+        Promise.resolve([
+          ...new Set(
+            locationIds.flatMap((id) => SELF_AND_DESCENDANTS[id] ?? [])
+          ),
+        ])
+    );
+    vi.mocked(db.location.findFirst).mockResolvedValue(null);
+
+    // Loader: the list itself is mocked; the tests read what it was asked for.
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
+      search: null,
+      totalAssets: 0,
+      perPage: 20,
+      page: 1,
+      categories: [],
+      tags: [],
+      assets: [],
+      totalPages: 0,
+      totalCategories: 0,
+      totalTags: 0,
+      locations: [],
+      totalLocations: 0,
+    } as any);
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      from: new Date("2026-01-01"),
+      to: new Date("2026-01-02"),
+      bookingAssets: [],
+      modelRequests: [],
+    } as any);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    });
+
+    vi.mocked(db.asset.findMany).mockResolvedValue([]);
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
+    vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      bookingAssets: [],
+      organizationId: "org123",
+    } as any);
+    vi.mocked(userService.getUserByID).mockResolvedValue({
+      id: "user123",
+      firstName: "John",
+      lastName: "Doe",
+      displayName: null,
+    } as any);
+    vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue({
+      checkedInAssetIds: [],
+      partialCheckinDetails: {},
+    });
+  });
+
+  /** Makes the loader and the action read `query` as the request URL. */
+  function openUrl(query: string) {
+    vi.mocked(httpServer.getCurrentSearchParams).mockReturnValue(
+      new URLSearchParams(query)
+    );
+  }
+
+  /** The location ids the loader asked the list to match for `query`. */
+  async function listLocationIds(query: string) {
+    openUrl(query);
+    await loader(createLoaderArgs({ context, params }));
+    return vi.mocked(assetService.getPaginatedAndFilterableAssets).mock
+      .lastCall?.[0].locationIdsOverride;
+  }
+
+  /** Submits a select-all for `query`, as the picker does. */
+  async function submitSelectAll(query: string) {
+    openUrl(query);
+    vi.mocked(httpServer.parseData).mockReturnValue({
+      assetIds: [ALL_SELECTED_KEY],
+      removedAssetIds: [],
+      redirectTo: null,
+    });
+    return action(createActionArgs({ context, request: mockRequest, params }));
+  }
+
+  /** The location ids "select all" asked the list builder to match for `query`. */
+  async function selectAllLocationIds(query: string) {
+    await submitSelectAll(query);
+    return vi.mocked(getAssetListWhereForSelectAll).mock.lastCall?.[0]
+      .locationIdsOverride;
+  }
+
+  /** The where select-all handed `db.asset.findMany` to expand the selection. */
+  function selectAllWhere(): Prisma.AssetWhereInput | undefined {
+    const call = vi
+      .mocked(db.asset.findMany)
+      .mock.calls.find(
+        ([args]) =>
+          JSON.stringify(args?.select) === JSON.stringify({ id: true })
+      );
+    return call?.[0]?.where as Prisma.AssetWhereInput | undefined;
+  }
+
+  /** The location ids in the where select-all ran. */
+  function clauseLocationIds() {
+    const where = selectAllWhere();
+    // Plain locations sit on `where.assetLocations`; with "without location"
+    // picked they share an OR group in `where.AND` with `assetLocations: none`.
+    const inLocations = (where?.assetLocations?.some?.locationId ??
+      [where?.AND ?? []]
+        .flat()
+        .flatMap((group) => [group.OR ?? []].flat())
+        .find((clause) => clause.assetLocations?.some)?.assetLocations?.some
+        ?.locationId) as { in: string[] } | undefined;
+    return inLocations?.in;
+  }
+
+  it("keeps both on the ticked location exactly while the checkbox is off", async () => {
+    const query = "location=campus";
+
+    expect(await listLocationIds(query)).toBeUndefined();
+    expect(await selectAllLocationIds(query)).toBeUndefined();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
+    // No override: the builder matches the URL's own value, as for every
+    // other caller.
+    expect(clauseLocationIds()).toEqual(["campus"]);
+  });
+
+  it("widens both to the parent plus sub-locations two levels deep when on", async () => {
+    const query = "location=campus&includeChildLocations=true";
+    const widened = ["building-a", "building-b", "campus", "room-a1"];
+
+    const listIds = await listLocationIds(query);
+    const selectAllIds = await selectAllLocationIds(query);
+
+    expect([...(listIds ?? [])].sort()).toEqual(widened);
+    expect(selectAllIds).toEqual(listIds);
+    // Select-all hands that set to the builder, and the where it runs
+    // matches on it.
+    expect([...(clauseLocationIds() ?? [])].sort()).toEqual(widened);
+  });
+
+  it("keeps without-location in both sets with the checkbox on", async () => {
+    const query =
+      "location=without-location&location=building-a&includeChildLocations=true";
+
+    const listIds = await listLocationIds(query);
+    const selectAllIds = await selectAllLocationIds(query);
+
+    expect([...(listIds ?? [])].sort()).toEqual([
+      "building-a",
+      "room-a1",
+      "without-location",
+    ]);
+    expect(selectAllIds).toEqual(listIds);
+    expect([...(clauseLocationIds() ?? [])].sort()).toEqual(
+      listIds?.slice().sort()
+    );
+  });
+
+  it("passes the loader's list options to select-all", async () => {
+    await submitSelectAll("location=campus");
+
+    expect(getAssetListWhereForSelectAll).toHaveBeenCalledWith({
+      organizationId: "org123",
+      currentSearchParams: "location=campus",
+      locationIdsOverride: undefined,
+      // The picker list refuses every custodian filter.
+      allowedTeamMemberIds: [],
+      // An ADMIN sees all custody, so the search matches every custodian.
+      custodySearchScope: "all",
+      bookableScope: null,
+      honorArchivedView: false,
+      honorLowStockFilter: false,
+    });
+  });
+
+  it("keeps the picker's hide-unavailable rules on select-all", async () => {
+    const query =
+      "hideUnavailable=true&bookingFrom=2026-01-01T09:00:00.000Z&bookingTo=2026-01-02T17:00:00.000Z&unhideAssetsBookigIds=booking123";
+
+    await submitSelectAll(query);
+    const where = selectAllWhere();
+    const groups = [where?.AND ?? []].flat();
+
+    expect(where).toMatchObject({
+      organizationId: "org123",
+      archivedAt: null,
+      availableToBook: true,
+    });
+    // INDIVIDUAL assets in custody stay out of the selection.
+    expect(groups).toContainEqual({
+      OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
+    });
+    // INDIVIDUAL assets held by a kit stay out too.
+    expect(groups).toContainEqual({
+      OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
+    });
+    // The booking-window conflict rule, which ignores this booking itself.
+    expect(groups).toContainEqual({
+      OR: [
+        { type: "QUANTITY_TRACKED" },
+        {
+          bookingAssets: {
+            none: {
+              booking: expect.objectContaining({
+                id: { notIn: ["booking123"] },
+                status: BookingStatus.RESERVED,
+              }),
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses a custodian filter on select-all, as the picker list does", async () => {
+    await submitSelectAll("teamMember=tm-colleague");
+
+    expect([selectAllWhere()?.AND ?? []].flat()).toContainEqual({
+      id: CUSTODY_FILTER_REFUSED,
+    });
+  });
+
+  it("offers the checkbox only when a ticked location has child locations", async () => {
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "building-a",
+    } as any);
+    openUrl("location=campus");
+    const withChildren: any = await loader(
+      createLoaderArgs({ context, params })
+    );
+    expect(withChildren.tickedLocationHasChildren).toBe(true);
+
+    vi.mocked(db.location.findFirst).mockResolvedValue(null);
+    openUrl("location=building-b");
+    const leaf: any = await loader(createLoaderArgs({ context, params }));
+    expect(leaf.tickedLocationHasChildren).toBe(false);
+
+    vi.mocked(db.location.findFirst).mockClear();
+    openUrl("");
+    const unfiltered: any = await loader(createLoaderArgs({ context, params }));
+    expect(unfiltered.tickedLocationHasChildren).toBe(false);
+    expect(db.location.findFirst).not.toHaveBeenCalled();
   });
 });

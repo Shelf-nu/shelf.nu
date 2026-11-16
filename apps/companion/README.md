@@ -1,5 +1,7 @@
 # Shelf Companion App
 
+> **License:** this directory is **not open source** and is not under the AGPL-3.0 license of the rest of this repository. Its source is available under the [PolyForm Internal Use License 1.0.0](./LICENSE). You may not distribute this app or an app based on it. Publishing on the Apple App Store, Google Play or any other store is distribution.
+
 > **Status:** Under review — ready for local testing
 > **Branch:** `feat/mobile-companion-app` (162 files, ~33k lines)
 > **Decision needed:** Where should this code live? See [Architecture Decision](#architecture-decision-monorepo-vs-separate-repo) below.
@@ -8,7 +10,7 @@
 
 ## What Is This?
 
-A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with **Expo SDK 54 + React Native + TypeScript**. It gives field teams mobile access to assets, scanning, audits, and bookings — all powered by the existing Shelf webapp backend.
+A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with **Expo SDK 58 + React Native + TypeScript**. It gives field teams mobile access to assets, scanning, audits, and bookings, all powered by the existing Shelf webapp backend.
 
 ### Features
 
@@ -122,7 +124,7 @@ The monorepo approach is what Expo recommends for apps that share a backend.
 
 | Tool      | Version        | Install                                                      |
 | --------- | -------------- | ------------------------------------------------------------ |
-| Node.js   | >= 22.20.0     | `nvm install 22`                                             |
+| Node.js   | >= 24.22.1     | `nvm install 24`                                             |
 | pnpm      | 9.15.9         | `corepack enable && corepack prepare pnpm@9.15.9 --activate` |
 | Xcode     | 16.4+ (stable) | App Store                                                    |
 | CocoaPods | Any            | `sudo gem install cocoapods`                                 |
@@ -321,7 +323,7 @@ apps/companion/
 │   │   ├── scanner.tsx     # QR + barcode scanner
 │   │   ├── home.tsx        # Dashboard
 │   │   ├── custody.tsx     # Custody management
-│   │   └── settings.tsx    # Theme, org switch, logout
+│   │   └── settings/       # Theme, org switch, notifications, logout
 │   └── _layout.tsx         # Root layout with providers
 ├── components/             # Shared UI components
 ├── lib/                    # Core libraries
@@ -340,7 +342,7 @@ apps/companion/
 
 ---
 
-## API Endpoints (27 routes)
+## API Endpoints (32 routes)
 
 All at `/api/mobile/*` — JWT Bearer auth required.
 
@@ -374,6 +376,33 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 | `/api/mobile/categories`               | GET    | Category list (cached)                  |
 | `/api/mobile/locations`                | GET    | Location list (cached)                  |
 | `/api/mobile/team-members`             | GET    | Team member list (cached)               |
+| `/api/mobile/push-token`               | POST   | Register this device for push           |
+| `/api/mobile/push-token`               | DELETE | Forget this device (sign-out)           |
+| `/api/mobile/notification-preferences` | GET    | Push switches + plan availability       |
+| `/api/mobile/notification-preferences` | PUT    | Save push switches                      |
+
+---
+
+## Role access
+
+Every role decision in the app comes from `@shelf/permissions`:
+`userHasPermission` (`lib/permissions.ts`) for the permission matrix and
+`useRoleAccess()` (`hooks/use-role-access.ts`) for reach: whose bookings,
+custody scope, audit scope, booking item rules. `/api/mobile/me` sends each
+workspace's visibility toggles and permission switches for this; pass the
+current organization to `userHasPermission` as `workspace` so an entry point
+follows a switch such as `managersCanEditAssets`. Never compare role strings in the app:
+`local-rules/no-direct-role-checks` (shared with the webapp, wired in
+`eslint.config.js`) fails `pnpm --filter @shelf/companion lint` on a role comparison
+outside tests.
+
+**Shipping:** role logic is JavaScript, so a change ships as an EAS OTA update,
+published once for every live `runtimeVersion` that can take one (1.4.0 and
+later, see [EAS-UPDATE.md](./EAS-UPDATE.md)). Older builds cannot update over the
+air; for them an unknown role denies every
+client-gated affordance, and server-computed booking actions keep working.
+A companion bundle that reaches a device before the server sends the toggles
+reads them as off, which only under-offers.
 
 ---
 
@@ -381,13 +410,13 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 
 | Layer      | Technology                        |
 | ---------- | --------------------------------- |
-| Framework  | Expo SDK 54 + React Native 0.81   |
-| Routing    | Expo Router 6 (file-based)        |
-| Language   | TypeScript 5.9                    |
+| Framework  | Expo SDK 58 + React Native 0.88   |
+| Routing    | Expo Router 58 (file-based)       |
+| Language   | TypeScript 6.0                    |
 | Auth       | Supabase Auth + SecureStore       |
 | State      | React Context (auth, org, theme)  |
 | API Client | Custom fetch wrapper with caching |
 | Scanner    | expo-camera (QR + barcode types)  |
 | E2E Tests  | Maestro                           |
-| iOS Min    | iOS 15.1                          |
-| Node       | >= 22.20.0                        |
+| iOS Min    | iOS 16.4                          |
+| Node       | >= 24.22.1                        |

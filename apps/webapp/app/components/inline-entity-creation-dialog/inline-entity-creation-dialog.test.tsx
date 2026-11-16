@@ -1,7 +1,25 @@
+import { OrganizationRoles } from "@prisma/client";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MemberRoles } from "~/utils/permissions/member-roles";
+import { withWorkspaceGrants } from "~/utils/permissions/member-roles";
 import InlineEntityCreationDialog from "./inline-entity-creation-dialog";
+
+/** The roles `useOrganizationRoles` returns for the current render. */
+const caller = vi.hoisted(() => ({
+  roles: undefined as MemberRoles | undefined,
+}));
+
+// why: the real hook reads the `_layout` route loader, which needs a data
+// router; the roles it returns, carrying the switches, decide whether the
+// dialog offers itself.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => caller.roles,
+}));
+
+// The forms load lazily from ./inline-entity-creation-forms, which imports the
+// modules mocked below, so the mocks apply there.
 
 // why: Mock NewCategoryForm to avoid router dependencies and test dialog behavior in isolation
 vi.mock("../category/new-category-form", () => ({
@@ -57,9 +75,61 @@ vi.mock("../location/form", () => ({
   ),
 }));
 
+// why: Mock InlineAssetModelForm to avoid router dependencies (it submits
+// through a fetcher) and test dialog behavior in isolation
+vi.mock("../asset-model/inline-form", () => ({
+  default: () => <div data-testid="asset-model-form" />,
+}));
+
 describe("InlineEntityCreationDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    caller.roles = withWorkspaceGrants([OrganizationRoles.ADMIN], {
+      managersCanEditAssets: false,
+    });
+  });
+
+  describe("Who is offered the create entry", () => {
+    const TYPES = ["category", "location", "assetModel"] as const;
+
+    it.each(TYPES)("offers an Administrator the %s create entry", (type) => {
+      render(
+        <InlineEntityCreationDialog
+          title="Create"
+          buttonLabel="Create new"
+          type={type}
+        />
+      );
+
+      expect(
+        screen.getByRole("button", { name: "Create new" })
+      ).toBeInTheDocument();
+    });
+
+    it.each(
+      TYPES.flatMap((type) => [
+        [type, true],
+        [type, false],
+      ]) as [(typeof TYPES)[number], boolean][]
+    )(
+      "renders nothing for a Manager: %s, switch on %s",
+      (type, managersCanEditAssets) => {
+        caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+          managersCanEditAssets,
+        });
+
+        const { container } = render(
+          <InlineEntityCreationDialog
+            title="Create"
+            buttonLabel="Create new"
+            type={type}
+          />
+        );
+
+        expect(container).toBeEmptyDOMElement();
+        expect(screen.queryByRole("button")).toBeNull();
+      }
+    );
   });
 
   describe("Button and Dialog visibility", () => {
@@ -172,7 +242,7 @@ describe("InlineEntityCreationDialog", () => {
 
       // Click the save button in the mocked form
       await act(async () => {
-        await user.click(screen.getByRole("button", { name: "Save" }));
+        await user.click(await screen.findByRole("button", { name: "Save" }));
       });
 
       await waitFor(() => {
@@ -186,6 +256,27 @@ describe("InlineEntityCreationDialog", () => {
           },
         });
       });
+    });
+  });
+
+  describe("Asset model creation flow", () => {
+    it("loads the asset model form when the dialog opens", async () => {
+      render(
+        <InlineEntityCreationDialog
+          title="Create Model"
+          buttonLabel="+ New Model"
+          type="assetModel"
+        />
+      );
+
+      expect(screen.queryByTestId("asset-model-form")).toBeNull();
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button", { name: "+ New Model" }));
+      });
+
+      expect(await screen.findByTestId("asset-model-form")).toBeInTheDocument();
     });
   });
 
@@ -232,7 +323,7 @@ describe("InlineEntityCreationDialog", () => {
 
       // Click the save button in the mocked form
       await act(async () => {
-        await user.click(screen.getByRole("button", { name: "Save" }));
+        await user.click(await screen.findByRole("button", { name: "Save" }));
       });
 
       await waitFor(() => {
@@ -309,7 +400,7 @@ describe("InlineEntityCreationDialog", () => {
       });
 
       // Click cancel button (mocked form's cancel button)
-      const cancelButton = screen.getByText("Cancel");
+      const cancelButton = await screen.findByText("Cancel");
       await act(async () => {
         await user.click(cancelButton);
       });

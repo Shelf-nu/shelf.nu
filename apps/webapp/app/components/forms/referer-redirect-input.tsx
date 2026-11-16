@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 interface RefererRedirectInputProps {
   /**
    * The name of the form field.
@@ -9,6 +11,8 @@ interface RefererRedirectInputProps {
    * The referer path (pathname + search) to redirect back to.
    * Typically obtained from `getRefererPath(request)` in your loader.
    * Example: "/assets?search=laptop&status=AVAILABLE"
+   *
+   * Only the value at mount is used; later changes are ignored.
    */
   referer?: string | null;
 }
@@ -22,6 +26,10 @@ interface RefererRedirectInputProps {
  * - Automatically detects if page was opened in a new tab (cmd+click/ctrl+click)
  * - If opened in new tab, clears the redirect value so the form action uses its fallback
  * - Works seamlessly with Remix form actions and `safeRedirect`
+ * - Posts the referer it mounted with. The Referer header is only meaningful
+ *   when the user arrives: a navigation that stays on the form's route (an
+ *   asset form adding `?category=<id>`) re-runs the loader with this page as
+ *   the Referer, and following that would lose where the user came from.
  *
  * @example
  * ```tsx
@@ -48,7 +56,10 @@ export function RefererRedirectInput({
   fieldName,
   referer,
 }: RefererRedirectInputProps) {
-  if (!referer) {
+  // Snapshot on mount on purpose, not a stale-prop bug: see the JSDoc above.
+  const [initialReferer] = useState(referer);
+
+  if (!initialReferer) {
     return null;
   }
 
@@ -56,7 +67,7 @@ export function RefererRedirectInput({
     <input
       type="hidden"
       name={fieldName}
-      defaultValue={referer}
+      defaultValue={initialReferer}
       ref={(input) => {
         // Don't redirect back if page was opened in a new tab
         // (e.g., via cmd+click or ctrl+click)

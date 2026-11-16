@@ -25,7 +25,9 @@ const { mockDb } = vitest.hoisted(() => ({
     $transaction: vitest.fn(),
     auditSession: {
       findUnique: vitest.fn(),
-      update: vitest.fn().mockResolvedValue({}),
+      // why: the counter write is guarded on the audit still being pending and
+      // refuses unless it matched the one audit.
+      updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
     },
     auditAsset: {
       findFirst: vitest.fn(),
@@ -114,7 +116,7 @@ describe("removeAssetFromAudit", () => {
     expect(mockDb.auditAsset.deleteMany).not.toHaveBeenCalled();
     // …and the caller's own audit counts are untouched. The old code
     // decremented them off a row from someone else's audit.
-    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+    expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("scopes the lookup by auditSessionId, not by id alone", async () => {
@@ -189,7 +191,7 @@ describe("concurrent removal", () => {
       })
     ).rejects.toThrow(/not found in this audit/);
 
-    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+    expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("aborts a bulk removal when fewer rows were deleted than proven", async () => {
@@ -214,7 +216,7 @@ describe("concurrent removal", () => {
       })
     ).rejects.toThrow(/removed by someone else/);
 
-    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+    expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
   });
 });
 

@@ -1,10 +1,17 @@
 import { useFetchers, useLoaderData } from "react-router";
+import { useAssetIndexSettingsOverrides } from "~/context/asset-index-settings-context";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
 /** Hook that returns the flags for the first column.
- * Can only be used in asset index page or its child routes
+ * Can only be used in asset index page or its child routes.
+ *
+ * A mounted `AssetIndexSettingsProvider` overriding `freezeColumn` wins over
+ * the loader's stored value and the optimistic fetcher update below — this is
+ * how the drill-down sheet turns the frozen column off without a checkbox
+ * column of its own to anchor it to.
  */
 export function useAssetIndexFreezeColumn() {
+  const overrides = useAssetIndexSettingsOverrides();
   const { settings } = useLoaderData<AssetIndexLoaderData>();
 
   /** Get the mode from the settings
@@ -24,6 +31,12 @@ export function useAssetIndexFreezeColumn() {
     optimisticFrozen = freezeFetcher?.formData
       ? freezeFetcher.formData.get("freezeColumn") === "yes"
       : freezeColumn;
+  }
+
+  // Checked last, after every hook above has run in a stable order: an
+  // early return here would change the hook call order between renders.
+  if (overrides?.freezeColumn !== undefined) {
+    return overrides.freezeColumn;
   }
 
   return optimisticFrozen;

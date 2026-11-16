@@ -8,13 +8,25 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import { OfflineBanner } from "@/components/offline-banner";
+import { UpdateAvailableBanner } from "@/components/update-available-banner";
 import AnimatedSplash from "@/components/animated-splash";
 import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
 import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
 import { initSentry, trackServerTag } from "@/lib/sentry";
-import { hydrateActiveServer, refreshActiveServerConfig } from "@/lib/server";
+import {
+  hydrateActiveServer,
+  onBeforeSessionEnd,
+  refreshActiveServerConfig,
+} from "@/lib/server";
+import { unlockOrientationOnTablets } from "@/lib/orientation";
+import {
+  configureNotificationPresentation,
+  usePushRegistration,
+  usePushTapHandler,
+} from "@/lib/push/handlers";
+import { unregisterThisDevice } from "@/lib/push/registration";
 import * as Sentry from "@sentry/react-native";
 import Constants from "expo-constants";
 
@@ -23,6 +35,17 @@ initSentry();
 
 // Keep the native splash visible until our animated splash is mounted.
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Phones stay upright; an Android tablet follows its rotation from launch.
+unlockOrientationOnTablets();
+
+// A push that arrives while the app is open shows as a banner.
+configureNotificationPresentation();
+
+// Every sign-out, including the one a server switch performs, first asks the
+// server to forget this device, so a shared phone stops receiving the
+// previous person's pushes.
+onBeforeSessionEnd(unregisterThisDevice);
 
 // ── Startup diagnostic (visible in Metro terminal) ──────────────────
 if (__DEV__) {
@@ -55,6 +78,10 @@ function RootLayoutNav() {
   // Handle incoming deep links (shelf:// and universal links)
   useDeepLinkHandler();
 
+  // Open the screen a tapped push is about, and keep this device registered
+  usePushTapHandler();
+  usePushRegistration();
+
   // Register 3D Touch / long-press quick actions (home screen shortcuts)
   useQuickActions();
 
@@ -78,7 +105,9 @@ function RootLayoutNav() {
     <>
       <StatusBar style={isDark ? "light" : "dark"} />
       <OfflineBanner />
-      <Slot />
+      <UpdateAvailableBanner>
+        <Slot />
+      </UpdateAvailableBanner>
       {!splashComplete && (
         <AnimatedSplash
           isReady={!isLoading}

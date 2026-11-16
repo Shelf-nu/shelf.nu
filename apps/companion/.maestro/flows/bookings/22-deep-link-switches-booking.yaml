@@ -1,0 +1,30 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Link to another booking replaces the open one"
+tags:
+  - bookings
+  - deeplink
+
+---
+# Test: a booking link opened while another booking is on screen shows the
+# linked booking. Both links resolve to the same route, so the second one
+# reaches the open booking screen with a new id instead of pushing a new one.
+# Needs two bookings in the test workspace (see env/test.env.example).
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://bookings/${SHELF_TEST_SWITCH_BOOKING_A_ID}"
+- extendedWaitUntil:
+    visible: "${SHELF_TEST_SWITCH_BOOKING_A_NAME}"
+    timeout: 20000
+
+- openLink: "shelf://bookings/${SHELF_TEST_SWITCH_BOOKING_B_ID}"
+- extendedWaitUntil:
+    visible: "${SHELF_TEST_SWITCH_BOOKING_B_NAME}"
+    timeout: 20000
+- assertNotVisible: "${SHELF_TEST_SWITCH_BOOKING_A_NAME}"
+
+- takeScreenshot: bookings-deep-link-switches-booking

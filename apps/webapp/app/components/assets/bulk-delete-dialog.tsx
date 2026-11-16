@@ -5,11 +5,16 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
-import { Button } from "../shared/button";
 
 export const BulkDeleteAssetsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
+  /** The typed count; checked by the server, see `assertBulkDeleteConfirmed`. */
+  confirmation: z.string().optional(),
 });
 
 export default function BulkDeleteDialog() {
@@ -22,43 +27,45 @@ export default function BulkDeleteDialog() {
     ? totalItems
     : selectedAssets.length;
 
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "asset" : "assets";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} ${noun} with their notes, custody, reminders and custom field values, and removes them from every booking, kit and audit. Their QR codes are unlinked. This cannot be undone.`,
+    };
+  };
+
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="trash"
-      title={`Delete (${totalSelected}) assets`}
-      description={`Are you sure you want to delete all (${totalSelected}) assets? This action cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
       actionUrl="."
       arrayFieldId="assetIds"
     >
-      {({ fetcherError, disabled, handleCloseDialog }) => (
+      {({
+        fetcherError,
+        fetcherErrorAdditionalData,
+        disabled,
+        handleCloseDialog,
+      }) => (
         <>
           <input type="hidden" value="bulk-delete" name="intent" />
-
-          {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
-          ) : null}
-
-          <div className="flex gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-              onClick={handleCloseDialog}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              width="full"
-              disabled={disabled}
-              className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-            >
-              Confirm
-            </Button>
-          </div>
+          <BulkDeleteConfirmation
+            count={totalSelected}
+            disabled={disabled}
+            fetcherError={fetcherError}
+            fetcherErrorAdditionalData={fetcherErrorAdditionalData}
+            onCancel={handleCloseDialog}
+          />
         </>
       )}
     </BulkUpdateDialogContent>

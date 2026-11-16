@@ -11,7 +11,7 @@
  * @see {@link file://./timeframe.ts}
  */
 import { DateTime } from "luxon";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveTimeframe, toZonedBoundaryISO } from "./timeframe";
 
@@ -160,5 +160,67 @@ describe("resolveTimeframe — unreadable custom boundaries", () => {
     expect(result.preset).toBe("custom");
     expect(result.from).toEqual(from);
     expect(result.to).toEqual(to);
+  });
+});
+
+/**
+ * An unrecognised preset.
+ *
+ * `timeframe` arrives from the query string, so it can be any string, and the
+ * switch's default branch answers with the 30 day range. That fallback has to
+ * keep the acting user's timezone: dropping it anchors the window at UTC
+ * midnight, which for a Tokyo user is 09:00 the same day, so a report silently
+ * covers a different set of rows than the one the picker claims.
+ */
+describe("resolveTimeframe - unrecognised preset", () => {
+  const tokyoPrefs = {
+    timeZone: "Asia/Tokyo",
+    dateFormat: "DD_MM_YYYY",
+  } as unknown as ResolvedFormatPrefs;
+
+  // why: a preset range ends at "now", and these cases compare two ranges
+  // resolved one after the other. On a live clock the second call can land a
+  // millisecond later, so the clock is frozen for both.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps the pref timezone when falling back from an unknown preset", () => {
+    const unknown = resolveTimeframe(
+      "not_a_preset" as never,
+      undefined,
+      undefined,
+      tokyoPrefs
+    );
+    const explicit = resolveTimeframe(
+      "last_30d",
+      undefined,
+      undefined,
+      tokyoPrefs
+    );
+
+    expect(unknown.preset).toBe("last_30d");
+    // Same range the caller would have got by asking for the default outright.
+    expect(unknown.from.toISOString()).toBe(explicit.from.toISOString());
+    expect(unknown.to.toISOString()).toBe(explicit.to.toISOString());
+  });
+
+  it("anchors the fallback window in the pref timezone, not UTC", () => {
+    const tokyo = resolveTimeframe(
+      "not_a_preset" as never,
+      undefined,
+      undefined,
+      tokyoPrefs
+    );
+    const utc = resolveTimeframe("not_a_preset" as never);
+
+    // Tokyo is UTC+9, so an identically-named range starts at a different
+    // instant. Equal boundaries would mean the pref was thrown away.
+    expect(tokyo.from.toISOString()).not.toBe(utc.from.toISOString());
   });
 });

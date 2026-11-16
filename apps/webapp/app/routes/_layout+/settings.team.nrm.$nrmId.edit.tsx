@@ -13,9 +13,8 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { getTeamMember } from "~/modules/team-member/service.server";
+import { getNrmForEdit, renameNrm } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -29,6 +28,12 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { NewOrEditMemberSchema } from "./settings.team.nrm.add-member";
 
+/**
+ * Loads a non-registered member for the edit modal.
+ *
+ * Gated on `nonRegisteredMember:update` and read through the NRM scope, so an
+ * id that is not an NRM of the workspace answers 404.
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -41,11 +46,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: PermissionAction.update,
     });
 
-    const teamMember = await getTeamMember({ id: nrmId, organizationId });
+    const teamMember = await getNrmForEdit({ nrmId, organizationId });
 
     return payload({ showModal: true, teamMember });
   } catch (cause) {
@@ -55,6 +60,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 export const meta = () => [{ title: appendToMetaTitle("Edit team member") }];
 
+/**
+ * Renames a non-registered member.
+ *
+ * Carries its own `nonRegisteredMember:update` gate (a direct POST never runs
+ * the loader) and writes through the scoped rename.
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -67,16 +78,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: PermissionAction.update,
     });
 
     const { name } = parseData(await request.formData(), NewOrEditMemberSchema);
 
-    await db.teamMember.update({
-      where: { id: nrmId, organizationId },
-      data: { name: name.trim() },
-    });
+    // The scope is part of the write: only a row the NRM index lists can be
+    // renamed, never a registered member's stored display name.
+    await renameNrm({ nrmId, organizationId, name: name.trim() });
 
     sendNotification({
       title: "Success",

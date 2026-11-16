@@ -1,10 +1,29 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { type FetcherWithComponents } from "react-router";
 import type {
+  AuditCount,
   AuditSessionInfo,
   AuditScannedItem,
   ScanListItems,
 } from "~/atoms/qr-scanner";
+import { isQuantityTracked } from "~/modules/asset/utils";
+import type { AuditScanCountRequired } from "~/modules/audit/service.server";
+import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+
+/**
+ * Whether a scanned item is a quantity-tracked asset, and so needs a count
+ * before it is saved. Restored rows carry no asset type, so a count entry
+ * (seeded from the audit's rows) also marks one.
+ */
+export function isQuantityScan(
+  data: Pick<AssetFromQr, "id"> & { type?: unknown },
+  auditCounts: Record<string, AuditCount>
+): boolean {
+  return (
+    auditCounts[data.id] !== undefined ||
+    isQuantityTracked(data as { type?: string | null })
+  );
+}
 
 /**
  * Props for the audit scan persistence hook.
@@ -24,6 +43,35 @@ type UseAuditScanPersistenceProps = {
   pendingPersistsRef: { current: Map<string, string> };
   /** Ref to prevent persistence during initial restoration */
   isRestoringRef: { current: boolean };
+  /**
+   * Unit counts keyed by assetId. A quantity-tracked scan is held back until
+   * its entry has a `foundQuantity`, then sent with it.
+   */
+  auditCounts: Record<string, AuditCount>;
+  /** Called when the server refuses a scan because it needs a count. */
+  onCountRequired: (request: AuditScanCountRequired) => void;
+  /**
+   * Called when a quantity-tracked scan is saved, with the count the server
+   * stored. That is the count sent, unless the server kept another (the audit
+   * finished, or the scan was removed, before a recount landed, or another
+   * scanner's first count claimed the row). The caller adopts it so the drawer
+   * shows what is stored; `refused` is true in that case so it can say why.
+   */
+  onCountSaved: (
+    assetId: string,
+    foundQuantity: number | null,
+    refused: boolean
+  ) => void;
+  /**
+   * Called when the server refuses a save that carried counts with a final
+   * answer (no permission any more, the audit archived: the response says
+   * `refused`), with the assets whose count it refused and the server's
+   * message. The caller stops treating those counts as about to be saved, so
+   * a refusal that keeps repeating cannot hold "Complete audit". A transient
+   * failure (a 5xx) does not call it: the count is retried and still holds
+   * completion until it is saved.
+   */
+  onCountFailed?: (assetIds: string[], message: string) => void;
 };
 
 /**
@@ -54,7 +102,16 @@ export function useAuditScanPersistence({
   persistedItemsRef,
   pendingPersistsRef,
   isRestoringRef,
+  auditCounts,
+  onCountRequired,
+  onCountSaved,
+  onCountFailed,
 }: UseAuditScanPersistenceProps) {
+  // The count each in-flight scan carried, keyed by assetId. A recount saved
+  // while that request is in flight differs from it, and the scan is sent again.
+  const sentCountsRef = useRef(new Map<string, number | null>());
+  const latestCountsRef = useRef(auditCounts);
+  latestCountsRef.current = auditCounts;
   // Bumped after we mutate `persistedItemsRef` so the consuming component
   // re-renders and any derived value (e.g. pendingScanCount that reads
   // `persistedItemsRef.current.has(...)` during render) reflects the new
@@ -107,6 +164,13 @@ export function useAuditScanPersistence({
         continue;
       }
 
+      // A quantity-tracked scan waits for the count dialog.
+      const isQuantity = isQuantityScan(item.data, auditCounts);
+      const foundQuantity = auditCounts[assetId]?.foundQuantity ?? null;
+      if (isQuantity && foundQuantity === null) {
+        continue;
+      }
+
       // Mark as pending
       pendingPersistsRef.current.set(assetId, qrId);
 
@@ -117,6 +181,13 @@ export function useAuditScanPersistence({
       formData.append("qrId", qrId);
       formData.append("assetId", assetId);
       formData.append("isExpected", String(isExpected));
+      // Marks a client that asks for counts. A request without it comes from a
+      // page loaded before audits counted units, and is recorded uncounted.
+      formData.append("countAware", "1");
+      if (isQuantity && foundQuantity !== null) {
+        formData.append("foundQuantity", String(foundQuantity));
+      }
+      sentCountsRef.current.set(assetId, isQuantity ? foundQuantity : null);
 
       // Submit only one item per effect run — next render will handle the rest
       void scanPersistFetcher.submit(formData, {
@@ -133,6 +204,7 @@ export function useAuditScanPersistence({
     persistedItemsRef,
     pendingPersistsRef,
     isRestoringRef,
+    auditCounts,
   ]);
 
   /**
@@ -142,23 +214,72 @@ export function useAuditScanPersistence({
   useEffect(() => {
     if (scanPersistFetcher.state === "idle" && scanPersistFetcher.data) {
       const data = scanPersistFetcher.data as
-        | { success?: boolean; data?: { scanId?: string } }
+        | {
+            success?: boolean;
+            data?: { scanId?: string };
+            foundQuantity?: number | null;
+          }
+        | (AuditScanCountRequired & { success: false })
         | { error?: string };
 
-      if ("success" in data && data.success) {
-        // Mark all pending as persisted
+      if ("status" in data && data.status === "count-required") {
+        // Nothing was saved; the scan goes back to waiting for a count.
+        pendingPersistsRef.current.clear();
+        sentCountsRef.current.clear();
+        bumpPersistedVersion();
+        onCountRequired(data);
+      } else if ("success" in data && data.success) {
+        const storedCount =
+          "foundQuantity" in data ? data.foundQuantity : undefined;
         pendingPersistsRef.current.forEach((_qrId, assetId) => {
+          const sent = sentCountsRef.current.get(assetId);
+          const current = latestCountsRef.current[assetId]?.foundQuantity;
+          const isCount = sent !== undefined && sent !== null;
+          // The server kept another count than the one sent.
+          const keptOther =
+            isCount && storedCount !== undefined && storedCount !== sent;
+          if (
+            !keptOther &&
+            sent !== undefined &&
+            current !== undefined &&
+            current !== sent
+          ) {
+            // Recounted while this request was in flight: send it again.
+            return;
+          }
           persistedItemsRef.current.add(assetId);
+          if (isCount) {
+            onCountSaved(
+              assetId,
+              keptOther ? storedCount ?? null : sent,
+              keptOther
+            );
+          }
         });
         pendingPersistsRef.current.clear();
+        sentCountsRef.current.clear();
         // Force a re-render so consumers reading `persistedItemsRef.current`
         // during render (e.g. pendingScanCount) recompute.
         bumpPersistedVersion();
       } else if ("error" in data && data.error) {
         // eslint-disable-next-line no-console
         console.error("Failed to persist scan:", data.error);
+        const refusedCounts = [...sentCountsRef.current]
+          .filter(([, sent]) => sent !== null && sent !== undefined)
+          .map(([assetId]) => assetId);
+        const isFinalRefusal = (data as { refused?: unknown }).refused === true;
+        if (isFinalRefusal && refusedCounts.length > 0) {
+          const refusal = (data as { error?: { message?: unknown } | null })
+            .error;
+          const message =
+            typeof refusal?.message === "string"
+              ? refusal.message
+              : "The server refused it.";
+          onCountFailed?.(refusedCounts, message);
+        }
         // Clear pending so it can be retried
         pendingPersistsRef.current.clear();
+        sentCountsRef.current.clear();
         bumpPersistedVersion();
       }
     }
@@ -167,5 +288,8 @@ export function useAuditScanPersistence({
     scanPersistFetcher.data,
     persistedItemsRef,
     pendingPersistsRef,
+    onCountRequired,
+    onCountSaved,
+    onCountFailed,
   ]);
 }

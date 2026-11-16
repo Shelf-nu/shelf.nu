@@ -5,6 +5,8 @@ import { action as createAction } from "~/routes/api+/mobile+/bookings.create";
 import { action as reserveAction } from "~/routes/api+/mobile+/bookings.reserve";
 import { action as updateAction } from "~/routes/api+/mobile+/bookings.update";
 import { action as custodyReleaseAction } from "~/routes/api+/mobile+/custody.release";
+import { OrganizationRoles } from "@prisma/client";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -116,9 +118,9 @@ describe("mobile booking routes - declared timezone validation", () => {
       user: { id: "user-1" },
     } as any);
     vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      role: "ADMIN",
-    } as any);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
   });
 
   const routes = [
@@ -213,10 +215,12 @@ describe("mobile routes - malformed body returns 400", () => {
     vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
     // `canUseAudits` gates the audit routes with a 403 BEFORE they parse the
     // body, so it has to be satisfied for these cases to reach the parse.
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      role: "ADMIN",
-      canUseAudits: true,
-    } as any);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({
+        roles: [OrganizationRoles.ADMIN],
+        canUseAudits: true,
+      })
+    );
   });
 
   /** A body that is not valid JSON at all. */

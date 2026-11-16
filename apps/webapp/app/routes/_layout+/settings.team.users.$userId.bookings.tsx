@@ -2,6 +2,7 @@ import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
+import { bookingStatusFilterWhereParams } from "~/modules/booking/constants";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
@@ -69,11 +70,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    // Scopes to the profile being viewed, NOT the viewer — this route renders
-    // one user's bookings and is gated above by a `teamMemberProfile.read` check
-    // (self-service/base users cannot reach other profiles). Do not substitute
-    // the caller's id here. Resolves all of the viewed user's team-member links
-    // so legacy team-member-linked bookings show, matching their own index.
+    // Scopes to the profile being viewed, NOT the viewer: this route renders
+    // one user's bookings. Only roles that see every booking can open another
+    // member's profile (`teamMemberProfile:read` implies
+    // `bookings.see === "all"`, pinned in
+    // `packages/permissions/src/policies.test.ts`), so no visibility filter
+    // applies here. Do not substitute the caller's id. Resolves all of the
+    // viewed user's team-member links so legacy team-member-linked bookings
+    // show, matching their own index.
     const custodianScope = await resolveCustodianScope({
       userId: selectedUserId,
       organizationId,
@@ -87,10 +91,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         search,
         userId: authSession?.userId,
         custodianScope,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
-        }),
+        // The picked status, if any ("Expired" = RESERVED past its end).
+        ...bookingStatusFilterWhereParams(status),
         tags: filterTags,
         // PERF: the list renders booking-level fields plus an asset COUNT. The
         // per-booking `bookingAssets` payload existed only for the assets

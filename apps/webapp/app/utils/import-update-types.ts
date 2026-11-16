@@ -257,7 +257,7 @@ export interface ParsedColumn {
   /** For custom fields: the definition */
   cfDef?: Pick<
     CustomField,
-    "name" | "type" | "helpText" | "required" | "active"
+    "name" | "type" | "format" | "helpText" | "required" | "active"
   >;
 }
 
@@ -291,6 +291,14 @@ export type AssetForUpdate = {
   id: string;
   title: string;
   /**
+   * Non-null = archived, which makes the asset read-only (issue #382).
+   * `fetchAssetsForUpdate` uses a top-level `include`, so every Asset scalar
+   * already comes back and this needed no query change — only the type.
+   * The preview reads it so an archived row is reported as a failure up front
+   * instead of being promised and then refused at apply time.
+   */
+  archivedAt?: Date | null;
+  /**
    * Plain scalar, no side-effects — round-trippable like `title`/`valuation`.
    * `fetchAssetsForUpdate` already pulls this via Prisma's `include` (which
    * selects all scalar columns), so no query change was needed to add it
@@ -299,6 +307,8 @@ export type AssetForUpdate = {
   description: string | null;
   sequentialId: string | null;
   valuation: number | null;
+  /** Read when the asset joins a model, to fill only an empty category. */
+  categoryId: string | null;
   availableToBook: boolean;
   /**
    * Asset type — needed by the qty-tracked update parser to decide

@@ -89,9 +89,6 @@ const mockKits = [
         },
       },
     ],
-    _count: {
-      assetKits: 2,
-    },
   },
   {
     id: "kit-2",
@@ -113,29 +110,29 @@ const mockKits = [
         },
       },
     ],
-    _count: {
-      assetKits: 1,
-    },
   },
 ];
 
 /**
- * The shape `/api/kits` returns: each member asset goes through
- * `serializeAssetImage`, which drops the nested `assetModel` and emits the
- * resolved image fields plus `imageSource`. These mocks each carry their own
- * `mainImage` and no thumbnail, so the thumbnail falls back to the full-size
- * URL within the "asset" tier.
+ * The shape `/api/kits` returns.
+ *
+ * The `AssetKit` pivot is flattened away into a plain `assets` array — that is
+ * the contract `KitsListComponent` reads, and `useApiQuery` casts the response
+ * to the component's type without validating it, so nothing but this assertion
+ * stands between a renamed field and a crash on the booking activity page.
+ * Each member asset also goes through `serializeAssetImage`, which drops the
+ * nested `assetModel` and emits the resolved image fields plus `imageSource`.
+ * These mocks each carry their own `mainImage` and no thumbnail, so the
+ * thumbnail falls back to the full-size URL within the "asset" tier.
  */
-const serializedMockKits = mockKits.map((kit) => ({
+const serializedMockKits = mockKits.map(({ assetKits, ...kit }) => ({
   ...kit,
-  assetKits: kit.assetKits.map(({ asset }) => {
+  assets: assetKits.map(({ asset }) => {
     const { assetModel: _assetModel, ...rest } = asset;
     return {
-      asset: {
-        ...rest,
-        thumbnailImage: rest.mainImage,
-        imageSource: "asset",
-      },
+      ...rest,
+      thumbnailImage: rest.mainImage,
+      imageSource: "asset",
     };
   }),
 }));
@@ -202,11 +199,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -314,11 +306,6 @@ describe("/api/kits", () => {
             },
             orderBy: { asset: { title: "asc" } },
           },
-          _count: {
-            select: {
-              assetKits: true,
-            },
-          },
         },
         orderBy: {
           name: "asc",
@@ -373,11 +360,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -438,11 +420,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -566,7 +543,6 @@ describe("/api/kits", () => {
             image: true,
             imageExpiration: true,
             assetKits: expect.any(Object),
-            _count: expect.any(Object),
           },
         })
       );

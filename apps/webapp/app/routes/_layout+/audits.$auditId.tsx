@@ -1,4 +1,4 @@
-import { AuditStatus, OrganizationRoles } from "@prisma/client";
+import { AuditStatus } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -22,12 +22,13 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { resolveAssigneeUserIds } from "~/modules/audit/assignee-form";
 import { sendAuditAssignedEmails } from "~/modules/audit/assignment-emails.server";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
+  getAuditUnitTotals,
   updateAuditSession,
   cancelAuditSession,
   archiveAuditSession,
@@ -75,7 +76,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ? PermissionAction.delete
         : PermissionAction.update;
 
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -83,16 +84,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     if (intent === "edit-audit") {
-      // Editing details (and the assignee list with them) is an admin/owner
-      // action. The UI hides Edit for other roles; enforce it here too so a
-      // direct POST cannot let a base member assign themselves to an audit.
-      if (isSelfServiceOrBase) {
+      // `audit:update` is held by every role that runs audits, so it does not
+      // decide who may change an audit's details. Editing (and reassigning)
+      // belongs to callers who manage others' audits, the same rule the
+      // actions menu applies before it offers Edit.
+      if (!access.policy.audits.manageOthers) {
         throw new ShelfError({
           cause: null,
-          message: "You do not have permission to edit audits.",
+          title: "Not allowed",
+          message: "You are not allowed to edit this audit.",
           additionalData: { userId, auditId },
-          label,
+          label: "Audit",
           status: 403,
+          shouldBeCaptured: false,
         });
       }
 
@@ -146,13 +150,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "complete-audit") {
-      // Assignee-gated: ADMIN/OWNER may complete any audit,
-      // BASE/SELF_SERVICE only when assigned.
+      // Assignee-gated: callers who see every audit may complete any audit,
+      // everyone else only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        assignedOnly: !access.audits.seeAll,
       });
 
       await completeAuditWithImages({
@@ -171,10 +175,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         organizationId,
         userId,
-        // Admin/owner is the inverse of self-service/base in this codebase.
-        // Passing it through lets the service allow non-creator admin/owners
-        // to cancel — matches archive/delete permissions.
-        isAdminOrOwner: !isSelfServiceOrBase,
+        canManageOthers: access.policy.audits.manageOthers,
         hints,
       });
 
@@ -182,26 +183,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "archive-audit") {
-      // Archiving requires the explicit "archive" permission.
-      // ADMIN/OWNER have it; BASE/SELF_SERVICE do not.
+      // Archiving requires `audit:archive`.
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.audit,
         action: PermissionAction.archive,
       });
-
-      // Only admin/owner can archive — UI gates this, but enforce server-side
-      // to prevent direct POST bypass by self-service/base roles
-      if (isSelfServiceOrBase) {
-        throw new ShelfError({
-          cause: null,
-          message: "You do not have permission to archive audits.",
-          additionalData: { userId, auditId },
-          label,
-          status: 403,
-        });
-      }
 
       await archiveAuditSession({
         auditSessionId: auditId,
@@ -213,20 +201,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "delete-audit") {
-      // Outer requirePermission already gated on PermissionAction.delete
-      // for this intent — no redundant inner re-check.
-
-      // UI hides the button for self-service/base, but enforce server-side
-      // to prevent direct POST bypass.
-      if (isSelfServiceOrBase) {
-        throw new ShelfError({
-          cause: null,
-          message: "You do not have permission to delete audits.",
-          additionalData: { userId, auditId },
-          label,
-          status: 403,
-        });
-      }
+      // The outer requirePermission already gated on `audit:delete` for
+      // this intent, so no inner re-check.
 
       const { confirmation } = parseData(
         formData,
@@ -287,20 +263,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, userOrganizations } = permissionResult;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const { session } = await getAuditSessionDetails({
+      // Reads `session` only, so no photo is signed here.
+      refreshExpectedAssetImages: false,
       id: auditId,
       organizationId,
       userOrganizations,
       request,
     });
-
-    // Calculate stats for dynamic button text
-    const scanCount = await db.auditScan.count({
-      where: { auditSessionId: auditId },
-    });
-    const hasScans = scanCount > 0;
 
     const stats = {
       expectedCount: session.expectedAssetCount,
@@ -309,16 +281,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       unexpectedCount: session.unexpectedAssetCount,
     };
 
-    const rolesForOrg = userOrganizations.find(
-      (org) => org.organization.id === organizationId
-    )?.roles;
-
-    const isAdminOrOwner = rolesForOrg
-      ? rolesForOrg.includes(OrganizationRoles.ADMIN) ||
-        rolesForOrg.includes(OrganizationRoles.OWNER)
-      : false;
-
-    if (!isAdminOrOwner) {
+    // Callers limited to assigned audits may open only those.
+    if (!access.audits.seeAll) {
       const isAssignee = session.assignments.some(
         (assignment) => assignment.userId === userId
       );
@@ -336,28 +300,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
     const header = { title: `${session.name} · Overview` };
 
-    // Fetch team members for audit assignment (used in edit dialog)
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        organizationId,
-        deletedAt: null,
-        userId: { not: null }, // Only team members with user accounts
-      },
-      select: {
-        id: true,
-        name: true,
-        userId: true,
-      },
-      orderBy: { name: "asc" },
-    });
+    // Read together: the scan count (dynamic button text), the units line of
+    // the header's Complete Audit dialog (the overview reads it from here
+    // too), and the team members for the edit dialog's assignment. The edit
+    // dialog is offered only to callers who manage others' audits, so the
+    // roster is read for them alone and is an empty list for everyone else.
+    const [scanCount, unitTotals, teamMembers] = await Promise.all([
+      db.auditScan.count({ where: { auditSessionId: auditId } }),
+      getAuditUnitTotals(auditId),
+      access.policy.audits.manageOthers
+        ? db.teamMember.findMany({
+            where: {
+              organizationId,
+              deletedAt: null,
+              userId: { not: null }, // Only team members with user accounts
+            },
+            select: {
+              id: true,
+              name: true,
+              userId: true,
+            },
+            orderBy: { name: "asc" },
+          })
+        : [],
+    ]);
+    const hasScans = scanCount > 0;
 
     return data(
       payload({
         header,
         session,
-        isAdminOrOwner,
+        canSeeAllAudits: access.audits.seeAll,
+        canManageOthersAudits: access.policy.audits.manageOthers,
         hasScans,
         stats,
+        unitTotals,
         userId,
         teamMembers,
       })
@@ -369,9 +346,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function AuditDetailsPage() {
-  const { session, isAdminOrOwner, hasScans, stats, userId } =
-    useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const {
+    session,
+    canSeeAllAudits,
+    canManageOthersAudits,
+    hasScans,
+    stats,
+    unitTotals,
+    userId,
+  } = useLoaderData<typeof loader>();
+  const roles = useOrganizationRoles();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -383,9 +367,9 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
-  // ADMIN/OWNER can scan/complete any audit;
-  // BASE/SELF_SERVICE only when assigned
-  const canScanAndComplete = isAssignee || isAdminOrOwner;
+  // Members whose audit scope covers every audit can scan and complete any of
+  // them; everyone else only the audits assigned to them.
+  const canScanAndComplete = isAssignee || canSeeAllAudits;
 
   // The activity loader requires `auditNote:read` and 403s without it, so the
   // tab follows the same gate rather than routing the user into an error.
@@ -428,7 +412,9 @@ export default function AuditDetailsPage() {
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-2">
           {/* Show actions dropdown to anyone who can view the audit (for PDF download) */}
-          {(isAdminOrOwner || isCreator || isAssignee) && <ActionsDropdown />}
+          {(canManageOthersAudits || isCreator || isAssignee) && (
+            <ActionsDropdown />
+          )}
 
           {!isCompleted &&
             !isCancelled &&
@@ -447,7 +433,11 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog auditName={session.name} stats={stats} />
+              <CompleteAuditDialog
+                auditName={session.name}
+                stats={stats}
+                units={unitTotals}
+              />
             )}
         </div>
       </Header>

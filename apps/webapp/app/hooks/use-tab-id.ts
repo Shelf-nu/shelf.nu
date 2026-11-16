@@ -13,6 +13,7 @@
  * @see {@link file://./../utils/tab-id.server.ts} — server-side counterpart
  */
 import { useEffect, useRef } from "react";
+import { generateClientId } from "~/utils/id/client-id";
 
 const SESSION_KEY = "__shelfTabId";
 
@@ -32,7 +33,7 @@ export function useTabId(): string {
     const stored = sessionStorage.getItem(SESSION_KEY);
     // Cloned tabs (window.open / target="_blank") inherit sessionStorage,
     // so generate a fresh ID when an opener is detected.
-    tabIdRef.current = stored && !window.opener ? stored : crypto.randomUUID();
+    tabIdRef.current = stored && !window.opener ? stored : generateClientId();
     sessionStorage.setItem(SESSION_KEY, tabIdRef.current);
   }
 

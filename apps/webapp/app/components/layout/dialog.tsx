@@ -14,6 +14,7 @@ export const Dialog = ({
   className,
   headerClassName,
   wrapperClassName,
+  ariaLabel,
 }: {
   title: string | ReactNode;
   children: ReactNode;
@@ -22,6 +23,8 @@ export const Dialog = ({
   className?: string;
   headerClassName?: string;
   wrapperClassName?: string;
+  /** Accessible name for the dialog, needed when `title` is not text (an icon). */
+  ariaLabel?: string;
 }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const onCloseRef = useRef(onClose);
@@ -39,15 +42,37 @@ export const Dialog = ({
       (document.activeElement as HTMLElement | null) ?? null;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onCloseRef.current?.();
-      }
+      if (event.key !== "Escape") return;
+
+      /**
+       * A floating layer owns Escape while the keystroke comes from inside it.
+       *
+       * Radix portals popover, select and combobox content into a
+       * `[data-radix-popper-content-wrapper]` on `body` and closes it from its
+       * own document-level handler. Because this listener runs first (see
+       * below), closing unconditionally would shut the whole dialog the moment
+       * someone dismissed a picker inside it, losing the form. Escape is
+       * expected to peel one layer at a time, so the innermost open layer
+       * takes it and this one only acts when nothing floats above.
+       *
+       * Keyed on where the keystroke came from rather than on whether any
+       * popper exists: an unrelated open layer elsewhere on the page, a
+       * tooltip for instance, must not stop this dialog closing.
+       */
+      const target = event.target as Element | null;
+      if (target?.closest?.("[data-radix-popper-content-wrapper]")) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      onCloseRef.current?.();
     };
 
-    // Attach to document to capture ESC even when Select or other components are focused
-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    // `window`, not `document`, and capture: the capture phase runs
+    // window -> document, so this fires before an enclosing Radix overlay's
+    // own document-level Escape handler and stopPropagation() keeps the key
+    // from reaching it. On `document` the outer layer wins the race and a
+    // dialog opened inside a Sheet closes the Sheet instead of itself.
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
       dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]") ||
@@ -60,7 +85,7 @@ export const Dialog = ({
     focusTarget.focus();
 
     return () => {
-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
       previouslyFocusedElement.current?.focus();
       previouslyFocusedElement.current = null;
     };
@@ -78,7 +103,12 @@ export const Dialog = ({
       }}
       onKeyDown={handleActivationKeyPress(() => onClose())}
     >
-      <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
+      <dialog
+        ref={dialogRef}
+        className={tw("dialog", className)}
+        open={open}
+        aria-label={ariaLabel}
+      >
         {/*
          * md:max-h-[calc(100vh-4rem)]: on desktop the dialog is `md:h-auto` and
          * the backdrop centers it without scrolling, so a tall body (e.g. the

@@ -9,7 +9,8 @@
  * Resolution order (first-match wins for dedup):
  *   1. Custodian (always included)
  *   2. Booking creator (if org setting enabled)
- *   3. Organization admins (RESERVATION events only, if org setting enabled)
+ *   3. The workspace booking broadcast audience (RESERVATION events whose
+ *      maker's role triggers it, if org setting enabled)
  *   4. Always-notify team members (org-level setting)
  *   5. Per-booking notification recipients
  *
@@ -21,9 +22,10 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@prisma/client";
+import { db } from "~/database/db.server";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
@@ -36,7 +38,9 @@ import { Logger } from "~/utils/logger";
  * - `CHECKIN` — booking assets have been checked in (completed)
  * - `OVERDUE` — booking has passed its end date without checkin
  * - `CANCEL` — booking was cancelled by a user
- * - `EXTEND` — booking end date was extended
+ * - `REVERT_TO_DRAFT` — a reserved booking was sent back to draft
+ * - `EXTEND`: booking end date was moved later
+ * - `SHORTEN`: booking end date was moved earlier
  * - `DELETE` — booking was permanently deleted
  * - `UPDATE` — booking fields or assets were modified
  */
@@ -47,7 +51,9 @@ export type BookingEventType =
   | "CHECKIN"
   | "OVERDUE"
   | "CANCEL"
+  | "REVERT_TO_DRAFT"
   | "EXTEND"
+  | "SHORTEN"
   | "DELETE"
   | "UPDATE";
 
@@ -96,6 +102,9 @@ export type NotificationRecipient = {
  * determines which `reason` label a user gets if they appear in multiple
  * categories.
  *
+ * **Members only:** a recipient who is no longer a member of the workspace is
+ * dropped, whichever link put them on the list.
+ *
  * **Editor exclusion:** The user who triggered the action (`editorUserId`)
  * is removed from the final list for immediate (non-scheduled) notifications,
  * so they don't receive an email for their own action. This exclusion is
@@ -119,18 +128,19 @@ export async function getBookingNotificationRecipients({
   organizationId,
   editorUserId,
   isScheduledJob,
-  isSelfServiceOrBase,
+  alertsOrgOnReservation,
 }: {
   booking: BookingForEmail;
   eventType: BookingEventType;
   organizationId: string;
   editorUserId?: string;
   isScheduledJob?: boolean;
-  /** When true, the booking was created by a base/self-service user.
-   *  Admin broadcast only fires for reservations made by these roles
-   *  (preserving current behavior where admins are alerted to "pickup"
-   *  requests from lower-role users). */
-  isSelfServiceOrBase?: boolean;
+  /**
+   * The reserving member's role triggers the workspace booking broadcast
+   * (`notifications.reservationAlertsAdmins`): their reservation is a
+   * "pickup" request someone else must handle.
+   */
+  alertsOrgOnReservation?: boolean;
 }): Promise<NotificationRecipient[]> {
   try {
     const recipients = new Map<string, NotificationRecipient>();
@@ -171,17 +181,17 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 4. Notify admins only on reservation requests from base/self-service
-    //    users. This is the "pickup" broadcast — admins are alerted so someone
-    //    can handle the request. Admins reserving their own bookings don't
-    //    trigger this broadcast (preserving current behavior).
+    // 4. On a reservation whose maker's role triggers the broadcast, notify
+    //    the broadcast audience (`notifications.orgBookingBroadcasts`) so
+    //    someone can handle the pickup.
     if (
       settings.notifyAdminsOnNewBooking &&
       eventType === "RESERVATION" &&
-      isSelfServiceOrBase
+      alertsOrgOnReservation
     ) {
-      const admins = await getOrganizationAdminsForNotification({
+      const admins = await getOrganizationNotificationAudience({
         organizationId,
+        audience: "orgBookingBroadcasts",
       });
 
       for (const admin of admins) {
@@ -237,7 +247,22 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 7. Exclude the editor from immediate (non-scheduled) notifications.
+    // 7. Keep only current members of the workspace. Revoking access unlinks
+    //    a user's team members but leaves them as a booking's custodian or
+    //    creator, and those links must not keep notifying them.
+    const memberships = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        userId: { in: [...recipients.values()].map(({ userId }) => userId) },
+      },
+      select: { userId: true },
+    });
+    const memberIds = new Set(memberships.map(({ userId }) => userId));
+    for (const [email, recipient] of recipients) {
+      if (!memberIds.has(recipient.userId)) recipients.delete(email);
+    }
+
+    // 8. Exclude the editor from immediate (non-scheduled) notifications.
     //    Scheduled jobs (reminders, overdue) have no human editor, so
     //    skipping this step ensures all relevant parties are notified.
     //    Exception: the "creator" reason means the user explicitly opted in
@@ -256,7 +281,7 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 8. Return only entries with valid emails
+    // 9. Return only entries with valid emails
     return Array.from(recipients.values()).filter(
       (r) => r.email && r.email.length > 0
     );

@@ -30,6 +30,27 @@ export const selectedBulkItemsAtom = atom<ListItemData[]>([]);
 export const disabledBulkItemsAtom = atom<ListItemData[]>([]);
 
 /**
+ * Whether the current route's selection is FORM STATE rather than a set of rows
+ * to act on.
+ *
+ * On an index, a tick means "do the next bulk action to this row", so it must
+ * not outlive the filter it was made under: an item ticked before a search
+ * stays selected while invisible, and the action then reaches an asset the user
+ * cannot see. On the `manage-*` screens a tick means "this item is attached to
+ * this booking or kit", so it MUST survive filtering — unticking is how you
+ * detach something, and clearing on search would submit every attached item as
+ * removed.
+ *
+ * Default false, so a new list page is protected without having to remember
+ * anything. Screens whose selection is form state never set this directly: they
+ * seed through `seedFormSelectionAtom`, which sets it in the same write, so a
+ * screen cannot load its attached items without also opting out.
+ * `AtomsResetHandler` resets this on every pathname change, so an opt-out
+ * cannot leak into the next route.
+ */
+export const selectionIsFormStateAtom = atom<boolean>(false);
+
+/**
  * Reset the atom when it mounts
  * This item is also reset in the atoms-reset-handler.tsx file
  * This is just in case the atom is used in a component that does not change route
@@ -99,6 +120,25 @@ export const setSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
     });
 
     set(selectedBulkItemsAtom, Array.from(prevItemsMap.values()));
+  }
+);
+
+/**
+ * Seeds the selection of a `manage-*` screen with the items already attached to
+ * its booking, kit or location, and marks that selection as form state.
+ *
+ * Use this — not `setSelectedBulkItemsAtom` — wherever a screen loads what is
+ * attached. Those screens submit every unticked item as removed, so if the
+ * selection were cleared by a search the save would detach everything; the flag
+ * set here is what stops `AtomsResetHandler` from clearing it.
+ *
+ * @param update - The items currently attached, pre-ticked in the picker
+ */
+export const seedFormSelectionAtom = atom<null, ListItemData[][], void>(
+  null,
+  (_, set, update) => {
+    set(setSelectedBulkItemsAtom, update);
+    set(selectionIsFormStateAtom, true);
   }
 );
 

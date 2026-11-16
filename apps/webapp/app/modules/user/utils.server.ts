@@ -1,4 +1,14 @@
-import type { OrganizationRoles } from "@prisma/client";
+/**
+ * Team User Actions
+ *
+ * Server handlers for the actions on the team settings pages: delete a user,
+ * revoke access, change a role, log a member out of Shelf, and resend or
+ * cancel an invite.
+ *
+ * @see {@link file://./../../routes/_layout+/settings.team.users.tsx}
+ * @see {@link file://./../../routes/_layout+/settings.team.invites.tsx}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import {
   InviteStatuses,
   OrganizationRoles as OrgRolesEnum,
@@ -8,35 +18,58 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
+import { endAllSessionsForUser } from "~/modules/auth/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
+import { emailMatchesDomains } from "~/utils/misc";
+import { roleChangeRequiresOwner } from "~/utils/permissions/membership-access";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
-import { isDemotion } from "~/utils/roles";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import {
+  ROLE_LABELS,
+  isWorkspaceOwner,
+  labelToRole,
+  resolveRole,
+} from "~/utils/permissions/role-access";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import {
   changeUserRole,
+  lockMembership,
   revokeAccessToOrganization,
-  transferEntitiesToNewOwner,
+  transferOnRoleChange,
 } from "./service.server";
-import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
+import {
+  caseInsensitiveEmailFilter,
+  revokeAccessEmailText,
+  roleChangeEmailText,
+} from "../invite/helpers";
 import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
 /**
- * This function handles the user actions such as deleting, revoking access, resending invite, and cancelling invite.
- * It is currently used in the settings/team/users index & user page.
+ * Handles the team actions posted from the team users list, the member page
+ * and the invites list: delete a team member, revoke access, resend or cancel
+ * an invite, change a role, and log a member out of Shelf.
+ *
+ * @param request - The action request; its form data carries the `intent`
+ * @param organizationId - The caller's current organization
+ * @param userId - The acting user's id
+ * @param callerAccess - The acting member's resolved access (from requirePermission)
+ * @throws {ShelfError} On invalid input, or 403 when the caller may not act on
+ *   the target or grant the requested role
  */
 export async function resolveUserAction(
   request: Request,
   organizationId: string,
   userId: string,
-  callerRole: OrgRolesEnum
+  callerAccess: RoleAccess
 ) {
   const formData = await request.formData();
 
@@ -49,6 +82,7 @@ export async function resolveUserAction(
         "resend",
         "cancelInvite",
         "changeRole",
+        "logoutUser",
       ]),
     }),
     {
@@ -110,28 +144,33 @@ export async function resolveUserAction(
       );
 
       /**
-       * Parity with `changeUserRole`: only the OWNER may act on an ADMIN.
-       * Without this an ADMIN who is refused a role change ("Only the workspace
-       * owner can change an Administrator's role") can just revoke that
-       * ADMIN's access instead, which is the stronger action.
+       * Same rule as `changeUserRole`: a member whose effective role needs the
+       * owner to change it (Administrator, Owner) can only have access revoked
+       * by the workspace owner. Revoking is the stronger action, so it can
+       * never be looser than a role change.
        *
-       * Revoking the OWNER is refused by `revokeAccessToOrganization` itself,
-       * so it holds for every caller rather than only this one.
+       * This read is a fast path for a friendly refusal. The decision that
+       * counts is repeated by `revokeAccessToOrganization` on the row re-read
+       * under the membership lock, which also refuses revoking the OWNER for
+       * every caller.
        */
       const targetUserOrg = await db.userOrganization.findFirst({
         where: { userId: targetUserId, organizationId },
         select: { roles: true },
       });
+      const targetRole = targetUserOrg
+        ? resolveRole(targetUserOrg.roles)
+        : null;
 
       if (
-        targetUserOrg?.roles.includes(OrgRolesEnum.ADMIN) &&
-        callerRole !== OrgRolesEnum.OWNER
+        targetRole &&
+        roleChangeRequiresOwner(targetRole) &&
+        !callerAccess.ownsWorkspace
       ) {
         throw new ShelfError({
           cause: null,
           title: "Insufficient permissions",
-          message:
-            "Only the workspace owner can revoke an Administrator's access.",
+          message: `Only the workspace owner can revoke access for a member with the ${ROLE_LABELS[targetRole]} role.`,
           additionalData: { organizationId, targetUserId },
           label: "Team",
           status: 403,
@@ -142,6 +181,7 @@ export async function resolveUserAction(
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
         organizationId,
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
       });
 
       const org = await db.organization
@@ -198,7 +238,7 @@ export async function resolveUserAction(
       await db.invite
         .updateMany({
           where: {
-            inviteeEmail,
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
             organizationId,
             status: InviteStatuses.PENDING,
           },
@@ -246,17 +286,14 @@ export async function resolveUserAction(
         }
       );
 
-      /** Find the Role based on its user friendly name */
-      const role = Object.keys(organizationRolesMap).find(
-        (key) => organizationRolesMap[key] === userFriendlyRole
-      ) as OrganizationRoles | undefined;
+      /** The form submits the role's label; map it back through ROLE_LABELS. */
+      const role = labelToRole(userFriendlyRole);
 
       /**
-       * `userFriendlyRole` is free text from the form and `organizationRolesMap`
-       * contains an OWNER entry (it doubles as the display map for the team
-       * list), so "Owner" would resolve here and mint an OWNER invite —
-       * the same escalation the invite dialog and CSV import both refuse.
-       * Ownership moves only through `transferOwnership`.
+       * `userFriendlyRole` is free text from the form. `labelToRole` knows
+       * every role's label, including Owner, so the invitable check is what
+       * refuses an Owner invite. Ownership moves only through
+       * `transferOwnership`.
        */
       if (!role || !isInvitableRole(role)) {
         throw new ShelfError({
@@ -269,39 +306,31 @@ export async function resolveUserAction(
         });
       }
 
-      /** Invalidate all previous invites for current user for current organization */
+      // Authorize before invalidating: a refused resend must leave the
+      // existing invite pending.
+      assertCanAssignRoles({
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
+        roles: [role],
+        organizationId,
+      });
 
-      const [_invalidatedInvites, invite] = await Promise.all([
-        db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to invalidate previous invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          }),
-
-        /** Create a new invite, based on the prev invite's role */
-        createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [role],
-          userId,
-        }),
-      ]);
+      /**
+       * `createInvite` invalidates the person's earlier pending invites in the
+       * same transaction that creates this one, so a refused resend (for
+       * example a team member deleted or claimed since) leaves the existing
+       * invite pending.
+       */
+      /** Create a new invite, based on the prev invite's role */
+      const invite = await createInvite({
+        organizationId,
+        inviteeEmail,
+        teamMemberName,
+        teamMemberId,
+        inviterId: userId,
+        roles: [role],
+        userId,
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
+      });
 
       if (invite) {
         sendNotification({
@@ -317,7 +346,8 @@ export async function resolveUserAction(
     }
     case "changeRole": {
       await validatePermission({
-        roles: [callerRole],
+        roles: [callerAccess.role],
+        workspace: callerAccess.workspaceGrants,
         action: PermissionAction.changeRole,
         entity: PermissionEntity.teamMember,
         organizationId,
@@ -351,99 +381,78 @@ export async function resolveUserAction(
         });
       }
 
-      /** Fetch the target's current role to detect demotion */
-      const targetUserOrg = await db.userOrganization.findFirst({
-        where: { userId: targetUserId, organizationId },
-      });
-
-      if (!targetUserOrg) {
-        throw new ShelfError({
-          cause: null,
-          message: "User is not a member of this organization",
-          label: "Team",
-          shouldBeCaptured: false,
-        });
-      }
-
-      const currentRole = targetUserOrg.roles[0];
-
-      /** Transfer entities on demotion */
-      if (isDemotion(currentRole, newRole)) {
-        const org = await db.organization.findUniqueOrThrow({
+      // `workspaceOwnerId`, not `org`: the role-change email further down in
+      // this same `case` block declares `const [targetUser, org]`.
+      const { userId: workspaceOwnerId } =
+        await db.organization.findUniqueOrThrow({
           where: { id: organizationId },
           select: { userId: true },
         });
 
-        const recipientId = transferToUserId || org.userId;
+      /**
+       * Lock order: the target's membership row FIRST, then the authorized
+       * role write, then entity writes, matching the other paths that take
+       * this same lock (SSO reconciliation, account deletion, revocation; see
+       * {@link lockMembership}), so two role changes on the same member queue
+       * on it instead of each holding a lock the other needs. Everything the
+       * change moves, and the role the audit entry records, is read from the
+       * persisted row under that lock.
+       */
+      const currentRole = await db.$transaction(async (tx) => {
+        const targetUserOrg = await lockMembership(tx, {
+          userId: targetUserId,
+          organizationId,
+        });
 
-        /** Validate that the transfer recipient is a member of this org */
-        if (transferToUserId) {
-          const recipientOrg = await db.userOrganization.findFirst({
-            where: { userId: transferToUserId, organizationId },
+        if (!targetUserOrg) {
+          throw new ShelfError({
+            cause: null,
+            message: "User is not a member of this organization",
+            additionalData: { targetUserId, organizationId },
+            label: "Team",
+            status: 404,
+            shouldBeCaptured: false,
           });
-
-          if (!recipientOrg) {
-            throw new ShelfError({
-              cause: null,
-              message:
-                "Transfer recipient is not a member of this organization",
-              label: "Team",
-              additionalData: { transferToUserId, organizationId },
-            });
-          }
         }
 
-        await db.$transaction(async (tx) => {
-          // The demoted user keeps their org membership (only their role
-          // rank drops), so only OWNERSHIP columns move — see
-          // EntityTransferReason's JSDoc in service.server.ts.
-          await transferEntitiesToNewOwner({
-            tx,
-            id: targetUserId,
-            newOwnerId: recipientId,
-            organizationId,
-            reason: "demotion",
-          });
+        const previousRole = resolveRole(targetUserOrg.roles);
 
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
-
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        // Authorize and write the role, then validate the recipient and move
+        // entities; any refusal rolls the whole change back. Authorizing first
+        // means a refused request takes no entity row locks and never reveals
+        // anything about the recipient.
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          actorOwnsWorkspace: callerAccess.ownsWorkspace,
+          tx,
         });
-      } else {
-        await db.$transaction(async (tx) => {
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
 
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        // Decides from the roles read under the lock, never from the row the
+        // role write above just changed.
+        await transferOnRoleChange({
+          tx,
+          targetUserId,
+          organizationId,
+          fromRoles: targetUserOrg.roles,
+          toRole: newRole,
+          recipientId: transferToUserId || workspaceOwnerId,
         });
-      }
+
+        await tx.roleChangeLog.create({
+          data: {
+            userId: targetUserId,
+            changedById: userId,
+            source: "MANUAL",
+            organizationId,
+            previousRole,
+            newRole,
+          },
+        });
+
+        return previousRole;
+      });
 
       /** Send email notification to the affected user */
       const [targetUser, org] = await Promise.all([
@@ -457,8 +466,8 @@ export async function resolveUserAction(
         }),
       ]);
 
-      const roleName = organizationRolesMap[newRole] || newRole;
-      const previousRoleName = organizationRolesMap[currentRole] || currentRole;
+      const roleName = ROLE_LABELS[newRole];
+      const previousRoleName = ROLE_LABELS[currentRole];
 
       sendEmail({
         to: targetUser.email,
@@ -481,6 +490,47 @@ export async function resolveUserAction(
       sendNotification({
         title: "Role updated",
         message: `User role has been changed to ${roleName}`,
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return payload(null);
+    }
+    case "logoutUser": {
+      const { userId: targetUserId } = parseData(
+        formData,
+        z.object({
+          userId: z.string(),
+        }),
+        {
+          additionalData: {
+            organizationId,
+            intent,
+          },
+        }
+      );
+
+      await assertCanLogoutMember({
+        organizationId,
+        actorUserId: userId,
+        targetUserId,
+      });
+
+      const endedSessions = await endAllSessionsForUser(targetUserId);
+
+      /**
+       * The audit record of a forced logout. It changes no workspace data, so
+       * there is no activity event for it; the log line names who logged out
+       * whom, in which workspace.
+       */
+      Logger.info(
+        `Team: user ${userId} logged out user ${targetUserId} of Shelf from workspace ${organizationId} (${endedSessions} session(s) ended)`
+      );
+
+      sendNotification({
+        title: "User logged out",
+        message:
+          "They have been signed out of Shelf on every device and must sign in again through your identity provider.",
         icon: { name: "success", variant: "success" },
         senderId: userId,
       });
@@ -534,4 +584,102 @@ export async function generateUniqueUsername(email: string): Promise<string> {
     label: "User",
     additionalData: { email, attempts: MAX_USERNAME_ATTEMPTS },
   });
+}
+
+/**
+ * Refuses a forced logout ("Log out of Shelf") the caller may not make.
+ *
+ * The action exists for SSO workspaces, where a role changed in the identity
+ * provider is applied only when the member next signs in. So the workspace
+ * must have SSO enabled and the target must sign in through it: an SSO user
+ * whose email domain is one of the workspace's SSO domains. SSO sign-in only
+ * reconciles roles in workspaces that claim the user's email domain, so an SSO
+ * user invited from another company's identity provider has no role here to
+ * refresh, and their sessions are not this workspace's to end. Nobody
+ * logs themselves out here, and nobody logs out the workspace owner. Admins
+ * may log out other admins.
+ *
+ * Reaching the action already needs `teamMember: update` (the route gate),
+ * which only admins and the owner hold.
+ *
+ * @param args.organizationId - The caller's current organization
+ * @param args.actorUserId - The member asking for the logout
+ * @param args.targetUserId - The member to log out, from the form
+ * @throws {ShelfError} 400 for a self-logout, a non-SSO workspace, or a member
+ *   who does not sign in through this workspace's SSO,
+ *   403 for the owner, 404 when the target is not a member of this workspace
+ */
+async function assertCanLogoutMember({
+  organizationId,
+  actorUserId,
+  targetUserId,
+}: {
+  organizationId: string;
+  actorUserId: string;
+  targetUserId: string;
+}) {
+  const refuse = (message: string, status: 400 | 403 | 404) =>
+    new ShelfError({
+      cause: null,
+      title: status === 403 ? "Insufficient permissions" : undefined,
+      message,
+      additionalData: { organizationId, actorUserId, targetUserId },
+      label: "Team",
+      status,
+      shouldBeCaptured: false,
+    });
+
+  if (targetUserId === actorUserId) {
+    throw refuse("You cannot log yourself out from here.", 400);
+  }
+
+  const [org, membership] = await Promise.all([
+    db.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        enabledSso: true,
+        userId: true,
+        ssoDetails: { select: { domain: true } },
+      },
+    }),
+    // Scoped by organizationId: a user id from another workspace finds nothing
+    db.userOrganization.findFirst({
+      where: { userId: targetUserId, organizationId },
+      select: { roles: true, user: { select: { sso: true, email: true } } },
+    }),
+  ]);
+
+  if (!membership) {
+    throw refuse("User is not a member of this workspace.", 404);
+  }
+
+  if (!org?.enabledSso) {
+    throw refuse(
+      "Logging members out is only available in workspaces that use SSO.",
+      400
+    );
+  }
+
+  if (!membership.user.sso) {
+    throw refuse(
+      "This member does not sign in through SSO, so there is no SSO role to refresh.",
+      400
+    );
+  }
+
+  if (
+    !emailMatchesDomains(
+      membership.user.email.split("@")[1] ?? "",
+      org.ssoDetails?.domain ?? null
+    )
+  ) {
+    throw refuse(
+      "This member does not sign in through this workspace's SSO, so there is no SSO role to refresh.",
+      400
+    );
+  }
+
+  if (org.userId === targetUserId || isWorkspaceOwner(membership.roles)) {
+    throw refuse("The workspace owner cannot be logged out.", 403);
+  }
 }

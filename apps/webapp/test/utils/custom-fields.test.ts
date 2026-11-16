@@ -11,6 +11,7 @@ const baseCustomField: CustomField = {
   required: false,
   active: true,
   type: "AMOUNT",
+  format: "PLAIN",
   options: [],
   organizationId: "org_1",
   userId: "user_1",

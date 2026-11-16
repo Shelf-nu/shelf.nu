@@ -195,7 +195,7 @@ const ListUserContent = ({
     <Td className=" p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <Link
-          target="blank"
+          target="_blank"
           className="underline hover:text-gray-500"
           to={`/qr/${item.id}`}
         >
@@ -217,7 +217,7 @@ const ListUserContent = ({
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         {item.organization ? (
           <Link
-            target="blank"
+            target="_blank"
             className="underline hover:text-gray-500"
             to={`/admin-dashboard/org/${item.organization.id}`}
           >
@@ -232,7 +232,7 @@ const ListUserContent = ({
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         {item.user ? (
           <Link
-            target="blank"
+            target="_blank"
             className="underline hover:text-gray-500"
             to={`/admin-dashboard/${item.user.id}`}
           >

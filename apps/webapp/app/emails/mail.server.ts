@@ -2,6 +2,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { triggerEmail } from "./email.worker.server";
+import { redactEmailPayloadForLog } from "./redact-email-payload";
 import type { EmailPayloadType } from "./types";
 
 const label = "Email";
@@ -17,7 +18,7 @@ export const sendEmailAndWait = (payload: EmailPayloadType) =>
       new ShelfError({
         cause,
         additionalData: {
-          payload,
+          payload: redactEmailPayloadForLog(payload),
           queueName: QueueNames.emailQueue,
           action: "sendEmail",
         },
@@ -48,7 +49,7 @@ const addToQueue = async (payload: EmailPayloadType) => {
       new ShelfError({
         cause,
         additionalData: {
-          payload,
+          payload: redactEmailPayloadForLog(payload),
           options,
           queueName: QueueNames.emailQueue,
           action: "addToQueue",

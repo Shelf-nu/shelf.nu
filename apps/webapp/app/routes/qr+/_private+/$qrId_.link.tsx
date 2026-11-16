@@ -1,8 +1,4 @@
-import type {
-  MetaFunction,
-  LoaderFunctionArgs,
-  ActionFunctionArgs,
-} from "react-router";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import {
   data,
   redirect,
@@ -18,18 +14,9 @@ import { Button } from "~/components/shared/button";
 
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
-import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { claimQrCode } from "~/modules/qr/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
-import {
-  payload,
-  error,
-  getActionMethod,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -85,50 +72,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });
-  }
-}
-
-export async function action({ context, request, params }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
-
-  try {
-    const method = getActionMethod(request);
-
-    switch (method) {
-      case "POST": {
-        const { organizationId, linkTo } = parseData(
-          await request.formData(),
-          z.object({
-            organizationId: z.string(),
-            linkTo: z.enum(["new", "existing"]),
-          })
-        );
-        await claimQrCode({
-          id: qrId,
-          organizationId,
-          userId,
-        });
-
-        /** Redirect to the relevant action. We also set the current org to the one selected, as the user could select  */
-        return redirect(
-          linkTo === "new"
-            ? `/assets/new?qrId=${qrId}`
-            : `/qr/${qrId}/link-existing-asset`,
-          {
-            headers: [
-              setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-            ],
-          }
-        );
-      }
-    }
-
-    throw notAllowedMethod(method);
-  } catch (cause) {
-    const reason = makeShelfError(cause);
-    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -14,9 +14,13 @@
  */
 import { ShelfError } from "./error";
 import {
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertAssetModelBelongsToOrg,
+  assertAuditAssetBelongsToAudit,
+  assertAuditSessionBelongsToOrg,
+  assertCategoriesBelongToOrg,
   assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
   assertKitsBelongToOrg,
@@ -25,13 +29,21 @@ import {
   assertTagsBelongToOrg,
   assertTagsAssignableToAssets,
   assertTeamMemberBelongsToOrg,
+  assertTeamMembersBelongToOrg,
   assertUserBelongsToOrg,
 } from "./org-validation.server";
+import { hasPermission } from "./permissions/permission.validator.server";
 
 // why: importing the module pulls in ~/database/db.server (Prisma client
 // init). The guards never touch it here because every call passes an explicit
 // tx, so a hollow mock is enough and keeps the suite DB-free.
 vitest.mock("~/database/db.server", () => ({ db: {} }));
+
+// why: the archived refusal looks up whether the actor may reinstate, only to
+// word the message; the permission matrix has its own suite.
+vitest.mock("~/utils/permissions/permission.validator.server", () => ({
+  hasPermission: vitest.fn().mockResolvedValue(false),
+}));
 
 const ORG = "org-1";
 
@@ -50,6 +62,8 @@ function txWith(overrides: Record<string, any>) {
     userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     assetKit: { findMany: vitest.fn().mockResolvedValue([]) },
     assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
+    auditAsset: { findFirst: vitest.fn().mockResolvedValue(null) },
+    auditSession: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
 }
@@ -344,6 +358,103 @@ describe("assertLocationsBelongToOrg", () => {
   });
 });
 
+describe("assertCategoriesBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({
+      category: { findMany: vitest.fn().mockResolvedValue([]) },
+    });
+    await expect(
+      assertCategoriesBelongToOrg({ categoryIds: [], organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.category.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves when every id belongs to the org, deduping and scoping by organizationId", async () => {
+    const tx = txWith({
+      category: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "c1" }, { id: "c2" }]),
+      },
+    });
+
+    await expect(
+      assertCategoriesBelongToOrg(
+        { categoryIds: ["c1", "c2", "c1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.category.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["c1", "c2"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when any ID is foreign/missing", async () => {
+    const tx = txWith({
+      category: { findMany: vitest.fn().mockResolvedValue([{ id: "c1" }]) },
+    });
+
+    const err = await assertCategoriesBelongToOrg(
+      { categoryIds: ["c1", "c9"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid categories");
+  });
+});
+
+describe("assertTeamMembersBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({
+      teamMember: { findMany: vitest.fn().mockResolvedValue([]) },
+    });
+    await expect(
+      assertTeamMembersBelongToOrg(
+        { teamMemberIds: [], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+    expect(tx.teamMember.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves when every id belongs to the org, deduping, scoping by organizationId and skipping soft-deleted members", async () => {
+    const tx = txWith({
+      teamMember: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "t1" }, { id: "t2" }]),
+      },
+    });
+
+    await expect(
+      assertTeamMembersBelongToOrg(
+        { teamMemberIds: ["t1", "t2", "t1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.teamMember.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["t1", "t2"] }, organizationId: ORG, deletedAt: null },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when any ID is foreign/missing", async () => {
+    const tx = txWith({
+      teamMember: { findMany: vitest.fn().mockResolvedValue([{ id: "t1" }]) },
+    });
+
+    const err = await assertTeamMembersBelongToOrg(
+      { teamMemberIds: ["t1", "t9"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid custodians");
+  });
+});
+
 describe("assertTagsBelongToOrg", () => {
   it("is a no-op for an empty list", async () => {
     const tx = txWith({});
@@ -513,20 +624,24 @@ describe("single-entity guards reject foreign/missing with 400", () => {
     expect(err.status).toBe(400);
     expect(tx.teamMember.findFirst).toHaveBeenCalledWith({
       where: { id: "tm-foreign", organizationId: ORG },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
   });
 
-  it("assertTeamMemberBelongsToOrg resolves when the member is in the org", async () => {
+  it("assertTeamMemberBelongsToOrg returns the member with its linked user id", async () => {
     const tx = txWith({
-      teamMember: { findFirst: vitest.fn().mockResolvedValue({ id: "tm-1" }) },
+      teamMember: {
+        findFirst: vitest
+          .fn()
+          .mockResolvedValue({ id: "tm-1", userId: "user-1" }),
+      },
     });
     await expect(
       assertTeamMemberBelongsToOrg(
         { teamMemberId: "tm-1", organizationId: ORG },
         tx
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ id: "tm-1", userId: "user-1" });
   });
 
   it("assertCategoryBelongsToOrg throws 400 when foreign/missing", async () => {
@@ -628,5 +743,169 @@ describe("assertUserBelongsToOrg", () => {
     await expect(
       assertUserBelongsToOrg({ userId: "u-1", organizationId: ORG }, tx)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("assertAssetsAreNotArchived", () => {
+  /** A tx whose asset table holds `archived` (id, title) rows. */
+  function archivedTx(archived: { id: string; title: string }[]) {
+    return txWith({
+      asset: {
+        count: vitest.fn().mockResolvedValue(archived.length),
+        findMany: vitest.fn().mockResolvedValue(archived),
+      },
+    });
+  }
+
+  it("resolves without reading titles when nothing is archived", async () => {
+    const tx = archivedTx([]);
+    await expect(
+      assertAssetsAreNotArchived(
+        { assetIds: ["a1", "a2"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+    expect(tx.asset.findMany).not.toHaveBeenCalled();
+  });
+
+  it("names the archived assets and carries their ids, in the input's order", async () => {
+    const tx = archivedTx([
+      { id: "a3", title: "Tripod" },
+      { id: "a1", title: "Camera" },
+    ]);
+
+    const err = await assertAssetsAreNotArchived(
+      { assetIds: ["a1", "a2", "a3"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    // Several assets: the way out every role has is dropping them.
+    expect(err.message).toBe(
+      '"Camera" and "Tripod" are archived. Remove them from the list and try again.'
+    );
+    expect(err.additionalData).toEqual({
+      organizationId: ORG,
+      archivedAssetIds: ["a1", "a3"],
+      archivedAssetTitles: ["Camera", "Tripod"],
+    });
+  });
+
+  it("tells a member who cannot reinstate to ask an admin", async () => {
+    vitest.mocked(hasPermission).mockResolvedValueOnce(false);
+    const err = await assertAssetsAreNotArchived(
+      { assetIds: ["a1"], organizationId: ORG, actorUserId: "u-base" },
+      archivedTx([{ id: "a1", title: "Camera" }])
+    ).catch((e) => e);
+
+    expect(err.message).toBe(
+      '"Camera" is archived. Ask an admin to reinstate it.'
+    );
+    expect(hasPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u-base",
+        organizationId: ORG,
+        entity: "asset",
+        action: "archive",
+      })
+    );
+  });
+
+  it("tells a member who can reinstate to do so", async () => {
+    vitest.mocked(hasPermission).mockResolvedValueOnce(true);
+    const err = await assertAssetsAreNotArchived(
+      { assetIds: ["a1"], organizationId: ORG, actorUserId: "u-admin" },
+      archivedTx([{ id: "a1", title: "Camera" }])
+    ).catch((e) => e);
+
+    expect(err.message).toBe(
+      '"Camera" is archived. Reinstate it to make changes.'
+    );
+  });
+
+  it("points a booking's holder at removing it or asking an admin", async () => {
+    const err = await assertAssetsAreNotArchived(
+      {
+        assetIds: ["a1"],
+        organizationId: ORG,
+        fix: "remove-from-booking",
+        canReinstate: false,
+      },
+      archivedTx([{ id: "a1", title: "Camera" }])
+    ).catch((e) => e);
+
+    expect(err.message).toBe(
+      '"Camera" is archived. Remove it from the booking or ask an admin to reinstate it.'
+    );
+  });
+});
+
+describe("assertAuditAssetBelongsToAudit", () => {
+  const args = {
+    auditAssetId: "aa-1",
+    auditSessionId: "audit-1",
+    organizationId: ORG,
+  };
+
+  it("resolves when the audit asset is in this audit, in this workspace", async () => {
+    const tx = txWith({
+      auditAsset: { findFirst: vitest.fn().mockResolvedValue({ id: "aa-1" }) },
+    });
+
+    await expect(
+      assertAuditAssetBelongsToAudit(args, tx)
+    ).resolves.toBeUndefined();
+
+    // Both the audit and the workspace are in the query: an AuditAsset id
+    // from another audit, or from another workspace's audit, must not match.
+    expect(tx.auditAsset.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "aa-1",
+        auditSessionId: "audit-1",
+        auditSession: { organizationId: ORG },
+      },
+      select: { id: true },
+    });
+  });
+
+  it("throws an uncaptured 400 for an audit asset in another audit or workspace", async () => {
+    const tx = txWith({});
+
+    const err = await assertAuditAssetBelongsToAudit(args, tx).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err).toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+});
+
+describe("assertAuditSessionBelongsToOrg", () => {
+  const args = { auditSessionId: "audit-1", organizationId: ORG };
+
+  it("resolves when the audit is in the caller's workspace", async () => {
+    const tx = txWith({
+      auditSession: {
+        findFirst: vitest.fn().mockResolvedValue({ id: "audit-1" }),
+      },
+    });
+
+    await expect(
+      assertAuditSessionBelongsToOrg(args, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.auditSession.findFirst).toHaveBeenCalledWith({
+      where: { id: "audit-1", organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("throws an uncaptured 400 for an audit in another workspace", async () => {
+    const err = await assertAuditSessionBelongsToOrg(args, txWith({})).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err).toMatchObject({ status: 400, shouldBeCaptured: false });
   });
 });

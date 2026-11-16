@@ -6,6 +6,8 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCategoryForNote,
   wrapDescriptionForNote,
+  wrapLinkForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
@@ -90,17 +92,108 @@ export function buildNameChangeNote({
     return null;
   }
 
-  const formatName = (value: string) => {
-    // Strip Markdoc delimiters BEFORE escaping emphasis: asset titles are
-    // free-form user input and escaping `*_~` alone still lets `{% … %}`
-    // through as a live tag.
-    const escaped = stripMarkdocDelimiters(value).replace(/([*_`~])/g, "\\$1");
-    return `**${escaped}**`;
-  };
-
-  return `${userLink} updated the asset name from ${formatName(
+  // Asset titles are free-form user input, and the note is on the asset's own
+  // page, so both names go inside `name` tags rather than links.
+  return `${userLink} updated the asset name from ${wrapNameForNote(
     normalizedPrevious
-  )} to ${formatName(normalizedNext)}.`;
+  )} to ${wrapNameForNote(normalizedNext)}.`;
+}
+
+/**
+ * Note content for an asset's model being set, changed, or cleared.
+ *
+ * Returns `null` when nothing actually changed, so a caller can pass the before
+ * and after unconditionally and get no note for a no-op.
+ *
+ * Model names are user-authored, so both renderings put the name inside a
+ * tag: a linked name goes through {@link wrapLinkForNote}, and a deleted
+ * model's name, which has no page to link to, goes through
+ * {@link wrapNameForNote}. Neither is ever bare text, per
+ * `.claude/rules/sanitize-note-content-markdoc.md`.
+ *
+ * @param args.userLink - Rendered link to the acting user.
+ * @param args.previous - The model before the change, if any.
+ * @param args.next - The model after the change, if any.
+ * @param args.previousDeleted - The previous model no longer exists, because
+ *   deleting it is what unlinked the asset. Names the deletion instead of a
+ *   plain removal, and renders the name unlinked.
+ * @returns Markdoc note content, or `null` when there is nothing to record.
+ */
+export function buildAssetModelChangeNote({
+  userLink,
+  previous,
+  next,
+  previousDeleted = false,
+}: {
+  userLink: string;
+  previous?: { id: string; name: string } | null;
+  next?: { id: string; name: string } | null;
+  previousDeleted?: boolean;
+}) {
+  const hasPrevious = previous != null;
+  const hasNext = next != null;
+
+  if (!hasPrevious && !hasNext) {
+    return null;
+  }
+  if (hasPrevious && hasNext && previous.id === next.id) {
+    return null;
+  }
+
+  // `/edit` is the model's only route — there is no bare detail page — and it
+  // is where the asset overview links a model name too. A deleted model has no
+  // page left, so its name goes inside a `name` tag instead.
+  const formattedPrevious = hasPrevious
+    ? previousDeleted
+      ? wrapNameForNote(previous.name)
+      : wrapLinkForNote(
+          `/settings/asset-models/${previous.id}/edit`,
+          stripMarkdocDelimiters(previous.name)
+        )
+    : null;
+  const formattedNext = hasNext
+    ? wrapLinkForNote(
+        `/settings/asset-models/${next.id}/edit`,
+        stripMarkdocDelimiters(next.name)
+      )
+    : null;
+
+  if (hasPrevious && hasNext) {
+    return `${userLink} changed the asset model from ${formattedPrevious} to ${formattedNext}.`;
+  }
+  if (hasNext) {
+    return `${userLink} set the asset model to ${formattedNext}.`;
+  }
+  // The deletion is named rather than reported as a plain removal: the model is
+  // gone workspace-wide, so a reader who goes looking for it will not find it.
+  if (previousDeleted) {
+    return `${userLink} deleted the asset model ${formattedPrevious}, removing it from this asset.`;
+  }
+  return `${userLink} removed the asset model ${formattedPrevious}.`;
+}
+
+/**
+ * Note content for an asset's "Available for bookings" switch being turned on
+ * or off.
+ *
+ * Only the user link varies between assets, and it is already an escaped
+ * Markdoc tag from {@link wrapUserLinkForNote}, so the rest of the sentence is
+ * fixed text with nothing user-supplied spliced in.
+ *
+ * @param args.userLink - Rendered link to the acting user.
+ * @param args.availableToBook - The value the switch was set to.
+ * @returns Markdoc note content
+ */
+export function buildAvailableToBookChangeNote({
+  userLink,
+  availableToBook,
+}: {
+  userLink: string;
+  availableToBook: boolean;
+}) {
+  return `${userLink} marked the asset as ${
+    availableToBook ? "available" : "unavailable"
+  } for bookings.`;
 }
 
 /**

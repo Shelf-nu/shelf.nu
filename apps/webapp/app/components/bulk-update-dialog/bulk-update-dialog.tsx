@@ -36,20 +36,32 @@ type BulkDialogType =
   | "activate"
   | "deactivate"
   | "archive"
+  | "reinstate"
   | "tag-add"
   | "tag-remove"
   | "cancel"
+  // Bookings-list check-out (RESERVED selection) and check-in (ONGOING /
+  // OVERDUE selection), with the dates kept.
+  | "checkout"
+  | "checkin"
   | "available"
   | "unavailable"
   | "bookings"
   | "booking-exist"
+  // Model reservations, from the asset index's model view. Separate from
+  // "bookings"/"booking-exist" because a model row carries a per-model
+  // quantity that an asset row does not.
+  | "model-bookings"
+  | "model-booking-exist"
   | "download-qr"
   | "partial-checkin"
   | "add-to-kit"
   | "remove-from-kit"
   | "start-audit"
   | "add-to-audit"
-  | "delete-audit";
+  | "delete-audit"
+  | "reorder-point"
+  | "custom-field";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
@@ -135,7 +147,7 @@ function BulkUpdateDialogTrigger({
   );
 }
 
-type DialogContentChildrenProps = {
+export type DialogContentChildrenProps = {
   disabled: boolean;
   handleCloseDialog: () => void;
   fetcherError?: string;
@@ -149,15 +161,18 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
    */
   className?: string;
   /**
-   * Title for the Dialog content
+   * Title for the Dialog content. A function receives the same props as
+   * `children`, so the title can follow the server's last answer (a bulk
+   * delete refused with a different count retitles itself).
    * @default `Update ${type}`
    */
-  title?: string;
+  title?: string | ((props: DialogContentChildrenProps) => string);
   /**
-   * Description for the dialog content
+   * Description for the dialog content. Like `title`, may be a function of the
+   * `children` props.
    * @default `Adjust the ${type} of selected (${itemsSelected}) assets.`
    */
-  description?: string;
+  description?: string | ((props: DialogContentChildrenProps) => string);
   /**
    * URL of your action handler
    * @example /api/assets/update-bulk-location
@@ -299,6 +314,15 @@ const BulkUpdateDialogContent = forwardRef<
     [fetcher.data, handleBulkActionSuccess]
   );
 
+  /** What `children`, `title` and `description` functions receive. */
+  const contentProps: DialogContentChildrenProps = {
+    disabled,
+    handleCloseDialog,
+    fetcherData: fetcher?.data,
+    fetcherError: fetcher?.data?.error?.message,
+    fetcherErrorAdditionalData: fetcher?.data?.error?.additionalData,
+  };
+
   return (
     <DialogPortal>
       <Dialog
@@ -316,10 +340,14 @@ const BulkUpdateDialogContent = forwardRef<
               </div>
             ) : null}
             <div className={tw("mb-5", type === "cancel" && "mt-5")}>
-              <h4>{title}</h4>
+              <h4>
+                {typeof title === "function" ? title(contentProps) : title}
+              </h4>
               <p>
                 {description
-                  ? description
+                  ? typeof description === "function"
+                    ? description(contentProps)
+                    : description
                   : `Adjust the ${type} of selected (${totalItemsSelected}) assets.`}
               </p>
             </div>
@@ -353,16 +381,7 @@ const BulkUpdateDialogContent = forwardRef<
             />
           ))}
           <div className="modal-content-wrapper">
-            {typeof children === "function"
-              ? children({
-                  disabled,
-                  handleCloseDialog,
-                  fetcherData: fetcher?.data,
-                  fetcherError: fetcher?.data?.error?.message,
-                  fetcherErrorAdditionalData:
-                    fetcher?.data?.error?.additionalData,
-                })
-              : children}
+            {typeof children === "function" ? children(contentProps) : children}
           </div>
         </fetcher.Form>
       </Dialog>

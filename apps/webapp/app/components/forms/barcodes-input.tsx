@@ -22,6 +22,7 @@ import {
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
+import { generateClientId } from "~/utils/id/client-id";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import Input from "./input";
@@ -49,7 +50,7 @@ type BarcodeInputWithKey = BarcodeInput & { clientKey: string };
 
 /** Generate a stable key for a barcode row (persisted id or fresh UUID). */
 const makeBarcodeKey = (existingId?: string): string =>
-  existingId ?? crypto.randomUUID();
+  existingId ?? generateClientId();
 
 type BarcodesInputProps = {
   className?: string;
@@ -357,7 +358,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     }}
                   />
                   <When truthy={!!valueErrorMessage}>
-                    <p className="mt-1 text-sm text-red-500">
+                    <p className="mt-1 text-sm text-error-500">
                       {valueErrorMessage}
                     </p>
                   </When>

@@ -1,9 +1,14 @@
 import type { ChangeEvent } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import resolveConfig from "tailwindcss/resolveConfig";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
-import DynamicSelect from "./dynamic-select";
+import DynamicSelect, {
+  MobileStyles,
+  PICKER_PHONE_MEDIA_QUERY,
+} from "./dynamic-select";
+import tailwindConfig from "../../../tailwind.config";
 
 // why: controlling navigation state to test component without triggering actual Remix navigation
 vi.mock("react-router", async () => {
@@ -154,7 +159,83 @@ describe("DynamicSelect", () => {
       await waitFor(() => {
         expect(trigger).toHaveTextContent("Item 2");
       });
-      expect(onChange).toHaveBeenCalledWith("item-2");
+      expect(onChange).toHaveBeenCalledWith(
+        "item-2",
+        expect.objectContaining({ id: "item-2" })
+      );
+    });
+
+    it("passes a search result's own columns to onChange", async () => {
+      // A row from /api/model-filters search results: not in the seeded list,
+      // with the record's columns at the top level.
+      const searchResult = {
+        id: "m-old",
+        name: "ZZ Test Model",
+        metadata: {},
+        defaultValuation: 199,
+      } as ModelFilterItem;
+      const onChange = vi.fn();
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn([searchResult], { searchQuery: "ZZ" })
+      );
+
+      render(
+        <DynamicSelect
+          model={{ name: "assetModel" as const, queryKey: "name" }}
+          initialDataKey="assetModels"
+          countKey="totalAssetModels"
+          contentLabel="Asset Models"
+          onChange={onChange}
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await act(async () => {
+        await user.click(await screen.findByText("ZZ Test Model"));
+      });
+
+      expect(onChange).toHaveBeenCalledWith(
+        "m-old",
+        expect.objectContaining({ defaultValuation: 199 })
+      );
+    });
+
+    it("passes no item when the pick is cleared", async () => {
+      const items = createTestItems(3);
+      const onChange = vi.fn();
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items)
+      );
+
+      render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          defaultValue="item-2"
+          allowClear
+          onChange={onChange}
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      // Picking the selected item again clears it. The trigger shows "Item 2"
+      // too, so take the row in the open list (the last match).
+      await waitFor(() => {
+        expect(screen.getAllByText("Item 2").length).toBeGreaterThan(1);
+      });
+      await act(async () => {
+        await user.click(screen.getAllByText("Item 2").at(-1)!);
+      });
+
+      expect(onChange).toHaveBeenCalledWith(undefined, undefined);
     });
 
     it("shows placeholder when nothing is selected", () => {
@@ -169,6 +250,61 @@ describe("DynamicSelect", () => {
       );
 
       expect(screen.getByText("Choose a category")).toBeInTheDocument();
+    });
+  });
+
+  describe("Scrolling inside a modal dialog", () => {
+    /**
+     * Every `Sheet` is a modal Radix Dialog, which mounts
+     * `react-remove-scroll`. That listens for `wheel` on `document` and
+     * cancels any whose target is outside the dialog content. This popover is
+     * portalled to `document.body`, so it counts as outside and its option
+     * list stops responding to the wheel — while the scrollbar, a pointer
+     * interaction, keeps working. Stopping the event before it reaches
+     * `document` is what keeps the list scrollable.
+     */
+    it("stops wheel events from reaching document", async () => {
+      const items = createTestItems(3);
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items)
+      );
+
+      render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+      });
+
+      // Stands in for react-remove-scroll's document-level listener.
+      const documentListener = vi.fn();
+      document.addEventListener("wheel", documentListener);
+
+      try {
+        act(() => {
+          screen.getByText("Item 1").dispatchEvent(
+            new WheelEvent("wheel", {
+              bubbles: true,
+              cancelable: true,
+              deltaY: 120,
+            })
+          );
+        });
+
+        expect(documentListener).not.toHaveBeenCalled();
+      } finally {
+        document.removeEventListener("wheel", documentListener);
+      }
     });
   });
 
@@ -316,7 +452,10 @@ describe("DynamicSelect", () => {
 
       // Wait for the click to be processed
       await waitFor(() => {
-        expect(onChange).toHaveBeenCalledWith("uncategorized");
+        expect(onChange).toHaveBeenCalledWith(
+          "uncategorized",
+          expect.objectContaining({ id: "uncategorized" })
+        );
       });
     });
 
@@ -614,7 +753,10 @@ describe("DynamicSelect", () => {
 
       // Should now show the regular item
       expect(screen.getByRole("button")).toHaveTextContent("Item 1");
-      expect(onChange).toHaveBeenCalledWith("item-1");
+      expect(onChange).toHaveBeenCalledWith(
+        "item-1",
+        expect.objectContaining({ id: "item-1" })
+      );
     });
 
     it("can switch from regular item to withoutValueItem", async () => {
@@ -669,7 +811,10 @@ describe("DynamicSelect", () => {
 
       // Should now show withoutValueItem
       expect(screen.getByRole("button")).toHaveTextContent("Without custody");
-      expect(onChange).toHaveBeenCalledWith("without-custody");
+      expect(onChange).toHaveBeenCalledWith(
+        "without-custody",
+        expect.objectContaining({ id: "without-custody" })
+      );
     });
   });
 
@@ -923,5 +1068,28 @@ describe("DynamicSelect", () => {
       expect(describedBy).toBeTruthy();
       expect(screen.getByRole("alert")).toHaveAttribute("id", describedBy);
     });
+  });
+});
+
+describe("MobileStyles", () => {
+  it("keeps the phone layout to phone widths", () => {
+    const { screens } = resolveConfig(tailwindConfig).theme;
+
+    // The exact complement of `sm`: tablets get the regular dropdown.
+    expect(PICKER_PHONE_MEDIA_QUERY).toBe(
+      `not all and (min-width: ${screens.sm})`
+    );
+  });
+
+  it("lifts the panel above its overlay at every width the overlay shows", () => {
+    const { container } = render(<MobileStyles open />);
+
+    // The overlay shows below `sm` and sits above the panel's own z-index, so
+    // the panel rule must cover the same widths. Where it does not, the
+    // overlay covers the options and a tap on one only closes the select.
+    expect(container.querySelector(".extra-overlay")).toHaveClass("sm:hidden");
+    expect(container.querySelector("style")?.textContent).toContain(
+      `@media ${PICKER_PHONE_MEDIA_QUERY} {`
+    );
   });
 });

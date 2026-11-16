@@ -1,6 +1,5 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -9,6 +8,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { createWhileAuditAcceptsComments } from "~/modules/audit/service.server";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -45,10 +45,9 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    // Paid Audits add-on gate. #2551 replaced the standalone
-    // `requireMobileAuditsEnabled` helper with the `canUseAudits` flag on
-    // `getMobileUserContext` — mirror `audits.complete.ts` so the revenue
-    // gate stays consistent across every mobile audit route.
+    // Paid Audits add-on gate, read from `getMobileUserContext`'s
+    // `canUseAudits`. Every mobile audit route checks it the same way as
+    // `audits.complete.ts`, so the add-on gates the whole feature.
     const { canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
@@ -75,7 +74,9 @@ export async function action({ request }: ActionFunctionArgs) {
           .min(1, "Note content is required")
           .max(NOTE_MAX_CONTENT_LENGTH),
       })
-      .safeParse(await request.json());
+      // An unreadable body parses as `null`, which fails the schema and takes
+      // the 400 below instead of throwing a SyntaxError into the 500 branch.
+      .safeParse(await request.json().catch(() => null));
 
     if (!parsed.success) {
       return data(
@@ -113,26 +114,32 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
     });
 
-    const note = await db.auditNote.create({
-      data: {
-        content,
-        auditSessionId,
-        auditAssetId,
-        userId: user.id,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            email: true,
-            profilePicture: true,
+    // Created only while the audit still accepts comments, checked on the
+    // locked row so a completion cannot slip in between.
+    const note = await createWhileAuditAcceptsComments(
+      { auditSessionId, organizationId },
+      (tx) =>
+        tx.auditNote.create({
+          data: {
+            content,
+            auditSessionId,
+            auditAssetId,
+            userId: user.id,
           },
-        },
-      },
-    });
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                email: true,
+                profilePicture: true,
+              },
+            },
+          },
+        })
+    );
 
     return data({ note });
   } catch (cause) {

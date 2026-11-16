@@ -16,6 +16,22 @@ export function useSlashCommands(
   const slashIndexRef = useRef(0);
   const filteredCommandsRef = useRef<SlashCommandItem[]>([]);
 
+  /**
+   * Closes the menu and forgets the pending query.
+   *
+   * State and both refs are cleared together. The refs are what the ProseMirror
+   * keydown handler and `applySlashCommand` read, and an effect only syncs them
+   * from state on the next render, so anything that closes the menu outside a
+   * transaction has to clear them here. Otherwise a keystroke arriving first
+   * acts on a menu that is already gone.
+   */
+  const clearSlash = useCallback(() => {
+    slashStateRef.current = null;
+    slashIndexRef.current = 0;
+    setSlashState(null);
+    setSlashIndex(0);
+  }, []);
+
   const updateSlash = useCallback((state: EditorState, view: EditorView) => {
     if (!state.selection.empty) {
       setSlashState(null);
@@ -155,10 +171,7 @@ export function useSlashCommands(
         "\ufffc"
       );
 
-      slashStateRef.current = null;
-      setSlashState(null);
-      setSlashIndex(0);
-      slashIndexRef.current = 0;
+      clearSlash();
 
       if (slice.startsWith("/")) {
         const tr = state.tr.delete(deleteFrom, deleteTo);
@@ -168,7 +181,7 @@ export function useSlashCommands(
       command.command(view.state, view.dispatch, view);
       view.focus();
     },
-    [viewRef]
+    [clearSlash, viewRef]
   );
 
   const handleSlashKeyDown = useCallback(
@@ -201,13 +214,12 @@ export function useSlashCommands(
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setSlashState(null);
-        setSlashIndex(0);
+        clearSlash();
         return true;
       }
       return false;
     },
-    [applySlashCommand]
+    [applySlashCommand, clearSlash]
   );
 
   const filteredCommands = useMemo(
@@ -238,5 +250,6 @@ export function useSlashCommands(
     applySlashCommand,
     handleSlashKeyDown,
     setSlashIndex,
+    clearSlash,
   };
 }

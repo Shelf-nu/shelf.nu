@@ -247,6 +247,40 @@ describe("POST /api/mobile/asset/create", () => {
     );
   });
 
+  it("accepts a description of exactly 5,000 characters", async () => {
+    vi.mocked(createAsset).mockResolvedValue(createdAsset());
+    const description = "a".repeat(5000);
+
+    const result = await action(
+      createActionArgs({
+        request: createRequest({ title: "New Laptop", description }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    expect(vi.mocked(createAsset).mock.calls[0][0].description).toBe(
+      description
+    );
+  });
+
+  it("rejects a description over 5,000 characters and creates nothing", async () => {
+    const result = await action(
+      createActionArgs({
+        request: createRequest({
+          title: "New Laptop",
+          description: "a".repeat(5001),
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(400);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toBe(
+      "Description must be 5,000 characters or fewer"
+    );
+    expect(createAsset).not.toHaveBeenCalled();
+  });
+
   // The point of this route change: an asset created from the phone used to
   // open with an empty history, while the same asset created on the website
   // said who made it and where they put it.

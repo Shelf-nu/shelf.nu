@@ -24,6 +24,25 @@ const LOCK_EXHAUSTION_MESSAGE =
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
+/**
+ * Every field that defines a ShelfError except `traceId`, which is random per
+ * instance. `toEqual` on two Error instances compares all their own
+ * properties, so an error built in the test can never equal the one under test
+ * while `traceId` is included — compare these fields instead.
+ */
+function shelfErrorFields(error: ShelfError) {
+  return {
+    name: error.name,
+    message: error.message,
+    cause: error.cause,
+    label: error.label,
+    title: error.title,
+    additionalData: error.additionalData,
+    shouldBeCaptured: error.shouldBeCaptured,
+    status: error.status,
+  };
+}
+
 describe(makeShelfError.name, () => {
   describe("cause is like a ShelfError", () => {
     it("should return the cause", () => {
@@ -33,7 +52,12 @@ describe(makeShelfError.name, () => {
         message: "I am an error",
       });
 
-      expect(makeShelfError(cause)).toEqual(cause);
+      // The cause comes back rebuilt with its additionalData merged, so an
+      // absent additionalData becomes an empty object.
+      expect(shelfErrorFields(makeShelfError(cause))).toEqual({
+        ...shelfErrorFields(cause),
+        additionalData: {},
+      });
     });
 
     it("should merge additionalData", () => {
@@ -218,42 +242,50 @@ describe(makeShelfError.name, () => {
       const cause = new Error("I am an error");
 
       expect(
-        makeShelfError(cause, {
-          userId: "user-id",
-        })
-      ).toEqual(
-        new ShelfError({
-          cause,
-          message: "Sorry, something went wrong.",
-          label: "Unknown",
-          additionalData: {
+        shelfErrorFields(
+          makeShelfError(cause, {
             userId: "user-id",
-          },
-        })
+          })
+        )
+      ).toEqual(
+        shelfErrorFields(
+          new ShelfError({
+            cause,
+            message: "Sorry, something went wrong.",
+            label: "Unknown",
+            additionalData: {
+              userId: "user-id",
+            },
+          })
+        )
       );
     });
 
     it("should return a default ShelfError if cause is an instance of Error", () => {
       const cause = new Error("I am an error");
 
-      expect(makeShelfError(cause)).toEqual(
-        new ShelfError({
-          cause,
-          message: "Sorry, something went wrong.",
-          label: "Unknown",
-        })
+      expect(shelfErrorFields(makeShelfError(cause))).toEqual(
+        shelfErrorFields(
+          new ShelfError({
+            cause,
+            message: "Sorry, something went wrong.",
+            label: "Unknown",
+          })
+        )
       );
     });
 
     it("should return a default ShelfError if cause is really unknown", () => {
       const cause = "I am an error";
 
-      expect(makeShelfError(cause)).toEqual(
-        new ShelfError({
-          cause,
-          message: "Sorry, something went wrong.",
-          label: "Unknown",
-        })
+      expect(shelfErrorFields(makeShelfError(cause))).toEqual(
+        shelfErrorFields(
+          new ShelfError({
+            cause,
+            message: "Sorry, something went wrong.",
+            label: "Unknown",
+          })
+        )
       );
     });
   });
@@ -895,5 +927,33 @@ describe(isHandledClientError.name, () => {
     expect(isHandledClientError(new Error("boom"))).toBe(false);
     expect(isHandledClientError(null)).toBe(false);
     expect(isHandledClientError({ status: 400 })).toBe(false);
+  });
+});
+
+describe(`${makeShelfError.name} with a thrown data response`, () => {
+  it("keeps the 400 getParams throws for a missing param", async () => {
+    const { getParams } = await import("./http.server");
+    const { z } = await import("zod");
+
+    let caught: unknown;
+    try {
+      getParams({}, z.object({ excludeUserId: z.string() }));
+    } catch (cause) {
+      caught = cause;
+    }
+
+    const reason = makeShelfError(caught);
+
+    expect(reason.status).toBe(400);
+    expect(reason.shouldBeCaptured).toBe(false);
+  });
+
+  it("leaves a 5xx data response to the unknown-error default", async () => {
+    const { data } = await import("react-router");
+
+    const reason = makeShelfError(data({ error: null }, { status: 502 }));
+
+    expect(reason.status).toBe(500);
+    expect(reason.label).toBe("Unknown");
   });
 });

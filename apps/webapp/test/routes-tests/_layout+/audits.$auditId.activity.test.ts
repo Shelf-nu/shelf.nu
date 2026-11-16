@@ -12,6 +12,7 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -22,12 +23,14 @@ import {
 const {
   getAuditNotes,
   getAuditSessionDetails,
-  requireAuditAssigneeForBaseSelfService,
+  getLinkTitles,
+  requireAuditAssigneeForScopedViewer,
   requirePermission,
 } = vi.hoisted(() => ({
   getAuditNotes: vi.fn(),
+  getLinkTitles: vi.fn(),
   getAuditSessionDetails: vi.fn(),
-  requireAuditAssigneeForBaseSelfService: vi.fn(),
+  requireAuditAssigneeForScopedViewer: vi.fn(),
   requirePermission: vi.fn(),
 }));
 
@@ -38,8 +41,12 @@ vi.mock("~/utils/roles.server", () => ({ requirePermission }));
 vi.mock("~/modules/audit/note-service.server", () => ({ getAuditNotes }));
 vi.mock("~/modules/audit/service.server", () => ({
   getAuditSessionDetails,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 }));
+
+// why: reads stored titles from the DB and fetches pages over the network. The
+// tests pin what the loader hands it and what it does with the answer.
+vi.mock("~/modules/link-preview/service.server", () => ({ getLinkTitles }));
 
 import { loader } from "~/routes/_layout+/audits.$auditId.activity";
 
@@ -61,13 +68,14 @@ describe("audit activity loader — auditNote:read is enforced server-side", () 
     getAuditNotes.mockResolvedValue([
       { id: "note-1", content: "Two units missing from bay 4" },
     ]);
+    getLinkTitles.mockResolvedValue({});
   });
 
   it("asks for auditNote:read, not audit:read", async () => {
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
       userOrganizations: [],
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await loader(loaderArgs());
@@ -108,7 +116,7 @@ describe("audit activity loader — auditNote:read is enforced server-side", () 
         return Promise.resolve({
           organizationId: "org-1",
           userOrganizations: [],
-          isSelfServiceOrBase: false,
+          access: accessFor([OrganizationRoles.ADMIN]),
         });
       }
     );
@@ -130,15 +138,15 @@ describe("audit activity loader — auditNote:read is enforced server-side", () 
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
       userOrganizations: [],
-      isSelfServiceOrBase: true,
+      access: accessFor([OrganizationRoles.BASE]),
     });
 
     await loader(loaderArgs());
 
-    expect(requireAuditAssigneeForBaseSelfService).toHaveBeenCalledWith(
+    expect(requireAuditAssigneeForScopedViewer).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
-        isSelfServiceOrBase: true,
+        assignedOnly: true,
         auditId: "audit-1",
       })
     );
@@ -156,5 +164,42 @@ describe("audit activity loader — auditNote:read is enforced server-side", () 
         PermissionAction.read
       );
     }
+  });
+
+  it("reads the titles of the links in the audit's notes once, for the session's workspace", async () => {
+    // The workspace comes from the permission check, never from the URL.
+    requirePermission.mockResolvedValue({
+      organizationId: "org-from-session",
+      userOrganizations: [],
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+    const notes = [
+      {
+        id: "note-1",
+        type: "COMMENT",
+        content: "Manual: https://example.com/m.pdf",
+      },
+      { id: "note-2", type: "UPDATE", content: "Audit started" },
+    ];
+    getAuditNotes.mockResolvedValue(notes);
+    const linkTitles = {
+      "https://example.com/m.pdf": { pageTitle: "Manual", customTitle: null },
+    };
+    getLinkTitles.mockResolvedValue(linkTitles);
+
+    const result = (await loader(loaderArgs())) as unknown as {
+      data: { session: { notes: unknown[] }; linkTitles: unknown };
+    };
+
+    expect(getLinkTitles).toHaveBeenCalledTimes(1);
+    expect(getLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-from-session",
+      notes,
+    });
+    // The very notes the page shows, not a copy or a subset.
+    expect(getLinkTitles.mock.calls[0][0].notes).toBe(
+      result.data.session.notes
+    );
+    expect(result.data.linkTitles).toEqual(linkTitles);
   });
 });

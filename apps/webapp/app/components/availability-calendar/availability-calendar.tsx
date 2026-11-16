@@ -17,16 +17,16 @@ import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
-import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { Spinner } from "~/components/shared/spinner";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import type { CalendarExtendedProps } from "~/routes/_layout+/calendar";
 import {
+  availabilityEventClassNames,
   getCalendarTitleAndSubtitle,
-  getStatusClasses,
   handleEventClick,
   handleEventMouseEnter,
   handleEventMouseLeave,
-  isOneDayEvent,
   scrollToNow,
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
@@ -226,19 +226,14 @@ export default function AvailabilityCalendar({
               resourceAreaWidth="35%"
               resourceLabelContent={resourceLabelContent}
               eventContent={renderEventCard}
-              eventClassNames={(eventInfo) => {
-                const viewType = eventInfo.view.type;
-                const isOneDay = isOneDayEvent(
+              eventClassNames={(eventInfo) =>
+                availabilityEventClassNames(
+                  eventInfo.event.extendedProps as CalendarExtendedProps,
                   eventInfo.event.start,
-                  eventInfo.event.end
-                );
-
-                return getStatusClasses(
-                  eventInfo.event.extendedProps.status,
-                  isOneDay,
-                  viewType
-                );
-              }}
+                  eventInfo.event.end,
+                  eventInfo.view.type
+                )
+              }
               nowIndicatorDidMount={handleNowIndicatorDidMount}
               viewDidMount={handleViewDidMount}
               datesSet={handleDatesSet}
@@ -257,7 +252,7 @@ function CalendarLoadingFallback() {
   return (
     <div className="absolute inset-0 z-10 flex justify-center bg-white/90">
       <div className="flex flex-col items-center gap-4 pt-[300px]">
-        <FallbackLoading className="size-16" />
+        <Spinner className="size-8" />
         <p className="text-sm text-gray-600">Loading calendar...</p>
       </div>
     </div>

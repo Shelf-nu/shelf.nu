@@ -44,8 +44,8 @@ vi.mock("react-router", async () => {
 vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => null,
 }));
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: [], isBaseOrSelfService: false }),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => [],
 }));
 // why: the row asks this to decide whether to offer the remove action. False
 // keeps that column out of the way — the evidence chip is what is under test.

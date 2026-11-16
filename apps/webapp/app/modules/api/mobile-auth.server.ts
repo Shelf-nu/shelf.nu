@@ -1,7 +1,9 @@
-import {
-  type AssetType,
-  type ConsumptionType,
+import { Roles } from "@prisma/client";
+import type {
+  AssetType,
+  ConsumptionType,
   OrganizationRoles,
+  Prisma,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -10,22 +12,31 @@ import {
   type AssetImageSource,
 } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import {
+  createSsoRequiredError,
+  getLegacyLoginDecisionForUser,
+} from "~/modules/auth/sso-enforcement.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   type PermissionAction,
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import { teamTierLimitHasLapsed } from "~/utils/stripe.server";
 import {
   assertCanUseBookings,
   canUseAudits,
   canUseBarcodes,
 } from "~/utils/subscription.server";
-import {
-  computeCanSeeAllCustody,
-  filterMobileCustodyListForViewer,
-  viewerCanSeeLegacyCustody,
-} from "./mobile-custody-visibility.server";
+import { scopeMobileAssetCustodyToViewer } from "./mobile-custody-visibility.server";
 import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
@@ -73,9 +84,12 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Get the database user record — exclude soft-deleted users
+  // The Shelf user shares its id with the auth user, so the verified token's
+  // subject identifies the account. Never resolve by email: a separate auth
+  // user can hold the same address (a non-SSO account beside an SSO one), and
+  // its session must not act as the Shelf account.
   const user = await db.user.findUnique({
-    where: { email: authUser.email },
+    where: { id: authUser.id },
     select: {
       id: true,
       email: true,
@@ -94,16 +108,46 @@ export async function requireMobileAuth(request: Request) {
       timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
+      sso: true,
     },
   });
 
-  if (!user || user.deletedAt) {
+  // A session whose auth user has no Shelf account is not a Shelf sign-in.
+  // 401 sends the companion back to its login screen.
+  if (!user) {
+    throw new ShelfError({
+      cause: null,
+      message: "This session does not belong to a Shelf account",
+      label: "Auth",
+      status: 401,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (user.deletedAt) {
     throw new ShelfError({
       cause: null,
       message: "User not found in database",
       label: "Auth",
       status: 404,
     });
+  }
+
+  // The companion signs in with a password straight against Supabase, so this
+  // is the first point Shelf sees that session. Refuse it when the address must
+  // use SSO, as the web sign-in would. SSO users pass without a lookup: their
+  // companion sessions are the SSO sessions of `User.sso` accounts. A refused account
+  // has every session revoked first, so its refresh token cannot mint another
+  // access token for the companion or the web.
+  if (!user.sso) {
+    const decision = await getLegacyLoginDecisionForUser({
+      userId: user.id,
+      email: user.email,
+    });
+    if (!decision.allowed) {
+      await revokeAllSessions(token);
+      throw createSsoRequiredError(decision.reason);
+    }
   }
 
   // Record companion-app usage for adoption metrics. requireMobileAuth is the
@@ -117,6 +161,7 @@ export async function requireMobileAuth(request: Request) {
   const {
     deletedAt: _deletedAt,
     lastMobileActiveAt: _lastMobileActiveAt,
+    sso: _sso,
     ...safeUser
   } = user;
   return { user: safeUser, authUser };
@@ -143,6 +188,15 @@ export async function requireMobileAuth(request: Request) {
  * no longer valid) so the app can distinguish "the server picked for me" from
  * "I chose this workspace" without re-deriving the hierarchy.
  *
+ * Each organization also carries the four workspace visibility toggles
+ * (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
+ * switch `managersCanEditAssets`, so the companion can resolve the same
+ * `RoleAccess` and the same matrix answers the server does for that workspace.
+ * It also carries `inactive`, `inactiveReason` and `inactiveMessage`: whether
+ * every other mobile route refuses requests there (see
+ * `mobileWorkspaceStateFor`), from the same read.
+ *
  * @param userId - the authenticated user
  * @returns organizations in landing order, plus the explicit last-selected id
  */
@@ -157,15 +211,41 @@ export async function getUserOrganizations(userId: string) {
     ],
     select: {
       roles: true,
-      user: { select: { sso: true, lastSelectedOrganizationId: true } },
+      user: {
+        select: {
+          sso: true,
+          lastSelectedOrganizationId: true,
+          // The gate reads the caller's Shelf system roles (Shelf admins
+          // pass), so the inactive state below comes from this one read.
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.user.select,
+        },
+      },
       organization: {
         select: {
+          // What the gate reads (type, owner and owner tier, admin switch),
+          // so `/me` marks each workspace inactive without a second read.
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.organization.select,
           id: true,
           name: true,
           type: true,
           imageId: true,
           barcodesEnabled: true,
           auditsEnabled: true,
+          // The workspace currency. Any screen that shows or collects money
+          // needs it before an asset exists to read it from: asset create,
+          // for one, which has no asset yet.
+          currency: true,
+          // why: the four workspace visibility toggles a RoleAccess resolves
+          // against. Without them here the companion has no way to widen a
+          // restricted role's own-scope for a given workspace.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
+          selfServiceCanSeeCustody: true,
+          baseUserCanSeeCustody: true,
+          // why: the permission switches the companion passes to
+          // `roleHasPermission`, so its create/edit entry points show exactly
+          // what the server will accept in this workspace.
+          managersCanEditAssets: true,
         },
       },
     },
@@ -200,21 +280,333 @@ export async function getUserOrganizations(userId: string) {
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
   return {
-    organizations: ordered.map((uo) => ({
-      ...uo.organization,
-      barcodesEnabled: canUseBarcodes(uo.organization),
-      auditsEnabled: canUseAudits(uo.organization),
-      roles: uo.roles,
-    })),
+    organizations: ordered.map((uo) => {
+      // The gate-only columns (owner, owner tier, admin switch) decide the
+      // inactive state and stay out of the response.
+      const {
+        userId: _ownerId,
+        workspaceDisabled: _workspaceDisabled,
+        owner: _owner,
+        ...organization
+      } = uo.organization;
+      return {
+        ...organization,
+        barcodesEnabled: canUseBarcodes(uo.organization),
+        auditsEnabled: canUseAudits(uo.organization),
+        roles: uo.roles,
+        ...mobileWorkspaceStateFor(uo, userId),
+      };
+    }),
     lastSelectedOrganizationId,
   };
 }
 
 /**
- * Resolves the organizationId from the request and verifies
- * the user has access to it. Returns the organizationId.
+ * What the mobile workspace gate reads from a membership row, in the same
+ * Prisma read that proves the membership: the workspace's type and admin
+ * switch, its owner and the owner's tier limit, and the caller's Shelf system
+ * roles. Prisma loads each nested relation with its own statement, so the read
+ * runs a handful of small primary-key lookups; the gate adds no read of its
+ * own. Spread it
+ * into any `userOrganization` select whose rows go to
+ * {@link mobileWorkspaceAccessFromMembership}.
+ */
+export const MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT = {
+  organization: {
+    select: {
+      type: true,
+      userId: true,
+      workspaceDisabled: true,
+      owner: { select: { tier: { select: { tierLimitId: true } } } },
+    },
+  },
+  user: { select: { roles: { select: { name: true } } } },
+} as const;
+
+/** A membership row selected with {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}. */
+type MobileWorkspaceGateMembership = Prisma.UserOrganizationGetPayload<{
+  select: typeof MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT;
+}>;
+
+/**
+ * Messages the companion shows when a workspace is inactive, by why it is
+ * inactive and whether the request acts in that workspace (`workspace`) or
+ * opens a scanned code it owns (`code`; that workspace may not be the one the
+ * app is in). They state the fact only: the phone app never points the user
+ * at a purchase.
+ */
+export const MOBILE_INACTIVE_MESSAGES = {
+  lapsed: {
+    workspace:
+      "This workspace is inactive because its subscription has expired.",
+    code: "The workspace this code belongs to is inactive because its subscription has expired.",
+  },
+  disabled: {
+    workspace: "This workspace has been disabled.",
+    code: "The workspace this code belongs to has been disabled.",
+  },
+} as const;
+
+/** Lapsed plan, said to anyone but the owner, who is the one who can renew. */
+const CONTACT_OWNER_SUFFIX =
+  "Contact the workspace owner for more information.";
+
+/** Disabled workspace, said to everyone: only Shelf staff can switch it back. */
+const CONTACT_SUPPORT_SUFFIX = "Contact Shelf support for more information.";
+
+/** Title of the 403 an inactive workspace gets. */
+const MOBILE_WORKSPACE_INACTIVE_TITLE = "Workspace inactive";
+
+/**
+ * Marks an inactive-workspace refusal: carried on the 403's `additionalData`
+ * (which `makeShelfError` keeps through every wrap), and sent by the scan
+ * lookups as the error `reason`, so the companion can title the answer
+ * without reading the message text.
+ */
+export const MOBILE_WORKSPACE_INACTIVE_REASON = "workspace_inactive";
+
+/** Why a workspace is inactive: switched off by a Shelf admin, or a lapsed Team plan. */
+export type MobileWorkspaceInactiveReason = "disabled" | "lapsed";
+
+/**
+ * The message for an inactive workspace, as the caller sees it.
+ *
+ * @param args.inactiveReason - Why the workspace is inactive.
+ * @param args.scope - `"workspace"` when the caller acts in it, `"code"` when
+ *   they opened a scanned code it owns.
+ * @param args.isOwner - Whether the caller owns the workspace. Only the owner
+ *   can renew a lapsed plan; nobody in the workspace can lift an admin switch.
+ * @returns The message, without purchase wording.
+ */
+function inactiveWorkspaceMessage({
+  inactiveReason,
+  scope,
+  isOwner,
+}: {
+  inactiveReason: MobileWorkspaceInactiveReason;
+  scope: "workspace" | "code";
+  isOwner: boolean;
+}): string {
+  const base = MOBILE_INACTIVE_MESSAGES[inactiveReason][scope];
+  const suffix =
+    inactiveReason === "disabled"
+      ? CONTACT_SUPPORT_SUFFIX
+      : isOwner
+      ? null
+      : CONTACT_OWNER_SUFFIX;
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+/**
+ * Whether an error is the 403 an inactive workspace gets from
+ * {@link getMobileWorkspaceAccess}, wrapped or not. Reads the structured
+ * marker on `additionalData`, never the title or message.
+ *
+ * @param error - Any error, usually the result of `makeShelfError`.
+ * @returns `true` for the inactive-workspace refusal.
+ */
+export function isMobileWorkspaceInactiveError(error: ShelfError): boolean {
+  return (
+    error.status === 403 &&
+    error.additionalData?.reason === MOBILE_WORKSPACE_INACTIVE_REASON
+  );
+}
+
+/**
+ * Why the web app shows a workspace as disabled, if it does. Mobile twin of
+ * the `disabledTeamOrg` loader flag in `routes/_layout+/_layout.tsx`, with the
+ * same three inputs:
+ *
+ * - `workspaceDisabled`, the switch a Shelf admin sets on the admin dashboard;
+ * - a TEAM workspace whose owner's tier limit has lapsed, by the shared
+ *   `teamTierLimitHasLapsed` rule (false when premium features are off);
+ * - Shelf admins pass through, as they do on web.
+ *
+ * Pure: it reads only the membership row, so the gate adds no database read
+ * beyond the membership read that proves access.
+ *
+ * @param membership - A row selected with
+ *   {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}.
+ * @returns `"disabled"` by a Shelf admin, `"lapsed"` Team plan, or `null`
+ *   when the workspace is active for this caller.
+ */
+function getMobileWorkspaceInactiveReason(
+  membership: MobileWorkspaceGateMembership
+): MobileWorkspaceInactiveReason | null {
+  // `Roles` is the Shelf system role (Shelf staff), not a workspace role.
+  if (membership.user.roles.some((role) => role.name === Roles.ADMIN)) {
+    return null;
+  }
+  const { organization } = membership;
+  if (organization.workspaceDisabled) return "disabled";
+  if (
+    organization.type === "TEAM" &&
+    teamTierLimitHasLapsed(organization.owner.tier.tierLimitId)
+  ) {
+    return "lapsed";
+  }
+  return null;
+}
+
+/** What the caller may do in a workspace, from {@link getMobileWorkspaceAccess}. */
+export type MobileWorkspaceAccess =
+  | { access: "not-member" }
+  | { access: "active" }
+  | { access: "inactive"; error: ShelfError };
+
+/**
+ * Answers whether the caller may act in a workspace, from a membership row the
+ * caller already loaded. Never throws for the answer itself: an inactive
+ * workspace comes back with the 403 to throw, so a caller weighing several
+ * workspaces can skip the inactive ones.
+ *
+ * @param args.userId - The signed-in caller.
+ * @param args.organizationId - The workspace the row belongs to.
+ * @param args.membership - The caller's membership row, selected with
+ *   {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}; `null` when none.
+ * @param args.reason - `"workspace"` when the request acts in this workspace,
+ *   `"code"` when it opens a scanned code this workspace owns; picks the
+ *   refusal message.
+ * @returns `not-member`, `active`, or `inactive` with its 403 `ShelfError`.
+ */
+export function mobileWorkspaceAccessFromMembership({
+  userId,
+  organizationId,
+  membership,
+  reason,
+}: {
+  userId: string;
+  organizationId: string;
+  membership: MobileWorkspaceGateMembership | null;
+  reason: "workspace" | "code";
+}): MobileWorkspaceAccess {
+  if (!membership) return { access: "not-member" };
+
+  const inactiveReason = getMobileWorkspaceInactiveReason(membership);
+  if (!inactiveReason) return { access: "active" };
+
+  return {
+    access: "inactive",
+    error: new ShelfError({
+      cause: null,
+      title: MOBILE_WORKSPACE_INACTIVE_TITLE,
+      message: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: reason,
+        // `organization.userId` is the workspace owner.
+        isOwner: membership.organization.userId === userId,
+      }),
+      additionalData: {
+        userId,
+        organizationId,
+        reason: MOBILE_WORKSPACE_INACTIVE_REASON,
+      },
+      label: "Auth",
+      status: 403,
+      shouldBeCaptured: false,
+    }),
+  };
+}
+
+/**
+ * Reads the caller's membership of one workspace, with what the lapse gate
+ * needs, in one Prisma read, and answers whether the caller may act there (see
+ * {@link mobileWorkspaceAccessFromMembership}).
+ *
+ * @param args.userId - The signed-in caller.
+ * @param args.organizationId - The workspace to check.
+ * @param args.reason - `"workspace"` or `"code"`; picks the refusal message.
+ * @returns `not-member`, `active`, or `inactive` with its 403 `ShelfError`.
+ */
+export async function getMobileWorkspaceAccess({
+  userId,
+  organizationId,
+  reason,
+}: {
+  userId: string;
+  organizationId: string;
+  reason: "workspace" | "code";
+}): Promise<MobileWorkspaceAccess> {
+  const membership = await db.userOrganization.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
+  });
+
+  return mobileWorkspaceAccessFromMembership({
+    userId,
+    organizationId,
+    membership,
+    reason,
+  });
+}
+
+/** Whether one of the caller's workspaces is active, as `/api/mobile/me` reports it. */
+export type MobileWorkspaceState = {
+  /** `true` when the mobile API refuses requests in this workspace. */
+  inactive: boolean;
+  /** Why it is inactive, or `null` when it is active. */
+  inactiveReason: MobileWorkspaceInactiveReason | null;
+  /** What the app shows for it, or `null` when it is active. */
+  inactiveMessage: string | null;
+};
+
+/** An active workspace, as `/api/mobile/me` reports it. */
+const ACTIVE_WORKSPACE_STATE: MobileWorkspaceState = {
+  inactive: false,
+  inactiveReason: null,
+  inactiveMessage: null,
+};
+
+/**
+ * Whether the mobile API refuses requests in one of the caller's workspaces,
+ * by the same rule as {@link getMobileWorkspaceAccess}, from a membership row
+ * that carries {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}. The state is
+ * extra information on `/me`: if it cannot be worked out, the workspace is
+ * reported active (logged), and every other route still refuses it.
+ *
+ * @param membership - The caller's membership row.
+ * @param userId - The signed-in caller.
+ * @returns The workspace's state for the app.
+ */
+function mobileWorkspaceStateFor(
+  membership: MobileWorkspaceGateMembership,
+  userId: string
+): MobileWorkspaceState {
+  try {
+    const inactiveReason = getMobileWorkspaceInactiveReason(membership);
+    if (!inactiveReason) return ACTIVE_WORKSPACE_STATE;
+    return {
+      inactive: true,
+      inactiveReason,
+      inactiveMessage: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: "workspace",
+        // `organization.userId` is the workspace owner.
+        isOwner: membership.organization.userId === userId,
+      }),
+    };
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to work out whether a workspace is active",
+        additionalData: { userId },
+        label: "Auth",
+      })
+    );
+    return ACTIVE_WORKSPACE_STATE;
+  }
+}
+
+/**
+ * Resolves the organizationId from the request and verifies the user has
+ * access to it: a membership, in a workspace that is active (see
+ * `getMobileWorkspaceAccess`). Returns the organizationId.
  *
  * Mobile clients send orgId as a query param or x-shelf-organization header.
+ *
+ * @throws {ShelfError} 400 without an org id, 403 when the caller is not a
+ *   member or the workspace is inactive.
  */
 export async function requireOrganizationAccess(
   request: Request,
@@ -235,12 +627,15 @@ export async function requireOrganizationAccess(
     });
   }
 
-  const membership = await db.userOrganization.findUnique({
-    where: { userId_organizationId: { userId, organizationId: orgId } },
-    select: { id: true },
+  const workspace = await getMobileWorkspaceAccess({
+    userId,
+    organizationId: orgId,
+    reason: "workspace",
   });
 
-  if (!membership) {
+  if (workspace.access === "inactive") throw workspace.error;
+
+  if (workspace.access === "not-member") {
     throw new ShelfError({
       cause: null,
       message: "You don't have access to this organization",
@@ -255,58 +650,68 @@ export async function requireOrganizationAccess(
 /**
  * Enforces RBAC permission checks for mobile API routes.
  *
- * Uses the same Role2PermissionMap as the webapp to ensure mobile
- * and web have identical authorization rules.
+ * Resolves through the same `hasPermission` as the webapp, which loads the
+ * membership's roles and the workspace's permission switches in one query,
+ * so mobile and web have identical authorization rules.
+ *
+ * @param args.matrixOnly - `true` answers from the matrix alone, for a
+ *   route that shares a pair with a path a workspace switch opens but must
+ *   stay closed to the role the switch opens it for
+ * @throws {ShelfError} 403 when the caller lacks the permission
  */
 export async function requireMobilePermission({
   userId,
   organizationId,
   entity,
   action,
+  matrixOnly,
 }: {
   userId: string;
   organizationId: string;
   entity: PermissionEntity;
   action: PermissionAction;
+  matrixOnly?: boolean;
 }) {
   await validatePermission({
     userId,
     organizationId,
     entity,
     action,
+    matrixOnly,
   });
 }
 
 /**
- * Fetches the user's role and org capability flags (barcodes, audits) for
- * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
+ * Fetches the caller's roles, reach and the org capability flags that every
+ * mobile route gates on. `canUseAudits`/`canUseBarcodes` reuse the canonical
  * subscription.server predicates so mobile matches webapp gating exactly.
  *
- * Also returns `canSeeAllCustody` — the mobile twin of the flag the web's
- * `requirePermission` returns (roles.server.ts:113-122): ADMIN/OWNER always
- * see all custody; SELF_SERVICE/BASE only when the matching org override
- * (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`) is enabled.
+ * `access` folds the membership's policy (read from its highest-rank role)
+ * with the workspace's visibility toggles, resolved by the same
+ * `resolveRoleAccess` web's `requirePermission` uses, so the two platforms
+ * cannot disagree about what a workspace has granted. Its booking and custody
+ * visibility answers are independent: a workspace may grant either without
+ * the other. Neither widens a MUTATION: writes stay on the role's permission
+ * grant plus `validateBookingOwnership`.
  *
  * Used by mobile routes that call service layer functions requiring
- * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and
- * by routes that must gate custody visibility server-side.
+ * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and by
+ * every route that must gate booking or custody visibility server-side.
  */
 export async function getMobileUserContext(
   userId: string,
   organizationId: string
 ): Promise<{
-  role: OrganizationRoles;
-  /**
-   * Every role on this membership. `role` is `roles[0]`, which is wrong for
-   * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
-   * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
-   * Callers making a privilege decision should use this with
-   * `resolveMostPrivilegedRole`.
-   */
+  /** Every role on this membership, for matrix checks (`hasPermission`), which union held roles. */
   roles: OrganizationRoles[];
+  /**
+   * The member's reach: effective role, booking/custody/audit scopes, and
+   * `workspaceGrants`, the switches to pass as `workspace` alongside `roles`
+   * to `hasPermission`. Every gate reads this.
+   */
+  access: RoleAccess;
   canUseBarcodes: boolean;
   canUseAudits: boolean;
-  canSeeAllCustody: boolean;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -321,6 +726,15 @@ export async function getMobileUserContext(
           // here keeps it one query alongside the role.
           selfServiceCanSeeCustody: true,
           baseUserCanSeeCustody: true,
+          // why: the booking twins of the two custody flags above. Every
+          // mobile booking read - list, calendar, detail, dashboard - takes
+          // its visibility answer from this row, so the columns have to be
+          // here for the workspace setting to reach them at all.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
+          // why: the workspace's permission switches. `access.workspaceGrants`
+          // carries them to every `hasPermission` call made with these roles.
+          managersCanEditAssets: true,
         },
       },
     },
@@ -335,20 +749,14 @@ export async function getMobileUserContext(
     });
   }
 
-  // why: roles is an array but we always operate on the first role; mirror
-  // the convention used in roles.server.ts and invite/service.server.ts so
-  // an empty array doesn't surface as `undefined` to downstream callers.
-  const role = userOrg.roles[0] ?? OrganizationRoles.BASE;
-
   return {
-    role,
     roles: userOrg.roles,
+    access: resolveRoleAccess({
+      roles: userOrg.roles,
+      workspace: userOrg.organization,
+    }),
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
-    canSeeAllCustody: computeCanSeeAllCustody({
-      role,
-      organization: userOrg.organization,
-    }),
   };
 }
 
@@ -386,16 +794,13 @@ export async function assertMobileCanUseBookings(organizationId: string) {
  * Shared Prisma select shape for asset data returned by mobile scanner endpoints.
  * Used by both QR and barcode resolution routes for consistent responses.
  *
- * NOTE: Post-Phase-4a/4b the `Asset` model no longer carries direct `kitId` or
- * `location` columns — kit linkage now lives on the `AssetKit` pivot
- * (`assetKits`) and location on the `AssetLocation` pivot (`assetLocations`).
- * Custody also became 1:many (`Custody[]`). The companion app currently in
- * App Store review (since 2026-05-20) consumes the legacy flat shape
- * (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody` as a single
- * object). To keep that live build working without a forced update, mobile
- * routes fetch this select and then call `shapeMobileAssetResponse` to
- * flatten the pivot rows into the legacy shape — mirroring the
- * `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below.
+ * NOTE: the `Asset` model holds kit linkage on the `AssetKit` pivot
+ * (`assetKits`), location on the `AssetLocation` pivot (`assetLocations`) and
+ * custody as a list (`Custody[]`), while companion builds in users' hands read
+ * a flat shape (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody`
+ * as a single object). So mobile routes fetch this select and then call
+ * `shapeMobileAssetResponse` to flatten the pivot rows into that shape, the
+ * same way the `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below does.
  */
 export const MOBILE_ASSET_SELECT = {
   id: true,
@@ -407,12 +812,18 @@ export const MOBILE_ASSET_SELECT = {
   sequentialId: true,
   mainImage: true,
   thumbnailImage: true,
+  // Lets `resignAndShapeMobileAsset` tell a lapsed photo URL; the shaper drops
+  // it from the response.
+  mainImageExpiration: true,
   // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
   // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
   // so the companion inherits model images with no client release.
   ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
+  // Archived assets are read-only and out of service. The companion shows one
+  // "Archived" badge instead of the live status and turns their actions off.
+  archivedAt: true,
   // why: the fulfil-and-check-out scanner matches each scan against the
   // booking's outstanding BookingModelRequests. Without the model id the
   // client cannot tell a matching unit from an off-model one, and can only
@@ -468,26 +879,38 @@ export const MOBILE_ASSET_SELECT = {
  * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
  * web scanner drawers.
  *
- * NOTE: `Kit` no longer exposes a direct `assets` relation — it is now joined
- * via the `AssetKit` pivot (`assetKits`). We still need to surface the
- * per-asset status/availableToBook to the companion app in the legacy flat
- * shape (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`)
- * so the existing mobile clients in the App Store don't break. Mobile
- * endpoints fetch this select shape and then call
- * `shapeMobileKitResponse` to flatten the pivot rows.
+ * NOTE: a `Kit` reaches its assets through the `AssetKit` pivot
+ * (`assetKits`), while companion builds in users' hands read a flat shape
+ * (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`). Mobile
+ * endpoints fetch this select shape and then call `shapeMobileKitResponse` to
+ * flatten the pivot rows into it.
+ *
+ * Every member is selected, archived ones included, with its `archivedAt`:
+ * `shapeMobileKitResponse` splits them into the active members the phone
+ * lists and counts, and the archived count it reports apart.
  */
 export const MOBILE_KIT_SELECT = {
   id: true,
   name: true,
   status: true,
   image: true,
-  _count: { select: { assetKits: true } },
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
-  // blocker — both mirror the web scanner drawers.
+  // blocker, both mirroring the web scanner drawers. `archivedAt` lets the
+  // shaper keep archived members out of both: the server books, hands over and
+  // moves a kit with its active members only, so an archived member must not
+  // block the kit on the phone. A kit holding only archived assets has nothing
+  // to book or hand over, and the phone flags it from the archived count.
   assetKits: {
     select: {
-      asset: { select: { id: true, status: true, availableToBook: true } },
+      asset: {
+        select: {
+          id: true,
+          status: true,
+          availableToBook: true,
+          archivedAt: true,
+        },
+      },
     },
   },
 } as const;
@@ -502,7 +925,13 @@ export type MobileKitResponse = {
   name: string;
   status: string;
   image: string | null;
+  /** Active members: the scanner's "Kit • N assets". */
   _count: { assets: number };
+  /**
+   * Archived members, left out of `assets` and `_count`. A kit with archived
+   * members and no active one holds nothing to book or hand over.
+   */
+  archivedAssetCount: number;
   assets: Array<{
     id: string;
     status: string;
@@ -516,6 +945,10 @@ export type MobileKitResponse = {
  * expected by the companion app's scanner. Returns `null` if the input is
  * `null` so callers can pass through directly.
  *
+ * `assetKits` holds every member, one row per asset (`AssetKit` is unique per
+ * asset and kit). The active ones become `assets` and `_count.assets`; the
+ * archived ones are only counted, as `archivedAssetCount`.
+ *
  * @param kit Kit row selected via `MOBILE_KIT_SELECT`, or `null`
  * @returns The legacy mobile response shape, or `null`
  */
@@ -525,20 +958,32 @@ export function shapeMobileKitResponse(
     name: string;
     status: string;
     image: string | null;
-    _count: { assetKits: number };
     assetKits: Array<{
-      asset: { id: string; status: string; availableToBook: boolean };
+      asset: {
+        id: string;
+        status: string;
+        availableToBook: boolean;
+        archivedAt: Date | null;
+      };
     }>;
   } | null
 ): MobileKitResponse | null {
   if (!kit) return null;
+  const assets = kit.assetKits
+    .filter((ak) => ak.asset.archivedAt === null)
+    .map(({ asset: { id, status, availableToBook } }) => ({
+      id,
+      status,
+      availableToBook,
+    }));
   return {
     id: kit.id,
     name: kit.name,
     status: kit.status,
     image: kit.image,
-    _count: { assets: kit._count.assetKits },
-    assets: kit.assetKits.map((ak) => ak.asset),
+    _count: { assets: assets.length },
+    archivedAssetCount: kit.assetKits.length - assets.length,
+    assets,
   };
 }
 
@@ -572,6 +1017,12 @@ export type MobileAssetResponse = {
    */
   imageSource: AssetImageSource;
   availableToBook: boolean;
+  /**
+   * When the asset was archived, `null` while it is active. Archived assets
+   * are read-only: the companion badges them "Archived" and offers no action
+   * the server would refuse.
+   */
+  archivedAt: Date | null;
   category: { name: string } | null;
   kitId: string | null;
   kit: { id: string; name: string } | null;
@@ -631,8 +1082,15 @@ export function shapeMobileAssetResponse(asset: {
   sequentialId: string | null;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Dropped below, so the response shape does not change. Optional because
+   * some callers build this argument by hand; {@link MobileAssetSelectRow}
+   * makes it required where a photo is re-signed.
+   */
+  mainImageExpiration?: Date | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
+  archivedAt: Date | null;
   category: { name: string } | null;
   type: AssetType;
   quantity: number | null;
@@ -647,7 +1105,13 @@ export function shapeMobileAssetResponse(asset: {
     custodian: { id: string; name: string; userId: string | null };
   }>;
 }): MobileAssetResponse {
-  const { assetKits, assetLocations, custody, ...rest } = asset;
+  const {
+    assetKits,
+    assetLocations,
+    custody,
+    mainImageExpiration: _mainImageExpiration,
+    ...rest
+  } = asset;
   const kit = assetKits[0]?.kit ?? null;
   /**
    * Collapse the model-image cascade before the row leaves the server. The
@@ -696,10 +1160,43 @@ export function shapeMobileAssetResponse(asset: {
 }
 
 /**
- * `MobileAssetResponse` plus the custody-visibility metadata added by
- * {@link getMobileAssetForViewer}: `custodyListOthersCount` is the number of
+ * A row selected with `MOBILE_ASSET_SELECT`. Unlike the shaper's own parameter,
+ * `mainImageExpiration` is required, so a select that drops it fails to compile
+ * instead of silently skipping the photo re-sign.
+ */
+export type MobileAssetSelectRow = Parameters<
+  typeof shapeMobileAssetResponse
+>[0] & { mainImageExpiration: Date | null };
+
+/**
+ * Re-signs a `MOBILE_ASSET_SELECT` row's lapsed photo URL, then shapes the row
+ * for the companion.
+ *
+ * Every path that returns such a row goes through this one step: the scanner
+ * resolvers and the asset returned after a quantity or custody change.
+ *
+ * @param asset - A row selected with `MOBILE_ASSET_SELECT`.
+ * @param organizationId - The workspace that owns the asset. For a code
+ *   resolved in a sibling workspace, that workspace rather than the caller's.
+ * @returns The legacy flat mobile response shape.
+ * @see {@link file://./../asset/service.server.ts} refreshExpiredAssetImages
+ */
+export async function resignAndShapeMobileAsset(
+  asset: MobileAssetSelectRow,
+  organizationId: string
+): Promise<MobileAssetResponse> {
+  const [refreshed] = await refreshExpiredAssetImages([asset], {
+    organizationId,
+    ...ASSET_IMAGE_RESIGN_LIMITS,
+  });
+  return shapeMobileAssetResponse(refreshed);
+}
+
+/**
+ * `MobileAssetResponse` with its custody scoped to one viewer by
+ * `scopeMobileAssetCustodyToViewer`: `custodyListOthersCount` is the number of
  * holders hidden from the viewer (0 when the viewer can see all custody), so
- * the companion can render "+N others" — mirroring the web's
+ * the companion can render "+N others", mirroring the web's
  * `QuantityCustodyList` hidden-count (quantity-custody-list.tsx:126).
  */
 export type MobileAssetForViewer = MobileAssetResponse & {
@@ -719,7 +1216,7 @@ export type MobileAssetForViewer = MobileAssetResponse & {
  * @param args.assetId - The asset to fetch (org-scoped)
  * @param args.organizationId - The caller's active organization
  * @param args.viewerUserId - The authenticated caller's user id
- * @param args.canSeeAllCustody - From {@link getMobileUserContext}
+ * @param args.canSeeAllCustody - The viewer's `access.custody.seeAll`, from {@link getMobileUserContext}
  * @returns The viewer-shaped asset, or null when not found in the org
  */
 export async function getMobileAssetForViewer({
@@ -736,6 +1233,7 @@ export async function getMobileAssetForViewer({
   const asset = await db.asset.findUnique({
     // why: inline-scope to org so cross-org probes read nothing — matches
     // the pattern used by every other mobile route.
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id refresh of the asset the caller just acted on; the detail view still shows archived assets
     where: { id: assetId, organizationId },
     // MOBILE_ASSET_SELECT's custody select already carries `custodian.userId`
     // (own-row detection; web parity) and `kitCustodyId` (releasableQuantity).
@@ -746,29 +1244,28 @@ export async function getMobileAssetForViewer({
 
   if (!asset) return null;
 
-  const shaped = shapeMobileAssetResponse(asset);
+  const shaped = await resignAndShapeMobileAsset(asset, organizationId);
 
-  const { custodyList, custodyListOthersCount } =
-    filterMobileCustodyListForViewer({
-      custodyList: shaped.custodyList,
-      custodyRows: asset.custody,
-      viewerUserId,
-      canSeeAllCustody,
-    });
+  return scopeMobileAssetCustodyToViewer(shaped, {
+    viewerUserId,
+    canSeeAllCustody,
+  });
+}
 
-  // Legacy single `custody` follows the web's specific-custody rule (see
-  // viewerCanSeeLegacyCustody): hidden unless the viewer can see all custody
-  // or IS the (primary) custodian.
-  const primaryCustody = asset.custody[0] ?? null;
-  const custody =
-    primaryCustody &&
-    viewerCanSeeLegacyCustody({
-      custodianUserId: primaryCustody.custodian.userId,
-      viewerUserId,
-      canSeeAllCustody,
-    })
-      ? shaped.custody
-      : null;
-
-  return { ...shaped, custody, custodyList, custodyListOthersCount };
+/**
+ * The `{ error }` body a scan lookup sends for a thrown error. An
+ * inactive-workspace refusal carries `reason: "workspace_inactive"`, so the
+ * companion scanner can title it as such; any other error carries the message
+ * alone, as every mobile route does.
+ *
+ * @param error - The error, as `makeShelfError` returns it.
+ * @returns The value for the response's `error` field.
+ */
+export function mobileScanErrorBody(error: ShelfError): {
+  message: string;
+  reason?: typeof MOBILE_WORKSPACE_INACTIVE_REASON;
+} {
+  return isMobileWorkspaceInactiveError(error)
+    ? { message: error.message, reason: MOBILE_WORKSPACE_INACTIVE_REASON }
+    : { message: error.message };
 }

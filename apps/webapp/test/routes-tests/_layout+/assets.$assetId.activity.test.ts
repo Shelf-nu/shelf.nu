@@ -24,12 +24,17 @@ import {
   Role2PermissionMap,
 } from "~/utils/permissions/permission.data";
 
-const { getAsset, getPaginatedAndFilterableAssetNotes, requirePermission } =
-  vi.hoisted(() => ({
-    getAsset: vi.fn(),
-    getPaginatedAndFilterableAssetNotes: vi.fn(),
-    requirePermission: vi.fn(),
-  }));
+const {
+  getAsset,
+  getLinkTitles,
+  getPaginatedAndFilterableAssetNotes,
+  requirePermission,
+} = vi.hoisted(() => ({
+  getAsset: vi.fn(),
+  getLinkTitles: vi.fn(),
+  getPaginatedAndFilterableAssetNotes: vi.fn(),
+  requirePermission: vi.fn(),
+}));
 
 // why: the loader's only authorization call. Stubbed so each test can drive it
 // with a different role while still resolving against the REAL permission
@@ -43,6 +48,10 @@ vi.mock("~/modules/asset/service.server", () => ({ getAsset }));
 vi.mock("~/modules/note/service.server", () => ({
   getPaginatedAndFilterableAssetNotes,
 }));
+
+// why: reads stored titles from the DB and fetches pages over the network. The
+// tests pin what the loader hands it and what it does with the answer.
+vi.mock("~/modules/link-preview/service.server", () => ({ getLinkTitles }));
 
 // why: the success path serializes a per-page cookie preference, which needs a
 // signing secret from the environment. Orthogonal to authorization.
@@ -122,6 +131,7 @@ describe("asset activity loader — note:read is enforced server-side", () => {
       hasNotes: true,
       cookie: { perPage: 20 },
     });
+    getLinkTitles.mockResolvedValue({});
   });
 
   it("requires note:read for the data it returns", async () => {
@@ -212,5 +222,48 @@ describe("asset activity loader — note:read is enforced server-side", () => {
       expect.objectContaining({ assetId: "asset-1", organizationId: "org-1" })
     );
     expect(result.data.items).toHaveLength(1);
+  });
+
+  it("reads the titles of the links in the page's notes once, for the session's workspace", async () => {
+    // The workspace comes from the permission check, never from the URL.
+    requirePermission.mockResolvedValue({
+      organizationId: "org-from-session",
+      userOrganizations: [],
+    });
+    const notes = [
+      {
+        id: "note-1",
+        type: "COMMENT",
+        content: "Manual: https://example.com/m.pdf",
+      },
+      { id: "note-2", type: "UPDATE", content: "Status changed to In custody" },
+    ];
+    getPaginatedAndFilterableAssetNotes.mockResolvedValue({
+      page: 1,
+      perPage: 20,
+      search: null,
+      items: notes,
+      totalItems: 2,
+      totalPages: 1,
+      hasNotes: true,
+      cookie: { perPage: 20 },
+    });
+    const linkTitles = {
+      "https://example.com/m.pdf": { pageTitle: "Manual", customTitle: null },
+    };
+    getLinkTitles.mockResolvedValue(linkTitles);
+
+    const result = (await loader(loaderArgs())) as unknown as {
+      data: { items: unknown[]; linkTitles: unknown };
+    };
+
+    expect(getLinkTitles).toHaveBeenCalledTimes(1);
+    expect(getLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-from-session",
+      notes,
+    });
+    // The very notes the page shows, not a copy or a subset.
+    expect(getLinkTitles.mock.calls[0][0].notes).toBe(result.data.items);
+    expect(result.data.linkTitles).toEqual(linkTitles);
   });
 });

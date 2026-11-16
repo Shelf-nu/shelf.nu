@@ -14,9 +14,12 @@
  * suite covers that loading contract itself.
  */
 import type { ReactNode } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 
@@ -26,6 +29,15 @@ import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 // so the asset-code chip is simply skipped — irrelevant to these tests.
 vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => null,
+}));
+
+/** The viewing member's roles, per case. */
+const viewer = { roles: [OrganizationRoles.ADMIN] as OrganizationRoles[] };
+
+// why: the member's access comes from the `_layout` loader, which a
+// component-only render does not run.
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => accessFor(viewer.roles),
 }));
 
 // why: the real `Button` renders a react-router `Link` for `to=`, which
@@ -188,6 +200,7 @@ async function openSidebar() {
 
 beforeEach(() => {
   fetcher = { load: vi.fn(), state: "idle", data: undefined };
+  viewer.roles = [OrganizationRoles.ADMIN];
 });
 
 describe("BookingAssetsSidebar QT stock badges", () => {
@@ -210,6 +223,45 @@ describe("BookingAssetsSidebar QT stock badges", () => {
     const trigger = await screen.findByText("Insufficient stock");
     expect(trigger).toBeInTheDocument();
     expect(trigger).toHaveClass("bg-red-50");
+  });
+
+  it("renders no stock badge for a kit-driven row even when the loose pool is empty", async () => {
+    // A kit holding the asset's last units: the loose pool reads 0/0, and the
+    // row is booked through the kit (`assetKitId` set), so neither badge
+    // applies. The same figures on a standalone row are the red case above.
+    const kit = {
+      id: "kit-1",
+      name: "Projector case",
+      image: null,
+      imageExpiration: null,
+      category: null,
+    };
+    const asset = makeQtAsset({ assetKits: [{ id: "ak-1", kit }] });
+    const booking = makeBooking({ status: "RESERVED" });
+    fetcher.data = {
+      ...makePayload({ asset, bookedQuantity: 1 }),
+      bookingAssets: [{ id: "ba-kit", quantity: 1, assetKitId: "ak-1", asset }],
+    };
+
+    render(
+      <BookingAssetsSidebar
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 0, physicalNow: 0, reserved: 0 },
+        }}
+      />
+    );
+
+    await openSidebar();
+
+    // Kit groups start collapsed; the member row only exists once expanded.
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Toggle kit expand" })
+    );
+
+    expect(await screen.findByText("Boards")).toBeInTheDocument();
+    expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checked out elsewhere")).not.toBeInTheDocument();
   });
 
   it("renders the amber PendingReturnBadge on a not-started booking when rowQty fits bookable but exceeds physicalNow, with an explanatory tooltip", async () => {
@@ -288,6 +340,32 @@ describe("BookingAssetsSidebar QT stock badges", () => {
 
     expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
     expect(screen.queryByText("Checked out elsewhere")).not.toBeInTheDocument();
+  });
+
+  it("renders a quantity-tracked asset with units in custody as Available on an ONGOING booking", async () => {
+    // Custody on a quantity-tracked asset is held by a team member outside
+    // this booking, so the row reads by this booking's own progress and must
+    // not inherit the pool's custody label.
+    const asset = makeQtAsset({ status: "IN_CUSTODY" });
+    const booking = makeBooking({ status: "ONGOING" });
+    fetcher.data = makePayload({ asset, bookedQuantity: 2 });
+
+    render(
+      <BookingAssetsSidebar
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 10, physicalNow: 5, reserved: 0 },
+        }}
+      />
+    );
+
+    await openSidebar();
+    // The badge stub renders the status it was handed, so the assertion is on
+    // the resolved status rather than on the user-facing label.
+    const badge = await screen.findByTestId("asset-status-badge");
+
+    expect(badge).toHaveTextContent("AVAILABLE");
+    expect(badge).not.toHaveTextContent("IN_CUSTODY");
   });
 });
 
@@ -391,4 +469,55 @@ describe("BookingAssetsSidebar lazy loading", () => {
     expect(fetcher.load).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
+});
+
+describe("BookingAssetsSidebar scan-to-assign link", () => {
+  /** A RESERVED booking with one model reservation still to assign. */
+  function bookingWithOpenModelRequest() {
+    return {
+      ...makeBooking({ status: "RESERVED", assetCount: 0 }),
+      modelRequests: [
+        {
+          id: "req-1",
+          assetModelId: "model-1",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-1", name: "Tripod" },
+        },
+      ],
+    } as Parameters<typeof BookingAssetsSidebar>[0]["booking"];
+  }
+
+  it("offers an Administrator the scanner on a reserved booking", async () => {
+    render(
+      <MemoryRouter>
+        <BookingAssetsSidebar booking={bookingWithOpenModelRequest()} />
+      </MemoryRouter>
+    );
+    await openSidebar();
+
+    expect(
+      screen.getByRole("link", { name: "Scan to assign" })
+    ).toHaveAttribute("href", "/bookings/booking-1/overview/scan-assets");
+  });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "offers %s no scanner on a reserved booking, which the page refuses",
+    async (role) => {
+      viewer.roles = [role];
+
+      render(
+        <MemoryRouter>
+          <BookingAssetsSidebar booking={bookingWithOpenModelRequest()} />
+        </MemoryRouter>
+      );
+      await openSidebar();
+
+      expect(screen.getByText("Tripod")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Scan to assign" })
+      ).not.toBeInTheDocument();
+    }
+  );
 });

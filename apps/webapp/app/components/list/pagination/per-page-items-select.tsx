@@ -7,11 +7,11 @@ import {
   SelectItem,
 } from "~/components/forms/select";
 import { useSearchParams } from "~/hooks/search-params";
-
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { PER_PAGE_OPTIONS } from "~/utils/per-page";
 
 export default function PerPageItemsSelect() {
-  const perPageValues = ["20", "50", "100"];
+  const perPageValues = PER_PAGE_OPTIONS.map(String);
   const [_, setSearchParams] = useSearchParams();
   const { perPage } = useLoaderData<AssetIndexLoaderData>();
 

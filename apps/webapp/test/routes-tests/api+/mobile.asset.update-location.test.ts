@@ -44,13 +44,39 @@ const dbMocks = vi.hoisted(() => ({
     findUniqueOrThrow: vi.fn(),
   },
   assetLocation: {
+    findMany: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
   location: {
     findFirst: vi.fn(),
   },
+  // why: the route writes the location activity log lines through this
+  // delegate; the rows handed over are asserted below.
+  locationNote: {
+    createMany: vi.fn(),
+  },
+  // why: the collapse reads the operator custody rows to re-home custody
+  // taken from a dropped placement; none are out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
+  // why: the same read also counts units out on bookings per location; none
+  // are out in these tests.
+  bookingAsset: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   $transaction: vi.fn(),
+}));
+
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -68,6 +94,13 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 // stock decrease cannot interleave. The lock issues a raw
 // `SELECT ... FOR UPDATE`, which a mocked tx client cannot execute — stub it
 // to return the row the write should be based on.
+// why: the archived freeze reads the asset's archive state through the
+// database; none of these fixtures are archived (issue #382).
+vi.mock("~/utils/org-validation.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/org-validation.server")>()),
+  assertAssetsAreNotArchived: vi.fn(),
+}));
+
 vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vi.fn(),
 }));
@@ -78,7 +111,8 @@ vi.mock("~/modules/note/service.server", () => ({
 }));
 
 // why: utility functions used for note formatting — we mock to avoid internal dependencies
-vi.mock("~/utils/markdoc-wrappers", () => ({
+vi.mock("~/utils/markdoc-wrappers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/markdoc-wrappers")>()),
   wrapUserLinkForNote: vi.fn(
     ({ firstName, lastName }: any) => `[${firstName} ${lastName}]`
   ),
@@ -132,6 +166,14 @@ function createRequest(body: Record<string, unknown>) {
 
 describe("POST /api/mobile/asset/update-location", () => {
   beforeEach(() => {
+    // The route reads the manual placements under the asset lock, and derives
+    // the collapse events, the primary event and the note from THAT read rather
+    // than the pre-transaction one. Default to the single old placement these
+    // tests set up; a test seeding more overrides it.
+    (dbMocks.assetLocation.findMany as any).mockResolvedValue([
+      { quantity: 1, location: { id: "loc-old", name: "Old Office" } },
+    ]);
+
     vi.clearAllMocks();
 
     (requireMobileAuth as any).mockResolvedValue({
@@ -197,9 +239,15 @@ describe("POST /api/mobile/asset/update-location", () => {
     // `getPrimaryLocation`, so the API surface stays stable for mobile.
     expect(body.asset.location.name).toBe("New Office");
 
-    // Phase 4b: assert the pivot writes happened inside the tx.
+    // Assert the pivot writes happened inside the tx.
+    //
+    // The clear is scoped to MANUAL placements. A kit owns its members'
+    // kit-driven rows (`assetKitId IS NOT NULL`) and the two axes are bounded
+    // by separate triggers, so clearing both here would delete placement the
+    // kit flow is responsible for. Every web-side `assetLocation.deleteMany`
+    // carries the same filter.
     expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1" },
+      where: { assetId: "asset-1", assetKitId: null },
     });
     expect(dbMocks.assetLocation.create).toHaveBeenCalledWith({
       data: {
@@ -217,6 +265,24 @@ describe("POST /api/mobile/asset/update-location", () => {
         assetId: "asset-1",
       })
     );
+    // Both locations' activity logs record the move.
+    expect(
+      dbMocks.locationNote.createMany.mock.calls[0][0].data.map(
+        (row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ]
+      )
+    ).toEqual([
+      [
+        "loc-new",
+        '[Test User] added {% link to="/assets/asset-1" text="Test Laptop" /%} to [New Office]. Moved from [Old Office].',
+      ],
+      [
+        "loc-old",
+        '[Test User] removed {% link to="/assets/asset-1" text="Test Laptop" /%} from [Old Office]. Moved to [New Office].',
+      ],
+    ]);
   });
 
   it("places the quantity from the locked row, not the pre-transaction read", async () => {

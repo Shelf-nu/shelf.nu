@@ -104,10 +104,15 @@ export default function BulkDownloadQrDialog({
   const processDownload = useCallback(
     async (data: BulkQrDownloadLoaderData, requestId: number) => {
       try {
-        const { assets, qrIdDisplayPreference, showShelfBranding } = data;
+        const { assets, qrIdDisplayPreference, showShelfBranding, labelsCsv } =
+          data;
 
         const zip = new JSZip();
         const qrFolder = zip.folder("qr-codes");
+        // One row per asset (name, SAM ID, QR ID, QR URL, category, location)
+        // for third-party label software. Built on the server, which knows the
+        // URL each code encodes.
+        zip.file("labels.csv", labelsCsv);
 
         /* Converting our React component to html so that we can later convert it into an image */
         const qrNodes = assets.map((asset) =>
@@ -257,6 +262,7 @@ export default function BulkDownloadQrDialog({
         open={isDialogOpen}
         onClose={handleClose}
         className={className}
+        ariaLabel="Download QR codes"
         title={
           <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
             <DownloadIcon />

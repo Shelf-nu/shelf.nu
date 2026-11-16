@@ -82,6 +82,52 @@ export function createAvailabilityLabels(
  * Predefined label configurations for common asset states
  */
 export const assetLabelPresets = {
+  /**
+   * Archived assets are read-only (issue #382) and still read AVAILABLE, so
+   * without this a scanned archived asset looks like any other row. The
+   * tooltip tells the operator to remove the row, so use it only where the
+   * drawer refuses archived assets; an audit uses {@link archivedInAudit}, and
+   * check-in and custody release use {@link archivedReturning}.
+   */
+  archived: (isArchived: boolean = false): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "Archived assets are read-only. Remove it from the list to continue.",
+    priority: 120,
+  }),
+
+  /**
+   * The audit counterpart of {@link archived}. An archived asset still counts
+   * in an audit (it is physically somewhere), so the badge only says it is out
+   * of service and asks for nothing.
+   */
+  archivedInAudit: (isArchived: boolean = false): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "This asset is archived and out of service, but it still counts in this audit.",
+    priority: 120,
+  }),
+
+  /**
+   * The counterpart of {@link archived} for drawers that bring an asset back:
+   * check-in and custody release. Neither refuses an archived asset, so the
+   * badge only says it is out of service and asks for nothing.
+   */
+  archivedReturning: (
+    isArchived: boolean = false
+  ): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "This asset is archived and out of service. It can still be returned.",
+    priority: 120,
+  }),
+
   inCustody: (isInCustody: boolean = false): AvailabilityLabelConfig => ({
     condition: isInCustody,
     badgeText: "In custody",
@@ -103,9 +149,9 @@ export const assetLabelPresets = {
   /**
    * "Part of kit" badge. Copy differs by asset type:
    *
-   *   - INDIVIDUAL — whole asset is committed to the kit; user must
-   *     remove it from the kit (or scan the kit QR) to act on it
-   *     directly.
+   *   - INDIVIDUAL — whole asset is committed to the kit, so it comes
+   *     along when the kit is scanned; acting on it alone means taking
+   *     it out of the kit first.
    *   - QUANTITY_TRACKED — only a slice (`AssetKit.quantity`) is in
    *     the kit; the rest of the pool is free and the action is
    *     still allowed. The booking + custody drawer blocker is scoped
@@ -121,7 +167,7 @@ export const assetLabelPresets = {
     tooltipTitle: "Asset is part of a kit",
     tooltipContent: isQuantityTracked
       ? "Part of this asset's quantity is allocated to a kit. The remaining free pool is still available to add individually."
-      : "Remove the asset from the kit to add it individually.",
+      : "Scan the kit's QR to take the whole kit, or remove the asset from the kit to use it on its own.",
     priority: 80,
   }),
 

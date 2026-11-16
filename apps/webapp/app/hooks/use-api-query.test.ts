@@ -1,3 +1,15 @@
+/**
+ * Tests for {@link useApiQuery} (`~/hooks/use-api-query`).
+ *
+ * Beyond the request/loading/error surface, two properties here are the whole
+ * reason the hook exists rather than a bare `fetch` in an effect, and each has
+ * a case that fails without it: only the current request's answer is applied,
+ * and the newest callback the caller rendered is the one invoked — including
+ * when the caller rebuilds that callback on every render, which every real
+ * call site does.
+ *
+ * @see {@link file://./use-api-query.ts}
+ */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import useApiQuery from "./use-api-query";
@@ -64,7 +76,10 @@ describe("useApiQuery", () => {
     );
 
     expect(result.current.isLoading).toBe(true);
-    expect(mockFetch).toHaveBeenCalledWith("/api/test");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/test",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
 
     await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
@@ -93,7 +108,10 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/assets?page=1&limit=10");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/assets?page=1&limit=10",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 
@@ -191,14 +209,20 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test1");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     // Change the API endpoint
     rerender({ api: "/api/test2" });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test2");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -229,14 +253,20 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test?page=1");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test?page=1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     // Change search params
     rerender({ searchParams: searchParams2 });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test?page=2");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test?page=2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -266,7 +296,10 @@ describe("useApiQuery", () => {
     rerender({ enabled: true });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -286,7 +319,10 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/health");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/health",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 
@@ -436,5 +472,96 @@ describe("useApiQuery", () => {
     expect(mockFetch).not.toHaveBeenCalled();
     expect(onSuccessMock).not.toHaveBeenCalled();
     expect(onErrorMock).not.toHaveBeenCalled();
+  });
+  it("ignores a superseded response when the url changes mid-flight", async () => {
+    // why: the case turns on completion ORDER, so one response has to be held
+    // open while a second answers. Only a hand-built deferred lets the test
+    // decide when the first one settles.
+    let resolveFirst: (value: unknown) => void = () => {};
+    const firstResponse = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    mockFetch.mockImplementation((url: string) =>
+      url.includes("page=1")
+        ? firstResponse
+        : Promise.resolve({ json: () => Promise.resolve({ page: 2 }) })
+    );
+
+    const { result, rerender } = renderHook(
+      ({ page }: { page: number }) =>
+        useApiQuery<{ page: number }>({
+          api: "/api/test",
+          searchParams: new URLSearchParams({ page: String(page) }),
+        }),
+      { initialProps: { page: 1 } }
+    );
+
+    // Page 2 is requested and answered while page 1 is still open.
+    rerender({ page: 2 });
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual({ page: 2 });
+    });
+
+    // Page 1 answers late. Settling the fetch is not enough to exercise the
+    // guard: `response.json()` and the handler after it run in later
+    // microtasks, and asserting before those have run would pass on page 2's
+    // data without the stale path ever being reached. Drain the chain inside
+    // `act` so any state update it attempts is flushed and attributed here.
+    await act(async () => {
+      resolveFirst({ json: () => Promise.resolve({ page: 1 }) });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.data).toEqual({ page: 2 });
+  });
+
+  it("still resolves when the caller passes a new callback every render", async () => {
+    // why: every real call site passes an inline arrow, so the callbacks
+    // change identity on each render. Cancelling on dependency change must not
+    // treat that as a superseded request, or the query aborts itself forever
+    // and the data never arrives.
+    mockFetch.mockResolvedValue({
+      json: () => Promise.resolve({ ok: true }),
+    });
+
+    const { result } = renderHook(() =>
+      useApiQuery<{ ok: boolean }>({
+        api: "/api/test",
+        onSuccess: () => {},
+        onError: () => {},
+      })
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual({ ok: true });
+    });
+    expect(result.current.isLoading).toBe(false);
+  });
+  it("stops loading when the query is disabled mid-flight", async () => {
+    // why: a never-resolving fetch is what "still in flight" means here; the
+    // dialogs that use this hook disable it the moment they close, which
+    // happens while a request is open.
+    mockFetch.mockImplementation(() => new Promise(() => {}));
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useApiQuery({ api: "/api/test", enabled }),
+      { initialProps: { enabled: true } }
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.isLoading).toBe(true);
+    });
+
+    rerender({ enabled: false });
+
+    // Cancelling must not leave the caller showing a spinner for a request
+    // that will never answer.
+    await waitForAsyncUpdate(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
   });
 });

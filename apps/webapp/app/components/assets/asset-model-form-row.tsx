@@ -22,6 +22,9 @@
  *
  * @see {@link file://./form.tsx} consumer
  */
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
+import type { FormAssetModel } from "./picked-asset-model";
+import { formModelFromPickerItem } from "./picked-asset-model";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -35,11 +38,11 @@ export type AssetModelFormRowProps = {
   assetModelId?: string | null;
   /**
    * Fired when the user picks (or clears) a model. The parent uses
-   * this to apply the model's `defaultCategoryId` to the form's
-   * category param so the Category selector re-renders with the new
-   * default — see `handleAssetModelChange` in `form.tsx`.
+   * this to show the model's `defaultCategoryId` in an empty Category
+   * selector. See `handleAssetModelChange` in `form.tsx`. `picked` is the
+   * picked model's row with its defaults, also for a model found by search.
    */
-  onChange: (modelId: string | undefined) => void;
+  onChange: (modelId: string | undefined, picked?: FormAssetModel) => void;
   /**
    * Inline error rendered below the selector (red text). Used by the
    * bulk-create client-side guard in `form.tsx` to surface "please
@@ -55,21 +58,27 @@ export function AssetModelFormRow({
   onChange,
   error,
 }: AssetModelFormRowProps) {
+  /** "Create" shortcuts show only to members who may create asset models. */
+  const canCreateAssetModel = useInlineCreatePermissions().assetModel;
+
   return (
     <FormRow
       rowLabel="Asset Model"
       required={required}
       subHeading={
         <p>
-          Assign a model to group similar assets together.{" "}
-          <Button
-            to="/settings/asset-models/new"
-            variant="link-gray"
-            className="text-gray-600 underline"
-            target="_blank"
-          >
-            Create asset models
-          </Button>
+          Assign a model to group similar assets together. When an asset joins a
+          model, the model's defaults fill its empty fields.{" "}
+          {canCreateAssetModel ? (
+            <Button
+              to="/settings/asset-models/new"
+              variant="link-gray"
+              className="text-gray-600 underline"
+              target="_blank"
+            >
+              Create asset models
+            </Button>
+          ) : null}
         </p>
       }
       className="border-b-0 pb-[10px]"
@@ -79,7 +88,9 @@ export function AssetModelFormRow({
           disabled={disabled}
           defaultValue={assetModelId ?? undefined}
           fieldName="assetModelId"
-          model={{ name: "assetModel", queryKey: "name" }}
+          // `withDefaults`: search results carry each model's defaults, so a
+          // model found by search pre-fills like one from the loader's page.
+          model={{ name: "assetModel", queryKey: "name", withDefaults: "true" }}
           triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
           placeholder="Select asset model"
           contentLabel="Asset Models"
@@ -90,7 +101,9 @@ export function AssetModelFormRow({
           closeOnSelect
           selectionMode="set"
           allowClear={true}
-          onChange={onChange}
+          onChange={(modelId, item) =>
+            onChange(modelId, item ? formModelFromPickerItem(item) : undefined)
+          }
           extraContent={({ onItemCreated, closePopover }) => (
             <InlineEntityCreationDialog
               title="Create new asset model"
