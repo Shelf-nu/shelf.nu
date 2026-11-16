@@ -19,6 +19,8 @@ import {
   runArchive,
   runReinstate,
   UNCONFIRMED_NOTE,
+  UNCONFIRMED_TITLE,
+  failureTitle,
   captureRequestScope,
   landArchiveChange,
   type ArchiveChangeResult,
@@ -514,12 +516,16 @@ async function land(
 ) {
   let shown = before;
   const refusals: string[] = [];
+  const titles: string[] = [];
   let refetched = 0;
   let changed = 0;
   await landArchiveChange(result, {
     assetId,
     isStillHere: here,
-    showRefusal: (message) => refusals.push(message),
+    showRefusal: (failure) => {
+      refusals.push(failure.message);
+      titles.push(failureTitle(failure, "Couldn't archive"));
+    },
     apply: (value) => {
       shown = value;
     },
@@ -532,7 +538,7 @@ async function land(
       changed += 1;
     },
   });
-  return { shown, refusals, refetched, changed };
+  return { shown, refusals, titles, refetched, changed };
 }
 
 const ARCHIVED_AT = "2026-11-16T10:00:00.000Z";
@@ -580,9 +586,27 @@ test("a refusal shows its message and reloads the asset", async () => {
   );
 
   assert.deepEqual(result.refusals, ["Refused"]);
+  assert.deepEqual(result.titles, ["Couldn't archive"]);
   assert.equal(result.refetched, 1);
   // The server answered "no": nothing changed, so nothing is marked.
   assert.equal(assetChangeVersion("asset-refused"), before);
+});
+
+test("a request without an answer claims neither failure nor a finished reload", async () => {
+  const result = await land(
+    {
+      kind: "failed",
+      message: `Timed out. ${UNCONFIRMED_NOTE}`,
+      uncertain: true,
+    },
+    { assetId: "asset-uncertain-words", reloadFails: true }
+  );
+
+  // Shown before the reload runs, and the reload can fail too.
+  assert.deepEqual(result.titles, [UNCONFIRMED_TITLE]);
+  assert.doesNotMatch(UNCONFIRMED_NOTE, /\b(was|has been) reloaded\b/);
+  assert.doesNotMatch(UNCONFIRMED_TITLE, /couldn't/i);
+  assert.equal(result.refetched, 1);
 });
 
 test("an uncertain failure marks the asset changed, here or not", async () => {

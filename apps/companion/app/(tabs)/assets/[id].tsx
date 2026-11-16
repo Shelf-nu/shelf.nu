@@ -85,6 +85,7 @@ import {
   captureRequestScope,
   runReinstate,
   landArchiveChange,
+  failureTitle,
   type RequestScope,
 } from "@/lib/asset-archive";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
@@ -514,7 +515,11 @@ export default function AssetDetailScreen() {
       await landArchiveChange(result, {
         assetId,
         isStillHere,
-        showRefusal: (message) => Alert.alert("Couldn't reinstate", message),
+        showRefusal: (failure) =>
+          Alert.alert(
+            failureTitle(failure, "Couldn't reinstate"),
+            failure.message
+          ),
         apply: (archivedAt) => applyArchivedAt(assetId, archivedAt),
         refetch: reloadAsset,
         onChanged: () =>
@@ -601,7 +606,11 @@ export default function AssetDetailScreen() {
         {
           assetId,
           isStillHere,
-          showRefusal: (message) => Alert.alert("Couldn't archive", message),
+          showRefusal: (failure) =>
+            Alert.alert(
+              failureTitle(failure, "Couldn't archive"),
+              failure.message
+            ),
           apply: (archivedAt) => applyArchivedAt(assetId, archivedAt),
           refetch: reloadAsset,
           onChanged: () => {

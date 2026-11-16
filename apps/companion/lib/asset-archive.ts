@@ -162,11 +162,30 @@ export type ArchiveOutcome<T> =
 const MISSING_ROUTE_STATUSES = [404, 405];
 
 /**
- * Added to the message of a request that got no answer, since the asset is
- * reloaded right after and may show the change went through.
+ * Added to the message of a request that got no answer. It is shown while the
+ * reload starts, so it claims neither the change nor the reload: either may
+ * still fail, and the asset detail refetches on its next focus until a reload
+ * succeeds.
  */
 export const UNCONFIRMED_NOTE =
-  "The asset was reloaded to show where it stands.";
+  "It may still have gone through, so the asset is being reloaded.";
+
+/** The alert title for a request that got no answer. */
+export const UNCONFIRMED_TITLE = "No answer from the server";
+
+/**
+ * The alert title for a failed request: a refusal says so, a request that got
+ * no answer does not claim the change failed.
+ *
+ * @param failure - the failed request
+ * @param refusedTitle - the title for a refusal the server answered
+ */
+export function failureTitle(
+  failure: FailedRequest,
+  refusedTitle: string
+): string {
+  return failure.uncertain ? UNCONFIRMED_TITLE : refusedTitle;
+}
 
 /**
  * Whether a request ended with no HTTP answer, so the server may have applied
@@ -348,7 +367,8 @@ export type ArchiveChangeResult =
  * @param result - how the request ended
  * @param options.assetId - the asset the request was sent for
  * @param options.isStillHere - from {@link captureRequestScope}
- * @param options.showRefusal - shows a refusal message
+ * @param options.showRefusal - shows a failed request (title from
+ *   {@link failureTitle})
  * @param options.apply - puts `archivedAt` on the asset shown on this screen
  * @param options.refetch - reloads that asset quietly
  * @param options.onChanged - runs after a change has landed on this screen
@@ -365,7 +385,7 @@ export async function landArchiveChange(
   }: {
     assetId: string;
     isStillHere: () => boolean;
-    showRefusal: (message: string) => void;
+    showRefusal: (failure: FailedRequest) => void;
     apply: (archivedAt: string | null) => void;
     refetch: () => Promise<unknown>;
     onChanged: () => void;
@@ -376,7 +396,7 @@ export async function landArchiveChange(
   if (result.kind === "failed") {
     if (result.uncertain) markAssetChanged(assetId);
     if (!isStillHere()) return;
-    showRefusal(result.message);
+    showRefusal(result);
     await refetch();
     return;
   }
