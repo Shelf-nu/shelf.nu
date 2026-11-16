@@ -1,6 +1,13 @@
 /**
- * Route tests for how the web SSO callback action reports a login that moved
- * the account onto SSO.
+ * Route tests for the web SSO callback action.
+ *
+ * A sign-in started at `/sso-login` arrives with a code, which the action
+ * trades for the session with this browser's PKCE verifier cookie. A sign-in
+ * started from the identity provider's dashboard arrives with tokens: the
+ * action first names the account (`identify`), and signs in only once the
+ * person confirms (`confirm`), with both tokens belonging to that account.
+ *
+ * It also reports a login that moved the account onto SSO.
  *
  * When an SSO login is merged onto an existing account, the session Supabase
  * issued belongs to a deleted duplicate and must not be issued. The user signs
@@ -14,6 +21,7 @@
  * @see apps/webapp/app/routes/_auth+/oauth.callback.tsx
  * @see apps/webapp/app/utils/sso.server.ts resolveUserAndOrgForSsoCallback
  */
+// @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,6 +44,24 @@ vi.mock("~/modules/auth/service.server", () => ({
   revokeSession: vi.fn(),
 }));
 
+// why: the code exchange and the token lookup call Supabase Auth; their wire
+// format is covered by sso-pkce.server.test.ts. The real ssoSignInExpiredError
+// stays, because the refusal the route returns is what these tests pin.
+vi.mock("~/modules/auth/sso-pkce.server", async () => ({
+  ...(await vi.importActual<typeof import("~/modules/auth/sso-pkce.server")>(
+    "~/modules/auth/sso-pkce.server"
+  )),
+  exchangeSsoCode: vi.fn(),
+  readTokenAccount: vi.fn(),
+}));
+
+// why: where a signed-in person lands depends on their workspaces in the
+// database; the cases only need a member of a team workspace.
+vi.mock("~/modules/organization/service.server", () => ({
+  getUserOrganizations: vi.fn(),
+  isSsoUser: vi.fn(),
+}));
+
 // why: the resolver provisions users and merges auth accounts, and the claims
 // lookup reads auth.identities; both are covered by sso.server.test.ts. The
 // real isSsoAccountLinkedError and assertSsoAuthenticatedSession stay, because
@@ -55,6 +81,13 @@ const { refreshAccessToken, revokeSession } = await import(
 );
 const { getSsoClaimsForAuthUser, resolveUserAndOrgForSsoCallback } =
   await import("~/utils/sso.server");
+const { exchangeSsoCode, readTokenAccount } = await import(
+  "~/modules/auth/sso-pkce.server"
+);
+const { getUserOrganizations, isSsoUser } = await import(
+  "~/modules/organization/service.server"
+);
+const { ssoCodeVerifierCookie } = await import("~/utils/cookies.server");
 
 /**
  * An unsigned access token whose `amr` claim records `method`. The route reads
@@ -76,26 +109,57 @@ const callbackSession = {
   expiresAt: 0,
 };
 
+/** A well-formed PKCE verifier, as `/sso-login` stores it. */
+const VERIFIER = "v".repeat(56);
+
 /**
  * Posts the callback form and runs the action with a session spy.
  *
- * @param extraFields - additional form fields, such as a forged `groups`
+ * @param fields - the form fields
+ * @param cookie - the request's Cookie header, if any
  */
-async function postCallback(extraFields: Record<string, string> = {}) {
+async function post(fields: Record<string, string>, cookie?: string) {
   const setSession = vi.fn();
   const request = new Request("http://localhost/oauth/callback", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refreshToken: "client-refresh-token",
-      redirectTo: "/assets",
-      ...extraFields,
-    }),
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+    body: new URLSearchParams(fields),
   });
   const result = await action(
     createActionArgs({ request, context: { setSession } as never })
   );
   return { result, setSession };
+}
+
+/**
+ * Posts a confirmed dashboard sign-in.
+ *
+ * @param extraFields - additional form fields, such as a forged `groups`
+ */
+function postCallback(extraFields: Record<string, string> = {}) {
+  return post({
+    intent: "confirm",
+    accessToken: "fragment-access-token",
+    refreshToken: "client-refresh-token",
+    redirectTo: "/assets",
+    ...extraFields,
+  });
+}
+
+/** The Cookie header carrying this browser's verifier. */
+async function verifierCookie() {
+  const setCookie = await ssoCodeVerifierCookie.serialize(VERIFIER);
+  return setCookie.split(";")[0];
+}
+
+/** The `Set-Cookie` values of an action result. */
+function setCookies(result: unknown) {
+  if (result instanceof Response) return result.headers.getSetCookie();
+  assertIsDataWithResponseInit(result);
+  return new Headers(result.init?.headers).getSetCookie();
 }
 
 /** What the SSO identity GoTrue wrote from the SAML assertion carries. */
@@ -117,9 +181,113 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(refreshAccessToken).mockResolvedValue(callbackSession);
   vi.mocked(getSsoClaimsForAuthUser).mockResolvedValue(identityClaims);
+  vi.mocked(exchangeSsoCode).mockResolvedValue(callbackSession);
+  vi.mocked(readTokenAccount).mockResolvedValue({
+    userId: callbackSession.userId,
+    email: callbackSession.email,
+  });
+  vi.mocked(getUserOrganizations).mockResolvedValue([
+    { organization: { type: "TEAM" } },
+  ] as never);
+  vi.mocked(isSsoUser).mockResolvedValue(true);
+  vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+    org: null,
+  } as never);
 });
 
-describe("POST /oauth/callback", () => {
+describe("POST /oauth/callback, sign-in started at /sso-login", () => {
+  it("trades the code with this browser's verifier, signs in and clears the verifier", async () => {
+    const { result, setSession } = await post(
+      { intent: "code", code: "auth-code", redirectTo: "/assets" },
+      await verifierCookie()
+    );
+
+    expect(exchangeSsoCode).toHaveBeenCalledWith({
+      code: "auth-code",
+      codeVerifier: VERIFIER,
+    });
+    expect(setSession).toHaveBeenCalledWith(callbackSession);
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).headers.get("Location")).toBe("/assets");
+    expect(setCookies(result).join("\n")).toMatch(/sso_code_verifier=;/);
+  });
+
+  it("passes no verifier when the browser holds none, and signs nobody in", async () => {
+    // The real exchange refuses a missing verifier with this error.
+    const { ssoSignInExpiredError } = await import(
+      "~/modules/auth/sso-pkce.server"
+    );
+    vi.mocked(exchangeSsoCode).mockRejectedValue(ssoSignInExpiredError());
+
+    const { result, setSession } = await post({
+      intent: "code",
+      code: "forwarded-code",
+    });
+
+    expect(exchangeSsoCode).toHaveBeenCalledWith({
+      code: "forwarded-code",
+      codeVerifier: null,
+    });
+    expect(setSession).not.toHaveBeenCalled();
+    expect(resolveUserAndOrgForSsoCallback).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(400);
+  });
+
+  it("refuses the token-only form a page without the confirmation step would post", async () => {
+    const { result, setSession } = await post({
+      refreshToken: "client-refresh-token",
+      redirectTo: "/assets",
+    });
+
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+    expect(setSession).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(400);
+  });
+});
+
+describe("POST /oauth/callback, sign-in started from the identity provider", () => {
+  it("names the account for the person to confirm, and signs nobody in yet", async () => {
+    const { result, setSession } = await post({
+      intent: "identify",
+      accessToken: "fragment-access-token",
+    });
+
+    expect(readTokenAccount).toHaveBeenCalledWith("fragment-access-token");
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+    expect(setSession).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+    expect(result.data).toEqual({
+      error: null,
+      confirmAccount: { email: "jane@acme.com" },
+    });
+  });
+
+  it("signs in once confirmed, when both tokens belong to the named account", async () => {
+    const { result, setSession } = await postCallback();
+
+    expect(refreshAccessToken).toHaveBeenCalledWith("client-refresh-token");
+    expect(setSession).toHaveBeenCalledWith(callbackSession);
+    expect((result as Response).headers.get("Location")).toBe("/assets");
+  });
+
+  it("refuses a confirmation whose refresh token belongs to another account", async () => {
+    vi.mocked(readTokenAccount).mockResolvedValue({
+      userId: "someone-else",
+      email: "it-support@acme.com",
+    });
+
+    const { result, setSession } = await postCallback();
+
+    expect(setSession).not.toHaveBeenCalled();
+    expect(resolveUserAndOrgForSsoCallback).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(400);
+  });
+});
+
+describe("POST /oauth/callback, outcomes", () => {
   it("reports a linked account as a success notice and issues no session", async () => {
     vi.mocked(resolveUserAndOrgForSsoCallback).mockRejectedValue(
       new ShelfError({

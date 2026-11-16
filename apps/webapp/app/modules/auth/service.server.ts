@@ -7,7 +7,6 @@ import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -454,55 +453,6 @@ export async function signInWithEmail(email: string, password: string) {
   }
 
   return authSession;
-}
-
-export async function signInWithSSO(
-  domain: string,
-  /**
-   * Which client is initiating SSO. `"mobile"` lands the post-auth redirect on
-   * the native-app callback path (which hands a session back to the app);
-   * defaults to the web callback. The redirect path is built HERE (never taken
-   * from the caller) so it is always an allow-listed, query-free Supabase
-   * redirect URL — Supabase treats `?` as a wildcard in the allow-list.
-   */
-  { platform = "web" }: { platform?: "web" | "mobile" } = {}
-) {
-  try {
-    const redirectTo = `${SERVER_URL}/oauth/callback${
-      platform === "mobile" ? "/mobile" : ""
-    }`;
-
-    const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
-      domain,
-      options: {
-        redirectTo,
-      },
-    });
-
-    if (error) {
-      throw error;
-    }
-
-    return data.url;
-  } catch (cause) {
-    let message =
-      "Something went wrong. Please try again later or contact support.";
-    let shouldBeCaptured = true;
-
-    // @ts-expect-error
-    if (cause?.code === "sso_provider_not_found") {
-      message = "No SSO provider assigned for your organization's domain";
-      shouldBeCaptured = false;
-    }
-
-    throw new ShelfError({
-      cause,
-      message,
-      label,
-      shouldBeCaptured,
-      additionalData: { domain },
-    });
-  }
 }
 
 /**

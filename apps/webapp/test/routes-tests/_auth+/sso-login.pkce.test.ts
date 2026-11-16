@@ -1,5 +1,8 @@
 /**
- * Route tests for the PKCE requirement on the native SSO start.
+ * Route tests for PKCE on the SSO start.
+ *
+ * Every sign-in started here keeps its Supabase code verifier in this
+ * browser's `sso_code_verifier` cookie, so only this browser can finish it.
  *
  * The native callback hands the authorization code back over the `shelf://`
  * custom scheme, which any app on the device may claim. PKCE is the only thing
@@ -9,10 +12,14 @@
  * @see apps/webapp/app/routes/_auth+/sso-login.tsx
  * @see apps/webapp/app/modules/auth/mobile-sso.server.ts — the redemption half
  */
+// @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
-import { createLoaderArgs } from "@mocks/remix";
+import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 import { describe, expect, it, vi } from "vitest";
-import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
+import {
+  mobilePkceChallengeCookie,
+  ssoCodeVerifierCookie,
+} from "~/utils/cookies.server";
 
 // why: importing the route pulls the Prisma client transitively; without this
 // the suite emits an unhandled P1001 trying to reach a database it never uses.
@@ -31,7 +38,17 @@ vi.mock("~/utils/env", async () => ({
   DEFAULT_SSO_DOMAIN: "",
 }));
 
-const { loader } = await import("~/routes/_auth+/sso-login");
+// why: starting a sign-in calls Supabase Auth; its wire format is covered by
+// sso-pkce.server.test.ts.
+vi.mock("~/modules/auth/sso-pkce.server", () => ({
+  startSsoSignIn: vi.fn().mockResolvedValue({
+    url: "https://idp.example.com/saml",
+    codeVerifier: "v".repeat(56),
+  }),
+}));
+
+const { action, loader } = await import("~/routes/_auth+/sso-login");
+const { startSsoSignIn } = await import("~/modules/auth/sso-pkce.server");
 
 /** A well-formed S256 challenge: 43 chars of base64url. */
 const VALID_CHALLENGE = "a".repeat(43);
@@ -109,4 +126,32 @@ describe("GET /sso-login — PKCE requirement", () => {
     const result = await invoke("");
     expect(result).toBeDefined();
   });
+});
+
+describe("POST /sso-login", () => {
+  it.each(["web", "mobile"] as const)(
+    "sends a %s sign-in to the identity provider and keeps the verifier in this browser",
+    async (platform) => {
+      const request = new Request("http://localhost/sso-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ domain: "acme.com", platform }),
+      });
+
+      const result = await action(createActionArgs({ request }));
+
+      expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", { platform });
+      expect(result).toBeInstanceOf(Response);
+      const response = result as Response;
+      expect(response.headers.get("Location")).toBe(
+        "https://idp.example.com/saml"
+      );
+      const setCookie = response.headers.get("set-cookie");
+      expect(setCookie).toContain("Path=/oauth/callback");
+      expect(setCookie).toContain("HttpOnly");
+      await expect(ssoCodeVerifierCookie.parse(setCookie)).resolves.toBe(
+        "v".repeat(56)
+      );
+    }
+  );
 });

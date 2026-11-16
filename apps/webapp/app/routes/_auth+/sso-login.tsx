@@ -17,9 +17,12 @@ import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { signInWithSSO } from "~/modules/auth/service.server";
+import { startSsoSignIn } from "~/modules/auth/sso-pkce.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
+import {
+  mobilePkceChallengeCookie,
+  setSsoCodeVerifier,
+} from "~/utils/cookies.server";
 import { DEFAULT_SSO_DOMAIN } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -40,7 +43,7 @@ const SSOLoginFormSchema = z.object({
     })),
   redirectTo: z.string().optional(),
   // "mobile" routes the post-auth redirect to the native-app callback so the
-  // companion app can complete SSO login (see signInWithSSO).
+  // companion app can complete SSO login (see startSsoSignIn).
   platform: z.enum(["web", "mobile"]).optional(),
 });
 
@@ -113,8 +116,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // (PKCE) requests are handled above and must complete their own handoff,
     // so they should not be short-circuited into the web SSO redirect.
     if (DEFAULT_SSO_DOMAIN && !isMobile) {
-      const redirectUrl = await signInWithSSO(DEFAULT_SSO_DOMAIN);
-      return redirect(redirectUrl);
+      const { url, codeVerifier } = await startSsoSignIn(DEFAULT_SSO_DOMAIN);
+      return redirect(url, {
+        headers: { "Set-Cookie": await setSsoCodeVerifier(codeVerifier) },
+      });
     }
 
     return payload({ title, subHeading });
@@ -135,9 +140,15 @@ export async function action({ request }: ActionFunctionArgs) {
           SSOLoginFormSchema,
           { shouldBeCaptured: false }
         );
-        const url = await signInWithSSO(domain, { platform });
+        const { url, codeVerifier } = await startSsoSignIn(domain, {
+          platform,
+        });
 
-        return redirect(url);
+        // The callback can only trade Supabase's code for a session with this
+        // verifier, so only this browser can finish the sign-in.
+        return redirect(url, {
+          headers: { "Set-Cookie": await setSsoCodeVerifier(codeVerifier) },
+        });
       }
     }
 
