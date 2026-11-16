@@ -15571,7 +15571,10 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     slices: Array<{ id: string; assetId: string; quantity: number }>
   ) {
     const findMany = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
-    const fallback = findMany.getMockImplementation();
+    // The other `bookingAsset.findMany` reads keep the answers they had.
+    const fallback = findMany.getMockImplementation() as
+      | ((args: unknown) => Promise<unknown>)
+      | undefined;
     findMany.mockImplementation(
       (args: { where?: { assetId?: string | { in?: string[] } } }) => {
         const assetFilter = args?.where?.assetId;
