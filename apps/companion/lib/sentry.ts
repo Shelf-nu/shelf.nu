@@ -2,10 +2,10 @@
  * Sentry instrumentation for the companion app.
  *
  * Main jobs:
- *  1. `initSentry()` — wire up crash/error reporting. No-ops in dev and when no
- *     DSN is configured (the DSN is injected from the EAS env var
- *     `EXPO_PUBLIC_SENTRY_DSN` for preview/production builds, so local Metro
- *     runs never report).
+ *  1. `initSentry()` wires up crash and error reporting. Only real phones on a
+ *     release build report: dev runs, builds without a DSN (the EAS env var
+ *     `EXPO_PUBLIC_SENTRY_DSN`) and simulators or emulators stay silent, and
+ *     preview builds report under their own environment.
  *  2. `reportAuditDurabilityEvent()` — emit the specific signals that tell us,
  *     WITHOUT waiting for a user to notice corrupted audit data, whether the
  *     offline → kill → sync path is failing in the field. These are the four
@@ -20,7 +20,10 @@
  * @see {@link file://./../hooks/use-audit-init.ts}
  */
 import * as Sentry from "@sentry/react-native";
+import * as Device from "expo-device";
+import * as Updates from "expo-updates";
 import type { PushFailureStage } from "./push/token-record";
+import { resolveSentryEnvironment } from "./sentry-environment";
 import {
   getActiveServer,
   setIncompleteTeardownReporter,
@@ -30,21 +33,26 @@ import {
 const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
 
 /**
- * Initialise Sentry. Safe to call unconditionally — it no-ops when there is no
- * DSN (local dev) or in `__DEV__`, so we never pollute the project with errors
- * from Expo Go / Metro sessions.
+ * Initialise Sentry. Safe to call unconditionally: it no-ops without a DSN, in
+ * `__DEV__` (Expo Go / Metro sessions) and on simulators or emulators, so
+ * developer testing never lands among customer errors.
  */
 export function initSentry() {
   if (!dsn || __DEV__) {
     if (__DEV__) console.log("[Sentry] disabled (dev or no DSN)");
     return;
   }
+  // Preview and TestFlight builds report under their own environment so QA
+  // traffic stays out of production telemetry and durability alerts.
+  const environment = resolveSentryEnvironment({
+    isDevice: Device.isDevice,
+    configuredEnvironment: process.env.EXPO_PUBLIC_SENTRY_ENV,
+    channel: Updates.channel,
+  });
+  if (!environment) return;
   Sentry.init({
     dsn,
-    // Distinguish preview/TestFlight builds from real production so QA traffic
-    // doesn't pollute production telemetry and durability alerts stay honest.
-    // Set per-environment as an EAS env var; default to production if unset.
-    environment: process.env.EXPO_PUBLIC_SENTRY_ENV ?? "production",
+    environment,
     // Modest perf sampling — we care about errors + the durability events,
     // not full tracing volume.
     tracesSampleRate: 0.1,
