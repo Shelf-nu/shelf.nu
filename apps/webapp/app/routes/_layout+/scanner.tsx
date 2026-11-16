@@ -13,11 +13,14 @@ import type { HeaderData } from "~/components/layout/header/types";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
-import type { ActionType } from "~/components/scanner/drawer/action-switcher";
 import {
   ActionSwitcher,
   useAvailableScannerActions,
 } from "~/components/scanner/drawer/action-switcher";
+import {
+  scannerActionToRestore,
+  VIEW_ASSET_ACTION,
+} from "~/components/scanner/drawer/restore-scanner-action";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
@@ -172,9 +175,6 @@ const MIN_SCANNER_HEIGHT = 400;
  */
 const BULK_SCAN_DRAFT_TARGET = "scanner";
 
-/** The one scanner action that opens each scan instead of collecting a list. */
-const VIEW_ASSET_ACTION: ActionType = "View asset";
-
 const QRScanner = () => {
   const navigate = useNavigate();
   const [paused, setPaused] = useState<boolean>(false);
@@ -215,11 +215,9 @@ const QRScanner = () => {
     targetId: `${BULK_SCAN_DRAFT_TARGET}:${organizationId}`,
     context: action === VIEW_ASSET_ACTION ? null : action,
     onRestore: (parkedAction) => {
-      const stillAllowed = availableActions.find(
-        (available) => available === parkedAction
-      );
-      if (stillAllowed && stillAllowed !== VIEW_ASSET_ACTION) {
-        setAction(stillAllowed);
+      const restored = scannerActionToRestore(parkedAction, availableActions);
+      if (restored) {
+        setAction(restored);
       }
     },
   });
