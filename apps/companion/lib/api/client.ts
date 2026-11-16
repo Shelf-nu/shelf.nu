@@ -13,7 +13,7 @@ import { postMultipart } from "./multipart-upload";
 import { CLIENT_USER_AGENT } from "./user-agent";
 import { chainAbort } from "../latest-request";
 import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
-import { notifyForbidden } from "./forbidden";
+import { notifyForbidden, recheckAfterRefusal } from "./forbidden";
 
 export type { ApiErrorDetails };
 
@@ -362,7 +362,7 @@ export async function apiFetch<T>(
       const errorDetails = extractErrorDetails(json);
       // 403 = forbidden → user lacks permission, but session is valid
       if (response.status === 403) {
-        notifyForbidden();
+        if (recheckAfterRefusal(path)) notifyForbidden();
         return {
           data: null,
           error:
@@ -468,7 +468,7 @@ export async function apiUpload<T>(
         return { data: null, error: "Session expired. Please sign in again." };
       }
       if (response.status === 403) {
-        notifyForbidden();
+        if (recheckAfterRefusal(path)) notifyForbidden();
         return {
           data: null,
           error:

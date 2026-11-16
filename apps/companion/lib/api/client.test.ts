@@ -229,7 +229,10 @@ describe("apiFetch's automatic retry", () => {
 
 describe("apiFetch and a refused request", () => {
   /** Answers every fetch with `status` and a JSON error body. */
-  async function fetchAnswering(status: number) {
+  async function fetchAnswering(
+    status: number,
+    path = "/api/mobile/dashboard?orgId=org_1"
+  ) {
     const realFetch = globalThis.fetch;
     let refusals = 0;
     const unsubscribe = forbidden.onForbidden(() => {
@@ -242,7 +245,7 @@ describe("apiFetch and a refused request", () => {
         status,
       })) as typeof fetch;
     try {
-      const request = client.apiFetch("/api/mobile/dashboard?orgId=org_1");
+      const request = client.apiFetch(path);
       answerRead("token-a");
       const result = await request;
       return { result, refusals };
@@ -257,6 +260,12 @@ describe("apiFetch and a refused request", () => {
 
     assert.equal(result.status, 403);
     assert.equal(refusals, 1);
+  });
+
+  it("does not tell them when /me itself is refused, so the re-check cannot loop", async () => {
+    const { refusals } = await fetchAnswering(403, "/api/mobile/me");
+
+    assert.equal(refusals, 0);
   });
 
   it("does not tell them about a 404", async () => {
