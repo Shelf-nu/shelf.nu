@@ -28,8 +28,8 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
-  unconfirmedScanSaveAtom,
   useClearScanDraftOnSave,
+  useInPlaceSaveMark,
 } from "~/hooks/use-scan-draft";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
@@ -136,7 +136,9 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   // already hold new scans) cannot set the result, and through it clear the
   // new list's scan draft.
   const submissionRef = useRef(0);
-  const setUnconfirmedSave = useSetAtom(unconfirmedScanSaveAtom);
+  // The list is marked unconfirmed from the moment it is sent; see
+  // `useInPlaceSaveMark`.
+  const saveMark = useInPlaceSaveMark();
 
   const zo = useZorm("AddToLocation", BulkLocationUpdateSchema, {
     onValidSubmit: async (e) => {
@@ -159,6 +161,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
         return;
       }
 
+      saveMark.start();
       try {
         let locationState: LocationState = { status: "processing" };
 
@@ -193,12 +196,16 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
           locationState = foldLocationPart(locationState, kitsData);
         }
 
+        if (submission === submissionRef.current) {
+          saveMark.settle(
+            locationState.status === "success" ? "saved" : "refused"
+          );
+        }
         setResult(locationState);
       } catch (error) {
-        // No answer: the server may have saved it anyway, so the list is
-        // marked and a restored copy warns before it is sent again.
+        // No answer: the server may have saved it anyway, so the mark stays.
         if (submission === submissionRef.current) {
-          setUnconfirmedSave(true);
+          saveMark.settle("unanswered");
         }
         setResult({
           status: "error",
@@ -220,10 +227,10 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
   function cleanupState() {
     submissionRef.current += 1;
-    // A save that failed keeps its list (and so its draft) to fix and send
-    // again. Moving an asset to the location it is already at changes
-    // nothing, so a retry after a partial failure repeats no saved work.
-    if (locationState.status !== "error") {
+    // A parked list is cleared only on a confirmed answer. A list that was
+    // refused, got no answer, or is still waiting (Done pressed mid-save)
+    // stays, with its draft and its unconfirmed mark.
+    if (locationState.status === "success") {
       clearItems();
     }
     setLocationState({

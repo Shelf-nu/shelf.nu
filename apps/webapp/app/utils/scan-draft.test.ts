@@ -114,14 +114,21 @@ describe("saveScanDraft / readScanDraft", () => {
     });
   });
 
-  it("drops codes that never resolved", () => {
+  /**
+   * A reload can land while a code scanned a moment ago is still being looked
+   * up. Nothing is known to be wrong with it, so it must not be lost.
+   */
+  it("keeps a code whose first lookup has not answered yet", () => {
     saveScanDraft(KEY, {
       "qr-1": scanned(),
       "qr-2": undefined,
-      "qr-3": { codeType: "qr" },
+      "qr-3": { codeType: "barcode" },
     });
 
-    expect(Object.keys(readScanDraft(KEY) ?? {})).toEqual(["qr-1"]);
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "qr-3": { codeType: "barcode", pendingLookup: true },
+    });
   });
 
   /** A code that failed once fails again; restoring it only repeats the error. */

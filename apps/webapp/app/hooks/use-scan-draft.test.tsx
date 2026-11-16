@@ -31,9 +31,11 @@ import {
 } from "~/utils/scan-draft";
 import {
   anyPartSaved,
+  inPlaceSaveAnswer,
   retiredScanSubmitFailureAtom,
   unconfirmedScanSaveAtom,
   useClearScanDraftOnSave,
+  useInPlaceSaveMark,
   useScanDraftOnEntry,
 } from "./use-scan-draft";
 
@@ -271,6 +273,86 @@ describe.each(SCANNERS)(
 
       expect(Object.keys(reloaded.get(scannedItemsAtom))).toEqual(["qr-1"]);
       expect(reloaded.get(unconfirmedScanSaveAtom)).toBe(true);
+    });
+
+    /**
+     * The case the draft exists for: the save is still waiting (a gateway
+     * holds it for up to 100 seconds) and the operator reloads. The list must
+     * come back with the warning, because the save may yet go through.
+     */
+    it("restores a list whose save was still waiting, with the warning", () => {
+      const store = createStore();
+      const { rerender, unmount } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+
+      mockNavigation.mockReturnValue({
+        state: "submitting",
+        formMethod: "POST",
+        location: { pathname: path },
+      });
+      rerender();
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
+      unmount();
+
+      // The reload: no navigation, no answer, only the draft.
+      mockNavigation.mockReturnValue({ state: "idle" });
+      const reloaded = createStore();
+      render(reloaded, { scope, targetId });
+
+      expect(Object.keys(reloaded.get(scannedItemsAtom))).toEqual(["qr-1"]);
+      expect(reloaded.get(unconfirmedScanSaveAtom)).toBe(true);
+    });
+
+    it("takes the mark off when the server refuses the save", () => {
+      const store = createStore();
+      const { rerender } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+      mockNavigation.mockReturnValue({
+        state: "submitting",
+        formMethod: "POST",
+        location: { pathname: path },
+      });
+      rerender();
+
+      mockNavigation.mockReturnValue({ state: "idle" });
+      mockActionData.mockReturnValue({ error: { message: "Not allowed" } });
+      rerender();
+
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(false);
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(false);
+      expect(Object.keys(readScanDraft(draftKey) ?? {})).toEqual(["qr-1"]);
+    });
+
+    it("keeps an earlier attempt's mark when a retry is refused", () => {
+      const store = createStore();
+      const { rerender } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+      // First attempt: no answer.
+      mockNavigation.mockReturnValue({
+        state: "submitting",
+        formMethod: "POST",
+        location: { pathname: path },
+      });
+      rerender();
+      mockNavigation.mockReturnValue({ state: "idle" });
+      mockActionData.mockReturnValue({
+        scanSubmitFailure: { kind: "timeout", status: 524 },
+      });
+      rerender();
+
+      // Second attempt: refused.
+      mockNavigation.mockReturnValue({
+        state: "submitting",
+        formMethod: "POST",
+        location: { pathname: path },
+      });
+      rerender();
+      mockNavigation.mockReturnValue({ state: "idle" });
+      mockActionData.mockReturnValue({ error: { message: "Not allowed" } });
+      rerender();
+
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
     });
 
     it("marks a second list whose save also got no answer", () => {
@@ -618,5 +700,66 @@ describe("anyPartSaved", () => {
     [["processing", "processing"], false],
   ] as const)("%j -> %s", (statuses, expected) => {
     expect(anyPartSaved(statuses)).toBe(expected);
+  });
+});
+
+/** A save sent in parts is settled once every part has answered. */
+describe("inPlaceSaveAnswer", () => {
+  it.each([
+    [["processing", "success"], false, null],
+    [["success", "skipped"], false, "saved"],
+    [["success", "error"], false, "saved"],
+    [["error", "skipped"], false, "refused"],
+    [["error", "error"], true, "unanswered"],
+    [["success", "error"], true, "unanswered"],
+  ] as const)("%j, no answer %s -> %s", (statuses, noAnswer, expected) => {
+    expect(inPlaceSaveAnswer(statuses, noAnswer)).toBe(expected);
+  });
+});
+
+/**
+ * The bulk actions save in place, so their drawers mark the list themselves:
+ * on when the save is sent, off again only for a refusal.
+ */
+describe("useInPlaceSaveMark", () => {
+  function renderMark(store: ReturnType<typeof createStore>) {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <Provider store={store}>{children}</Provider>
+    );
+    return renderHook(() => useInPlaceSaveMark(), { wrapper });
+  }
+
+  it("marks the list while the save is waiting", () => {
+    const store = createStore();
+    const { result } = renderMark(store);
+
+    act(() => result.current.start());
+
+    expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+  });
+
+  it("keeps the mark when the save got no answer", () => {
+    const store = createStore();
+    const { result } = renderMark(store);
+    act(() => result.current.start());
+
+    act(() => result.current.settle("unanswered"));
+
+    expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+  });
+
+  it("takes the mark off for a refusal, unless an earlier attempt left it", () => {
+    const fresh = createStore();
+    const first = renderMark(fresh);
+    act(() => first.result.current.start());
+    act(() => first.result.current.settle("refused"));
+    expect(fresh.get(unconfirmedScanSaveAtom)).toBe(false);
+
+    const retried = createStore();
+    retried.set(unconfirmedScanSaveAtom, true);
+    const second = renderMark(retried);
+    act(() => second.result.current.start());
+    act(() => second.result.current.settle("refused"));
+    expect(retried.get(unconfirmedScanSaveAtom)).toBe(true);
   });
 });

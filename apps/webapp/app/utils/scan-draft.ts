@@ -136,15 +136,15 @@ function isSyntheticKey(key: string): boolean {
 }
 
 /**
- * Saves the resolved codes from a scan list, replacing any previous draft.
+ * Saves the codes from a scan list, replacing any previous draft.
  *
- * Kept: every code that resolved, and every code still owed a lookup
- * (`pendingLookup`: restored from a draft, or its last lookup got no answer).
- * Nothing is known to be wrong with those, and they are looked up again when
- * the draft is restored. Dropped: a code the server refused, which would only
- * be refused again, and a code scanned a moment ago that has not resolved
- * either way yet. Writing an empty list removes the draft rather than storing
- * an empty one.
+ * Kept: every code nothing is known to be wrong with. That is a code that
+ * resolved, a code still owed a lookup (`pendingLookup`: restored from a
+ * draft, or its last lookup got no answer), and a code scanned a moment ago
+ * whose first lookup has not answered yet: a reload in that moment must not
+ * lose it. Each is looked up again when the draft is restored. Dropped: a
+ * code the server refused, which would only be refused again. Writing an
+ * empty list removes the draft rather than storing an empty one.
  *
  * @param key - From {@link scanDraftKey}.
  * @param items - The current scan list.
@@ -162,11 +162,10 @@ export function saveScanDraft(
     if (!item) {
       continue;
     }
-    // A code still owed a lookup is kept whatever else it carries: a restored
-    // entry has no type until its fetch lands, and dropping it then would
-    // empty the draft in the moments after a restore. Otherwise only a
-    // resolved code is worth keeping.
-    if (!item.pendingLookup && (item.error || !item.type)) {
+    // Only a refusal drops a code. A code still owed a lookup carries an
+    // error from its last attempt, but that error says nothing about the
+    // code, so it is kept like a code that has not been answered yet.
+    if (item.error && !item.pendingLookup) {
       continue;
     }
     if (isSyntheticKey(code)) {

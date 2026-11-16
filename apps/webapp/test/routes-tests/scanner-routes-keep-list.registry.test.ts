@@ -180,20 +180,32 @@ describe("scanner routes keep a draft of their list", () => {
   it("update location marks a save that got no answer", () => {
     expect(
       read("../../components/scanner/drawer/uses/update-location-drawer.tsx")
-    ).toMatch(
-      /\} catch \(error\) \{[\s\S]*?setUnconfirmedSave\(true\);[\s\S]*?setResult\(\{/
-    );
+    ).toMatch(/\} catch \(error\) \{[\s\S]*?saveMark\.settle\("unanswered"\);/);
   });
 
   /**
-   * A location save that failed keeps its list, and so its draft, when the
-   * result dialog is closed: moving assets to where they already are changes
-   * nothing, so sending it again is safe.
+   * A parked list is cleared only on a confirmed answer. Each bulk drawer
+   * marks it as it is sent, and closing the result dialog empties it only
+   * when the save succeeded: a refused, unanswered or still waiting save
+   * keeps the list, its draft and its mark.
    */
-  it("keeps a failed bulk location list when its result is dismissed", () => {
-    expect(
-      read("../../components/scanner/drawer/uses/update-location-drawer.tsx")
-    ).toMatch(/if \(locationState\.status !== "error"\) \{\s*clearItems\(\);/);
+  it.each([
+    [
+      "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
+      /if \(saved\) \{\s*clearItems\(\);/,
+    ],
+    [
+      "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
+      /if \(saved\) \{\s*clearItems\(\);/,
+    ],
+    [
+      "../../components/scanner/drawer/uses/update-location-drawer.tsx",
+      /if \(locationState\.status === "success"\) \{\s*clearItems\(\);/,
+    ],
+  ])("%s clears its list only on a confirmed save", (file, clearing) => {
+    const source = read(file);
+    expect(source).toMatch(/saveMark\.start\(\);/);
+    expect(source).toMatch(clearing);
   });
 
   it.each([

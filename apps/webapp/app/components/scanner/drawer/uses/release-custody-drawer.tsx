@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { AssetStatus, AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -35,8 +35,9 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   anyPartSaved,
-  unconfirmedScanSaveAtom,
+  inPlaceSaveAnswer,
   useClearScanDraftOnSave,
+  useInPlaceSaveMark,
 } from "~/hooks/use-scan-draft";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
@@ -177,7 +178,12 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // already hold new scans) cannot set the result, and through it clear the
   // new list's scan draft.
   const submissionRef = useRef(0);
-  const setUnconfirmedSave = useSetAtom(unconfirmedScanSaveAtom);
+  // The list is marked unconfirmed from the moment it is sent; see
+  // `useInPlaceSaveMark`. `noAnswerRef` records whether any part of the
+  // current save got no answer, and `settledRef` which save was settled.
+  const saveMark = useInPlaceSaveMark();
+  const noAnswerRef = useRef(false);
+  const settledRef = useRef(0);
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -188,13 +194,14 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         }
       };
       // No answer (the request failed, or the answer was a gateway's page):
-      // the server may have saved it anyway, so the list is marked and a
-      // restored copy warns before it can be sent again.
+      // the server may have saved it anyway, so the mark must stay.
       const markUnconfirmed = () => {
         if (submission === submissionRef.current) {
-          setUnconfirmedSave(true);
+          noAnswerRef.current = true;
         }
       };
+      noAnswerRef.current = false;
+      saveMark.start();
       setDialogOpen(true);
       const { assetIds, kitIds } = e.data;
 
@@ -303,13 +310,39 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     anyPartSaved([custodyState.assetStatus, custodyState.kitStatus])
   );
 
+  // Once every part has answered, the mark is settled: a refusal takes it
+  // back off, no answer keeps it, and a save leaves the draft to the save
+  // signal above.
+  useEffect(() => {
+    if (!dialogOpen || settledRef.current === submissionRef.current) {
+      return;
+    }
+    const answer = inPlaceSaveAnswer(
+      [custodyState.assetStatus, custodyState.kitStatus],
+      noAnswerRef.current
+    );
+    if (answer) {
+      settledRef.current = submissionRef.current;
+      saveMark.settle(answer);
+    }
+  }, [custodyState.assetStatus, custodyState.kitStatus, dialogOpen, saveMark]);
+
   function cleanupState() {
     submissionRef.current += 1;
+    const saved = anyPartSaved([
+      custodyState.assetStatus,
+      custodyState.kitStatus,
+    ]);
     setCustodyState({
       assetStatus: "processing",
       kitStatus: "processing",
     });
-    clearItems();
+    // A parked list is cleared only on a confirmed answer. A list that was
+    // refused, got no answer, or is still waiting (Done pressed mid-save)
+    // stays, with its draft and its unconfirmed mark.
+    if (saved) {
+      clearItems();
+    }
   }
 
   return (

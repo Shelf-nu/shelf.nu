@@ -12,6 +12,14 @@
  * hook decides when the list is cleared, and calls `restoreDraft` straight
  * after its entry clear.
  *
+ * **The rule:** a parked list is cleared only on a confirmed answer (the save
+ * succeeded, or the operator emptied the list). Anything else keeps it,
+ * marked unconfirmed from the moment the save starts: a save still waiting,
+ * one that got no answer, and one dismissed before it answered all leave the
+ * list in the draft with the "may have gone through" warning. A save the
+ * server refused takes the mark back off, unless an earlier attempt at the
+ * same list had left it.
+ *
  * @see {@link file://./../utils/scan-draft.ts} for what a draft holds.
  * @see {@link file://./use-booking-fulfil-session-initialization.ts}
  * @see {@link file://./use-booking-assign-session-initialization.ts}
@@ -85,6 +93,72 @@ const scanListSavedInPlaceAtom = atom(false);
  */
 export function anyPartSaved(statuses: readonly string[]): boolean {
   return statuses.some((status) => status === "success");
+}
+
+/** How a save that stays on the page ended, for {@link useInPlaceSaveMark}. */
+export type InPlaceSaveAnswer =
+  /** At least part of it was saved; the draft goes through the save signal. */
+  | "saved"
+  /** The server answered and saved nothing. */
+  | "refused"
+  /** No answer: the request failed, or the answer was a gateway's page. */
+  | "unanswered";
+
+/**
+ * How a save sent in parts ended, once every part has answered.
+ *
+ * @param statuses - Each part's status: `"processing"`, `"success"`,
+ *   `"error"` or `"skipped"`
+ * @param noAnswer - Whether any part got no answer
+ * @returns The answer, or `null` while a part is still waiting
+ */
+export function inPlaceSaveAnswer(
+  statuses: readonly string[],
+  noAnswer: boolean
+): InPlaceSaveAnswer | null {
+  if (statuses.includes("processing")) {
+    return null;
+  }
+  if (noAnswer) {
+    return "unanswered";
+  }
+  return anyPartSaved(statuses) ? "saved" : "refused";
+}
+
+/**
+ * The unconfirmed mark for a scanner that saves in place (the bulk actions),
+ * which has no route action for {@link useScanDraft} to watch.
+ *
+ * `start` puts the mark on as the save is sent, so a reload while it waits
+ * keeps the warning with the list. `settle` reads the answer: a refusal takes
+ * back only what this attempt added, no answer keeps the mark, and a save
+ * leaves the draft to the save signal ({@link useClearScanDraftOnSave}).
+ *
+ * @returns `start` and `settle`, stable across renders
+ */
+export function useInPlaceSaveMark(): {
+  start: () => void;
+  settle: (answer: InPlaceSaveAnswer) => void;
+} {
+  const store = useStore();
+  const setUnconfirmedSave = useSetAtom(unconfirmedScanSaveAtom);
+  const earlierMarkRef = useRef(false);
+
+  const start = useCallback(() => {
+    earlierMarkRef.current = store.get(unconfirmedScanSaveAtom);
+    setUnconfirmedSave(true);
+  }, [store, setUnconfirmedSave]);
+
+  const settle = useCallback(
+    (answer: InPlaceSaveAnswer) => {
+      if (answer === "refused") {
+        setUnconfirmedSave(earlierMarkRef.current);
+      }
+    },
+    [setUnconfirmedSave]
+  );
+
+  return useMemo(() => ({ start, settle }), [start, settle]);
 }
 
 /**
@@ -195,19 +269,48 @@ export function useScanDraft({
   const [unconfirmedSave, setUnconfirmedSave] = useAtom(
     unconfirmedScanSaveAtom
   );
-  // A save that got no answer may have gone through. A gateway's refusal
-  // ("rejected") means nothing was saved, so it raises no mark.
-  // Keyed on the failure itself, not on a yes/no: each save answers with a
-  // new object, so a second unanswered save after the list was emptied and
-  // refilled marks the new list too.
-  const submitFailure = getScanSubmitFailure(useActionData());
+  // The mark goes on when the save starts, so a reload while it is still
+  // waiting keeps the warning with the list. `earlierMarkRef` holds the mark
+  // as it was before this attempt, so a refusal can take back only what this
+  // attempt added. `awaitingAnswerRef` is set from the start of a save until
+  // its answer is read.
+  const earlierMarkRef = useRef(false);
+  const awaitingAnswerRef = useRef(false);
+  const savingHere =
+    navigation.state === "submitting" &&
+    navigation.formMethod?.toUpperCase() === "POST";
+  useEffect(() => {
+    if (!savingHere || awaitingAnswerRef.current) {
+      return;
+    }
+    awaitingAnswerRef.current = true;
+    earlierMarkRef.current = store.get(unconfirmedScanSaveAtom);
+    setUnconfirmedSave(true);
+  }, [savingHere, store, setUnconfirmedSave]);
+
+  // Read each answer once. Keyed on the answer itself, not on a yes/no: each
+  // save answers with a new object, so a second unanswered save after the
+  // list was emptied and refilled marks the new list too.
+  const actionData = useActionData();
+  const submitFailure = getScanSubmitFailure(actionData);
   const submitFailureRef = useRef(submitFailure);
   submitFailureRef.current = submitFailure;
   useEffect(() => {
-    if (submitFailure && submitFailure.kind !== "rejected") {
-      setUnconfirmedSave(true);
+    if (actionData === undefined) {
+      return;
     }
-  }, [submitFailure, setUnconfirmedSave]);
+    const awaited = awaitingAnswerRef.current;
+    awaitingAnswerRef.current = false;
+    if (submitFailure && submitFailure.kind !== "rejected") {
+      // No answer: the save may have gone through.
+      setUnconfirmedSave(true);
+    } else if (awaited) {
+      // A definite answer that stayed on the page: the server refused the
+      // save, or a gateway turned it away before the server saw it. Nothing
+      // was saved by this attempt.
+      setUnconfirmedSave(earlierMarkRef.current);
+    }
+  }, [actionData, submitFailure, setUnconfirmedSave]);
 
   // The mark belongs to this scanner's list: the next scanner starts clean.
   useEffect(() => () => setUnconfirmedSave(false), [setUnconfirmedSave]);
