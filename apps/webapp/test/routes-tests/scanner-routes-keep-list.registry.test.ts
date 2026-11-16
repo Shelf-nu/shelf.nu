@@ -129,11 +129,11 @@ describe("scanner routes keep a draft of their list", () => {
   it.each([
     [
       "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
-      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
+      /useClearScanDraftOnSave\(\s*anyPartSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
     ],
     [
       "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
-      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
+      /useClearScanDraftOnSave\(\s*anyPartSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
     ],
     [
       "../../components/scanner/drawer/uses/update-location-drawer.tsx",

@@ -33,7 +33,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { allPartsSaved, useClearScanDraftOnSave } from "~/hooks/use-scan-draft";
+import { anyPartSaved, useClearScanDraftOnSave } from "~/hooks/use-scan-draft";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import type {
@@ -282,10 +282,10 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const clearItems = useSetAtom(clearScannedItemsAtom);
 
   // The list stays on screen under the result until the dialog is closed.
-  // Once the whole list has saved its draft goes, so a reload before then
-  // does not bring back scans that are already saved.
+  // Once any part has saved its draft goes, so a reload before then does not
+  // bring back scans that are already saved and send them again.
   useClearScanDraftOnSave(
-    allPartsSaved([custodyState.assetStatus, custodyState.kitStatus])
+    anyPartSaved([custodyState.assetStatus, custodyState.kitStatus])
   );
 
   function cleanupState() {

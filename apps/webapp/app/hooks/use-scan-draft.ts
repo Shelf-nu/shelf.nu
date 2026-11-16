@@ -20,7 +20,7 @@
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
-import { useLocation, useNavigation } from "react-router";
+import { useActionData, useLocation, useNavigation } from "react-router";
 import {
   scannedAssetQuantitiesAtom,
   scannedAssetSourcesAtom,
@@ -32,9 +32,11 @@ import {
   readScanDraft,
   readScanDraftChoices,
   readScanDraftContext,
+  readScanDraftUnconfirmedSave,
   saveScanDraft,
   scanDraftKey,
 } from "~/utils/scan-draft";
+import { getScanSubmitFailure } from "~/utils/scan-submit-failure";
 
 /**
  * Where the auth middleware sends a request whose session has ended. A save
@@ -44,6 +46,16 @@ import {
 const SIGN_IN_PATH = "/login";
 
 /**
+ * Whether the list on screen was sent in a save that got no answer, so it may
+ * already be saved. Raised when the route's action reports such a failure, or
+ * when a restored draft carries the mark; lowered when the list is emptied, a
+ * draft without the mark is restored, or the scanner unmounts. It is stored
+ * with the draft, so the warning survives a reload together with the list,
+ * and `ScanSubmitFailureAlert` shows it when the failure itself is gone.
+ */
+export const unconfirmedScanSaveAtom = atom(false);
+
+/**
  * Raised by a scanner that saves in place, without navigating, once its save
  * has succeeded. {@link useScanDraft} answers by removing the draft, and the
  * flag goes back down as soon as it has been read.
@@ -51,18 +63,17 @@ const SIGN_IN_PATH = "/login";
 const scanListSavedInPlaceAtom = atom(false);
 
 /**
- * Whether a save sent in parts (assets and kits go to separate endpoints) has
- * fully succeeded: every part saved or had nothing to send, and at least one
- * part saved.
+ * Whether any part of a save sent in parts (assets and kits go to separate
+ * endpoints) has been saved. Once one has, the list must not come back from
+ * its draft: sending it again would repeat that part, and a custody change
+ * adds units rather than setting them. Closing the result dialog empties the
+ * list in that case too, so the draft goes the same way, only sooner.
  *
- * @param statuses - Each part's status, e.g. `["success", "skipped"]`
- * @returns `true` only when the whole list is saved
+ * @param statuses - Each part's status, e.g. `["success", "error"]`
+ * @returns `true` once at least one part is saved
  */
-export function allPartsSaved(statuses: readonly string[]): boolean {
-  return (
-    statuses.every((status) => status === "success" || status === "skipped") &&
-    statuses.some((status) => status === "success")
-  );
+export function anyPartSaved(statuses: readonly string[]): boolean {
+  return statuses.some((status) => status === "success");
 }
 
 /**
@@ -170,6 +181,23 @@ export function useScanDraft({
   const savedInPlaceRef = useRef(false);
   const [savedInPlace, setSavedInPlace] = useAtom(scanListSavedInPlaceAtom);
 
+  const [unconfirmedSave, setUnconfirmedSave] = useAtom(
+    unconfirmedScanSaveAtom
+  );
+  // A save that got no answer may have gone through. A gateway's refusal
+  // ("rejected") means nothing was saved, so it raises no mark.
+  const submitFailure = getScanSubmitFailure(useActionData());
+  const unanswered =
+    submitFailure !== null && submitFailure.kind !== "rejected";
+  useEffect(() => {
+    if (unanswered) {
+      setUnconfirmedSave(true);
+    }
+  }, [unanswered, setUnconfirmedSave]);
+
+  // The mark belongs to this scanner's list: the next scanner starts clean.
+  useEffect(() => () => setUnconfirmedSave(false), [setUnconfirmedSave]);
+
   const restoreDraft = useCallback(() => {
     // A newly seeded target is a new list to keep. The flag stays set for
     // late resolutions belonging to the target that was just submitted,
@@ -185,8 +213,19 @@ export function useScanDraft({
       setScannedSources(sources);
       setScannedItems(draft);
     }
+    setUnconfirmedSave(
+      draft !== null &&
+        draftKey !== null &&
+        readScanDraftUnconfirmedSave(draftKey)
+    );
     return draft !== null;
-  }, [draftKey, setScannedItems, setScannedQuantities, setScannedSources]);
+  }, [
+    draftKey,
+    setScannedItems,
+    setScannedQuantities,
+    setScannedSources,
+    setUnconfirmedSave,
+  ]);
 
   useEffect(() => {
     if (seededTargetIdRef.current !== targetId) {
@@ -202,11 +241,16 @@ export function useScanDraft({
     // would wipe the draft the seed restores from, and React's development
     // double-mount makes the loss permanent. The store holds the current list.
     const current = store.get(scannedItemsAtom);
+    const emptied = Object.keys(current).length === 0;
     if (savedInPlaceRef.current) {
-      if (Object.keys(current).length > 0) {
+      if (!emptied) {
         return;
       }
       savedInPlaceRef.current = false;
+    }
+    // An emptied list has nothing left that may have been saved.
+    if (emptied && store.get(unconfirmedScanSaveAtom)) {
+      setUnconfirmedSave(false);
     }
     saveScanDraft(draftKey, current, {
       context,
@@ -214,16 +258,19 @@ export function useScanDraft({
         quantities: store.get(scannedAssetQuantitiesAtom),
         sources: store.get(scannedAssetSourcesAtom),
       },
+      unconfirmedSave: !emptied && store.get(unconfirmedScanSaveAtom),
     });
   }, [
     scannedItems,
     scannedQuantities,
     scannedSources,
+    unconfirmedSave,
     draftKey,
     targetId,
     seededTargetIdRef,
     store,
     context,
+    setUnconfirmedSave,
   ]);
 
   // A scanner that saves in place said its save went through.

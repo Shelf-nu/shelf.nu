@@ -11,9 +11,11 @@
  *
  * @see {@link file://./../../../utils/scan-submit-failure.ts}
  */
+import { useAtomValue } from "jotai";
 import { useActionData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
+import { unconfirmedScanSaveAtom } from "~/hooks/use-scan-draft";
 import type { ScanSubmitFailureKind } from "~/utils/scan-submit-failure";
 import { getScanSubmitFailure } from "~/utils/scan-submit-failure";
 
@@ -58,6 +60,16 @@ const ADVICE: Record<ScanSubmitFailureKind, string> = {
     "Your scanned list is still here and nothing was saved. Wait a moment, then confirm again.",
 };
 
+/**
+ * Shown for a list put back from a scan draft that was sent in a save that
+ * got no answer. The failure itself went with the page, so all that is known
+ * is that this list may already be saved.
+ */
+const RESTORED_UNCONFIRMED_HEADLINE =
+  "An earlier save of this list got no answer.";
+const RESTORED_UNCONFIRMED_ADVICE =
+  "The save may have gone through, so check before you confirm again.";
+
 /** HTTP 413: the request was larger than the gateway accepts. */
 const TOO_LARGE_STATUS = 413;
 
@@ -85,10 +97,28 @@ export function ScanSubmitFailureAlert({
   savedCheck?: ScanSavedCheck;
 }) {
   const failure = getScanSubmitFailure(useActionData());
+  const unconfirmedSave = useAtomValue(unconfirmedScanSaveAtom);
   const submitting = useDisabled();
 
-  if (!failure || submitting) {
+  if (submitting) {
     return null;
+  }
+
+  if (!failure) {
+    // The failure went with the page (a reload, an error page), but the list
+    // came back from a draft that remembers it may already be saved.
+    return unconfirmedSave ? (
+      <div
+        role="alert"
+        className="mx-3 mt-2 rounded border border-warning-300 bg-warning-25 px-3 py-2 text-[13px] text-warning-800"
+      >
+        <p className="font-semibold">{RESTORED_UNCONFIRMED_HEADLINE}</p>
+        <p>
+          {RESTORED_UNCONFIRMED_ADVICE}
+          {savedCheck ? <SavedCheckLink savedCheck={savedCheck} /> : null}
+        </p>
+      </div>
+    ) : null;
   }
 
   return (
@@ -102,20 +132,30 @@ export function ScanSubmitFailureAlert({
           ? TOO_LARGE_ADVICE
           : ADVICE[failure.kind]}
         {savedCheck && failure.kind !== "rejected" ? (
-          <>
-            {" "}
-            <Button
-              variant="link"
-              to={savedCheck.to}
-              target="_blank"
-              rel="noreferrer"
-              className="inline text-[13px] font-semibold text-warning-800 underline"
-            >
-              {savedCheck.label}
-            </Button>
-          </>
+          <SavedCheckLink savedCheck={savedCheck} />
         ) : null}
       </p>
     </div>
+  );
+}
+
+/**
+ * The link to the page that shows whether a save went through. Opens in a
+ * new tab so the scanner, and its list, stay where they are.
+ */
+function SavedCheckLink({ savedCheck }: { savedCheck: ScanSavedCheck }) {
+  return (
+    <>
+      {" "}
+      <Button
+        variant="link"
+        to={savedCheck.to}
+        target="_blank"
+        rel="noreferrer"
+        className="inline text-[13px] font-semibold text-warning-800 underline"
+      >
+        {savedCheck.label}
+      </Button>
+    </>
   );
 }

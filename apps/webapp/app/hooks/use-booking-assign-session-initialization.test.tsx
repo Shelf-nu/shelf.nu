@@ -33,6 +33,8 @@ import { useBookingAssignSessionInitialization } from "./use-booking-assign-sess
 // the signed-in user. Neither exists without a mounted router; the draft has
 // its own suite, so here they are held still.
 vi.mock("react-router", () => ({
+  // The draft reads the action's answer to keep a save that got none.
+  useActionData: () => undefined,
   useNavigation: () => ({ state: "idle" }),
   useLocation: () => ({ pathname: "/bookings/booking-1/overview/scan-assets" }),
 }));

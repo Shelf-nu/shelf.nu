@@ -5,8 +5,11 @@
  */
 import type { ComponentProps } from "react";
 import { render, screen } from "@testing-library/react";
+import { Provider } from "jotai";
+import { createStore } from "jotai/vanilla";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { unconfirmedScanSaveAtom } from "~/hooks/use-scan-draft";
 import { ScanSubmitFailureAlert } from "./scan-submit-failure-alert";
 
 // why: the notice reads the route's action data and navigation state, which
@@ -138,5 +141,53 @@ describe("ScanSubmitFailureAlert", () => {
     render(<ScanSubmitFailureAlert />);
 
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /**
+   * After a reload the failure itself is gone, but a list put back from a
+   * draft that was sent in an unanswered save is still marked.
+   */
+  describe("for a list restored after a save that got no answer", () => {
+    function renderMarked(marked: boolean) {
+      const store = createStore();
+      store.set(unconfirmedScanSaveAtom, marked);
+      return render(
+        <Provider store={store}>
+          <ScanSubmitFailureAlert
+            savedCheck={{ to: "/bookings/b-1", label: "Open the booking" }}
+          />
+        </Provider>
+      );
+    }
+
+    it("warns that the save may have gone through, with the link to check", () => {
+      mockActionData.mockReturnValue(undefined);
+
+      renderMarked(true);
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "may have gone through"
+      );
+      expect(
+        screen.getByRole("link", { name: "Open the booking" })
+      ).toHaveAttribute("href", "/bookings/b-1");
+    });
+
+    it("says nothing for a list without the mark", () => {
+      mockActionData.mockReturnValue(undefined);
+
+      renderMarked(false);
+
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("steps aside while the list is being sent again", () => {
+      mockActionData.mockReturnValue(undefined);
+      mockNavigation.mockReturnValue({ state: "submitting" });
+
+      renderMarked(true);
+
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
   });
 });

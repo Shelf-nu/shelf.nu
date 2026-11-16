@@ -25,11 +25,13 @@ import {
   readScanDraft,
   readScanDraftChoices,
   readScanDraftContext,
+  readScanDraftUnconfirmedSave,
   saveScanDraft,
   scanDraftKey,
 } from "~/utils/scan-draft";
 import {
-  allPartsSaved,
+  anyPartSaved,
+  unconfirmedScanSaveAtom,
   useClearScanDraftOnSave,
   useScanDraftOnEntry,
 } from "./use-scan-draft";
@@ -39,10 +41,12 @@ import {
 // state directly rather than mounting a router.
 const mockNavigation = vi.fn();
 const mockLocation = vi.fn();
+const mockActionData = vi.fn();
 
 vi.mock("react-router", () => ({
   useNavigation: () => mockNavigation(),
   useLocation: () => mockLocation(),
+  useActionData: () => mockActionData(),
 }));
 
 // why: the draft is keyed by the signed-in user, which comes from the layout
@@ -114,6 +118,7 @@ describe.each(SCANNERS)(
       localStorage.clear();
       vi.clearAllMocks();
       mockNavigation.mockReturnValue({ state: "idle" });
+      mockActionData.mockReturnValue(undefined);
       mockLocation.mockReturnValue({ pathname: path });
       mockUser.mockReturnValue({ id: USER_ID });
     });
@@ -241,6 +246,56 @@ describe.each(SCANNERS)(
       });
     });
 
+    /**
+     * A save that got no answer may have gone through. The list kept for a
+     * reload carries that, so the warning comes back with it.
+     */
+    it("marks the draft when the save got no answer, and warns again after a reload", () => {
+      const store = createStore();
+      const { rerender, unmount } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+
+      mockActionData.mockReturnValue({
+        scanSubmitFailure: { kind: "timeout", status: 524 },
+      });
+      rerender();
+
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
+      unmount();
+
+      // The reload: no action data any more, only the draft.
+      mockActionData.mockReturnValue(undefined);
+      const reloaded = createStore();
+      render(reloaded, { scope, targetId });
+
+      expect(Object.keys(reloaded.get(scannedItemsAtom))).toEqual(["qr-1"]);
+      expect(reloaded.get(unconfirmedScanSaveAtom)).toBe(true);
+    });
+
+    it("does not mark a draft for a save the gateway turned away", () => {
+      const store = createStore();
+      const { rerender } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+
+      mockActionData.mockReturnValue({
+        scanSubmitFailure: { kind: "rejected", status: 429 },
+      });
+      rerender();
+
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(false);
+    });
+
+    it("drops the mark once the list is emptied", () => {
+      saveScanDraft(draftKey, { "qr-1": scanned() }, { unconfirmedSave: true });
+      const store = createStore();
+      render(store, { scope, targetId });
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+
+      act(() => store.set(scannedItemsAtom, {}));
+
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(false);
+    });
+
     it("does not pick up another scanner's list", () => {
       saveScanDraft(scanDraftKey(other.scope, USER_ID, other.targetId), {
         "qr-1": scanned(),
@@ -270,6 +325,7 @@ describe("bulk scanner: one list across its actions", () => {
     localStorage.clear();
     vi.clearAllMocks();
     mockNavigation.mockReturnValue({ state: "idle" });
+    mockActionData.mockReturnValue(undefined);
     mockLocation.mockReturnValue({ pathname: "/scanner" });
     mockUser.mockReturnValue({ id: USER_ID });
   });
@@ -509,18 +565,20 @@ describe("bulk scanner: one list across its actions", () => {
   });
 });
 
-/** A save sent in parts counts as saved only when every part is. */
-describe("allPartsSaved", () => {
+/**
+ * A save sent in parts counts as saved once any part is: that part must not be
+ * sent again from a restored list.
+ */
+describe("anyPartSaved", () => {
   it.each([
     [["success", "success"], true],
     [["success", "skipped"], true],
-    [["skipped", "success"], true],
-    [["success"], true],
+    [["success", "error"], true],
+    [["processing", "success"], true],
     [["skipped", "skipped"], false],
-    [["success", "error"], false],
-    [["processing", "success"], false],
+    [["error", "skipped"], false],
     [["processing", "processing"], false],
   ] as const)("%j -> %s", (statuses, expected) => {
-    expect(allPartsSaved(statuses)).toBe(expected);
+    expect(anyPartSaved(statuses)).toBe(expected);
   });
 });

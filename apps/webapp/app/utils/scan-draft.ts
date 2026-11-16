@@ -64,6 +64,11 @@ type StoredDraft = {
   quantities?: Record<string, number>;
   /** "From location" picked per pool, keyed by asset id. */
   sources?: Record<string, string>;
+  /**
+   * The list was sent in a save that got no answer, so it may already be
+   * saved. Kept so the warning comes back with the list after a reload.
+   */
+  unconfirmedSave?: boolean;
 };
 
 /**
@@ -87,6 +92,11 @@ export type ScanDraftExtras = {
   context?: string | null;
   /** The per-row choices, handed back by {@link readScanDraftChoices}. */
   choices?: ScanDraftChoices;
+  /**
+   * The list was sent in a save that got no answer. Handed back by
+   * {@link readScanDraftUnconfirmedSave}.
+   */
+  unconfirmedSave?: boolean;
 };
 
 /**
@@ -144,7 +154,7 @@ function isSyntheticKey(key: string): boolean {
 export function saveScanDraft(
   key: string,
   items: ScanListItems,
-  { context, choices }: ScanDraftExtras = {}
+  { context, choices, unconfirmedSave }: ScanDraftExtras = {}
 ): void {
   const entries: Record<string, DraftEntry> = {};
 
@@ -180,6 +190,7 @@ export function saveScanDraft(
     ...(choices && Object.keys(choices.sources).length > 0
       ? { sources: choices.sources }
       : {}),
+    ...(unconfirmedSave ? { unconfirmedSave: true } : {}),
   };
 
   try {
@@ -308,6 +319,17 @@ export function readScanDraftChoices(key: string): ScanDraftChoices {
   }
 
   return { quantities, sources };
+}
+
+/**
+ * Whether the parked list was sent in a save that got no answer, so it may
+ * already be saved and the operator must check before confirming it again.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns `true` only for a draft that carries the mark
+ */
+export function readScanDraftUnconfirmedSave(key: string): boolean {
+  return readStoredDraft(key)?.unconfirmedSave === true;
 }
 
 /**
