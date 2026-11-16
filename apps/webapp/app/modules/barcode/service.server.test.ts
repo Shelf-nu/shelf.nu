@@ -776,7 +776,7 @@ describe("updateBarcodes", () => {
   });
 
   it("should delete barcodes not in new list", async () => {
-    expect.assertions(2);
+    expect.assertions(4);
     const existingBarcodes = [
       { id: "barcode-1", type: BarcodeType.Code128, value: "OLD123" },
       { id: "barcode-2", type: BarcodeType.Code39, value: "OLD456" },
@@ -804,6 +804,18 @@ describe("updateBarcodes", () => {
     const transactionOperations = mockTransaction.mock.calls[0][0];
     // The release of unattached rows, one update, one deleteMany
     expect(transactionOperations).toHaveLength(3);
+    // The release frees only the value taken, never the removed barcode.
+    expect(db.barcode.deleteMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        organizationId: "org-1",
+        value: { in: ["UPDATED123"] },
+        assetId: null,
+        kitId: null,
+      },
+    });
+    expect(db.barcode.deleteMany).toHaveBeenNthCalledWith(2, {
+      where: { id: { in: ["barcode-2"] }, organizationId: "org-1" },
+    });
   });
 
   it("should validate all barcodes before processing", async () => {
