@@ -185,6 +185,41 @@ describe("GET /api/get-scanned-item/:qrId records the scan", () => {
     expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
   });
 
+  /**
+   * A row put back from a scan draft looks its code up again. Nobody scanned
+   * it just now, so scan history must not say they did.
+   */
+  it("records nothing for a lookup restored from a scan draft", async () => {
+    expect(await resolve("qr-1", "?restored=1")).toBe(200);
+
+    expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("records nothing for a restored SAM ID lookup either", async () => {
+    mockAssetFindFirst.mockResolvedValue(assetRow("asset-7"));
+
+    expect(await resolve("SAM-0007", "?restored=1")).toBe(200);
+
+    expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("still records a fresh scan when the param carries anything else", async () => {
+    expect(await resolve("qr-1", "?restored=true")).toBe(200);
+
+    expect(mockRecordScanNonFatal).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a QR from another workspace with a 4xx, so a scan draft lets it go", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-2",
+      assetId: "asset-1",
+      kitId: null,
+    });
+
+    expect(await resolve("qr-1")).toBe(404);
+  });
+
   it("records nothing for a QR from another workspace", async () => {
     mockGetQr.mockResolvedValue({
       id: "qr-1",

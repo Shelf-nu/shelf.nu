@@ -109,7 +109,10 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
       message:
         "This code doesn't exist or it doesn't belong to your current organization.",
       title: "QR code not found",
-      status: 404,
+      // Only a missing row is a 404. Anything else (the database did not
+      // answer) is a server failure, and scanners keep a code that got one
+      // to look it up again later instead of dropping it as unknown.
+      status: isNotFoundError(cause) ? 404 : 500,
       additionalData: { id },
       label,
       shouldBeCaptured: !isNotFoundError(cause),

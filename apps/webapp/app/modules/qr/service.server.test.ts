@@ -4,6 +4,7 @@ import { ShelfError } from "~/utils/error";
 import {
   claimImportQrCodes,
   claimQrCode,
+  getQr,
   getQrByAssetId,
   getQrByKitId,
   parseQrCodesFromImportData,
@@ -101,6 +102,34 @@ describe("parseQrCodesFromImportData — import validation errors", () => {
 
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+/**
+ * Scanners read the status to decide whether a code is unknown (dropped from a
+ * scan draft) or the server failed (kept, to look it up again later).
+ */
+describe("getQr status", () => {
+  async function thrownBy(cause: unknown) {
+    vitest.mocked(db.qr.findUniqueOrThrow).mockRejectedValueOnce(cause);
+    try {
+      await getQr({ id: "qr-1" });
+    } catch (err) {
+      return err as ShelfError;
+    }
+    throw new Error("expected getQr to throw");
+  }
+
+  it("answers 404 when no such code exists", async () => {
+    const err = await thrownBy({ code: "P2025" });
+
+    expect(err.status).toBe(404);
+  });
+
+  it("answers 500 when the database fails, which says nothing about the code", async () => {
+    const err = await thrownBy(new Error("Can't reach database server"));
+
+    expect(err.status).toBe(500);
   });
 });
 
