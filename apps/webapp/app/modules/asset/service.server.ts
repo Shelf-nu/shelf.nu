@@ -1415,6 +1415,10 @@ export async function createAsset({
           await releaseUnattachedBarcodes(tx, {
             barcodes: newBarcodes,
             organizationId,
+            // The release matches values ignoring case, so a new value can
+            // match a reused row (ExternalQR `zz-code` vs `ZZ-CODE`). The
+            // create connects those rows by id, so they must survive.
+            keepIds: [...reusedBarcodeIdsByType.values()].flat(),
           });
         }
 

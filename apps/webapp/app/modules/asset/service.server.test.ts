@@ -2863,7 +2863,8 @@ describe("createAsset reused barcodes", () => {
     });
 
     // Only this workspace's rows, only the values written as new rows
-    // (normalized per type), only rows attached to nothing.
+    // (normalized per type), only rows attached to nothing, never the row
+    // the create connects by id.
     expect(db.barcode.deleteMany).toHaveBeenCalledTimes(1);
     expect(db.barcode.deleteMany).toHaveBeenCalledWith({
       where: {
@@ -2871,11 +2872,41 @@ describe("createAsset reused barcodes", () => {
         value: { in: ["ZZ-LABEL-1", "zz-Label-2"], mode: "insensitive" },
         assetId: null,
         kitId: null,
+        id: { notIn: ["bc-orphan"] },
       },
     });
     expect(
       vitest.mocked(db.barcode.deleteMany).mock.invocationCallOrder[0]
     ).toBeLessThan(vitest.mocked(db.asset.create).mock.invocationCallOrder[0]);
+  });
+
+  it("keeps a reused row when a new value differs from it only in case", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "ZZ Test Asset",
+      description: null,
+      categoryId: null,
+      valuation: null,
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [
+        // The case-insensitive release matches `zz-code` against the reused
+        // `ZZ-CODE` row, which the create still connects by id.
+        { type: "ExternalQR", value: "ZZ-CODE", existingId: "bc-orphan" },
+        { type: "ExternalQR", value: "zz-code" },
+      ],
+    });
+
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-A",
+        value: { in: ["zz-code"], mode: "insensitive" },
+        assetId: null,
+        kitId: null,
+        id: { notIn: ["bc-orphan"] },
+      },
+    });
   });
 
   it("frees nothing when the asset is created without barcodes", async () => {
