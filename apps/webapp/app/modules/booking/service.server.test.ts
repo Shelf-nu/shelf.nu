@@ -19832,6 +19832,77 @@ describe("addScannedAssetsToBooking", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [true, "refuses it and rolls the add back"],
+    [false, "clears the approval so the request waits again"],
+  ])(
+    "a requester's scanned extra on their approved request, at check-out %s: %s",
+    async (atCheckout) => {
+      // why: the row lock reads the booking RESERVED; once, so later tests
+      // keep the default.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      });
+      // One row for both booking reads: the window (no dates, so the
+      // windowed guards skip) and the growth rule's read (approved).
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue({
+        from: null,
+        to: null,
+        status: BookingStatus.RESERVED,
+        approvedAt: new Date("2026-11-01T09:00:00Z"),
+      });
+      //@ts-expect-error missing vitest type
+      db.userOrganization.findUnique.mockResolvedValue({
+        roles: [OrganizationRoles.SELF_SERVICE],
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        id: "booking-1",
+        name: "Shoot",
+        status: BookingStatus.RESERVED,
+      });
+
+      try {
+        const add = addScannedAssetsToBooking({
+          assetIds: ["asset-1"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          // The fulfil flow authorizes under the check-out rule.
+          access: null,
+          atCheckout,
+        });
+        if (atCheckout) {
+          await expect(add).rejects.toThrow(
+            /can't ask for more than was approved/
+          );
+        } else {
+          // The transaction commits; the activity notes after it need asset
+          // rows this harness does not stage, so only the write is asserted.
+          await add.catch(() => {});
+        }
+        expect(db.booking.updateMany).toHaveBeenCalledWith({
+          where: { id: "booking-1", organizationId: "org-1" },
+          data: { approvedAt: null, approvedById: null },
+        });
+      } finally {
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue(null);
+        //@ts-expect-error missing vitest type
+        db.userOrganization.findUnique.mockResolvedValue(null);
+        //@ts-expect-error missing vitest type
+        db.booking.findFirst.mockResolvedValue(null);
+      }
+    }
+  );
+
   describe("QUANTITY_TRACKED pool", () => {
     const QT_ID = "asset-qty-scan";
     const from = new Date("2026-07-01T09:00:00Z");

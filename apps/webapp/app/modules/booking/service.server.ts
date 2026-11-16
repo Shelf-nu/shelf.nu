@@ -20106,6 +20106,7 @@ export async function addScannedAssetsToBooking({
   inSameTransaction,
   hints,
   seesAllBookings,
+  atCheckout = false,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
@@ -20129,6 +20130,12 @@ export async function addScannedAssetsToBooking({
   inSameTransaction?: (
     tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]
   ) => Promise<void>;
+  /**
+   * True when the add is the first step of a check-out (fulfil and check
+   * out). A scanned extra that clears an approved request's approval is then
+   * refused and rolled back: at check-out no later approval can follow.
+   */
+  atCheckout?: boolean;
   /**
    * The caller's access. Its add-items rule is enforced inside the write
    * transaction against the locked booking status. `null` only for a flow
@@ -20185,6 +20192,12 @@ export async function addScannedAssetsToBooking({
         revealOtherBookings:
           seesAllBookings ?? access?.bookings.seeAll ?? false,
       });
+      if (atCheckout && result.approvalCleared) {
+        throw requestGrowthRefusal({
+          bookingId,
+          status: result.booking.status,
+        });
+      }
       await inSameTransaction?.(tx);
       return result;
     });
