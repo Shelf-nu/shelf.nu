@@ -1581,6 +1581,51 @@ describe("createAsset first placement in the Activity Summary", () => {
     );
   });
 
+  it("adds the new asset to its location's Activity tab after the commit", async () => {
+    // why: the re-read inside the create transaction returns the stored row;
+    // this is the shape it has once the placement exists.
+    vi.mocked(db.asset.findUniqueOrThrow).mockResolvedValueOnce({
+      id: "asset-new",
+      title: "Chairs",
+      type: "QUANTITY_TRACKED",
+      unitOfMeasure: null,
+      assetLocations: [
+        { quantity: 40, location: { id: "loc-store", name: "Store" } },
+      ],
+      user: {
+        id: "user-1",
+        firstName: "Sam",
+        lastName: "Lee",
+        displayName: "Sam Lee",
+      },
+    } as never);
+
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      locationId: "loc-store",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    const lines = vi
+      .mocked(db.locationNote.createMany)
+      .mock.calls.flatMap(([args]) => (args as { data: unknown[] }).data);
+    expect(lines).toEqual([
+      expect.objectContaining({
+        locationId: "loc-store",
+        type: "UPDATE",
+        userId: "user-1",
+        content: expect.stringMatching(/added .*40.* to .*Store/),
+      }),
+    ]);
+  });
+
   it("records no location event for an asset created without a location", async () => {
     await createAsset({
       title: "Lamp",

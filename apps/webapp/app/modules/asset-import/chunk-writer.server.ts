@@ -6,7 +6,8 @@
  * statement per table. Each row ends up exactly as `createAsset` would leave
  * it: the asset with its sequential id, a QR code, tags, placement, kit pivot,
  * direct custody, custom field values, barcodes, one `ASSET_CREATED` event and,
- * for a placed row, one `ASSET_LOCATION_CHANGED` event from no location.
+ * for a placed row, one `ASSET_LOCATION_CHANGED` event from no location plus,
+ * after the commit, its line on the location's Activity tab.
  * Kit custody is not written here: the FINALIZE step assigns it per kit.
  *
  * The first statement advances `AssetImport.processedRows` guarded on the
@@ -42,6 +43,9 @@ import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { resolveImportedAssetModel } from "~/modules/asset-model/service.server";
 import { BARCODE_IMPORT_COLUMNS } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import type { AssetLocationMove } from "~/modules/location-note/service.server";
+import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import {
@@ -50,6 +54,7 @@ import {
 } from "~/utils/custom-fields";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { id } from "~/utils/id/id.server";
+import { Logger } from "~/utils/logger";
 import {
   assertAssetModelsBelongToOrg,
   assertCategoriesBelongToOrg,
@@ -76,6 +81,63 @@ type ChunkTxClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
 
 /** Signed main image for one asset, uploaded before the transaction starts. */
 export type ImportedImage = { mainImage: string; mainImageExpiration: Date };
+
+/** A row a chunk placed at a location, for the location activity log. */
+type ChunkArrival = {
+  asset: AssetLocationMove["asset"];
+  locationId: string;
+  /** Units placed, for a quantity-tracked pool only. */
+  quantity: number | null;
+};
+
+/**
+ * Reads what the location activity lines of a committed chunk name: the
+ * importing user and each destination location. The chunk is already saved,
+ * so a failed read is logged and only the lines are lost.
+ *
+ * @param params.userId - The user running the import
+ * @param params.organizationId - Workspace of the import
+ * @param params.locationIds - Locations the chunk placed rows at
+ * @returns The actor and the locations by id, or `null` when either read fails
+ */
+async function loadArrivalNoteContext({
+  userId,
+  organizationId,
+  locationIds,
+}: {
+  userId: string;
+  organizationId: string;
+  locationIds: string[];
+}) {
+  try {
+    const [actor, locations] = await Promise.all([
+      db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, ...USER_NAME_SELECT },
+      }),
+      db.location.findMany({
+        where: { id: { in: locationIds }, organizationId },
+        select: { id: true, name: true },
+      }),
+    ]);
+    if (!actor) return null;
+    return {
+      actor,
+      locations: new Map(locations.map((location) => [location.id, location])),
+    };
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Could not load the names for the location activity lines of an import.",
+        additionalData: { userId, organizationId },
+        label,
+      })
+    );
+    return null;
+  }
+}
 
 /** Arguments for {@link writeImportChunk}. */
 export type WriteImportChunkArgs = {
@@ -657,9 +719,11 @@ export async function writeImportChunk({
   extraWarnings = [],
 }: WriteImportChunkArgs): Promise<WriteImportChunkResult> {
   const nextProcessedRows = chunkStart + rows.length;
+  /** Rows placed at a location by this chunk, for the location activity log. */
+  let arrivals: ChunkArrival[] = [];
 
   try {
-    return await db.$transaction(
+    const result = await db.$transaction(
       async (tx): Promise<WriteImportChunkResult> => {
         // Progress guard. Holds the import row's lock for the rest of the
         // transaction, so a concurrent duplicate waits and then matches 0.
@@ -913,10 +977,52 @@ export async function writeImportChunk({
           tx
         );
 
+        arrivals = withLocation.map((p) => ({
+          asset: {
+            id: p.row.assetId,
+            title: p.row.title,
+            type: p.type ?? AssetType.INDIVIDUAL,
+            unitOfMeasure: p.unitOfMeasure ?? null,
+          },
+          locationId: p.locationId!,
+          quantity:
+            p.type === AssetType.QUANTITY_TRACKED ? poolQuantity(p) : null,
+        }));
+
         return { applied: true, nextProcessedRows, warnings };
       },
       { timeout: 30_000, maxWait: 10_000 }
     );
+
+    // Each placed row's arrival on its location's Activity tab, written after
+    // the commit. A chunk another run already wrote placed nothing here.
+    if (result.applied && arrivals.length > 0) {
+      const context = await loadArrivalNoteContext({
+        userId,
+        organizationId,
+        locationIds: distinct(arrivals.map((a) => a.locationId)),
+      });
+      if (context) {
+        await createAssetLocationMoveNotes({
+          moves: arrivals.flatMap((arrival): AssetLocationMove[] => {
+            const to = context.locations.get(arrival.locationId);
+            return to
+              ? [
+                  {
+                    asset: arrival.asset,
+                    from: null,
+                    to,
+                    quantity: arrival.quantity,
+                  },
+                ]
+              : [];
+          }),
+          actor: context.actor,
+        });
+      }
+    }
+
+    return result;
   } catch (cause) {
     const innerCause = isLikeShelfError(cause) ? cause.cause : cause;
     const rawMessage =

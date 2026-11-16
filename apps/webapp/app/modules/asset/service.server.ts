@@ -1495,6 +1495,26 @@ export async function createAsset({
           : created;
       }, LONG_TRANSACTION_OPTIONS);
 
+      // The first placement on the location's Activity tab, written after the
+      // commit. The asset's creator is the user who placed it.
+      const placement = locationId ? asset.assetLocations?.[0] : undefined;
+      if (placement?.location && asset.user) {
+        await createAssetLocationMoveNotes({
+          moves: [
+            {
+              asset,
+              from: null,
+              to: placement.location,
+              quantity:
+                asset.type === AssetType.QUANTITY_TRACKED
+                  ? placement.quantity
+                  : null,
+            },
+          ],
+          actor: asset.user,
+        });
+      }
+
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
