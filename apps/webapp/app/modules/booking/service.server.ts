@@ -2482,8 +2482,8 @@ export async function reserveBooking({
       where: { organizationId },
       select: BOOKING_APPROVAL_SWITCHES_SELECT,
     });
-    // Each requesting role has its own switch: Base (on by default) and Self
-    // service (off by default). Everyone else reserves approved.
+    // Each requesting role has its own switch (Base, Self service), both off
+    // by default. Everyone else reserves approved.
     const needsApproval = roleReservesAsRequest({
       approvalSetting: actorApprovalSetting,
       settings: approvalSettings,

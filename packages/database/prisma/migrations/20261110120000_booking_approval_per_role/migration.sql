@@ -1,8 +1,8 @@
--- Booking approval, per requesting role. Base is on by default (a Base
--- member never checks out themself, so the hand-over was always the
--- approval); Self service is off by default. A workspace that had the single
--- switch on keeps approval for Self service too.
-ALTER TABLE "BookingSettings" ADD COLUMN "requireApprovalForBase" BOOLEAN NOT NULL DEFAULT true;
+-- Booking approval, per requesting role. Both switches are off by default:
+-- the feature is opt-in per workspace, so nothing changes for anyone until an
+-- owner or administrator turns one on. A workspace that had the single switch
+-- on keeps approval for Self service.
+ALTER TABLE "BookingSettings" ADD COLUMN "requireApprovalForBase" BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE "BookingSettings" ADD COLUMN "requireApprovalForSelfService" BOOLEAN NOT NULL DEFAULT false;
 
 UPDATE "BookingSettings"

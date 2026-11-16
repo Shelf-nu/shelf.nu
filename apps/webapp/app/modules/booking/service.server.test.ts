@@ -23,6 +23,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
 } from "@shelf/labels";
 import { onTestFinished } from "vitest";
+import { createBookingSettings } from "@factories";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { accessFor } from "@helpers/role-access";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -4481,6 +4482,37 @@ describe("reserveBooking", () => {
         );
       });
 
+      it("approves a Base reservation on write in a fresh workspace: both switches start off", async () => {
+        // A new workspace's settings row carries the schema defaults, which
+        // the factory mirrors: approval is opt-in, so nothing is a request.
+        const fresh = createBookingSettings();
+        expect(fresh.requireApprovalForBase).toBe(false);
+        expect(fresh.requireApprovalForSelfService).toBe(false);
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue({
+          requireApprovalForBase: fresh.requireApprovalForBase,
+          requireApprovalForSelfService: fresh.requireApprovalForSelfService,
+        });
+
+        await reserveBooking({
+          ...mockReserveParams,
+          alertsOrgOnReservation: true,
+          actorApprovalSetting: "base",
+          userId: "user-2",
+        });
+
+        expect(db.booking.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ approvedAt: expect.any(Date) }),
+          })
+        );
+        expect(sendEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            subject: expect.stringContaining("Booking reserved"),
+          })
+        );
+      });
+
       it("approves an administrator's own reservation in the same write", async () => {
         await reserveBooking({
           ...mockReserveParams,
@@ -4502,8 +4534,8 @@ describe("reserveBooking", () => {
       });
 
       it("approves a Self service reservation while only the Base switch is on", async () => {
-        // why: each role has its own switch; the default (Base on, Self
-        // service off) gates Base only.
+        // why: each role has its own switch; with only Base's on, Self
+        // service reserves approved.
         //@ts-expect-error missing vitest type
         db.bookingSettings.findUnique.mockResolvedValue({
           requireApprovalForBase: true,
