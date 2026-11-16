@@ -13816,14 +13816,15 @@ export async function approveBooking({
    * The booking's `updatedAt` as the approver saw it. A request sent back,
    * edited and submitted again is RESERVED and unapproved once more, so the
    * status alone cannot tell it from the one the approver reviewed; this can.
-   * Absent from callers that predate it (older phone builds).
+   * Optional; both callers send the request version below as well.
    */
   reviewedUpdatedAt?: Date | null;
   /**
    * The request version the approver saw (`readBookingRequestVersion`): the
    * booking with every slice and model reservation, so a change to what the
    * request holds is caught whichever write made it. Checked under the
-   * booking row lock. Absent from callers that predate it.
+   * booking row lock. Both callers send it: the web approve intent and the
+   * phone's approve route each refuse a request without one.
    */
   reviewedVersion?: string | null;
 }) {

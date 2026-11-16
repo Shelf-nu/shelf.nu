@@ -53,7 +53,9 @@ import { ShelfError } from "~/utils/error";
 import { action } from "~/routes/api+/mobile+/bookings.approve";
 import { PermissionAction } from "~/utils/permissions/permission.data";
 
-function post(body: unknown = { bookingId: "booking-1" }) {
+function post(
+  body: unknown = { bookingId: "booking-1", requestVersion: "abc123" }
+) {
   return action({
     request: new Request(
       "http://localhost/api/mobile/bookings/approve?orgId=org-1",
@@ -160,6 +162,17 @@ describe("POST /api/mobile/bookings/approve", () => {
     const response = await post();
 
     expect(response.status).toBe(403);
+    expect(approveBooking).not.toHaveBeenCalled();
+  });
+
+  it("refuses an approval without the version the screen showed", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.MANAGER] }) as never
+    );
+
+    const response = await post({ bookingId: "booking-1" });
+
+    expect(response.status).toBe(400);
     expect(approveBooking).not.toHaveBeenCalled();
   });
 

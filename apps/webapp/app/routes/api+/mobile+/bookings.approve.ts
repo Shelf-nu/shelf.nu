@@ -34,16 +34,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z.object({
   bookingId: z.string().min(1),
   /**
-   * The booking's `updatedAt` as the screen showed it, so a request that was
-   * sent back and resubmitted meanwhile is not approved unseen. Optional:
-   * older app builds do not send it.
+   * The booking's `updatedAt` as the screen showed it, checked as well as the
+   * request version. Optional: the version is the check that matters.
    */
   updatedAt: z.coerce.date().optional(),
   /**
    * The request version the screen showed (the booking plus everything it
-   * holds), so a change to its items is caught too. Optional for older builds.
+   * holds). Required: an approval is checked against what the approver saw,
+   * and the screen is only offered Approve together with a version.
    */
-  requestVersion: z.string().min(1).optional(),
+  requestVersion: z.string().min(1),
 });
 
 /**
