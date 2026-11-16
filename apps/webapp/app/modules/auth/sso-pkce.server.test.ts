@@ -178,6 +178,19 @@ describe("exchangeSsoCode", () => {
     });
   });
 
+  it("treats a rate limit as a failure to retry, not an expired sign-in", async () => {
+    answerExchange(
+      HttpResponse.json(
+        { code: 429, error_code: "over_request_rate_limit", msg: "Slow down" },
+        { status: 429 }
+      )
+    );
+
+    await expect(
+      exchangeSsoCode({ code: "auth-code", codeVerifier: VERIFIER })
+    ).rejects.toMatchObject({ status: 500, shouldBeCaptured: true });
+  });
+
   it("reports a Supabase outage as a captured failure", async () => {
     answerExchange(HttpResponse.json({}, { status: 503 }));
 
@@ -199,6 +212,19 @@ describe("readTokenAccount", () => {
     await expect(readTokenAccount("tile-token")).resolves.toEqual({
       userId: "auth-user-1",
       email: "jane@acme.com",
+    });
+  });
+
+  it("refuses a token whose account has no email", async () => {
+    server.use(
+      http.get(`${SUPABASE_URL}/auth/v1/user`, () =>
+        HttpResponse.json({ id: "auth-user-1" })
+      )
+    );
+
+    await expect(readTokenAccount("tile-token")).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
     });
   });
 

@@ -94,15 +94,19 @@ export const mobilePkceChallengeCookie = createCookie("mobile_pkce_challenge", {
  *
  * Holds the PKCE code verifier of an SSO sign-in this browser started, from
  * `/sso-login` until the callback trades Supabase's `?code=` for the session.
- * It is the secret half of the pair, so it is HttpOnly, sent only to the
- * callback paths (`/oauth/callback` and `/oauth/callback/mobile`), and lives
- * only as long as one sign-in. `sameSite: "lax"` because the browser arrives
- * at the callback through a top-level redirect from Supabase.
+ * It is the secret half of the pair, so it is HttpOnly and lives only as long
+ * as one sign-in. `sameSite: "lax"` because the browser arrives at the
+ * callback through a top-level redirect from Supabase.
+ *
+ * Scoped to `/oauth`, never `/oauth/callback`: the callback pages post through
+ * React Router, which sends the request to `/oauth/callback.data` (and
+ * `/oauth/callback/mobile.data`), and a cookie scoped to `/oauth/callback` is
+ * not sent there.
  *
  * @see apps/webapp/app/modules/auth/sso-pkce.server.ts
  */
 export const ssoCodeVerifierCookie = createCookie("sso_code_verifier", {
-  path: "/oauth/callback",
+  path: "/oauth",
   httpOnly: true,
   sameSite: "lax",
   secure: process.env.NODE_ENV === "production",

@@ -54,6 +54,7 @@ import {
   payload,
   readFormData,
 } from "~/utils/http.server";
+import { readProviderError } from "~/utils/sso-callback";
 import {
   assertSsoAuthenticatedSession,
   getSsoClaimsForAuthUser,
@@ -117,8 +118,8 @@ export async function action({ request }: ActionFunctionArgs) {
             request.headers.get("Cookie")
           ),
         });
-        // Any Supabase refresh token refreshes, so refuse a session that was
-        // not obtained through SSO before anything is provisioned or synced.
+        // Any Supabase session would pass the steps below, so refuse one that
+        // was not obtained through SSO before anything is provisioned or synced.
         await assertSsoAuthenticatedSession(authSession);
         const { groups, firstName, lastName, contactInfo } =
           await getSsoClaimsForAuthUser({
@@ -234,20 +235,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function MobileLoginCallback() {
   const fetcher = useFetcher<typeof action>();
-  const result = fetcher.data;
+  const { data: result, submit } = fetcher;
   const [searchParams] = useSearchParams();
   const code = searchParams.get("code");
   /** Supabase reports a failed sign-in on the callback URL itself. */
-  const providerError =
-    searchParams.get("error_description") ?? searchParams.get("error");
+  const providerError = readProviderError(searchParams);
   /** The code is posted once, re-renders included. */
   const codePosted = useRef(false);
 
   useEffect(() => {
     if (!code || codePosted.current) return;
     codePosted.current = true;
-    void fetcher.submit({ code }, { method: "post" });
-  }, [code, fetcher]);
+    void submit({ code }, { method: "post" });
+  }, [code, submit]);
 
   // Once the server returns the deeplink, bounce back into the app. In the
   // system browser opened by `expo-web-browser`, navigating to the `shelf://`

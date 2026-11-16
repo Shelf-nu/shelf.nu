@@ -66,6 +66,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { readProviderError } from "~/utils/sso-callback";
 import {
   assertSsoAuthenticatedSession,
   getSsoClaimsForAuthUser,
@@ -197,8 +198,11 @@ async function completeSsoSignIn({
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const { disableSSO } = config;
-  // The verifier is single-use: every answer from this action removes it.
+  // The verifier is single-use: every answer to a code exchange removes it.
+  // Answers to a dashboard sign-in leave it, so a sign-in another tab started
+  // at /sso-login can still finish.
   const clearVerifier = setCookie(await clearSsoCodeVerifier());
+  let verifierUsed = false;
 
   try {
     // The callback serves only SSO; a social login provider would need its
@@ -223,6 +227,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         switch (form.intent) {
           case "code": {
+            verifierUsed = true;
             const codeVerifier = await ssoCodeVerifierCookie.parse(
               request.headers.get("Cookie")
             );
@@ -243,17 +248,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
             // A sign-in this browser started never arrives with tokens. One
             // that did not start here gets named and must be confirmed.
             const { email } = await readTokenAccount(form.accessToken);
-            return data(payload({ confirmAccount: { email } }), {
-              headers: [clearVerifier],
-            });
+            return data(payload({ confirmAccount: { email } }));
           }
 
           case "confirm": {
             // The person confirmed the account `identify` named for this
             // access token, so the session must belong to that same account.
             // The browser posts both tokens, so neither is trusted alone.
-            const account = await readTokenAccount(form.accessToken);
-            const authSession = await refreshAccessToken(form.refreshToken);
+            const [account, authSession] = await Promise.all([
+              readTokenAccount(form.accessToken),
+              refreshAccessToken(form.refreshToken),
+            ]);
             if (authSession.userId !== account.userId) {
               throw ssoSignInExpiredError();
             }
@@ -262,7 +267,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
               request,
               setSession: context.setSession,
               redirectTo: form.redirectTo,
-              headers: [clearVerifier],
+              headers: [],
             });
           }
         }
@@ -271,19 +276,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
+    const headers = verifierUsed ? [clearVerifier] : [];
     // The account was moved onto SSO and the person must sign in once more:
     // an outcome to report, not a failure.
     if (isSsoAccountLinkedError(cause)) {
       return data(
         payload({ ssoAccountLinked: true as const, message: cause.message }),
-        { headers: [clearVerifier] }
+        { headers }
       );
     }
     const reason = makeShelfError(cause);
-    return data(error(reason), {
-      status: reason.status,
-      headers: [clearVerifier],
-    });
+    return data(error(reason), { status: reason.status, headers });
   }
 }
 
@@ -307,14 +310,13 @@ type FragmentTokens = { accessToken: string; refreshToken: string };
 
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();
-  const { data } = fetcher;
+  const { data, submit } = fetcher;
   const disabled = useDisabled(fetcher);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/";
   const code = searchParams.get("code");
   /** Supabase reports a failed sign-in on the callback URL itself. */
-  const providerError =
-    searchParams.get("error_description") ?? searchParams.get("error");
+  const providerError = readProviderError(searchParams);
 
   /** Each code and each set of tokens is posted once, re-renders included. */
   const codePosted = useRef(false);
@@ -324,11 +326,8 @@ export default function LoginCallback() {
   useEffect(() => {
     if (!code || codePosted.current) return;
     codePosted.current = true;
-    void fetcher.submit(
-      { intent: "code", code, redirectTo },
-      { method: "post" }
-    );
-  }, [code, fetcher, redirectTo]);
+    void submit({ intent: "code", code, redirectTo }, { method: "post" });
+  }, [code, submit, redirectTo]);
 
   // Started from the identity provider's dashboard: the Supabase client reads
   // the tokens from the URL fragment (not readable server-side). Ask the
@@ -348,7 +347,7 @@ export default function LoginCallback() {
         accessToken: session.access_token,
         refreshToken: session.refresh_token,
       };
-      void fetcher.submit(
+      void submit(
         { intent: "identify", accessToken: session.access_token },
         { method: "post" }
       );
@@ -357,12 +356,12 @@ export default function LoginCallback() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [code, fetcher]);
+  }, [code, submit]);
 
   function confirmAccount() {
     const tokens = fragmentTokens.current;
     if (!tokens) return;
-    void fetcher.submit(
+    void submit(
       { intent: "confirm", ...tokens, redirectTo },
       { method: "post" }
     );

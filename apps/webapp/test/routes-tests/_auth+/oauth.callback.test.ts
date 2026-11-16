@@ -232,6 +232,28 @@ describe("POST /oauth/callback, sign-in started at /sso-login", () => {
     expect(resolveUserAndOrgForSsoCallback).not.toHaveBeenCalled();
     assertIsDataWithResponseInit(result);
     expect(result.init?.status).toBe(400);
+    // A failed exchange spends the verifier too.
+    expect(setCookies(result).join("\n")).toMatch(/sso_code_verifier=;/);
+  });
+
+  it("clears the verifier when the exchanged sign-in only links the account", async () => {
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        status: 409,
+        message: "Your account is now on single sign-on.",
+        additionalData: { ssoAccountLinked: true },
+        label: "Auth",
+        shouldBeCaptured: false,
+      })
+    );
+
+    const { result } = await post(
+      { intent: "code", code: "auth-code" },
+      await verifierCookie()
+    );
+
+    expect(setCookies(result).join("\n")).toMatch(/sso_code_verifier=;/);
   });
 
   it("refuses the token-only form a page without the confirmation step would post", async () => {
@@ -262,6 +284,8 @@ describe("POST /oauth/callback, sign-in started from the identity provider", () 
       error: null,
       confirmAccount: { email: "jane@acme.com" },
     });
+    // A sign-in another tab started at /sso-login keeps its verifier.
+    expect(setCookies(result).join("\n")).not.toMatch(/sso_code_verifier/);
   });
 
   it("signs in once confirmed, when both tokens belong to the named account", async () => {
@@ -270,6 +294,7 @@ describe("POST /oauth/callback, sign-in started from the identity provider", () 
     expect(refreshAccessToken).toHaveBeenCalledWith("client-refresh-token");
     expect(setSession).toHaveBeenCalledWith(callbackSession);
     expect((result as Response).headers.get("Location")).toBe("/assets");
+    expect(setCookies(result).join("\n")).not.toMatch(/sso_code_verifier/);
   });
 
   it("refuses a confirmation whose refresh token belongs to another account", async () => {

@@ -15,7 +15,8 @@
 // @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
-import { describe, expect, it, vi } from "vitest";
+import { Browser } from "happy-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mobilePkceChallengeCookie,
   ssoCodeVerifierCookie,
@@ -31,11 +32,16 @@ vi.mock("~/config/shelf.config", () => ({
   config: { disableSSO: false },
 }));
 
-// why: a default SSO domain would short-circuit the web branch and change what
-// the non-mobile assertions exercise.
+/** The default SSO domain the loader reads; empty unless a case sets one. */
+const ssoEnv = vi.hoisted(() => ({ defaultDomain: "" }));
+
+// why: a default SSO domain short-circuits the web branch to the identity
+// provider; each case picks whether the instance has one.
 vi.mock("~/utils/env", async () => ({
   ...(await vi.importActual<typeof import("~/utils/env")>("~/utils/env")),
-  DEFAULT_SSO_DOMAIN: "",
+  get DEFAULT_SSO_DOMAIN() {
+    return ssoEnv.defaultDomain;
+  },
 }));
 
 // why: starting a sign-in calls Supabase Auth; its wire format is covered by
@@ -49,6 +55,40 @@ vi.mock("~/modules/auth/sso-pkce.server", () => ({
 
 const { action, loader } = await import("~/routes/_auth+/sso-login");
 const { startSsoSignIn } = await import("~/modules/auth/sso-pkce.server");
+
+afterEach(() => {
+  ssoEnv.defaultDomain = "";
+  vi.mocked(startSsoSignIn).mockClear();
+});
+
+/**
+ * Which of the given URLs a browser holding this `Set-Cookie` sends the
+ * verifier to, using a real browser cookie jar rather than a hand-set header.
+ *
+ * @param setCookie - The `Set-Cookie` value the response carried
+ * @param urls - The URLs to check
+ * @returns The URLs the verifier is sent to
+ */
+async function urlsCarryingVerifier(setCookie: string, urls: string[]) {
+  // document.cookie cannot write HttpOnly; path matching is the same without it.
+  const browserCookie = setCookie
+    .split(";")
+    .filter((part) => !/httponly/i.test(part))
+    .join(";");
+  const browser = new Browser();
+  try {
+    const page = browser.newPage();
+    page.url = "http://localhost/sso-login";
+    page.mainFrame.document.cookie = browserCookie;
+    return urls.filter((url) =>
+      browser.defaultContext.cookieContainer
+        .getCookies(new URL(url), false)
+        .some((cookie) => cookie.key === "sso_code_verifier")
+    );
+  } finally {
+    await browser.close();
+  }
+}
 
 /** A well-formed S256 challenge: 43 chars of base64url. */
 const VALID_CHALLENGE = "a".repeat(43);
@@ -147,11 +187,60 @@ describe("POST /sso-login", () => {
         "https://idp.example.com/saml"
       );
       const setCookie = response.headers.get("set-cookie");
-      expect(setCookie).toContain("Path=/oauth/callback");
       expect(setCookie).toContain("HttpOnly");
       await expect(ssoCodeVerifierCookie.parse(setCookie)).resolves.toBe(
         "v".repeat(56)
       );
     }
   );
+});
+
+describe("the verifier cookie", () => {
+  it("reaches the URLs the callback pages post to, and stays off the rest of the app", async () => {
+    const setCookie = await ssoCodeVerifierCookie.serialize("v".repeat(56));
+
+    // The callback pages post through React Router, to `<path>.data`.
+    await expect(
+      urlsCarryingVerifier(setCookie, [
+        "http://localhost/oauth/callback.data",
+        "http://localhost/oauth/callback/mobile.data",
+        "http://localhost/oauth/callback",
+        "http://localhost/assets",
+        "http://localhost/sso-login",
+      ])
+    ).resolves.toEqual([
+      "http://localhost/oauth/callback.data",
+      "http://localhost/oauth/callback/mobile.data",
+      "http://localhost/oauth/callback",
+    ]);
+  });
+});
+
+describe("GET /sso-login with a default SSO domain", () => {
+  it("sends the browser to the identity provider and keeps the verifier", async () => {
+    ssoEnv.defaultDomain = "acme.com";
+
+    const result = await invoke("");
+
+    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com");
+    expect(result).toBeInstanceOf(Response);
+    const response = result as Response;
+    expect(response.headers.get("Location")).toBe(
+      "https://idp.example.com/saml"
+    );
+    await expect(
+      ssoCodeVerifierCookie.parse(response.headers.get("set-cookie"))
+    ).resolves.toBe("v".repeat(56));
+  });
+
+  it("still lets the companion app start its own sign-in", async () => {
+    ssoEnv.defaultDomain = "acme.com";
+
+    const result = await invoke(
+      `?platform=mobile&code_challenge=${VALID_CHALLENGE}`
+    );
+
+    expect(startSsoSignIn).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+  });
 });

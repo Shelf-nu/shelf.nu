@@ -131,10 +131,29 @@ describe("SSO callback page", () => {
     );
   });
 
-  it("shows the error Supabase put on the callback URL", async () => {
-    renderAt("/oauth/callback?error=access_denied&error_description=Denied");
+  it("posts only the code when the URL also carries tokens", async () => {
+    renderAt("/oauth/callback?code=auth-code");
+    await waitFor(() => expect(posted).toHaveLength(1));
 
-    expect(await screen.findByText("Denied")).toBeInTheDocument();
+    emitFragmentSession();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posted).toEqual([
+      { intent: "code", code: "auth-code", redirectTo: "/" },
+    ]);
+  });
+
+  it("reports a failed sign-in in its own words, never the URL's", async () => {
+    renderAt(
+      "/oauth/callback?error=access_denied&error_description=Account%20locked%2C%20call%20555-0100"
+    );
+
+    expect(
+      await screen.findByText(
+        "Sign-in failed at your identity provider. Please try again."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/call 555-0100/)).not.toBeInTheDocument();
     expect(posted).toEqual([]);
   });
 });

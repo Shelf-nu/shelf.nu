@@ -229,10 +229,10 @@ describe("POST /oauth/callback/mobile", () => {
       message:
         "Your account is now on single sign-on. Sign in again to continue.",
     });
-    // The one-shot PKCE challenge is cleared on this exit too.
-    expect(new Headers(result.init?.headers).get("set-cookie")).toContain(
-      "mobile_pkce_challenge="
-    );
+    // Both one-shot cookies are cleared on this exit too.
+    const cleared = new Headers(result.init?.headers).getSetCookie().join("\n");
+    expect(cleared).toMatch(/mobile_pkce_challenge=;/);
+    expect(cleared).toMatch(/sso_code_verifier=;/);
   });
 
   it("still reports other resolver failures as errors", async () => {
@@ -255,6 +255,9 @@ describe("POST /oauth/callback/mobile", () => {
         message: "More than one Shelf account uses this email address.",
       },
     });
+    const cleared = new Headers(result.init?.headers).getSetCookie().join("\n");
+    expect(cleared).toMatch(/mobile_pkce_challenge=;/);
+    expect(cleared).toMatch(/sso_code_verifier=;/);
   });
 
   it.each(["password", "otp", "magiclink"])(
