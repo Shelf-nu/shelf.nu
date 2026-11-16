@@ -4622,6 +4622,43 @@ describe("reserveBooking", () => {
     expect(result).toEqual(reservedBooking);
   });
 
+  it("locks the booking row before anything else in its transaction", async () => {
+    // why: item and amount changes take the booking row before their asset
+    // locks; reserving must take the same order, or the two can deadlock.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      bookingAssets: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.RESERVED,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockClear();
+
+    await reserveBooking(mockReserveParams).catch(() => {});
+
+    const lockCall = vitest
+      .mocked(db.$queryRaw)
+      .mock.calls.findIndex(([sql]) =>
+        (sql as unknown as string[]).join("").includes('FROM "Booking"')
+      );
+    expect(lockCall).toBeGreaterThanOrEqual(0);
+    const lockOrder = vitest.mocked(db.$queryRaw).mock.invocationCallOrder[
+      lockCall
+    ];
+    const firstSliceRead =
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mock.invocationCallOrder[0] ?? Infinity;
+    expect(lockOrder).toBeLessThan(firstSliceRead);
+  });
+
   it("links the custodian user from the team member row", async () => {
     const mockBooking = {
       ...mockBookingData,

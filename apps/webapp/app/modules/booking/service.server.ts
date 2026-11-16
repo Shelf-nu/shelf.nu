@@ -2610,6 +2610,11 @@ export async function reserveBooking({
     // must stay inside the transaction that flips the status, which needs
     // the long budget rather than Prisma's five-second default.
     const updatedBooking = await db.$transaction(async (tx) => {
+      // The booking row first, before any asset lock below: every path that
+      // changes a booking's items or amounts takes the booking row first, the
+      // order a check-out uses, so two of them cannot wait on each other.
+      await lockBookingForStatusCheck(tx, id, organizationId);
+
       /**
        * Eligibility, re-read through `tx` immediately before the status write.
        *
