@@ -438,6 +438,107 @@ describe("booking source contract", () => {
     expectCheckFailure(result, 3);
   });
 
+  it("check 1 allows LEGACY to AUTO and back to LEGACY within one transaction", async () => {
+    // The first-mode record of the LEGACY to AUTO update is 'LEGACY', so the
+    // final LEGACY is not a downgrade.
+    const created: SeededOrgWithPool[] = [];
+    try {
+      const result = await commitAndExpect(async (tx) => {
+        const pool = await seedPool(tx);
+        created.push(pool);
+        const booking = await seedBooking(tx, {
+          organizationId: pool.organizationId,
+          userId: pool.userId,
+          status: "RESERVED",
+          from: FROM,
+          to: TO,
+          slices: [{ assetId: pool.assetId, quantity: 4 }],
+        });
+        const sliceId = firstSlice(booking.sliceIds);
+        await convertSlice(tx, sliceId, "AUTO");
+        await tx.$executeRaw`
+          UPDATE "BookingAsset" SET "sourceAllocation" = 'LEGACY'
+          WHERE "id" = ${sliceId}
+        `;
+      });
+      expect(result).toEqual({ ok: true });
+    } finally {
+      await cleanup(created);
+    }
+  });
+
+  it("check 2 LEGACY standalone slice next to a KIT slice of the same asset fails", async () => {
+    // The group is converted only through its kit slice, so this pins the kit
+    // half of the converted-group lookup.
+    const result = await commitAndExpect(async (tx) => {
+      const pool = await seedPool(tx);
+      const kit = await tx.kit.create({
+        data: {
+          name: "Kit A",
+          organizationId: pool.organizationId,
+          createdById: pool.userId,
+        },
+        select: { id: true },
+      });
+      const assetKit = await tx.assetKit.create({
+        data: {
+          assetId: pool.assetId,
+          kitId: kit.id,
+          organizationId: pool.organizationId,
+          quantity: 3,
+        },
+        select: { id: true },
+      });
+      const booking = await seedBooking(tx, {
+        organizationId: pool.organizationId,
+        userId: pool.userId,
+        status: "RESERVED",
+        from: FROM,
+        to: TO,
+        slices: [
+          { assetId: pool.assetId, quantity: 2 },
+          { assetId: pool.assetId, quantity: 3, assetKitId: assetKit.id },
+        ],
+      });
+      const [, kitSliceId] = booking.sliceIds;
+      if (!kitSliceId) {
+        throw new Error("seedBooking returned no kit slice");
+      }
+      // A valid KIT slice: one KIT row planning all 3 units.
+      await convertSlice(tx, kitSliceId, "KIT");
+      await insertSource(tx, {
+        organizationId: pool.organizationId,
+        sliceId: kitSliceId,
+        kind: "KIT",
+        quantity: 3,
+      });
+    });
+    expectCheckFailure(result, 2);
+  });
+
+  it("check 4 KIT slice with no assetKitId fails", async () => {
+    const result = await commitAndExpect(async (tx) => {
+      const pool = await seedPool(tx);
+      const booking = await seedBooking(tx, {
+        organizationId: pool.organizationId,
+        userId: pool.userId,
+        status: "RESERVED",
+        from: FROM,
+        to: TO,
+        slices: [{ assetId: pool.assetId, quantity: 3 }],
+      });
+      const sliceId = firstSlice(booking.sliceIds);
+      await convertSlice(tx, sliceId, "KIT");
+      await insertSource(tx, {
+        organizationId: pool.organizationId,
+        sliceId,
+        kind: "KIT",
+        quantity: 3,
+      });
+    });
+    expectCheckFailure(result, 4);
+  });
+
   it("check 4 kit/AUTO mismatch fails", async () => {
     // An AUTO slice may not carry a KIT row.
     const result = await commitAndExpect(async (tx) => {

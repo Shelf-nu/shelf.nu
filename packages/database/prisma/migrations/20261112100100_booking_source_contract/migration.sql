@@ -16,10 +16,14 @@
 --     once per transaction, on the final state.
 --   * LEGACY fast path: a "BookingAsset" write that is LEGACY before and
 --     after, or a booking "ConsumptionLog" write, whose group is unconverted
---     at commit (no non-LEGACY slice, no share row) returns after one indexed
---     lookup, creating no temp table. Writers that know nothing about source
---     rows therefore pay almost nothing. The triggers on the two source tables
---     always enqueue.
+--     at commit (no non-LEGACY slice, no share row) returns after
+--     booking_source_group_is_converted, creating no temp table. That costs
+--     per write: one exact probe of "BookingAsset_manual_unique", one probe of
+--     "AssetKit_assetId_kitId_key" for the asset's kits plus one exact probe
+--     of "BookingAsset_kit_unique" per kit of the asset, and one probe of
+--     "BookingDispositionShare_bookingId_assetId_idx"; twice only when an
+--     UPDATE moves the row to another (booking, asset) group. The triggers on
+--     the two source tables always enqueue.
 --   * check_booking_source_slice runs checks 1, 3 to 8 and 10 for one slice;
 --     check_booking_source_group runs checks 2, 9 and 10 for one group.
 --     A slice that no longer exists is skipped. A group whose booking no
@@ -93,11 +97,14 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Whether a (booking, asset) group is converted: it has a non-LEGACY slice or
--- any share row. Reads only existing indexes: the slice lookup is split on
--- "assetKitId" so each half matches a partial unique index,
--- "BookingAsset_manual_unique" ("bookingId", "assetId") WHERE "assetKitId" IS
--- NULL and "BookingAsset_kit_unique" ("bookingId", "assetKitId") WHERE
--- "assetKitId" IS NOT NULL; the share lookup uses
+-- any share row. Reads only existing indexes, each probe exact: the slice
+-- lookup is split on "assetKitId" to match the two partial uniques. The
+-- standalone half probes "BookingAsset_manual_unique" ("bookingId",
+-- "assetId") WHERE "assetKitId" IS NULL. The kit half takes the asset's
+-- AssetKit ids from "AssetKit_assetId_kitId_key" ("assetId", "kitId") and
+-- probes "BookingAsset_kit_unique" ("bookingId", "assetKitId") WHERE
+-- "assetKitId" IS NOT NULL once per kit, so a booking with many kit slices of
+-- other assets costs nothing extra. The share lookup uses
 -- "BookingDispositionShare_bookingId_assetId_idx".
 CREATE OR REPLACE FUNCTION booking_source_group_is_converted(
   p_booking_id text, p_asset_id text
@@ -112,8 +119,11 @@ RETURNS boolean AS $$
     )
     OR EXISTS (
       SELECT 1 FROM "BookingAsset"
-      WHERE "bookingId" = p_booking_id AND "assetId" = p_asset_id
-        AND "assetKitId" IS NOT NULL
+      WHERE "bookingId" = p_booking_id
+        AND "assetKitId" IN (
+          SELECT ak.id FROM "AssetKit" ak WHERE ak."assetId" = p_asset_id
+        )
+        AND "assetId" = p_asset_id
         AND "sourceAllocation" <> 'LEGACY'
     )
     OR EXISTS (
@@ -122,6 +132,32 @@ RETURNS boolean AS $$
     )
   );
 $$ LANGUAGE sql STABLE;
+
+-- Whether a row write touches a converted group: the OLD group for UPDATE and
+-- DELETE, the NEW group for INSERT and UPDATE. An UPDATE that keeps the row in
+-- the same (booking, asset) group looks it up once.
+CREATE OR REPLACE FUNCTION booking_source_write_touches_converted_group(
+  p_op text,
+  p_old_booking_id text, p_old_asset_id text,
+  p_new_booking_id text, p_new_asset_id text
+)
+RETURNS boolean AS $$
+BEGIN
+  IF p_op IN ('UPDATE', 'DELETE')
+    AND booking_source_group_is_converted(p_old_booking_id, p_old_asset_id)
+  THEN
+    RETURN true;
+  END IF;
+  IF p_op = 'INSERT'
+    OR (p_op = 'UPDATE'
+      AND (p_new_booking_id IS DISTINCT FROM p_old_booking_id
+        OR p_new_asset_id IS DISTINCT FROM p_old_asset_id))
+  THEN
+    RETURN booking_source_group_is_converted(p_new_booking_id, p_new_asset_id);
+  END IF;
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql STABLE;
 
 -- Check 10 and the share half of check 6 for a set of shares.
 CREATE OR REPLACE FUNCTION check_booking_source_shares(p_share_ids text[])
@@ -513,13 +549,8 @@ RETURNS TRIGGER AS $$
 BEGIN
   IF (TG_OP = 'INSERT' OR OLD."sourceAllocation" = 'LEGACY')
     AND (TG_OP = 'DELETE' OR NEW."sourceAllocation" = 'LEGACY')
-    AND NOT (
-      TG_OP IN ('UPDATE', 'DELETE')
-      AND booking_source_group_is_converted(OLD."bookingId", OLD."assetId")
-    )
-    AND NOT (
-      TG_OP IN ('INSERT', 'UPDATE')
-      AND booking_source_group_is_converted(NEW."bookingId", NEW."assetId")
+    AND NOT booking_source_write_touches_converted_group(
+      TG_OP, OLD."bookingId", OLD."assetId", NEW."bookingId", NEW."assetId"
     )
   THEN
     RETURN NULL;
@@ -597,15 +628,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION booking_source_contract_on_log()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NOT (
-      TG_OP IN ('UPDATE', 'DELETE')
-      AND booking_source_group_is_converted(OLD."bookingId", OLD."assetId")
-    )
-    AND NOT (
-      TG_OP IN ('INSERT', 'UPDATE')
-      AND booking_source_group_is_converted(NEW."bookingId", NEW."assetId")
-    )
-  THEN
+  IF NOT booking_source_write_touches_converted_group(
+    TG_OP, OLD."bookingId", OLD."assetId", NEW."bookingId", NEW."assetId"
+  ) THEN
     RETURN NULL;
   END IF;
 
