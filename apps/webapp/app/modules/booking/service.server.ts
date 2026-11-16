@@ -15920,6 +15920,15 @@ export async function removeAssets({
     let sourceBookingName = "";
 
     await db.$transaction(async (tx) => {
+      // Removing items changes the booking: move its version, so an approver
+      // looking at the request from before cannot approve it unseen. First in
+      // the transaction, so the booking row is locked before any slice, the
+      // same order a check-out takes them in.
+      await tx.booking.updateMany({
+        where: { id, organizationId },
+        data: { updatedAt: new Date() },
+      });
+
       // Read the source booking's status under the SAME tx snapshot used by
       // `bookingAsset.deleteMany` below. Doing it inside the tx removes the
       // observable window where the source booking's pivot rows are gone
@@ -16086,12 +16095,6 @@ export async function removeAssets({
       }
 
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
-      // Removing items changes the booking: move its version, so an approver
-      // looking at the request from before cannot approve it unseen.
-      await tx.booking.updateMany({
-        where: { id, organizationId },
-        data: { updatedAt: new Date() },
-      });
 
       /**
        * The zero-asset invariant, defended from the removal side.

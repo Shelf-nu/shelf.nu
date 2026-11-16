@@ -521,6 +521,33 @@ describe("checkout reminder and overdue pushes", () => {
     expect(sendPush).not.toHaveBeenCalled();
   });
 
+  it("sends no checkout reminder for a request still waiting for approval", async () => {
+    // why: the server refuses to check out a pending request, so a reminder
+    // to do it would ask for something that cannot happen.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValueOnce({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    await workerHandler({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder,
+      },
+    });
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
   it("pushes the checkout reminder once, to the custodian alone", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockResolvedValue({

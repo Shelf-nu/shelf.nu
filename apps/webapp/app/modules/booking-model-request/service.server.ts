@@ -2543,6 +2543,28 @@ type UpsertBookingModelRequestArgs = {
 };
 
 /**
+ * Moves the booking's version (`updatedAt`) in a transaction that changes its
+ * model reservations. An approver approves the version they saw, so a request
+ * whose reservations changed since must not match it.
+ *
+ * Called first in the transaction, so the booking row is locked before any
+ * model or reservation row, the order a check-out takes them in.
+ *
+ * @param tx - The transaction changing the reservations
+ * @param args.bookingId - The booking
+ * @param args.organizationId - Its workspace
+ */
+async function touchBookingVersion(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  { bookingId, organizationId }: { bookingId: string; organizationId: string }
+) {
+  await tx.booking.updateMany({
+    where: { id: bookingId, organizationId },
+    data: { updatedAt: new Date() },
+  });
+}
+
+/**
  * Validates and writes one model reservation inside a caller's transaction.
  *
  * Separate from {@link upsertBookingModelRequest} so a caller that already owns
@@ -2896,16 +2918,17 @@ export async function upsertBookingModelRequest({
     // Serves both the in-tx event and the post-tx note.
     const actor = await loadActorBestEffort(userId);
 
-    const result = await db.$transaction((tx) =>
-      writeBookingModelRequestInTx(tx, {
+    const result = await db.$transaction(async (tx) => {
+      await touchBookingVersion(tx, { bookingId, organizationId });
+      return writeBookingModelRequestInTx(tx, {
         bookingId,
         assetModelId,
         quantity,
         organizationId,
         userId,
         actor,
-      })
-    );
+      });
+    });
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
     // can't roll back the upsert. Phrasing depends on whether this was
@@ -3079,6 +3102,7 @@ export async function upsertBookingModelRequests({
   try {
     return await db.$transaction(
       async (tx) => {
+        await touchBookingVersion(tx, { bookingId, organizationId });
         /**
          * Locks first, then the read they protect.
          *
@@ -3258,6 +3282,7 @@ export async function reserveModelsUpToAvailability({
     try {
       const batchReduced = await db.$transaction(
         async (tx) => {
+          await touchBookingVersion(tx, { bookingId, organizationId });
           const booking = await tx.booking.findUnique({
             where: { id: bookingId, organizationId },
             select: { from: true, to: true },
@@ -3386,6 +3411,7 @@ export async function removeBookingModelRequest({
      * the concrete-asset side — cancellation was the one outlier.
      */
     const cancelled = await db.$transaction(async (tx) => {
+      await touchBookingVersion(tx, { bookingId, organizationId });
       const booking = await tx.booking.findUnique({
         where: { id: bookingId, organizationId },
         select: { id: true, status: true },

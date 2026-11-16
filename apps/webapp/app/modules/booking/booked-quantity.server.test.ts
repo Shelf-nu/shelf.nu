@@ -140,15 +140,19 @@ describe("setStandaloneBookedQuantities", () => {
     });
   });
 
-  it("leaves the booking's version alone when no amount changes", async () => {
-    slicesHold({ "slice-a": { quantity: 5 } });
+  it("locks the booking before any asset, the order a check-out uses", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
 
     await setStandaloneBookedQuantities({
       ...SCOPE,
       changes: [change("a", 5)],
     });
 
-    expect(tx.booking.updateMany).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(tx.booking.updateMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vi.mocked(lockAssetForQuantityUpdate).mock.invocationCallOrder[0]
+    );
   });
 
   it("measures against the amount read under the lock, not a caller snapshot", async () => {
