@@ -6,7 +6,7 @@ import {
   type QrIdDisplayPreference,
 } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useLocation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -137,12 +137,15 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  // Focus the Name input on mount, but skip it when the field is disabled
-  // (personal workspaces don't allow renaming). Arriving via a section anchor
-  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
-  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
+  // Focus the Name input on mount, except when the field is disabled
+  // (personal workspaces cannot be renamed) or the page opened at a linked
+  // card (/settings/general#permissions): the browser starts keyboard
+  // navigation at that card, and focusing the name would send Tab back to the
+  // top. React Router's `location.hash` is the hash the page opened with;
+  // the scroll-synced hash is written past the router, so it never flips this.
+  const { hash } = useLocation();
   const nameInputRef = useAutoFocus<HTMLInputElement>({
-    when: !isPersonalWorkspace,
+    when: !isPersonalWorkspace && !hash,
   });
 
   const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
