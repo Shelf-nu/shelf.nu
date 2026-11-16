@@ -29,6 +29,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 import {
+  releaseUnattachedBarcodes,
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
@@ -2141,18 +2142,22 @@ export async function createKit({
       category: categoryId ? { connect: { id: categoryId } } : undefined,
     };
 
-    /** If barcodes are passed, create them */
-    if (barcodes && barcodes.length > 0) {
-      const barcodesToAdd = barcodes.filter(
-        (barcode) => !!barcode.value && !!barcode.type
-      );
+    /**
+     * Barcodes this create writes. Their values are freed from unattached rows
+     * inside the create transaction, so a value left behind by a deleted asset
+     * or kit can be used again.
+     */
+    const barcodesToAdd = (barcodes ?? []).filter(
+      (barcode) => !!barcode.value && !!barcode.type
+    );
 
+    if (barcodesToAdd.length > 0) {
       Object.assign(data, {
         barcodes: {
           create: barcodesToAdd.map(({ type, value }) => ({
             type,
             // Normalize per type (ExternalQR keeps its case, others uppercase)
-            // so stored kit barcodes match what filters/lookups expect — same
+            // so stored kit barcodes match what filters/lookups expect. Same
             // rule the asset create path uses via `normalizeBarcodeValue`.
             value: normalizeBarcodeValue(type, value),
             organizationId,
@@ -2170,6 +2175,13 @@ export async function createKit({
 
     // Use transaction to ensure kit creation and activity event are atomic
     const kit = await db.$transaction(async (tx) => {
+      if (barcodesToAdd.length > 0) {
+        await releaseUnattachedBarcodes(tx, {
+          barcodes: barcodesToAdd,
+          organizationId,
+        });
+      }
+
       const created = await tx.kit.create({ data });
 
       // Activity event must be inside transaction for atomicity
