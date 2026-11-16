@@ -46,7 +46,6 @@ import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import type { AssetLocationMove } from "~/modules/location-note/service.server";
 import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
-import { assetQtyMeta } from "~/utils/asset-quantity";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import {
   buildCustomFieldValue,
@@ -120,7 +119,18 @@ async function loadArrivalNoteContext({
         select: { id: true, name: true },
       }),
     ]);
-    if (!actor) return null;
+    if (!actor) {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message:
+            "The user running an import was not found, so its location activity lines were not written.",
+          additionalData: { userId, organizationId },
+          label,
+        })
+      );
+      return null;
+    }
     return {
       actor,
       locations: new Map(locations.map((location) => [location.id, location])),
@@ -955,28 +965,8 @@ export async function writeImportChunk({
         );
 
         // Each first placement, in the same shape as a move from nowhere, so
-        // the Activity Summary shows where the asset arrived.
-        await recordEvents(
-          withLocation.map((p) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_LOCATION_CHANGED" as const,
-            entityType: "ASSET" as const,
-            entityId: p.row.assetId,
-            assetId: p.row.assetId,
-            locationId: p.locationId!,
-            field: "locationId",
-            fromValue: null,
-            toValue: p.locationId!,
-            // Qty-tracked: the units placed. No-op for INDIVIDUAL.
-            meta: assetQtyMeta(
-              { type: p.type ?? AssetType.INDIVIDUAL },
-              poolQuantity(p)
-            ),
-          })),
-          tx
-        );
-
+        // the Activity Summary shows where the asset arrived. The same list
+        // feeds the location activity lines after the commit.
         arrivals = withLocation.map((p) => ({
           asset: {
             id: p.row.assetId,
@@ -988,6 +978,24 @@ export async function writeImportChunk({
           quantity:
             p.type === AssetType.QUANTITY_TRACKED ? poolQuantity(p) : null,
         }));
+        await recordEvents(
+          arrivals.map((arrival) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: arrival.asset.id,
+            assetId: arrival.asset.id,
+            locationId: arrival.locationId,
+            field: "locationId",
+            fromValue: null,
+            toValue: arrival.locationId,
+            // Qty-tracked: the units placed.
+            meta:
+              arrival.quantity === null ? {} : { quantity: arrival.quantity },
+          })),
+          tx
+        );
 
         return { applied: true, nextProcessedRows, warnings };
       },

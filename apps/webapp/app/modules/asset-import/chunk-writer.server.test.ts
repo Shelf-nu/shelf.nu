@@ -475,6 +475,62 @@ describe("writeImportChunk", () => {
     });
   });
 
+  it("keeps a committed chunk when the names for its location lines cannot be read", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(db.location.findMany).mockRejectedValueOnce(
+      new Error("connection lost")
+    );
+
+    const result = await writeImportChunk(
+      args({ rows: [row("i1", { location: "Store" })] })
+    );
+
+    expect(result).toMatchObject({ applied: true });
+    expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
+  });
+
+  it("writes no location lines when the importing user is gone", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(db.user.findUnique).mockResolvedValueOnce(null);
+
+    const result = await writeImportChunk(
+      args({ rows: [row("i1", { location: "Store" })] })
+    );
+
+    expect(result).toMatchObject({ applied: true });
+    expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
+  });
+
+  it("leaves out a row whose location was deleted after the commit", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(db.location.findMany).mockResolvedValueOnce([
+      { id: "loc-store", name: "Store" },
+    ] as never);
+
+    await writeImportChunk(
+      args({
+        rows: [
+          row("i1", { location: "Store" }),
+          row("i2", { location: "Depot" }),
+        ],
+        resolved: {
+          ...resolvedFixture,
+          locations: { Store: "loc-store", Depot: "loc-depot" },
+        },
+      })
+    );
+
+    expect(createAssetLocationMoveNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moves: [
+          expect.objectContaining({
+            asset: expect.objectContaining({ id: "i1" }),
+          }),
+        ],
+      })
+    );
+  });
+
   it("writes no location activity lines for a chunk already committed", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 0 });
     await writeImportChunk(args({ rows: [row("i1", { location: "Store" })] }));

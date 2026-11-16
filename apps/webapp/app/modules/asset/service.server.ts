@@ -191,6 +191,7 @@ import {
   parseFileFormData,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { formatModelShortfallMessage } from "./archive-shortfall";
@@ -267,6 +268,7 @@ import {
   recordStockChanges,
 } from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
+import type { AssetLocationMove } from "../location-note/service.server";
 import {
   createAssetLocationMoveNotes,
   createSystemLocationNote,
@@ -971,6 +973,50 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   }
 }
 
+/** A just-created asset, as `createAsset` returns it. */
+type CreatedAssetWithPlacement = {
+  id: string;
+  title: string;
+  type: AssetType;
+  unitOfMeasure: string | null;
+  assetLocations?: {
+    quantity: number;
+    location: { id: string; name: string } | null;
+  }[];
+  user?: (UserNameFields & { id: string }) | null;
+};
+
+/**
+ * The location Activity lines for assets just created at a location: one move
+ * each, from no location to where the asset was placed, named after the user
+ * who created them. Passing every asset of a batch in one call lets
+ * `createAssetLocationMoveNotes` group them into one line per location.
+ *
+ * @param assets - Assets as `createAsset` returns them
+ * @returns The helper's arguments, or `null` when no asset was placed
+ */
+function firstPlacementNotes(
+  assets: CreatedAssetWithPlacement[]
+): Parameters<typeof createAssetLocationMoveNotes>[0] | null {
+  const moves = assets.flatMap((asset): AssetLocationMove[] => {
+    const placement = asset.assetLocations?.[0];
+    if (!placement?.location) return [];
+    return [
+      {
+        asset,
+        from: null,
+        to: placement.location,
+        // Units placed, for a pool only; an individual asset is just named.
+        quantity:
+          asset.type === AssetType.QUANTITY_TRACKED ? placement.quantity : null,
+      },
+    ];
+  });
+  // Every asset of a batch is created by the same user.
+  const actor = assets.find((asset) => asset.user)?.user;
+  return moves.length > 0 && actor ? { moves, actor } : null;
+}
+
 /**
  * Builds the `assetKits` nested-create fragment that attaches a newly-created
  * asset to a kit via the `AssetKit` pivot.
@@ -1034,6 +1080,7 @@ export async function createAsset({
   consumptionType,
   unitOfMeasure,
   assetModelId,
+  writeLocationNote = true,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -1056,6 +1103,12 @@ export async function createAsset({
   consumptionType?: Asset["consumptionType"];
   unitOfMeasure?: Asset["unitOfMeasure"];
   assetModelId?: string;
+  /**
+   * Whether to add the new asset to its location's Activity tab. Callers that
+   * create many assets pass `false` and write one grouped line for all of
+   * them with {@link firstPlacementNotes}.
+   */
+  writeLocationNote?: boolean;
 }) {
   // Server-side validation for quantity-tracked assets
   if (isQuantityTracked(type)) {
@@ -1496,24 +1549,11 @@ export async function createAsset({
       }, LONG_TRANSACTION_OPTIONS);
 
       // The first placement on the location's Activity tab, written after the
-      // commit. The asset's creator is the user who placed it.
-      const placement = locationId ? asset.assetLocations?.[0] : undefined;
-      if (placement?.location && asset.user) {
-        await createAssetLocationMoveNotes({
-          moves: [
-            {
-              asset,
-              from: null,
-              to: placement.location,
-              quantity:
-                asset.type === AssetType.QUANTITY_TRACKED
-                  ? placement.quantity
-                  : null,
-            },
-          ],
-          actor: asset.user,
-        });
-      }
+      // commit.
+      const locationNotes = writeLocationNote
+        ? firstPlacementNotes([asset])
+        : null;
+      if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
 
       // Successfully created asset, exit the retry loop
       return asset;
@@ -1819,11 +1859,20 @@ export async function bulkCreateAssetsFromModel({
   // Nesting under an outer tx would break that retry; instead we accept
   // partial-success semantics and surface `failedAt` on mid-loop failure.
 
+  const created: CreatedAssetWithPlacement[] = [];
   const createdAssetIds: Asset["id"][] = [];
+  /**
+   * One grouped line on the location's Activity tab for every asset saved,
+   * including those saved before a failure part-way through.
+   */
+  const writeLocationNotes = async () => {
+    const locationNotes = firstPlacementNotes(created);
+    if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
+  };
   for (let i = 0; i < titles.length; i++) {
     const title = titles[i];
     try {
-      const created = await createAsset({
+      const asset = await createAsset({
         title,
         description: description ?? null,
         userId,
@@ -1839,8 +1888,10 @@ export async function bulkCreateAssetsFromModel({
         mainImageExpiration,
         availableToBook: availableToBook ?? true,
         type: AssetType.INDIVIDUAL,
+        writeLocationNote: false,
       });
-      createdAssetIds.push(created.id);
+      created.push(asset);
+      createdAssetIds.push(asset.id);
     } catch (cause) {
       const error = isLikeShelfError(cause)
         ? (cause as ShelfError)
@@ -1856,10 +1907,12 @@ export async function bulkCreateAssetsFromModel({
               failedAtIndex: i,
             },
           });
+      await writeLocationNotes();
       return { createdAssetIds, failedAt: i, error };
     }
   }
 
+  await writeLocationNotes();
   return { createdAssetIds };
 }
 
@@ -5504,6 +5557,7 @@ export async function duplicateAsset({
               amountOfDuplicates > 1 ? ` ${i + 1}` : ""
             })`,
             customFieldsValues: copiedCustomFieldValues,
+            writeLocationNote: false,
           })
         );
       }
@@ -5516,6 +5570,10 @@ export async function duplicateAsset({
       });
       throw cause;
     }
+
+    // One grouped line on the location's Activity tab, once every copy exists.
+    const locationNotes = firstPlacementNotes(duplicatedAssets);
+    if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
 
     // Images are uploaded once every copy exists, so a failed create never
     // leaves an uploaded file behind. An image is best-effort: a copy without
