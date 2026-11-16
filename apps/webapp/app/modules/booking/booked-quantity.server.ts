@@ -172,6 +172,14 @@ export async function setStandaloneBookedQuantitiesWithinTx(
       quantity: change.quantity,
     });
   }
+  // A changed amount changes the booking: move its version, so an approver
+  // looking at the request from before cannot approve it unseen.
+  if (applied.some((a) => a.previousQuantity !== a.quantity)) {
+    await tx.booking.updateMany({
+      where: { id: bookingId, organizationId },
+      data: { updatedAt: new Date() },
+    });
+  }
   return applied;
 }
 

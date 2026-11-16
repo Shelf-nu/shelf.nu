@@ -14061,7 +14061,7 @@ describe("removeAssets", () => {
     // A quantity-tracked asset can hold a free-pool row alongside kit-driven
     // ones on the same booking. A caller that can see which row the operator
     // acted on says so, and only that row goes: the kit still holds its units.
-    expect.assertions(1);
+    expect.assertions(2);
 
     const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
 
@@ -14090,6 +14090,12 @@ describe("removeAssets", () => {
         assetId: { in: ["asset-1"] },
         assetKitId: null,
       },
+    });
+    // Removing items moves the booking's version, so a pending request
+    // cannot be approved from a page that showed the old items.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: "booking-1", organizationId: "org-1" },
+      data: { updatedAt: expect.any(Date) },
     });
   });
 

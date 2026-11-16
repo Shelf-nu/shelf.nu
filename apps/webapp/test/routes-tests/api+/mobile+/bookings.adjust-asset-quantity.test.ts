@@ -135,6 +135,8 @@ const tx = {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  // A changed amount moves the booking's version (`updatedAt`).
+  booking: { updateMany: vi.fn() },
 };
 
 /** Build a POST request for this endpoint with a JSON body. */

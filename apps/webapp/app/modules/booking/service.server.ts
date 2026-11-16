@@ -15988,6 +15988,12 @@ export async function removeAssets({
       }
 
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
+      // Removing items changes the booking: move its version, so an approver
+      // looking at the request from before cannot approve it unseen.
+      await tx.booking.updateMany({
+        where: { id, organizationId },
+        data: { updatedAt: new Date() },
+      });
 
       /**
        * The zero-asset invariant, defended from the removal side.

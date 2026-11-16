@@ -31,6 +31,8 @@ import {
 /** The transaction client the service is handed; reset per test. */
 const tx = {
   bookingAsset: { findUnique: vi.fn(), update: vi.fn() },
+  // A changed amount moves the booking's version (`updatedAt`).
+  booking: { updateMany: vi.fn() },
 };
 
 // why: the database is the integration boundary. `$transaction` hands the
@@ -130,6 +132,23 @@ describe("setStandaloneBookedQuantities", () => {
     expect(applied).toEqual([
       { assetId: "a", assetTitle: "Asset a", previousQuantity: 2, quantity: 5 },
     ]);
+    // The booking's version moves, so a pending request cannot be approved
+    // from a page that showed the old amount.
+    expect(tx.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: SCOPE.bookingId, organizationId: SCOPE.organizationId },
+      data: { updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("leaves the booking's version alone when no amount changes", async () => {
+    slicesHold({ "slice-a": { quantity: 5 } });
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+
+    expect(tx.booking.updateMany).not.toHaveBeenCalled();
   });
 
   it("measures against the amount read under the lock, not a caller snapshot", async () => {

@@ -44,6 +44,7 @@ const dbMocks = vi.hoisted(() => {
           findUnique: bookingAssetFindUnique,
           update: vi.fn().mockResolvedValue(undefined),
         },
+        booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       })
     ),
   };
