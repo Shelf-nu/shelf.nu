@@ -14,17 +14,20 @@
  * Asking for less (lowering an amount, removing items) is unaffected, and so
  * is a change made by someone who may approve or by a role whose switch is off.
  *
- * Adding assets or kits, and scans that add them, are closed to these roles
- * once a booking is past DRAFT (`canManageBookingItems`), and no role changes
- * a booking's start once it is past DRAFT, so the paths this rule guards are
- * the booked amounts, the model reservations and the extension of a started
- * booking.
+ * Adding assets or kits from the booking page is closed to these roles once a
+ * booking is past DRAFT (`canManageBookingItems`), so the paths this rule
+ * guards are the booked amounts, the model reservations, the extension of a
+ * started booking, a scanned extra that answers no reservation at check-out,
+ * and a check-out that moves the start earlier or re-dates an expired
+ * reservation to a later end. At check-out no later approval can follow, so
+ * those callers refuse when this clears an approval (`requestGrowthRefusal`).
  *
  * Every write that can ask for more runs this before it commits.
  *
  * @see {@link file://./booked-quantity.server.ts}
  * @see {@link file://../booking-model-request/service.server.ts}
- * @see {@link file://./service.server.ts} `extendBooking`
+ * @see {@link file://./service.server.ts} `extendBooking`, `checkoutBooking`,
+ *   `fulfilModelRequestsAndCheckout`, `addScannedAssetsToBookingWithinTx`
  */
 import { BookingStatus } from "@prisma/client";
 import type { Booking, Organization, Prisma, User } from "@prisma/client";
@@ -110,16 +113,7 @@ export async function applyRequestGrowthRule(
   // A booking already out cannot become a request again: the extra items
   // would leave without anyone approving them. Refused, with both ways out.
   if (hasStarted) {
-    throw new ShelfError({
-      cause: null,
-      title: "Approval required",
-      message:
-        "This booking has already been checked out, so it can't ask for more now. Ask someone who can approve bookings to add it, or make a new booking request for the extra items.",
-      additionalData: { bookingId, status: booking.status },
-      label: "Booking",
-      status: 400,
-      shouldBeCaptured: false,
-    });
+    throw requestGrowthRefusal({ bookingId, status: booking.status });
   }
 
   await tx.booking.updateMany({
@@ -184,5 +178,33 @@ export async function actorReservesAsRequest({
     approvalSetting:
       ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
     settings,
+  });
+}
+
+/**
+ * The refusal for a member whose own reservations need approval asking for
+ * more where an approval cannot follow: on a booking already out, or at the
+ * moment of check-out. Names both ways forward.
+ *
+ * @param args.bookingId - The booking
+ * @param args.status - Its status, for the error's data
+ * @returns The error to throw
+ */
+export function requestGrowthRefusal({
+  bookingId,
+  status,
+}: {
+  bookingId: Booking["id"];
+  status: BookingStatus;
+}): ShelfError {
+  return new ShelfError({
+    cause: null,
+    title: "Approval required",
+    message:
+      "This booking can't ask for more than was approved at check-out or once it is out. Ask someone who can approve bookings to add it, or make a new booking request for the extra items.",
+    additionalData: { bookingId, status },
+    label: "Booking",
+    status: 400,
+    shouldBeCaptured: false,
   });
 }

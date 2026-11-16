@@ -110,11 +110,14 @@ function post({
   creatorId = "someone-else",
   custodianUserId = "someone-else",
   requireExplicitCheckoutForAdmin = false,
+  reviewedVersion,
 }: {
   roles: OrganizationRoles[];
   creatorId?: string;
   custodianUserId?: string;
   requireExplicitCheckoutForAdmin?: boolean;
+  /** The request version the page showed, posted by the fulfil form. */
+  reviewedVersion?: string;
 }) {
   fulfilMock.mockResolvedValue({
     booking: { id: "booking-1", name: "Load-in", status: "ONGOING" },
@@ -140,7 +143,10 @@ function post({
         // repeated plain key collapses to a string and the schema 400s BEFORE
         // the guard, which would make the refusal assertions pass for the wrong
         // reason.
-        body: new URLSearchParams({ "assetIds[0]": "asset-1" }),
+        body: new URLSearchParams({
+          "assetIds[0]": "asset-1",
+          ...(reviewedVersion ? { reviewedVersion } : {}),
+        }),
       }
     ),
     params: { bookingId: "booking-1" },
@@ -222,6 +228,21 @@ describe("fulfil-and-checkout action", () => {
       requireExplicitCheckout: false,
     });
     expect(bookingSettingsMock).toHaveBeenCalledWith("org-1");
+  });
+
+  it("hands the service the request version the page showed, or none", async () => {
+    await post({
+      roles: [OrganizationRoles.ADMIN],
+      reviewedVersion: "v-shown",
+    });
+    expect(fulfilMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewedVersion: "v-shown" })
+    );
+
+    await post({ roles: [OrganizationRoles.ADMIN] });
+    expect(fulfilMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewedVersion: null })
+    );
   });
 
   it("records every unit the fulfil scanner sends out as scanned on the web", async () => {

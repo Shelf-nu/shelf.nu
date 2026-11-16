@@ -789,6 +789,20 @@ function restoreTeamMemberFindFirst() {
   );
 }
 
+/**
+ * A pending request as `readBookingRequestVersion` reads it. Its digest is the
+ * version an approver's page carries; any other string is a changed request.
+ */
+const PENDING_REQUEST_ROW = {
+  status: BookingStatus.RESERVED,
+  approvedAt: null,
+  updatedAt: new Date("2026-11-01T10:00:00Z"),
+  bookingAssets: [
+    { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+  ],
+  modelRequests: [],
+};
+
 describe("createBooking", () => {
   afterEach(restoreTeamMemberFindFirst);
 
@@ -5541,8 +5555,15 @@ describe("checkoutBooking", () => {
     });
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // The request as the approver's page showed it, read again under the lock.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(PENDING_REQUEST_ROW);
 
-    await checkoutBooking({ ...mockCheckoutParams, userId: "user-1" });
+    await checkoutBooking({
+      ...mockCheckoutParams,
+      userId: "user-1",
+      reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+    });
 
     expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5558,6 +5579,55 @@ describe("checkoutBooking", () => {
       expect.anything()
     );
   });
+
+  it.each([
+    ["without the request version", undefined, /not been approved yet/],
+    [
+      "with the version of a request that changed since",
+      "stale",
+      /changed since you opened it/,
+    ],
+  ])(
+    "refuses an approver's check-out of a pending request %s",
+    async (_label, reviewedVersion, message) => {
+      const { hasPermission } = await import(
+        "~/utils/permissions/permission.validator.server"
+      );
+      vitest.mocked(hasPermission).mockResolvedValue(true);
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      });
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue({
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue(PENDING_REQUEST_ROW);
+
+      await expect(
+        checkoutBooking({
+          ...mockCheckoutParams,
+          userId: "user-1",
+          reviewedVersion,
+        })
+      ).rejects.toThrow(message);
+      expect(db.booking.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+        })
+      );
+    }
+  );
 
   it("refuses a straight check-out of a draft by a member whose reservation is a request", async () => {
     // why: checking a draft out skips the reservation, so without this a
@@ -5923,6 +5993,74 @@ describe("checkoutBooking", () => {
         })
       );
     });
+
+    it.each([
+      [OrganizationRoles.SELF_SERVICE, true],
+      [OrganizationRoles.ADMIN, false],
+    ])(
+      "a %s member re-dating their approved expired reservation later is refused: %s",
+      async (role, refused) => {
+        // A new end later than the approved one asks for more time than was
+        // approved, and at check-out no later approval can follow. Someone
+        // who may approve is not held to that.
+        const booking = expiredBooking();
+        const reads = (
+          db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+        ).mockResolvedValueOnce(booking);
+        // The hydrating read only when the check-out commits: a queued value
+        // nothing consumes would leak into the next case.
+        if (!refused) {
+          reads.mockResolvedValueOnce({
+            ...booking,
+            status: BookingStatus.ONGOING,
+          });
+        }
+        //@ts-expect-error missing vitest type
+        db.booking.update.mockResolvedValue({ id: "booking-1" });
+        lockReadsReserved();
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue({
+          requireApprovalForBase: true,
+          requireApprovalForSelfService: true,
+        });
+        // The growth rule's read of the locked request: approved. Once: the
+        // reschedule reads the booking again later through its own default.
+        //@ts-expect-error missing vitest type
+        db.booking.findFirst.mockResolvedValueOnce({
+          status: BookingStatus.RESERVED,
+          approvedAt: new Date("2026-11-01T09:00:00Z"),
+        });
+        //@ts-expect-error missing vitest type
+        db.userOrganization.findUnique.mockResolvedValue({ roles: [role] });
+
+        try {
+          const checkout = checkoutBooking({
+            ...mockCheckoutParams,
+            userId: "user-1",
+            from: expiredFrom,
+            to: expiredTo,
+            intentChoice: CheckoutIntentEnum["with-new-end-date"],
+            newEndDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+          });
+          if (refused) {
+            await expect(checkout).rejects.toThrow(
+              /can't ask for more than was approved/
+            );
+            expect(statusWrite()).toBeUndefined();
+          } else {
+            await checkout;
+            expect(statusWrite()?.data?.status).toBe(BookingStatus.ONGOING);
+          }
+        } finally {
+          //@ts-expect-error missing vitest type
+          db.bookingSettings.findUnique.mockResolvedValue(null);
+          //@ts-expect-error missing vitest type
+          db.booking.findFirst.mockResolvedValue(null);
+          //@ts-expect-error missing vitest type
+          db.userOrganization.findUnique.mockResolvedValue(null);
+        }
+      }
+    );
 
     it("refuses the early-check-out value on an expired reservation", async () => {
       expect.assertions(2);
@@ -7408,6 +7546,142 @@ describe("fulfilModelRequestsAndCheckout", () => {
       db.booking.findUnique.mockResolvedValue(null);
     }
   });
+
+  /**
+   * Stages an approved (or pending) request whose scan adds `dell-1`, a unit
+   * that answers no model reservation: an extra on top of what was asked for.
+   */
+  function stageExtraScanOnRequest({
+    approvedAt,
+    reachesScan = true,
+  }: {
+    approvedAt: Date | null;
+    /** False when the case is refused before the scan reads anything. */
+    reachesScan?: boolean;
+  }) {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce({ ...buildPreTxBooking(), approvedAt });
+    // The locked row the approval gate and the growth rule read.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      ...PENDING_REQUEST_ROW,
+      approvedAt,
+    });
+    if (!reachesScan) return;
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: null,
+      },
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+  }
+
+  /** Puts the settings and booking reads back to the suite's defaults. */
+  function resetRequestReads() {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue(null);
+  }
+
+  it("refuses a requester's scanned extra on their approved request at check-out", async () => {
+    // A unit that answers no reservation asks for more than was approved, and
+    // at check-out no later approval can follow.
+    stageExtraScanOnRequest({ approvedAt: new Date("2026-11-10T09:00:00Z") });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: [OrganizationRoles.SELF_SERVICE],
+    });
+
+    try {
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+        })
+      ).rejects.toThrow(/can't ask for more than was approved/);
+      expect(hasStatusUpdate()).toBe(false);
+    } finally {
+      resetRequestReads();
+    }
+  });
+
+  it("lets an approver add a scanned extra to an approved request at check-out", async () => {
+    stageExtraScanOnRequest({ approvedAt: new Date("2026-11-10T09:00:00Z") });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    try {
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+      }).catch(() => {});
+      // The approval stays: an approver's change is not held to the rule.
+      expect(db.booking.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { approvedAt: null, approvedById: null },
+        })
+      );
+    } finally {
+      resetRequestReads();
+    }
+  });
+
+  it.each([
+    ["without the request version", undefined, /not been approved yet/],
+    [
+      "with the version of a request that changed since",
+      "stale",
+      /changed since you opened it/,
+    ],
+  ])(
+    "refuses an approver's fulfil check-out of a pending request %s",
+    async (_label, reviewedVersion, message) => {
+      const { hasPermission } = await import(
+        "~/utils/permissions/permission.validator.server"
+      );
+      vitest.mocked(hasPermission).mockResolvedValue(true);
+      stageExtraScanOnRequest({ approvedAt: null, reachesScan: false });
+
+      try {
+        await expect(
+          fulfilModelRequestsAndCheckout({
+            ...mockFulfilParams,
+            assetIds: ["dell-1"],
+            reviewedVersion,
+          })
+        ).rejects.toThrow(message);
+        // Refused before the scan adds anything.
+        expect(db.booking.update).not.toHaveBeenCalled();
+      } finally {
+        resetRequestReads();
+      }
+    }
+  );
 
   it("should create BookingAssets + drain all requests + transition to ONGOING on happy path", async () => {
     expect.assertions(3);
@@ -26961,7 +27235,14 @@ describe("assertRequestMayBeCheckedOut", () => {
       requireApprovalForBase: true,
       requireApprovalForSelfService: true,
     });
-    await expect(assertRequestMayBeCheckedOut(args)).resolves.toBeUndefined();
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(PENDING_REQUEST_ROW);
+    await expect(
+      assertRequestMayBeCheckedOut({
+        ...args,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).resolves.toEqual({ approvesRequest: true });
 
     vitest.mocked(hasPermission).mockResolvedValue(false);
     //@ts-expect-error missing vitest type
@@ -26969,6 +27250,36 @@ describe("assertRequestMayBeCheckedOut", () => {
       status: BookingStatus.RESERVED,
       approvedAt: new Date(),
     });
-    await expect(assertRequestMayBeCheckedOut(args)).resolves.toBeUndefined();
+    await expect(assertRequestMayBeCheckedOut(args)).resolves.toEqual({
+      approvesRequest: false,
+    });
   });
+
+  it.each([
+    ["without the request version", undefined, /not been approved yet/],
+    [
+      "with the version of a request that changed since",
+      "stale",
+      /changed since you opened it/,
+    ],
+  ])(
+    "refuses an approver %s, before anything is written",
+    async (_label, reviewedVersion, message) => {
+      const { hasPermission } = await import(
+        "~/utils/permissions/permission.validator.server"
+      );
+      vitest.mocked(hasPermission).mockResolvedValue(true);
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue(PENDING_REQUEST_ROW);
+
+      await expect(
+        assertRequestMayBeCheckedOut({ ...args, reviewedVersion })
+      ).rejects.toThrow(message);
+    }
+  );
 });

@@ -55,6 +55,7 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import { readReviewedVersion } from "~/modules/booking/request-version.server";
 import { getBooking } from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -348,6 +349,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // scan adds has no slice yet, so it gets the default (see
       // `recordCheckoutSourceLocations`).
       sourceLocations: parseSourceLocationsFromFormData(formData),
+      // The request version the page showed; see `checkoutBooking`.
+      reviewedVersion: readReviewedVersion(formData),
     });
 
     sendNotification({

@@ -219,6 +219,21 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     );
   });
 
+  it("hands the service the request version the screen showed", async () => {
+    await action(
+      createActionArgs({
+        request: createRequest({
+          bookingId: "booking-1",
+          assetIds: ["dell-1"],
+          requestVersion: "v-shown",
+        }),
+      })
+    );
+    expect(fulfilAndCheckOut).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewedVersion: "v-shown" })
+    );
+  });
+
   it("keeps the stored dates: the phone never asks for a new end date", async () => {
     await action(
       createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })

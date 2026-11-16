@@ -22,6 +22,7 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { ReviewedVersionField } from "~/components/booking/approval/reviewed-version-field";
 import CheckoutDialog from "~/components/booking/checkout-dialog";
 import { CheckoutSourceSelect } from "~/components/booking/checkout-source-select";
 import { Form } from "~/components/custom-form";
@@ -1442,6 +1443,7 @@ const CustomForm = ({
     >
       <div className="flex w-full gap-2 px-3 py-2">
         {/* Hidden form fields */}
+        <ReviewedVersionField />
         {assetIdsForCheckout.map((assetId, index) => (
           <input
             key={`assetIds-${assetId}`}

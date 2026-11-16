@@ -38,6 +38,7 @@
 import { AssetType, BookingStatus, type Booking } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   addScannedAssetsToBooking,
   assertRequestMayBeCheckedOut,
@@ -106,10 +107,11 @@ export async function fulfilAndCheckOut({
   // Before anything is written: the scanned-only path below commits the
   // assignment of scanned units before its check-out, so a pending request
   // the caller may not approve must be refused here, not after.
-  await assertRequestMayBeCheckedOut({
+  const { approvesRequest } = await assertRequestMayBeCheckedOut({
     bookingId: args.bookingId,
     organizationId: args.organizationId,
     actorUserId: args.userId,
+    reviewedVersion: args.reviewedVersion,
   });
 
   const scannedKits = await resolveScannedKits(args);
@@ -139,7 +141,7 @@ export async function fulfilAndCheckOut({
     }
   }
 
-  return checkOutScannedUnits(args, scannedKits, known);
+  return checkOutScannedUnits(args, scannedKits, known, approvesRequest);
 }
 
 /** The booking's status and window, as {@link readBookingStatus} reads them. */
@@ -287,7 +289,12 @@ async function readBookingStatus({
 async function checkOutScannedUnits(
   args: Omit<FulfilAndCheckOutArgs, "requireExplicitCheckout">,
   scannedKits: ScannedKits,
-  known?: BookingWindowRow
+  known?: BookingWindowRow,
+  /**
+   * The preflight found an approver checking out a pending request and
+   * compared the version they saw, before this path assigned anything.
+   */
+  approvesRequest = false
 ): Promise<FulfilAndCheckOutResult> {
   const { bookingId, organizationId, userId, assetIds, kitIds = [] } = args;
 
@@ -514,6 +521,12 @@ async function checkOutScannedUnits(
     intentChoice: args.checkoutIntentChoice,
     provenance: args.provenance,
     sourceLocations: args.sourceLocations,
+    // The approver's version was compared by the preflight before this path
+    // assigned the scanned units; the check-out compares the version as it
+    // stands after those additions of the approver's own.
+    reviewedVersion: approvesRequest
+      ? await readBookingRequestVersion(db, { bookingId, organizationId })
+      : undefined,
   });
 
   return {

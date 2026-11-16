@@ -58,7 +58,9 @@ vi.mock("~/modules/booking/utils.server", () => ({
 vi.mock("~/modules/booking/service.server", () => ({
   // why: the pending-approval preflight reads the booking and the actor's
   // permission; its own suite covers that, here only whether it refused.
-  assertRequestMayBeCheckedOut: vi.fn().mockResolvedValue(undefined),
+  assertRequestMayBeCheckedOut: vi
+    .fn()
+    .mockResolvedValue({ approvesRequest: false }),
   fulfilModelRequestsAndCheckout: vi.fn(),
   addScannedAssetsToBooking: vi.fn(),
   partialCheckoutBooking: vi.fn(),

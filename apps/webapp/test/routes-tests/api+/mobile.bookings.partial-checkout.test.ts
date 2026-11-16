@@ -200,6 +200,28 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
     }
   });
 
+  it("hands the service the request version the screen showed", async () => {
+    (partialCheckoutBooking as any).mockResolvedValue({
+      checkedOutAssetCount: 1,
+      remainingAssetCount: 1,
+      isComplete: false,
+      booking: { id: "booking-1", name: "Test Booking", status: "ONGOING" },
+    });
+
+    await action(
+      createActionArgs({
+        request: createPartialCheckoutRequest({
+          bookingId: "booking-1",
+          assetIds: [assetCuid1],
+          requestVersion: "v-shown",
+        }),
+      })
+    );
+    expect(partialCheckoutBooking).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewedVersion: "v-shown" })
+    );
+  });
+
   it("records a method the server does not know as null, and still hands the batch over", async () => {
     // "quick" is server-only, so a client declaring it is not believed. The
     // field only labels the batch, so it must not refuse a real hand-over.

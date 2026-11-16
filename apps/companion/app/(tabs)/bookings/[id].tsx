@@ -435,7 +435,8 @@ function BookingDetailScreen({ id }: { id: string }) {
           currentOrg.id,
           booking.id,
           getTimeZone(),
-          sourceLocations
+          sourceLocations,
+          booking.requestVersion
         ));
       } catch {
         err = "Something went wrong";
@@ -654,6 +655,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     const orgId = currentOrg.id;
     const bookingId = booking.id;
     const bookingName = booking.name;
+    const requestVersion = booking.requestVersion;
     await submitFromSheet({
       lock: bookingSubmitLock,
       request: () =>
@@ -665,7 +667,8 @@ function BookingDetailScreen({ id }: { id: string }) {
           checkouts.length > 0 ? checkouts : undefined,
           sourceLocations,
           // Rows ticked in this screen's list, never scanned.
-          BOOKING_METHOD.selected
+          BOOKING_METHOD.selected,
+          requestVersion
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();

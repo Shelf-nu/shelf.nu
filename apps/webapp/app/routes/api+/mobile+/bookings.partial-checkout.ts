@@ -68,9 +68,13 @@ export async function action({ request }: ActionFunctionArgs) {
       method,
       timeZone,
       sourceLocations,
+      requestVersion,
     } = await parseMobileBody(
       z.object({
         bookingId: z.string().min(1),
+        // The request version the screen showed: an approver's check-out of
+        // a pending request approves it and is refused without it.
+        requestVersion: z.string().min(1).optional(),
         // Optional: a QT-only check-out sends its quantities in `checkouts` with
         // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
         // service 400s if BOTH are empty, so we don't require a minimum here
@@ -170,6 +174,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // Never guessed: a bundle that declared no method is recorded as null.
       provenance: { surface: "phone", method: method ?? null },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
+      reviewedVersion: requestVersion,
     });
 
     return data({

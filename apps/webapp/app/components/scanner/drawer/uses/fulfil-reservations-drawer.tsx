@@ -79,6 +79,7 @@ import {
   scannedItemsAtom,
   type FulfilSessionInfo,
 } from "~/atoms/qr-scanner";
+import { ReviewedVersionField } from "~/components/booking/approval/reviewed-version-field";
 import CheckoutDialog, {
   CheckoutIntentEnum,
   REVERT_TO_DRAFT_RESCHEDULE_HINT,
@@ -1044,6 +1045,7 @@ function FulfilCheckoutForm({
       className="flex w-full"
       method="post"
     >
+      <ReviewedVersionField />
       {/* The footer is pinned, so every pixel here is one the scan list does
           not get. The remaining-units line shares the buttons' row rather than
           taking one of its own, and wraps above them only when the drawer is
