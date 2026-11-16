@@ -25,6 +25,16 @@ export type ScanSavedCheck = {
   label: string;
 };
 
+/**
+ * The check for every booking scanner: the booking page shows what was saved.
+ *
+ * @param bookingId - The booking the scanner saves into
+ * @returns The link the failure notice offers
+ */
+export function bookingSavedCheck(bookingId: string): ScanSavedCheck {
+  return { to: `/bookings/${bookingId}`, label: "Open the booking" };
+}
+
 /** What happened, in the operator's words. One line per failure kind. */
 const HEADLINES: Record<ScanSubmitFailureKind, string> = {
   timeout: "The save took too long to answer.",

@@ -87,7 +87,10 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
-import { ScanSubmitFailureAlert } from "../scan-submit-failure-alert";
+import {
+  bookingSavedCheck,
+  ScanSubmitFailureAlert,
+} from "../scan-submit-failure-alert";
 import { PendingItemsList } from "./pending-items-list";
 
 /**
@@ -1419,10 +1422,7 @@ export default function PartialCheckinDrawer({
   return (
     <DispositionContext.Provider value={dispositionCtxValue}>
       <ConfigurableDrawer
-        savedCheck={{
-          to: `/bookings/${booking.id}`,
-          label: "Open the booking",
-        }}
+        savedCheck={bookingSavedCheck(booking.id)}
         schema={partialCheckinAssetsSchema}
         items={items}
         onClearItems={clearList}
@@ -2437,10 +2437,7 @@ const CustomForm = ({
             // carries the same link to where the save can be checked.
             notice={
               <ScanSubmitFailureAlert
-                savedCheck={{
-                  to: `/bookings/${booking.id}`,
-                  label: "Open the booking",
-                }}
+                savedCheck={bookingSavedCheck(booking.id)}
               />
             }
             booking={{

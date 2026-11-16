@@ -51,6 +51,7 @@ import {
   resolveScannedUnitsAvailable,
 } from "./booking-scan-blockers";
 import { kitHasUnavailableActiveMember } from "./scan-blocker-helpers";
+import { bookingSavedCheck } from "../scan-submit-failure-alert";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToBookingSchema = z
@@ -379,7 +380,7 @@ export default function AddAssetsToBookingDrawer({
       className={className}
       style={style}
       formName="AddScannedAssetsToBooking"
-      savedCheck={{ to: `/bookings/${booking.id}`, label: "Open the booking" }}
+      savedCheck={bookingSavedCheck(booking.id)}
       headerContent={
         <AssignReservationHeader
           progressByModel={progressByModel}
