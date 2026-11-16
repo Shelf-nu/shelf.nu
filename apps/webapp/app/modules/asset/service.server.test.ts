@@ -166,10 +166,12 @@ vitest.mock("~/database/db.server", () => ({
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
-    // why: createAsset retypes the orphaned barcodes it reuses inside its
-    // create transaction, so the delegate has to exist for the tx body to run.
+    // why: createAsset retypes the orphaned barcodes it reuses, and frees the
+    // unattached ones holding a value it writes, inside its create
+    // transaction, so the delegate has to exist for the tx body to run.
     barcode: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: checkOutQuantity finds/creates/increments the operator-allocated
     // custody row; releaseQuantity finds it then deletes or decrements by
@@ -2840,6 +2842,49 @@ describe("createAsset reused barcodes", () => {
         }),
       })
     );
+  });
+
+  it("frees unattached barcodes holding a new value before creating the asset", async () => {
+    expect.assertions(3);
+
+    await createAsset({
+      title: "ZZ Test Asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [
+        { type: "Code128", value: "zz-label-1" },
+        { type: "ExternalQR", value: "zz-Label-2" },
+        // Reused by id: connected as it is, so it must not be freed.
+        { type: "Code128", value: "ZZ-KEPT-1", existingId: "bc-orphan" },
+      ],
+    } as any);
+
+    // Only this workspace's rows, only the values written as new rows
+    // (normalized per type), only rows attached to nothing.
+    expect(db.barcode.deleteMany).toHaveBeenCalledTimes(1);
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-A",
+        value: { in: ["ZZ-LABEL-1", "zz-Label-2"] },
+        assetId: null,
+        kitId: null,
+      },
+    });
+    expect(
+      vitest.mocked(db.barcode.deleteMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.create).mock.invocationCallOrder[0]);
+  });
+
+  it("frees nothing when the asset is created without barcodes", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "ZZ Test Asset",
+      userId: "user-1",
+      organizationId: "org-A",
+    } as any);
+
+    expect(db.barcode.deleteMany).not.toHaveBeenCalled();
   });
 
   it("does not touch existing barcodes when none are reused", async () => {

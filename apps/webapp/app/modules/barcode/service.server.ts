@@ -1,4 +1,11 @@
-import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
+import type {
+  Barcode,
+  Organization,
+  User,
+  Asset,
+  Kit,
+  Prisma,
+} from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { decodeCsvListCell } from "~/utils/csv-cells";
@@ -67,6 +74,71 @@ async function assertBarcodeTargetBelongsToOrg({
 }
 
 /**
+ * The slice of a Prisma client that {@link releaseUnattachedBarcodes} needs.
+ * The root client and an interactive transaction client both satisfy it.
+ */
+export type BarcodeReleaseClient = {
+  barcode: {
+    deleteMany: (args: {
+      where: {
+        organizationId: string;
+        value: { in: string[] };
+        assetId: null;
+        kitId: null;
+      };
+    }) => Prisma.PrismaPromise<Prisma.BatchPayload>;
+  };
+};
+
+/**
+ * Frees barcode values held by unattached rows, so the caller can write them.
+ *
+ * A barcode value is taken only while its row is attached to an asset or a
+ * kit. Deleting an asset or kit leaves its barcode rows behind with both
+ * links null (`onDelete: SetNull`), and those rows still occupy the
+ * `[organizationId, value]` unique index. Every write of a barcode value
+ * calls this first, in the same transaction as the write, so the next writer
+ * takes the value with the type it submitted.
+ *
+ * Only rows that are in `organizationId`, carry one of the submitted values
+ * and are attached to nothing are removed. A value held by a live asset or
+ * kit is left alone and still fails the caller's write on the unique index.
+ * Scans that recorded a removed row keep their scanned `code`; their
+ * `barcodeId` is nulled by the foreign key.
+ *
+ * Returns the query without awaiting it, so it works both awaited inside an
+ * interactive transaction and as an entry of a batch transaction.
+ *
+ * @param client - The root client or the caller's transaction client
+ * @param args.barcodes - The barcodes about to be written, as submitted
+ * @param args.organizationId - The caller's workspace
+ * @returns The pending delete of the matching unattached rows
+ */
+export function releaseUnattachedBarcodes(
+  client: BarcodeReleaseClient,
+  {
+    barcodes,
+    organizationId,
+  }: {
+    barcodes: { type: BarcodeType; value: string }[];
+    organizationId: Organization["id"];
+  }
+) {
+  return client.barcode.deleteMany({
+    where: {
+      organizationId,
+      value: {
+        in: barcodes.map(({ type, value }) =>
+          normalizeBarcodeValue(type, value)
+        ),
+      },
+      assetId: null,
+      kitId: null,
+    },
+  });
+}
+
+/**
  * Create a single barcode
  *
  * @throws {ShelfError} 400 when the target asset or kit is not in `organizationId`
@@ -95,14 +167,20 @@ export async function createBarcode({
       });
     }
 
-    const barcode = await db.barcode.create({
-      data: {
-        type,
-        value: normalizedValue, // Preserve case for ExternalQR, uppercase others
+    const barcode = await db.$transaction(async (tx) => {
+      await releaseUnattachedBarcodes(tx, {
+        barcodes: [{ type, value }],
         organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
+      });
+      return tx.barcode.create({
+        data: {
+          type,
+          value: normalizedValue, // Preserve case for ExternalQR, uppercase others
+          organizationId,
+          ...(assetId && { assetId }),
+          ...(kitId && { kitId }),
+        },
+      });
     });
     return barcode;
   } catch (cause) {
@@ -177,14 +255,17 @@ export async function createBarcodes({
     // Let Prisma handle unique constraint violations for performance
 
     // Use createMany for bulk insert performance
-    await db.barcode.createMany({
-      data: barcodes.map((barcode) => ({
-        type: barcode.type,
-        value: normalizeBarcodeValue(barcode.type, barcode.value),
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      })),
+    await db.$transaction(async (tx) => {
+      await releaseUnattachedBarcodes(tx, { barcodes, organizationId });
+      await tx.barcode.createMany({
+        data: barcodes.map((barcode) => ({
+          type: barcode.type,
+          value: normalizeBarcodeValue(barcode.type, barcode.value),
+          organizationId,
+          ...(assetId && { assetId }),
+          ...(kitId && { kitId }),
+        })),
+      });
     });
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
@@ -248,9 +329,17 @@ export async function updateBarcode({
       }
     }
 
-    const barcode = await db.barcode.update({
-      where: { id, organizationId },
-      data: updateData,
+    const barcode = await db.$transaction(async (tx) => {
+      if (type !== undefined && value !== undefined) {
+        await releaseUnattachedBarcodes(tx, {
+          barcodes: [{ type, value }],
+          organizationId,
+        });
+      }
+      return tx.barcode.update({
+        where: { id, organizationId },
+        data: updateData,
+      });
     });
     return barcode;
   } catch (cause) {
@@ -500,8 +589,19 @@ export async function replaceBarcodes({
 }
 
 /**
- * Validates that all barcode values are unique within the organization
- * Throws ShelfError with validation errors if duplicates are found
+ * Validates that no submitted barcode value is held by another asset or kit
+ * in the organization, and that none is submitted twice.
+ *
+ * Only rows attached to an asset or a kit count as holders: an unattached row
+ * is free to take (see {@link releaseUnattachedBarcodes}), so it never appears
+ * in an error. Each error names the asset or kit that holds the value.
+ *
+ * @param barcodes - The submitted barcodes, in form order
+ * @param organizationId - The caller's workspace
+ * @param currentItemId - The asset or kit being edited, whose own barcodes are
+ *   not conflicts
+ * @param relationshipType - Whether `currentItemId` is an asset or a kit
+ * @throws {ShelfError} 400 with one field error per conflicting barcode
  */
 export async function validateBarcodeUniqueness(
   barcodes: { type: BarcodeType; value: string }[],
@@ -541,6 +641,7 @@ export async function validateBarcodeUniqueness(
     where: {
       value: { in: submittedValues },
       organizationId,
+      OR: [{ assetId: { not: null } }, { kitId: { not: null } }],
     },
     include: {
       asset: { select: { title: true } },
@@ -559,26 +660,22 @@ export async function validateBarcodeUniqueness(
       })
     : existingBarcodes;
 
-  // Create a map for O(1) lookup: value -> existing barcode info
-  const existingValueMap = new Map<
-    string,
-    (typeof filteredExistingBarcodes)[0]
-  >();
+  // Map for O(1) lookup: value -> name of the asset or kit that holds it
+  const holderNameByValue = new Map<string, string>();
   filteredExistingBarcodes.forEach((barcode) => {
-    existingValueMap.set(barcode.value, barcode);
+    const holderName = barcode.asset?.title ?? barcode.kit?.name;
+    if (holderName !== undefined) {
+      holderNameByValue.set(barcode.value, holderName);
+    }
   });
 
   // Check each submitted barcode against the map
   for (let i = 0; i < barcodes.length; i++) {
     const barcode = barcodes[i];
     const normalizedValue = normalizeBarcodeValue(barcode.type, barcode.value);
-    const existingBarcode = existingValueMap.get(normalizedValue);
+    const itemName = holderNameByValue.get(normalizedValue);
 
-    if (existingBarcode) {
-      const itemName =
-        existingBarcode.asset?.title ||
-        existingBarcode.kit?.name ||
-        "Unknown item";
+    if (itemName !== undefined) {
       validationErrors[`barcodes[${i}].value`] = {
         message: `This barcode value is already used by "${itemName}"`,
       };
@@ -661,7 +758,11 @@ export async function updateBarcodes({
       (existing) => !submittedIds.has(existing.id)
     );
 
-    const operations = [];
+    const operations: Prisma.PrismaPromise<unknown>[] = [
+      // First, so a submitted value held by an unattached row is free before
+      // the updates and creates below write it.
+      releaseUnattachedBarcodes(db, { barcodes, organizationId }),
+    ];
 
     // Update existing barcodes
     for (const barcode of barcodesToUpdate) {

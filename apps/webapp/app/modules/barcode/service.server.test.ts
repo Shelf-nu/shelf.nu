@@ -52,6 +52,8 @@ function findAllRequestedIds({ where }: { where: { id: { in: string[] } } }) {
 }
 
 beforeEach(() => {
+  // Suites below replace this per test; each test starts from the default.
+  mockTransaction.mockImplementation((callback) => callback(db));
   //@ts-expect-error missing vitest type
   db.asset.findMany.mockImplementation(findAllRequestedIds);
   //@ts-expect-error missing vitest type
@@ -732,19 +734,18 @@ describe("updateBarcodes", () => {
       },
     });
 
-    // Should create one update operation and one create operation
-    expect(db.$transaction).toHaveBeenCalledWith([
-      expect.objectContaining({
-        // This would be the update operation for existing barcode
-      }),
-      expect.objectContaining({
-        // This would be the create operation for new barcode
-      }),
-    ]);
-
+    // The release of unattached rows, one update and one create
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     const transactionOperations = mockTransaction.mock.calls[0][0];
-    expect(transactionOperations).toHaveLength(2); // One update, one create
+    expect(transactionOperations).toHaveLength(3);
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        value: { in: ["UPDATED123", "NEW123"] },
+        assetId: null,
+        kitId: null,
+      },
+    });
   });
 
   it("should delete barcodes not in new list", async () => {
@@ -774,7 +775,8 @@ describe("updateBarcodes", () => {
 
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     const transactionOperations = mockTransaction.mock.calls[0][0];
-    expect(transactionOperations).toHaveLength(2); // One update, one deleteMany
+    // The release of unattached rows, one update, one deleteMany
+    expect(transactionOperations).toHaveLength(3);
   });
 
   it("should validate all barcodes before processing", async () => {
@@ -1019,6 +1021,7 @@ describe("validateBarcodeUniqueness", () => {
       where: {
         value: { in: ["UNIQUE123", "UNIQUE456"] },
         organizationId: "org-1",
+        OR: [{ assetId: { not: null } }, { kitId: { not: null } }],
       },
       include: {
         asset: { select: { title: true } },
