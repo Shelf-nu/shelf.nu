@@ -158,6 +158,33 @@ function isExpectedRouteErrorRejection(event: ErrorEvent): boolean {
 }
 
 /**
+ * Matches errors from the script a crypto wallet injects into every page
+ * (Brave's built-in wallet, MetaMask-style extensions), which sets
+ * `window.ethereum.selectedAddress` before the wallet object exists. Safari
+ * words it "evaluating 'window.ethereum.selectedAddress = undefined'",
+ * Chromium "Cannot set properties of undefined (setting 'selectedAddress')".
+ * Shelf never touches `window.ethereum`, so neither phrase comes from app code.
+ */
+const WALLET_INJECTION_PATTERN = /window\.ethereum|'selectedAddress'/;
+
+/**
+ * Whether an event is a crypto wallet's injected script failing on the page
+ * rather than an error in Shelf. Requires no first-party frame as well, so an
+ * error thrown by our own code is never dropped by its wording alone.
+ *
+ * @param event - The Sentry error event
+ * @returns `true` when the error comes from an injected wallet script
+ */
+function isWalletInjectionError(event: ErrorEvent): boolean {
+  return (
+    event.exception?.values?.some(
+      (v) =>
+        WALLET_INJECTION_PATTERN.test(v.value ?? "") && hasNoFirstPartyFrame(v)
+    ) ?? false
+  );
+}
+
+/**
  * Client `beforeSend` hook body: decides whether a captured browser error is
  * worth sending to Sentry. Returns the (unchanged) event to send it, or
  * `null` to drop it.
@@ -258,6 +285,12 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // global unhandled-rejection handler instead of the error boundary. Same
   // policy as the boundary branch below (see isExpectedRouteErrorRejection).
   if (isExpectedRouteErrorRejection(event)) {
+    return null;
+  }
+
+  // Hard-filter errors from a crypto wallet's injected script; they run in
+  // the page but are not Shelf code (see isWalletInjectionError).
+  if (isWalletInjectionError(event)) {
     return null;
   }
 

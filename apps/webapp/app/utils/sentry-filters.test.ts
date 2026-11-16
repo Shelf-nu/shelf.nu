@@ -116,6 +116,26 @@ describe("handleClientBeforeSend — noise filters", () => {
   });
 });
 
+describe("handleClientBeforeSend: crypto wallet scripts injected into the page", () => {
+  it.each([
+    "undefined is not an object (evaluating 'window.ethereum.selectedAddress = undefined')",
+    "Cannot set properties of undefined (setting 'selectedAddress')",
+  ])("drops %s", (value) => {
+    expect(
+      handleClientBeforeSend(makeEvent({ type: "TypeError", value }))
+    ).toBeNull();
+  });
+
+  it("keeps the same wording when it comes from first-party code", () => {
+    const event = makeEvent({
+      type: "TypeError",
+      value: "Cannot set properties of undefined (setting 'selectedAddress')",
+      inApp: true,
+    });
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+});
+
 describe("handleClientBeforeSend: JavaScript chunks that fail to load", () => {
   it.each([
     "Failed to fetch dynamically imported module: https://app.shelf.nu/file-assets/abc/assets._index-X1.js",
