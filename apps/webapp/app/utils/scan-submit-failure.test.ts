@@ -224,6 +224,15 @@ describe("readBulkSaveAnswer", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects an error that does not have the app's refusal shape", async () => {
+    await expect(
+      readBulkSaveAnswer(answer(502, JSON.stringify({ error: "Bad Gateway" })))
+    ).rejects.toThrow();
+    await expect(
+      readBulkSaveAnswer(answer(502, JSON.stringify({ error: null })))
+    ).rejects.toThrow();
+  });
+
   it("rejects a body that is not JSON", async () => {
     await expect(
       readBulkSaveAnswer(new Response("<html>524</html>", { status: 524 }))

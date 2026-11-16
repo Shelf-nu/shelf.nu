@@ -676,6 +676,40 @@ describe("bulk scanner: one list across its actions", () => {
       expect(readScanDraftContext(draftKey)).toBe("Assign custody");
     });
 
+    it("mirrors a restored list again after a list saved in place", () => {
+      const store = createStore();
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <StrictMode>
+          <Provider store={store}>{children}</Provider>
+        </StrictMode>
+      );
+      const otherKey = scanDraftKey("bulk", USER_ID, "scanner:org-b");
+      saveScanDraft(otherKey, { "qr-9": scanned() });
+      const { rerender } = renderHook(
+        ({ saved, targetId }: { saved: boolean; targetId: string }) => {
+          useScanDraftOnEntry({ scope: "bulk", targetId });
+          useClearScanDraftOnSave(saved);
+        },
+        { wrapper, initialProps: { saved: false, targetId: "scanner" } }
+      );
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+      rerender({ saved: true, targetId: "scanner" });
+
+      // Another workspace, whose parked list replaces the saved one.
+      rerender({ saved: false, targetId: "scanner:org-b" });
+      act(() =>
+        store.set(scannedItemsAtom, {
+          ...store.get(scannedItemsAtom),
+          "qr-10": scanned(),
+        })
+      );
+
+      expect(Object.keys(readScanDraft(otherKey) ?? {}).sort()).toEqual([
+        "qr-10",
+        "qr-9",
+      ]);
+    });
+
     it("keeps the draft while the save has not succeeded", () => {
       const store = createStore();
       renderWithSave(store);

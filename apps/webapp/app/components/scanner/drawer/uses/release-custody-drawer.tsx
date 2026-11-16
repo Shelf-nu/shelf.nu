@@ -373,10 +373,20 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     });
     // A parked list is cleared only on a confirmed answer. A list that was
     // refused, got no answer, or is still waiting (Done pressed mid-save)
-    // stays, with its draft and its unconfirmed mark; the rows of a part that
-    // saved have already left it.
+    // stays, with its draft and its unconfirmed mark. A part that already
+    // saved leaves it now, even when the other part is still waiting: its
+    // late answer is ignored from here on, and a retry must not send the
+    // saved rows again.
     if (saved) {
       clearItems();
+      return;
+    }
+    const confirmed = savedPartRows(scanList, submittedRef.current, {
+      assets: custodyState.assetStatus === "success",
+      kits: custodyState.kitStatus === "success",
+    });
+    if (confirmed.length > 0) {
+      removeRows(confirmed);
     }
   }
 

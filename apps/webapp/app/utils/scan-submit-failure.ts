@@ -199,12 +199,14 @@ export async function keepScanListOnSubmitFailure({
  * Reads the answer to a bulk scanner save sent with a plain `fetch` (the bulk
  * actions save in place, outside a route action).
  *
- * The app answers both a save and a refusal with JSON, a refusal under an
- * `error` key. Anything else is no answer: a body that is not JSON (a
- * gateway's page) makes `response.json()` reject, and a failing status whose
- * JSON has no `error` key (a gateway or proxy answering in JSON) is turned
- * into a rejection here. Either way the caller's `catch` treats it as a save
- * that may have gone through, never as a success.
+ * Only the app's own answer counts: a refusal, whatever its status, carries
+ * `error` as an object with a `message`; a save answers 2xx with no `error`
+ * (or a `null` one). Anything else is no answer: a body that is not JSON (a
+ * gateway's page) makes `response.json()` reject, and any other JSON (a
+ * gateway or proxy answering in JSON, a string `error`, a failing status
+ * without the refusal shape) is turned into a rejection here. Either way the
+ * caller's `catch` treats it as a save that may have gone through, never as a
+ * success or a refusal.
  *
  * @param response - The answer to the save request
  * @returns The app's answer: its payload, or its refusal under `error`
@@ -214,11 +216,16 @@ export async function readBulkSaveAnswer<T extends { error?: unknown }>(
   response: Response
 ): Promise<T> {
   const body = (await response.json()) as T | null;
-  const isAppAnswer =
-    body !== null &&
-    typeof body === "object" &&
-    (response.ok || "error" in body);
-  if (!isAppAnswer) {
+  if (body === null || typeof body !== "object") {
+    throw new Error(`The save got no answer from the app (${response.status})`);
+  }
+  const refusal = body.error;
+  const isRefusal =
+    typeof refusal === "object" && refusal !== null && "message" in refusal;
+  const isSave =
+    response.ok &&
+    (!("error" in body) || body.error === null || body.error === undefined);
+  if (!isRefusal && !isSave) {
     throw new Error(`The save got no answer from the app (${response.status})`);
   }
   return body;

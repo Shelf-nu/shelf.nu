@@ -360,6 +360,9 @@ export function useScanDraft({
     // server again and a list parked overnight comes back current.
     const draft = draftKey ? readScanDraft(draftKey) : null;
     if (draft && draftKey) {
+      // The restored list replaces whatever was on screen, including a list
+      // just saved in place, so it is mirrored again from here.
+      savedInPlaceRef.current = false;
       const { quantities, sources } = readScanDraftChoices(draftKey);
       setScannedQuantities(quantities);
       setScannedSources(sources);

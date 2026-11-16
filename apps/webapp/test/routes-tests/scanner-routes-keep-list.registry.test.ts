@@ -199,8 +199,13 @@ describe("scanner routes keep a draft of their list", () => {
     "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
     "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
   ])("%s takes only the saved part out of the list", (file) => {
-    expect(read(file)).toMatch(
+    const source = read(file);
+    expect(source).toMatch(
       /if \(answer !== "saved"\) \{\s*const confirmed = savedPartRows\(/
+    );
+    // Also when Done is pressed while the other part is still waiting.
+    expect(source).toMatch(
+      /clearItems\(\);\s*return;\s*\}\s*const confirmed = savedPartRows\(/
     );
   });
 
