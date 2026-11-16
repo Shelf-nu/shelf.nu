@@ -50,6 +50,39 @@ type DraftEntry = {
 type StoredDraft = {
   savedAt: number;
   entries: Record<string, DraftEntry>;
+  /**
+   * What the operator was doing with the list when it was parked (on the bulk
+   * scanner, which action). Kept inside the draft, so it is written, expired
+   * and removed together with the list it belongs to.
+   */
+  context?: string;
+  /** Units entered per quantity-tracked asset, keyed by asset id. */
+  quantities?: Record<string, number>;
+  /** "From location" picked per pool, keyed by asset id. */
+  sources?: Record<string, string>;
+};
+
+/**
+ * What the operator set on the rows beyond the codes themselves. Both maps are
+ * keyed by asset id, like the atoms they come from, so they apply again as soon
+ * as a restored row resolves to its asset. Without them a restored list would
+ * look complete while each row fell back to its default (one unit, the
+ * pre-selected location), and a confirm could move the wrong units.
+ */
+export type ScanDraftChoices = {
+  quantities: Record<string, number>;
+  sources: Record<string, string>;
+};
+
+/** Everything a draft keeps besides its codes. See {@link saveScanDraft}. */
+export type ScanDraftExtras = {
+  /**
+   * What the operator is doing with the list, handed back by
+   * {@link readScanDraftContext}.
+   */
+  context?: string | null;
+  /** The per-row choices, handed back by {@link readScanDraftChoices}. */
+  choices?: ScanDraftChoices;
 };
 
 /**
@@ -101,8 +134,14 @@ function isSyntheticKey(key: string): boolean {
  *
  * @param key - From {@link scanDraftKey}.
  * @param items - The current scan list.
+ * @param extras - Context and per-row choices, written with every save so a
+ *   list that is emptied and refilled still carries them.
  */
-export function saveScanDraft(key: string, items: ScanListItems): void {
+export function saveScanDraft(
+  key: string,
+  items: ScanListItems,
+  { context, choices }: ScanDraftExtras = {}
+): void {
   const entries: Record<string, DraftEntry> = {};
 
   for (const [code, item] of Object.entries(items)) {
@@ -127,7 +166,17 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
     return;
   }
 
-  const draft: StoredDraft = { savedAt: Date.now(), entries };
+  const draft: StoredDraft = {
+    savedAt: Date.now(),
+    entries,
+    ...(context ? { context } : {}),
+    ...(choices && Object.keys(choices.quantities).length > 0
+      ? { quantities: choices.quantities }
+      : {}),
+    ...(choices && Object.keys(choices.sources).length > 0
+      ? { sources: choices.sources }
+      : {}),
+  };
 
   try {
     localStorage.setItem(key, JSON.stringify(draft));
@@ -138,16 +187,15 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
 }
 
 /**
- * Reads a draft back as scan-list entries, or `null` when there is nothing
- * worth restoring.
+ * Reads the stored draft, or `null` when there is none worth using.
  *
- * Entries carry no `data`, so each row re-resolves against the server on mount.
- * An expired or unreadable draft is removed rather than returned.
+ * An expired, unreadable or malformed draft is removed rather than returned,
+ * so nothing stored with it (its context included) outlives the expiry.
  *
  * @param key - From {@link scanDraftKey}.
- * @returns Scan-list entries ready to seed the atom, or `null`.
+ * @returns The stored draft, or `null`.
  */
-export function readScanDraft(key: string): ScanListItems | null {
+function readStoredDraft(key: string): StoredDraft | null {
   let raw: string | null = null;
 
   try {
@@ -183,6 +231,25 @@ export function readScanDraft(key: string): ScanListItems | null {
     return null;
   }
 
+  return draft;
+}
+
+/**
+ * Reads a draft back as scan-list entries, or `null` when there is nothing
+ * worth restoring.
+ *
+ * Entries carry no `data`, so each row re-resolves against the server on mount.
+ * An expired or unreadable draft is removed rather than returned.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns Scan-list entries ready to seed the atom, or `null`.
+ */
+export function readScanDraft(key: string): ScanListItems | null {
+  const draft = readStoredDraft(key);
+  if (!draft) {
+    return null;
+  }
+
   const restored: ScanListItems = {};
   for (const [code, entry] of Object.entries(draft.entries)) {
     if (isSyntheticKey(code)) {
@@ -195,8 +262,54 @@ export function readScanDraft(key: string): ScanListItems | null {
 }
 
 /**
- * Removes a draft. Called once its scans have been submitted, so returning to
- * the scanner does not offer work that is already done.
+ * Reads the context saved with a draft: what the operator was doing with the
+ * list when it was parked.
+ *
+ * It lives inside the draft, so it is `null` whenever the draft is gone,
+ * expired or unreadable.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns The saved value, or `null` when none was saved
+ */
+export function readScanDraftContext(key: string): string | null {
+  const context = readStoredDraft(key)?.context;
+  return typeof context === "string" && context ? context : null;
+}
+
+/**
+ * Reads the per-row choices saved with a draft. Values of the wrong shape are
+ * left out, so a damaged entry falls back to the row's default.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns The saved choices, empty when the draft has none or is gone
+ */
+export function readScanDraftChoices(key: string): ScanDraftChoices {
+  const draft = readStoredDraft(key);
+  const quantities: Record<string, number> = {};
+  const sources: Record<string, string> = {};
+
+  if (draft?.quantities && typeof draft.quantities === "object") {
+    for (const [assetId, quantity] of Object.entries(draft.quantities)) {
+      if (Number.isInteger(quantity) && quantity >= 1) {
+        quantities[assetId] = quantity;
+      }
+    }
+  }
+  if (draft?.sources && typeof draft.sources === "object") {
+    for (const [assetId, source] of Object.entries(draft.sources)) {
+      if (typeof source === "string" && source) {
+        sources[assetId] = source;
+      }
+    }
+  }
+
+  return { quantities, sources };
+}
+
+/**
+ * Removes a draft, and the context saved with it. Called once its scans have
+ * been saved, so returning to the scanner does not offer work that is already
+ * done.
  *
  * @param key - From {@link scanDraftKey}.
  */
@@ -205,47 +318,5 @@ export function clearScanDraft(key: string): void {
     localStorage.removeItem(key);
   } catch {
     // See `saveScanDraft`.
-  }
-}
-
-/** Where a draft's context is kept: beside the draft, under its own key. */
-function contextKey(key: string): string {
-  return `${key}:context`;
-}
-
-/**
- * Remembers one piece of context for a draft: what the operator was doing
- * with the list when it was parked (on the bulk scanner, which action).
- *
- * It is kept on its own, not removed with the draft. A draft is emptied and
- * refilled many times while one list is being scanned (it holds nothing
- * until the first code resolves), and losing the context each time would
- * leave a list with no way back to where it belongs. On its own it means
- * nothing: {@link readScanDraftContext} is only worth calling for a draft
- * that {@link readScanDraft} has just returned, which is what enforces the
- * expiry.
- *
- * @param key - From {@link scanDraftKey}.
- * @param context - The value to put back with the list.
- */
-export function saveScanDraftContext(key: string, context: string): void {
-  try {
-    localStorage.setItem(contextKey(key), context);
-  } catch {
-    // See `saveScanDraft`.
-  }
-}
-
-/**
- * Reads the context saved with a draft.
- *
- * @param key - From {@link scanDraftKey}.
- * @returns The saved value, or `null` when none was saved
- */
-export function readScanDraftContext(key: string): string | null {
-  try {
-    return localStorage.getItem(contextKey(key));
-  } catch {
-    return null;
   }
 }

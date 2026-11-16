@@ -27,6 +27,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useClearScanDraftOnSave } from "~/hooks/use-scan-draft";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
@@ -200,6 +201,11 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   });
 
   const clearItems = useSetAtom(clearScannedItemsAtom);
+
+  // The list stays on screen under the result until the dialog is closed.
+  // Once the whole list has saved its draft goes, so a reload before then
+  // does not bring back scans that are already saved.
+  useClearScanDraftOnSave(locationState.status === "success");
 
   function cleanupState() {
     setLocationState({

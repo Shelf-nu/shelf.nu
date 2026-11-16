@@ -13,6 +13,8 @@ import {
 import {
   clearScanDraft,
   readScanDraft,
+  readScanDraftChoices,
+  readScanDraftContext,
   saveScanDraft,
   scanDraftKey,
 } from "./scan-draft";
@@ -299,5 +301,100 @@ describe("clearScanDraft", () => {
     clearScanDraft(KEY);
 
     expect(readScanDraft(KEY)).toBeNull();
+  });
+
+  it("removes the context saved with it, leaving nothing behind", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+    clearScanDraft(KEY);
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+    expect(
+      Object.keys(localStorage).filter((key) => key.startsWith(KEY))
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The context (on the bulk scanner, the action a list was parked under) is
+ * stored inside the draft, so it lives, expires and goes with its list.
+ */
+describe("draft context", () => {
+  it("round-trips with the draft", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+
+    expect(readScanDraftContext(KEY)).toBe("Assign custody");
+  });
+
+  it("is gone once the list is emptied", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+    saveScanDraft(KEY, {}, { context: "Assign custody" });
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+  });
+
+  it("expires with its draft", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T08:00:00Z"));
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+
+    vi.setSystemTime(new Date("2026-01-02T08:00:00Z"));
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("is null when none was saved", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+  });
+});
+
+/**
+ * The units and source locations set on the rows are kept with the codes, so
+ * a restored list is not one that looks complete while every row has fallen
+ * back to its default.
+ */
+describe("draft choices", () => {
+  const choices = {
+    quantities: { "pool-1": 3 },
+    sources: { "pool-1": "loc-2" },
+  };
+
+  it("round-trips the quantities and sources set on the rows", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+
+    expect(readScanDraftChoices(KEY)).toEqual(choices);
+  });
+
+  it("goes with the draft when the list is emptied", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+    saveScanDraft(KEY, {}, { choices });
+
+    expect(readScanDraftChoices(KEY)).toEqual({ quantities: {}, sources: {} });
+  });
+
+  it("goes with the draft when it is cleared", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+    clearScanDraft(KEY);
+
+    expect(readScanDraftChoices(KEY)).toEqual({ quantities: {}, sources: {} });
+  });
+
+  it("leaves out values of the wrong shape, so the row falls back to its default", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        savedAt: Date.now(),
+        entries: { "qr-1": { codeType: "qr" } },
+        quantities: { a: 2, b: 0, c: 1.5, d: "4" },
+        sources: { a: "loc-1", b: "", c: 7 },
+      })
+    );
+
+    expect(readScanDraftChoices(KEY)).toEqual({
+      quantities: { a: 2 },
+      sources: { a: "loc-1" },
+    });
   });
 });

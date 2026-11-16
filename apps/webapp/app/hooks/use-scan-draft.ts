@@ -18,19 +18,70 @@
  * @see {@link file://./use-booking-checkin-session-initialization.ts}
  */
 import type { RefObject } from "react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { useAtomValue, useSetAtom, useStore } from "jotai";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
 import { useLocation, useNavigation } from "react-router";
-import { scannedItemsAtom } from "~/atoms/qr-scanner";
+import {
+  scannedAssetQuantitiesAtom,
+  scannedAssetSourcesAtom,
+  scannedItemsAtom,
+} from "~/atoms/qr-scanner";
 import { useUserData } from "~/hooks/use-user-data";
 import {
   clearScanDraft,
   readScanDraft,
+  readScanDraftChoices,
   readScanDraftContext,
   saveScanDraft,
-  saveScanDraftContext,
   scanDraftKey,
 } from "~/utils/scan-draft";
+
+/**
+ * Where the auth middleware sends a request whose session has ended. A save
+ * that lands here was never run: the middleware turned it away before the
+ * route's action, so its draft is the only copy of the list left.
+ */
+const SIGN_IN_PATH = "/login";
+
+/**
+ * Raised by a scanner that saves in place, without navigating, once its save
+ * has succeeded. {@link useScanDraft} answers by removing the draft, and the
+ * flag goes back down as soon as it has been read.
+ */
+const scanListSavedInPlaceAtom = atom(false);
+
+/**
+ * Whether a save sent in parts (assets and kits go to separate endpoints) has
+ * fully succeeded: every part saved or had nothing to send, and at least one
+ * part saved.
+ *
+ * @param statuses - Each part's status, e.g. `["success", "skipped"]`
+ * @returns `true` only when the whole list is saved
+ */
+export function allPartsSaved(statuses: readonly string[]): boolean {
+  return (
+    statuses.every((status) => status === "success" || status === "skipped") &&
+    statuses.some((status) => status === "success")
+  );
+}
+
+/**
+ * Tells the scan draft that the list on screen has been saved, for a scanner
+ * whose save stays on the page (the bulk actions show the result in a dialog
+ * and empty the list only when it is closed). Without this, a reload while
+ * the result is still on screen would bring back a list that already saved.
+ *
+ * @param saved - `true` once the save has fully succeeded. Nothing happens
+ *   while it is `false`, so a refused or partly failed save keeps its draft.
+ */
+export function useClearScanDraftOnSave(saved: boolean): void {
+  const setSavedInPlace = useSetAtom(scanListSavedInPlaceAtom);
+  useEffect(() => {
+    if (saved) {
+      setSavedInPlace(true);
+    }
+  }, [saved, setSavedInPlace]);
+}
 
 /** Arguments for {@link useScanDraft}. */
 type UseScanDraftArgs = {
@@ -47,6 +98,11 @@ type UseScanDraftArgs = {
    * that the atom still holds whatever the previous flow left behind.
    */
   seededTargetIdRef: RefObject<string | null>;
+  /**
+   * Stored with the draft on every save and handed back by
+   * `readScanDraftContext`. See {@link useScanDraftOnEntry}.
+   */
+  context?: string | null;
 };
 
 /**
@@ -55,8 +111,12 @@ type UseScanDraftArgs = {
  * - Mirrors `scannedItemsAtom` into the draft as it changes, once the caller
  *   has seeded its session. An emptied list removes the draft.
  * - Removes the draft when a submission is accepted, which is the one that
- *   navigates away. A submission that stays on the page (refused, or never
- *   answered) keeps its draft.
+ *   navigates away to a page of the app. A submission that stays on the page
+ *   (refused, or never answered), or that the auth middleware sends to the
+ *   sign-in page (it never ran), keeps its draft.
+ * - Removes the draft when a scanner that saves in place says its save
+ *   succeeded ({@link useClearScanDraftOnSave}), and stores nothing more until
+ *   that list has been emptied.
  *
  * The draft is keyed by the signed-in user as well as the target, because the
  * storage belongs to the browser: a shared terminal would otherwise hand one
@@ -73,12 +133,19 @@ export function useScanDraft({
   scope,
   targetId,
   seededTargetIdRef,
+  context = null,
 }: UseScanDraftArgs): {
   restoreDraft: () => boolean;
   draftKey: string | null;
 } {
   const scannedItems = useAtomValue(scannedItemsAtom);
   const setScannedItems = useSetAtom(scannedItemsAtom);
+  // The units and source locations set on the rows. Kept with the codes, so
+  // a restored row is put back as the operator left it.
+  const scannedQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  const setScannedQuantities = useSetAtom(scannedAssetQuantitiesAtom);
+  const scannedSources = useAtomValue(scannedAssetSourcesAtom);
+  const setScannedSources = useSetAtom(scannedAssetSourcesAtom);
   const store = useStore();
 
   const navigation = useNavigation();
@@ -96,6 +163,13 @@ export function useScanDraft({
   // offer work that has already been saved.
   const acceptedSubmitRef = useRef(false);
 
+  // Set once a scanner that saves in place reports success. Its list stays on
+  // screen under the result until the operator dismisses it, and mirroring
+  // that list would put the saved scans straight back. Lowered when the list
+  // is emptied, so the next list on the same page is kept again.
+  const savedInPlaceRef = useRef(false);
+  const [savedInPlace, setSavedInPlace] = useAtom(scanListSavedInPlaceAtom);
+
   const restoreDraft = useCallback(() => {
     // A newly seeded target is a new list to keep. The flag stays set for
     // late resolutions belonging to the target that was just submitted,
@@ -105,11 +179,14 @@ export function useScanDraft({
     // Restored entries carry no `data`, so each row resolves against the
     // server again and a list parked overnight comes back current.
     const draft = draftKey ? readScanDraft(draftKey) : null;
-    if (draft) {
+    if (draft && draftKey) {
+      const { quantities, sources } = readScanDraftChoices(draftKey);
+      setScannedQuantities(quantities);
+      setScannedSources(sources);
       setScannedItems(draft);
     }
     return draft !== null;
-  }, [draftKey, setScannedItems]);
+  }, [draftKey, setScannedItems, setScannedQuantities, setScannedSources]);
 
   useEffect(() => {
     if (seededTargetIdRef.current !== targetId) {
@@ -124,17 +201,57 @@ export function useScanDraft({
     // entry clear produces, or whatever the last flow left behind. Saving that
     // would wipe the draft the seed restores from, and React's development
     // double-mount makes the loss permanent. The store holds the current list.
-    saveScanDraft(draftKey, store.get(scannedItemsAtom));
-  }, [scannedItems, draftKey, targetId, seededTargetIdRef, store]);
+    const current = store.get(scannedItemsAtom);
+    if (savedInPlaceRef.current) {
+      if (Object.keys(current).length > 0) {
+        return;
+      }
+      savedInPlaceRef.current = false;
+    }
+    saveScanDraft(draftKey, current, {
+      context,
+      choices: {
+        quantities: store.get(scannedAssetQuantitiesAtom),
+        sources: store.get(scannedAssetSourcesAtom),
+      },
+    });
+  }, [
+    scannedItems,
+    scannedQuantities,
+    scannedSources,
+    draftKey,
+    targetId,
+    seededTargetIdRef,
+    store,
+    context,
+  ]);
+
+  // A scanner that saves in place said its save went through.
+  useEffect(() => {
+    if (!savedInPlace) {
+      return;
+    }
+    setSavedInPlace(false);
+    if (!draftKey) {
+      return;
+    }
+    savedInPlaceRef.current = true;
+    clearScanDraft(draftKey);
+  }, [savedInPlace, setSavedInPlace, draftKey]);
 
   // A submission that navigates away is one the action accepted: these scans
-  // are saved, so the draft must not offer them again.
+  // are saved, so the draft must not offer them again. Every scanner action
+  // redirects only on success, and answers a refusal on the page. The one
+  // other redirect is the auth middleware's, to the sign-in page, when the
+  // session ended: the action never ran, and after signing back in the
+  // operator lands on the scanner again, where the draft puts the list back.
   useEffect(() => {
     const submittedAway =
       navigation.state === "loading" &&
       navigation.formMethod?.toUpperCase() === "POST" &&
       navigation.location !== undefined &&
-      navigation.location.pathname !== location.pathname;
+      navigation.location.pathname !== location.pathname &&
+      navigation.location.pathname !== SIGN_IN_PATH;
 
     if (submittedAway && draftKey) {
       acceptedSubmitRef.current = true;
@@ -188,10 +305,21 @@ export function useScanDraftOnEntry({
   // before that, so the list as it was on arrival cannot overwrite the draft.
   const restoredTargetIdRef = useRef<string | null>(null);
 
+  // The mode last worked in that shows a list. A `null` context (a mode with
+  // no list) leaves it in place: that is the one to go back to. Stored with
+  // every save of the draft, so it lives and expires with the list.
+  const [listContext, setListContext] = useState<string | null>(context);
+  useEffect(() => {
+    if (context) {
+      setListContext(context);
+    }
+  }, [context]);
+
   const { restoreDraft, draftKey } = useScanDraft({
     scope,
     targetId,
     seededTargetIdRef: restoredTargetIdRef,
+    context: listContext,
   });
 
   // Read through a ref so a caller's inline callback does not re-run the
@@ -207,16 +335,13 @@ export function useScanDraftOnEntry({
     }
     restoredTargetIdRef.current = targetId;
     if (restoreDraft() && draftKey) {
-      onRestoreRef.current?.(readScanDraftContext(draftKey));
+      const parkedContext = readScanDraftContext(draftKey);
+      // Kept until the caller switches to a mode of its own, so the next save
+      // does not drop it.
+      if (parkedContext) {
+        setListContext(parkedContext);
+      }
+      onRestoreRef.current?.(parkedContext);
     }
   }, [targetId, restoreDraft, draftKey]);
-
-  // Remember the mode the operator last chose. A `null` context (a mode with
-  // no list) leaves the last one in place: that is the one to go back to.
-  useEffect(() => {
-    if (restoredTargetIdRef.current !== targetId || !draftKey || !context) {
-      return;
-    }
-    saveScanDraftContext(draftKey, context);
-  }, [context, draftKey, targetId]);
 }
