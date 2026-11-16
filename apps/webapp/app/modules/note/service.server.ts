@@ -134,6 +134,9 @@ export async function createNote(
 /**
  * Creates multiple notes with the same content.
  *
+ * A thin wrapper over {@link createNotesPerAsset}, which owns the ownership
+ * check, the insert and the error wrapping. An empty `assetIds` writes nothing.
+ *
  * `organizationId` is required and validated: every target asset must belong
  * to that organization before the notes are written (cross-org IDOR guard).
  *
@@ -159,20 +162,73 @@ export async function createNotes(
   },
   tx?: NotesTxClient
 ) {
+  // One implementation for both shapes: the ownership check, the insert and
+  // the error wrapping live in `createNotesPerAsset`.
+  return createNotesPerAsset(
+    {
+      notes: assetIds.map((assetId) => ({ assetId, content })),
+      type,
+      userId,
+      organizationId,
+    },
+    tx
+  );
+}
+
+/**
+ * Creates one note per asset, each with its own content, in a single insert.
+ *
+ * Use this instead of calling {@link createNotes} in a loop when the wording
+ * differs per asset (a unit count, the kit an asset arrived through). A loop
+ * costs one ownership check and one insert per asset, awaited in sequence, so
+ * a scan of fifty assets becomes a hundred round trips. This is one check over
+ * every asset and one insert, whatever the size of the batch.
+ *
+ * `organizationId` is required and validated: every target asset must belong
+ * to that organization before any note is written (cross-org IDOR guard).
+ *
+ * @param params.notes - The asset each note belongs to and its content
+ * @param params.type - Note type, `COMMENT` when omitted
+ * @param params.userId - The author the notes are attributed to
+ * @param params.organizationId - Caller's validated organization ID
+ * @param tx - Optional Prisma transaction client, so the guard and the write
+ *   commit with the surrounding mutation. Defaults to the global `db`.
+ * @returns The `createMany` result, or `{ count: 0 }` for an empty batch
+ * @throws {ShelfError} 400 if any asset is not in `organizationId`
+ */
+export async function createNotesPerAsset(
+  {
+    notes,
+    type,
+    userId,
+    organizationId,
+  }: {
+    notes: Array<{ assetId: Asset["id"]; content: Note["content"] }>;
+    type?: Note["type"];
+    userId: User["id"];
+    organizationId: string;
+  },
+  tx?: NotesTxClient
+) {
+  if (notes.length === 0) {
+    return { count: 0 };
+  }
+
+  // The guard dedupes: an asset can carry more than one note in a batch.
+  const assetIds = notes.map((note) => note.assetId);
+
   try {
     const client = tx ?? db;
 
     await assertAssetsBelongToOrg({ assetIds, organizationId }, tx);
 
-    const data = assetIds.map((id) => ({
-      content,
-      type: type || "COMMENT",
-      userId,
-      assetId: id,
-    }));
-
     return await client.note.createMany({
-      data,
+      data: notes.map((note) => ({
+        content: note.content,
+        type: type || "COMMENT",
+        userId,
+        assetId: note.assetId,
+      })),
     });
   } catch (cause) {
     throw new ShelfError({

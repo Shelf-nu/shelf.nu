@@ -3,7 +3,9 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import {
   clearSelectedBulkItemsAtom,
+  selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
+  selectionIsFormStateAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
@@ -12,6 +14,7 @@ import { PartialCheckboxIcon } from "~/components/icons/library";
 import { Th } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import type { ListItemData } from "../list-item";
 
@@ -46,6 +49,16 @@ type BulkListHeaderProps = ThHTMLAttributes<HTMLTableCellElement> & {
   items?: ListItemData[];
 };
 
+/**
+ * The select-page checkbox in a list's header row.
+ *
+ * Ticked when every row on screen is selected or "Select all" is on (outside
+ * form-state screens), partial when some are, empty otherwise. Clicking it
+ * clears a full selection and otherwise selects the rows on screen.
+ *
+ * @param props - The rows on screen (or a getter over the loader data)
+ * @returns The `<th>` holding the checkbox
+ */
 export default function BulkListHeader({
   itemsGetter,
   items: itemsProp,
@@ -63,14 +76,24 @@ export default function BulkListHeader({
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const totalItemsSelected = useAtomValue(selectedBulkItemsCountAtom);
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const selectionIsFormState = useAtomValue(selectionIsFormStateAtom);
 
-  const partialItemsSelected =
-    totalItemsSelected > 0 && totalItemsSelected < items.length;
+  // "Select all" ticks every row matching the filters, on every page, while
+  // listing only the rows of the page it was clicked on. Under the marker the
+  // header reads ticked, as the rows do (see BulkListItemCheckbox). On
+  // manage-* screens the rows tick only when listed, so there the header
+  // keeps the count rule below.
+  const selectingAll =
+    !selectionIsFormState && isSelectingAllItems(selectedBulkItems);
 
-  const allItemsSelected = totalItemsSelected >= items.length;
+  const allItemsSelected = selectingAll || totalItemsSelected >= items.length;
+
+  const partialItemsSelected = !allItemsSelected && totalItemsSelected > 0;
 
   const clearSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
 
+  /** Clears a full selection, otherwise selects every row on screen. */
   function handleSelectAllIncomingItems() {
     if (allItemsSelected) {
       clearSelectedItems();

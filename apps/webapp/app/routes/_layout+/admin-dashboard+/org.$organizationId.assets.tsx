@@ -50,6 +50,7 @@ export const loader = async ({
       // Shelf staff route, gated by `requireAdmin` above — and it renders the
       // custodian filter, so the seed must not be scoped to one person.
       canSeeAllCustody: true,
+      custodySearchScope: "all",
     });
 
     // Synchronous — no DB call. Booking custodian data is already included

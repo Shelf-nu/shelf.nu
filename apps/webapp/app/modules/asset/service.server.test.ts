@@ -4594,6 +4594,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
 
   const checkOut = () =>
     bulkCheckOutAssets({
+      custodySearchScope: "all",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       allowedTeamMemberIds: "all" as const,
@@ -4608,6 +4609,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
 
   const checkIn = () =>
     bulkCheckInAssets({
+      custodySearchScope: "all",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       allowedTeamMemberIds: "all" as const,
@@ -4922,6 +4924,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let caught: unknown;
     try {
       await bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -4971,6 +4974,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
 
     await expect(
       bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -5016,6 +5020,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -5057,6 +5062,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -5098,6 +5104,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -5687,6 +5694,7 @@ describe("bulkUpdateAssetModel", () => {
       // `asset: update` is ADMIN/OWNER-only, so this bulk path declares that
       // the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       // The caller's access reaches the resolver unchanged, so a select-all
       // over a last audit date filter works for those allowed to see it.
       lastAuditDateAccess: "available",
@@ -6126,6 +6134,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
 
     await expect(
       bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -6208,6 +6217,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
 
     await expect(
       bulkCheckOutAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         allowedTeamMemberIds: "all" as const,
@@ -6229,6 +6239,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // is the client's cue to refresh, not a server fault. `shouldBeCaptured`
     // is false for the same reason — this must not page anyone.
     const caught = await bulkCheckOutAssets({
+      custodySearchScope: "all",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       allowedTeamMemberIds: "all" as const,
@@ -6253,6 +6264,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // Downstream note/event stubs may be incomplete; all this asserts is that
     // the gate itself did not fire and custody insertion was reached.
     await bulkCheckOutAssets({
+      custodySearchScope: "all",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       allowedTeamMemberIds: "all" as const,
@@ -6889,6 +6901,7 @@ describe("getAssets low-stock filter", () => {
 
   const base = {
     organizationId: "org_1",
+    custodySearchScope: "all" as const,
     page: 1,
     perPage: 20,
     orderBy: "createdAt" as const,
@@ -6933,6 +6946,7 @@ describe("getAssets search via UNION", () => {
 
   const base = {
     organizationId: "org_1",
+    custodySearchScope: "all" as const,
     page: 1,
     perPage: 20,
     orderBy: "createdAt" as const,
@@ -6950,6 +6964,23 @@ describe("getAssets search via UNION", () => {
     expect(where.OR).toBeUndefined();
     // exactly one fetch, no fallback re-query
     expect(findManyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches custodian names only on the viewer's own custody when they may not see all custody", async () => {
+    await getAssets({
+      ...base,
+      custodySearchScope: { userId: "viewer_1" },
+      search: "chair",
+    });
+    const sql = queryRawMock.mock.calls[0][0] as Prisma.Sql;
+    expect(sql.sql).toContain('tm."userId" = ?');
+    expect(sql.values).toContain("viewer_1");
+  });
+
+  it("matches every custodian's name for a viewer who sees all custody", async () => {
+    await getAssets({ ...base, search: "chair" });
+    const sql = queryRawMock.mock.calls[0][0] as Prisma.Sql;
+    expect(sql.sql).not.toContain('tm."userId" = ?');
   });
 
   it("does not run the UNION when there is no search term", async () => {
@@ -7073,6 +7104,7 @@ describe("getAssets filter groups without a search", () => {
 
   const base = {
     organizationId: "org_1",
+    custodySearchScope: "all" as const,
     page: 1,
     perPage: 20,
     orderBy: "createdAt" as const,
@@ -8559,6 +8591,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     // the guard below can see it, and by then the evidence is gone — nothing
     // downstream can tell the two cases apart.
     await bulkCheckInAssets({
+      custodySearchScope: "all",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       userId: "user-1",
@@ -8581,6 +8614,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
 
     await expect(
       bulkCheckInAssets({
+        custodySearchScope: "all",
         lastAuditDateAccess: "hidden",
         bookableScope: null,
         userId: "user-1",
@@ -8622,6 +8656,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     });
 
     await bulkCheckOutAssets({
+      custodySearchScope: "all",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       allowedTeamMemberIds: "all" as const,
@@ -8944,6 +8979,7 @@ describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () =>
     args: Partial<Parameters<typeof getAdvancedPaginatedAndFilterableAssets>[0]>
   ) {
     await getAdvancedPaginatedAndFilterableAssets({
+      custodySearchScope: "all",
       request: new Request("http://localhost/assets"),
       organizationId: "org-1",
       settings: settingsWith(true),
@@ -9014,6 +9050,7 @@ describe("getAdvancedPaginatedAndFilterableAssets - unknown filter value", () =>
     };
 
     const error = await getAdvancedPaginatedAndFilterableAssets({
+      custodySearchScope: "all",
       request: new Request("http://localhost/assets"),
       organizationId: "org-1",
       settings: { ...ASSET_INDEX_SETTINGS, mode: "ADVANCED" },

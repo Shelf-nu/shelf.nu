@@ -22,6 +22,9 @@
  * - `"archived"` on the scan-list routes (bulk custody, bulk location, scan to
  *   a booking), with `archivedAssetIds`: the requested assets refused because
  *   they are archived, so the app can mark exactly those rows.
+ * - `"workspace_inactive"` on the scan lookups (qr, get-scanned-item,
+ *   barcode), with the 403 for a code whose workspace is inactive, so the
+ *   scanner can title it "Workspace Inactive".
  */
 export type ApiErrorDetails = {
   message: string;

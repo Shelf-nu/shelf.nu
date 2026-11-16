@@ -1,13 +1,17 @@
 import { useWindowDimensions } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import type { ReactNode } from "react";
 import NoWorkspaceScreen from "@/components/no-workspace-screen";
+import InactiveWorkspaceScreen from "@/components/inactive-workspace-screen";
 import { contentColumnLayout } from "@/components/content-column";
 import { useAuth } from "@/lib/auth-context";
+import { TAB_WITHOUT_BUTTON } from "@/lib/tab-without-button";
 import { useTheme } from "@/lib/theme-context";
 import { useOrg } from "@/lib/org-context";
 import { fontSize } from "@/lib/constants";
 import { showsTabSidebar } from "@/lib/content-column";
+import { tabShowsInactiveScreen } from "@/lib/workspace-access";
 
 /**
  * Holds the tabs that are single screens in the content column on wide
@@ -15,9 +19,47 @@ import { showsTabSidebar } from "@/lib/content-column";
  * column to their own screens (wrapping them here would squeeze their headers
  * too), and the scanner's camera uses the whole window.
  */
-const TAB_SCREEN_LAYOUT = contentColumnLayout({
+const COLUMN_LAYOUT = contentColumnLayout({
   only: ["home", "custody"],
 });
+
+/** Tabs that draw a header of their own above the screen. */
+const TABS_WITH_HEADER: ReadonlySet<string> = new Set(["home", "custody"]);
+
+/**
+ * Shows the inactive-workspace screen in place of a tab while the open
+ * workspace is inactive, so no tab shows its own generic error for it.
+ *
+ * @param props.routeName - The tab being rendered.
+ * @param props.children - The tab's own screen.
+ */
+function InactiveWorkspaceGate({
+  routeName,
+  children,
+}: {
+  routeName: string;
+  children: ReactNode;
+}) {
+  const { currentOrg } = useOrg();
+  if (currentOrg && tabShowsInactiveScreen(routeName, currentOrg)) {
+    return (
+      <InactiveWorkspaceScreen
+        org={currentOrg}
+        underHeader={TABS_WITH_HEADER.has(routeName)}
+      />
+    );
+  }
+  return <>{children}</>;
+}
+
+/** Every tab: the content column where it applies, behind the inactive gate. */
+const TAB_SCREEN_LAYOUT = (
+  props: Parameters<typeof COLUMN_LAYOUT>[0]
+): ReturnType<typeof COLUMN_LAYOUT> => (
+  <InactiveWorkspaceGate routeName={props.route.name}>
+    {COLUMN_LAYOUT(props)}
+  </InactiveWorkspaceGate>
+);
 
 // The tab icons cast `color` to a string: React Native 0.88 types the tint
 // as any ColorValue (numbers and null included), Ionicons takes a string, and
@@ -142,14 +184,14 @@ export default function TabLayout() {
       <Tabs.Screen
         name="audits"
         options={{
-          href: null,
+          ...TAB_WITHOUT_BUTTON,
           headerShown: false,
         }}
       />
       <Tabs.Screen
         name="custody"
         options={{
-          href: null,
+          ...TAB_WITHOUT_BUTTON,
           title: "Custody",
         }}
       />

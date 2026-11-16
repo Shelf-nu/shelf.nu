@@ -455,6 +455,8 @@ export default function AddBookingAssetsScreen() {
     modelReservationBounds({
       available: model.available,
       fulfilledQuantity: modelRequestsById[model.id]?.fulfilledQuantity,
+      namedNotInCustody: model.namedNotInCustody,
+      currentQuantity: modelRequestsById[model.id]?.quantity,
     });
 
   /**
@@ -686,6 +688,8 @@ export default function AddBookingAssetsScreen() {
       const { max } = modelReservationBounds({
         available: item.available,
         fulfilledQuantity: assigned,
+        namedNotInCustody: item.namedNotInCustody,
+        currentQuantity: reserved,
       });
       // Nothing free to reserve AND nothing already reserved → can't act.
       const canReserve = max >= 1;

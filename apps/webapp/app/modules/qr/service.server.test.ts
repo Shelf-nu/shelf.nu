@@ -4,6 +4,8 @@ import { ShelfError } from "~/utils/error";
 import {
   claimImportQrCodes,
   claimQrCode,
+  getQrByAssetId,
+  getQrByKitId,
   parseQrCodesFromImportData,
   validateImportQrCodes,
 } from "./service.server";
@@ -16,6 +18,7 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     qr: {
       findMany: vitest.fn().mockResolvedValue([]),
+      findFirst: vitest.fn().mockResolvedValue(null),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findUniqueOrThrow: vitest.fn(),
       update: vitest.fn(),
@@ -98,6 +101,32 @@ describe("parseQrCodesFromImportData — import validation errors", () => {
 
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+describe("getQrByAssetId / getQrByKitId", () => {
+  it("only finds an asset's code that is unclaimed or claimed by this workspace", async () => {
+    await getQrByAssetId({ assetId: "asset-1", organizationId });
+
+    expect(db.qr.findFirst).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
+    });
+  });
+
+  it("only finds a kit's code that is unclaimed or claimed by this workspace", async () => {
+    await getQrByKitId({ kitId: "kit-1", organizationId });
+
+    expect(db.qr.findFirst).toHaveBeenCalledWith({
+      where: {
+        kitId: "kit-1",
+        kit: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
+    });
   });
 });
 

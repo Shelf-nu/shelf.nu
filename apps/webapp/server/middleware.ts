@@ -182,7 +182,10 @@ export function protect({
         }`
       );
     }
-    const isValidSession = await validateSession(auth.refreshToken);
+    const isValidSession = await validateSession(
+      auth.refreshToken,
+      auth.userId
+    );
 
     if (!isValidSession) {
       session.flash(

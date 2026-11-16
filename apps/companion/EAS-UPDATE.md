@@ -128,8 +128,10 @@ eas env:exec production "npx expo export --clear --dump-sourcemap -p ios -p andr
 
 # 1b. GATE — prove the artifact before step 2 publishes it. Reads the baked
 #     values back out of the built bundles and exits non-zero on a mismatch, so
-#     a copy-pasted run cannot sail past it. Run under the SAME environment the
-#     export claimed, so expected and baked values arrive the same way.
+#     a copy-pasted run cannot sail past it. It also fails a bundle that still
+#     installs Expo's fetch as the global fetch (metro.config.js turns it off).
+#     Run under the SAME environment the export claimed, so expected and baked
+#     values arrive the same way.
 eas env:exec production "node scripts/check-bundle-env.mjs"
 
 # 2. Publish exactly that bundle. --skip-bundler is what makes this safe: it

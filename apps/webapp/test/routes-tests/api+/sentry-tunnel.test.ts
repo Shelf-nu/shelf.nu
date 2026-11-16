@@ -30,6 +30,7 @@ vi.mock("~/utils/env", () => ({
 }));
 
 import { action } from "~/routes/api+/sentry-tunnel";
+import { SENTRY_TUNNEL_MAX_ENVELOPE_BYTES } from "~/utils/constants";
 
 // @vitest-environment node
 
@@ -43,11 +44,20 @@ function envelope(dsn: string) {
   })}\n{"type":"event"}\n{}`;
 }
 
-/** Invokes the route action with a raw envelope body. */
-function post(body: string) {
+/**
+ * Invokes the route action with a raw envelope body.
+ *
+ * @param body - The envelope
+ * @param init - Method and headers; defaults to a plain POST
+ */
+function post(
+  body: string,
+  init: { method?: string; headers?: Record<string, string> } = {}
+) {
   return action({
     request: new Request("https://app.shelf.nu/api/sentry-tunnel", {
-      method: "POST",
+      method: init.method ?? "POST",
+      headers: init.headers,
       body,
     }),
     params: {},
@@ -142,6 +152,51 @@ describe("sentry-tunnel action", () => {
   it("rejects a malformed envelope header", () => {
     return post("not json\n{}").then((response) => {
       expect(response.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("body size cap", () => {
+    /** A genuine envelope padded to exactly `size` bytes. */
+    function paddedEnvelope(size: number) {
+      const base = envelope("https://pubkey@o123.ingest.sentry.io/456");
+      return base + " ".repeat(size - base.length);
+    }
+
+    it("forwards an envelope at the cap", async () => {
+      const response = await post(
+        paddedEnvelope(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES)
+      );
+
+      expect(response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["POST", "PUT", "PATCH"])(
+      "refuses a %s body that grows past the cap, without forwarding it",
+      async (method) => {
+        // No Content-Length header: the cap is enforced while reading.
+        const response = await post(
+          paddedEnvelope(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES + 1),
+          { method }
+        );
+
+        expect(response.status).toBe(413);
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
+
+    it("refuses a declared Content-Length above the cap before reading", async () => {
+      const response = await post(
+        envelope("https://pubkey@o123.ingest.sentry.io/456"),
+        {
+          headers: {
+            "content-length": String(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES + 1),
+          },
+        }
+      );
+
+      expect(response.status).toBe(413);
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });

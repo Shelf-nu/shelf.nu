@@ -1,6 +1,7 @@
 import { apiFetch, apiUpload } from "./client";
 import type { PhotoCapture } from "../audit-photo-exif";
 import { appendAuditImageUpload } from "../audit-photo-exif";
+import { mobilePaths } from "./paths";
 import type {
   AuditsResponse,
   AuditDetailResponse,
@@ -64,9 +65,7 @@ export const auditsApi = {
 
   /** Get full audit detail with expected assets and existing scans */
   audit: (auditId: string, orgId: string) =>
-    apiFetch<AuditDetailResponse>(
-      `/api/mobile/audits/${auditId}?orgId=${orgId}`
-    ),
+    apiFetch<AuditDetailResponse>(mobilePaths.audit(auditId, orgId)),
 
   /**
    * Get every note and photo recorded on an audit, for READING.
@@ -97,10 +96,7 @@ export const auditsApi = {
     auditAssetId?: string | null
   ) =>
     apiFetch<AuditEvidenceResponse>(
-      `/api/mobile/audits/${auditId}/evidence?orgId=${orgId}` +
-        (auditAssetId
-          ? `&auditAssetId=${encodeURIComponent(auditAssetId)}`
-          : ""),
+      mobilePaths.auditEvidence(auditId, orgId, auditAssetId),
       { signal }
     ),
 

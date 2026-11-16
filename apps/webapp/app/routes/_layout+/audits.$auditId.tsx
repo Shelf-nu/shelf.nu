@@ -294,23 +294,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Read together: the scan count (dynamic button text), the units line of
     // the header's Complete Audit dialog (the overview reads it from here
-    // too), and the team members for the edit dialog's assignment.
+    // too), and the team members for the edit dialog's assignment. The edit
+    // dialog is offered only to callers who manage others' audits, so the
+    // roster is read for them alone and is an empty list for everyone else.
     const [scanCount, unitTotals, teamMembers] = await Promise.all([
       db.auditScan.count({ where: { auditSessionId: auditId } }),
       getAuditUnitTotals(auditId),
-      db.teamMember.findMany({
-        where: {
-          organizationId,
-          deletedAt: null,
-          userId: { not: null }, // Only team members with user accounts
-        },
-        select: {
-          id: true,
-          name: true,
-          userId: true,
-        },
-        orderBy: { name: "asc" },
-      }),
+      access.policy.audits.manageOthers
+        ? db.teamMember.findMany({
+            where: {
+              organizationId,
+              deletedAt: null,
+              userId: { not: null }, // Only team members with user accounts
+            },
+            select: {
+              id: true,
+              name: true,
+              userId: true,
+            },
+            orderBy: { name: "asc" },
+          })
+        : [],
     ]);
     const hasScans = scanCount > 0;
 

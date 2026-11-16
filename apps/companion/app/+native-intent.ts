@@ -3,40 +3,33 @@
  *
  * `redirectSystemPath` runs for every URL the OS delivers to the app
  * (Universal Links / App Links and custom-scheme links), BEFORE the router
- * resolves a route — on cold start (`initial: true`) and on warm `url`
- * events (`initial: false`). Returning a different string rewrites what the
- * router navigates to.
+ * resolves a route, on cold start (`initial: true`) and on warm `url`
+ * events (`initial: false`). The string it returns is what the router opens;
+ * `null` opens nothing (expo-router 58 `build/link/linking.js` skips a falsy
+ * path, and `build/getLinkingConfig.js` starts at the root for a null launch
+ * URL).
  *
- * IMPORTANT (verified against expo-router 6.0.23 source,
- * `build/getLinkingConfig.js` + `build/link/linking.js`): in a bare app the
- * `path` argument is the RAW FULL URL (`https://app.shelf.nu/assets/:id/overview`,
- * `shelf://assets/:id`), not a path — so this function normalises scheme and
- * host before matching.
+ * In a bare app the `path` argument is the RAW FULL URL
+ * (`https://app.shelf.nu/assets/:id/overview`, `shelf://assets/:id`), not a
+ * path.
  *
- * Why this exists: the OS delivers every nested path under a claimed prefix
- * (e.g. `/assets/:id/overview` — the canonical web asset URL), but the native
- * app only has routes for the resource details. Without a rewrite the router
- * lands on an unmatched route at cold start and the user is stuck behind the
- * splash screen with no navigation running (the 1.1.0 build-25 hang). Mapping
- * every claimed prefix to a real native screen here makes cold-start links
- * deterministic and removes any timing race with the JS deep-link listener.
+ * The router opens no link that names a screen of the app. Opened by the
+ * router, a detail screen in a tab the user has not opened yet has nothing
+ * under it: no back button, and the tab's list cannot be reached. The
+ * deep-link hook (`useDeepLinkHandler`, lib/deep-links.ts) opens those links
+ * instead, through `openLinkedRoute`, which roots the tab at its list. At
+ * launch the router starts on the start screen, never on an unmatched route,
+ * so a nested claimed path (`/assets/:id/overview`) can never leave the app
+ * on the splash screen.
  *
- * Kept in sync with the claimed-path allowlist — see
- * `.claude/rules/companion-deep-link-allowlist.md`, the iOS AASA route and
- * `android.intentFilters` in app.json. `/qr/:id` is the one claimed path that
- * cannot be rewritten synchronously (needs an API resolve to know whether it
- * is an asset or a kit) — it lands on the start screen and
- * `useDeepLinkHandler` (lib/deep-links.ts) finishes the job from the original
- * URL.
+ * Which links count, and the route each opens, is decided by
+ * `nativeRouteForLink` (`lib/resource-path.ts`), through the claimed-path
+ * allowlist (`.claude/rules/companion-deep-link-allowlist.md`).
  *
- * Which paths count, and the native route each maps to, is decided by
- * `nativeRouteForLink` (`lib/resource-path.ts`), which matches through the
- * same allowlist push taps use.
- *
- * @see {@link file://./../lib/deep-links.ts}
- * @see {@link file://./../lib/resource-path.ts} the shared path allowlist
+ * @see {@link file://./../lib/link-routing.ts} `systemPathFor`, the rule
+ * @see {@link file://./../lib/deep-links.ts} the hook that opens the links
  */
-import { nativeRouteForLink } from "../lib/resource-path";
+import { systemPathFor } from "../lib/link-routing";
 
 type RedirectSystemPathArgs = {
   /**
@@ -49,17 +42,24 @@ type RedirectSystemPathArgs = {
 };
 
 /**
- * Rewrites OS-delivered link URLs to navigable in-app routes.
+ * Decides what the router opens for an OS-delivered URL (`systemPathFor`).
+ * A link that names a screen of the app is opened by the deep-link hook,
+ * anchored in its tab, so the router starts on the start screen for it at
+ * launch and ignores it while the app runs.
  *
  * @param args - the incoming URL and whether it launched the app
- * @returns the in-app path the router should resolve instead, or the
- *          original string unchanged when the URL isn't a claimed pattern
+ * @returns the path the router opens, the original string when the URL names
+ *          no screen of the app, or null to open nothing
  */
-export function redirectSystemPath({ path }: RedirectSystemPathArgs): string {
+export function redirectSystemPath({
+  path,
+  initial,
+}: RedirectSystemPathArgs): string | null {
   try {
-    return nativeRouteForLink(path);
+    return systemPathFor({ path, initial });
   } catch {
-    // Never let a parse error strand the user: fall back to the start screen.
-    return "/";
+    // Never let a parse error strand the user: the start screen at launch,
+    // and no change while the app runs.
+    return initial ? "/" : null;
   }
 }

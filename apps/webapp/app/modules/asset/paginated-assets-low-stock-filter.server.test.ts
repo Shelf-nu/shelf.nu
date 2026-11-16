@@ -55,6 +55,7 @@ vi.mock("~/utils/cookies.server", async (importOriginal) => ({
 /** Loads a list whose URL carries `?lowStockOnly=true`. */
 function load(honorLowStockFilter?: boolean) {
   return getPaginatedAndFilterableAssets({
+    custodySearchScope: "all",
     request: new Request("https://shelf.test/assets?lowStockOnly=true"),
     organizationId: "org-1",
     canSeeAllCustody: true,

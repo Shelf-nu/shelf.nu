@@ -79,6 +79,11 @@ import {
 } from "@/lib/booking-discard-draft";
 import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
+import {
+  bookingScanHref,
+  takeScannerOpening,
+  type BookingScanAction,
+} from "@/lib/booking-scan-route";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
@@ -362,6 +367,26 @@ function BookingDetailScreen({ id }: { id: string }) {
       fetchBooking().finally(() => setIsLoading(false));
     }, [fetchBooking, booking, id])
   );
+
+  // True while a push to the booking scanner is in flight, so a second fast
+  // tap on a Scan button is ignored instead of stacking a second scanner.
+  // Cleared whenever this screen gains focus again.
+  const scannerOpening = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      scannerOpening.current = false;
+    }, [])
+  );
+  const openBookingScanner = (action: BookingScanAction) => {
+    if (!booking || !takeScannerOpening(scannerOpening)) return;
+    try {
+      router.push(bookingScanHref(booking, action));
+    } catch (error) {
+      // A push that never leaves this screen would never clear the gate.
+      scannerOpening.current = false;
+      throw error;
+    }
+  };
 
   const onRefresh = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2172,15 +2197,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             {canAddItems && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
-                onPress={() =>
-                  router.push(
-                    `/(tabs)/scanner?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&bookingAction=add`
-                  )
-                }
+                onPress={() => openBookingScanner("add")}
                 accessibilityLabel="Scan assets or kits to add to this booking"
                 accessibilityRole="button"
               >
@@ -2303,15 +2320,7 @@ function BookingDetailScreen({ id }: { id: string }) {
             {canUseProgressiveCheckout && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
-                onPress={() =>
-                  router.push(
-                    `/(tabs)/scanner?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&bookingAction=checkout`
-                  )
-                }
+                onPress={() => openBookingScanner("checkout")}
                 accessibilityLabel="Scan assets to check out"
                 accessibilityRole="button"
               >
@@ -2385,15 +2394,7 @@ function BookingDetailScreen({ id }: { id: string }) {
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&bookingAction=fulfil`
-                    )
-                  }
+                  onPress={() => openBookingScanner("fulfil")}
                   accessibilityLabel={`Scan to assign ${
                     booking.outstandingModelUnitCount
                   } reserved unit${
@@ -2449,13 +2450,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                   <>
                     <TouchableOpacity
                       style={styles.actionButtonOutline}
-                      onPress={() =>
-                        router.push(
-                          `/(tabs)/scanner?bookingId=${
-                            booking.id
-                          }&bookingName=${encodeURIComponent(booking.name)}`
-                        )
-                      }
+                      onPress={() => openBookingScanner("checkin")}
                       accessibilityLabel="Scan assets to check in"
                       accessibilityRole="button"
                     >

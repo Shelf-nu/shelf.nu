@@ -298,7 +298,15 @@ type AssetFixture = Omit<
   | "quantity"
   | "unitOfMeasure"
   | "bookingAssets"
+  | "notes"
 > & {
+  notes: {
+    id: string;
+    content: string;
+    type: string;
+    createdAt: Date;
+    user: { firstName: string; lastName: string; displayName: string | null };
+  }[];
   sequentialId: string | null;
   assetModel: ReturnType<typeof buildAsset>["assetModel"] | null;
   preferredBarcodeId: string | null;
@@ -431,6 +439,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["ADMIN"],
       access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
@@ -488,6 +497,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["SELF_SERVICE"],
       access: accessFor(["SELF_SERVICE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
@@ -529,6 +539,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["SELF_SERVICE"],
       access: accessFor(["SELF_SERVICE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     // Reorder so the caller's row is the primary (oldest) one
@@ -685,6 +696,7 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["ADMIN"],
       access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildAsset());
@@ -762,6 +774,7 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["ADMIN"],
       access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset());
@@ -825,6 +838,7 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["SELF_SERVICE"],
       access: accessFor(["SELF_SERVICE"], {
         selfServiceCanSeeBookings: overrides.canSeeAllBookings,
         selfServiceCanSeeCustody: overrides.canSeeAllCustody,
@@ -1080,6 +1094,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: true,
       canUseAudits: false,
+      roles: ["ADMIN"],
       access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     canUseBarcodesMock.mockReturnValue(true);
@@ -1307,6 +1322,7 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
+      roles: ["BASE"],
       access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
   });
@@ -1407,4 +1423,82 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
     // The per-value Link list is gone: the companion finds links itself.
     expect(body.asset.linkFields).toBeUndefined();
   });
+});
+
+describe("GET /api/mobile/assets/:assetId: activity notes", () => {
+  /** An asset carrying one activity note, as the query returns it. */
+  function assetWithNote(): AssetFixture {
+    return {
+      ...buildAsset(),
+      notes: [
+        {
+          id: "note-1",
+          content: "Moved to the north store",
+          type: "UPDATE",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          user: { firstName: "Ann", lastName: "Admin", displayName: null },
+        },
+      ],
+    };
+  }
+
+  /** Calls the loader as a member holding `roles`, returning the body. */
+  async function loadAs(roles: ("ADMIN" | "BASE" | "SELF_SERVICE")[]) {
+    getMobileUserContextMock.mockResolvedValue({
+      canUseBarcodes: false,
+      canUseAudits: false,
+      roles,
+      access: accessFor(roles),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    return (result as unknown as Response).json();
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    requireMobileAuthMock.mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    // The stub honours the notes `take`, as the database would.
+    assetFindUniqueMock.mockImplementation((args: unknown) => {
+      const { select } = args as { select?: { notes?: { take?: number } } };
+      const asset = assetWithNote();
+      return Promise.resolve(
+        select?.notes?.take === 0 ? { ...asset, notes: [] } : asset
+      );
+    });
+  });
+
+  it("sends the notes to a member holding note: read", async () => {
+    const body = await loadAs(["ADMIN"]);
+
+    expect(body.asset.notes).toHaveLength(1);
+    expect(body.asset.notes[0].content).toBe("Moved to the north store");
+  });
+
+  it.each([["BASE"], ["SELF_SERVICE"]] as const)(
+    "sends an empty notes list to a %s member, who lacks note: read",
+    async (role) => {
+      const body = await loadAs([role]);
+
+      expect(body.asset.notes).toEqual([]);
+      // No note rows are read for a member who may not see them.
+      expect(db.asset.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            notes: expect.objectContaining({ take: 0 }),
+          }),
+        })
+      );
+    }
+  );
 });
