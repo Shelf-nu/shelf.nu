@@ -25,7 +25,7 @@ import {
   setStandaloneBookedQuantity,
   type BookedQuantityChange,
 } from "./booked-quantity.server";
-import { clearApprovalWhenRequestGrows } from "./request-change.server";
+import { applyRequestGrowthRule } from "./request-change.server";
 
 // @vitest-environment node
 
@@ -39,7 +39,7 @@ const tx = {
 // why: whether a raised amount clears an approval is decided by the
 // approval helper, which has its own suite; here only when it is asked.
 vi.mock("./request-change.server", () => ({
-  clearApprovalWhenRequestGrows: vi.fn().mockResolvedValue(false),
+  applyRequestGrowthRule: vi.fn().mockResolvedValue(false),
 }));
 
 // why: the database is the integration boundary. `$transaction` hands the
@@ -154,19 +154,19 @@ describe("setStandaloneBookedQuantities", () => {
       ...SCOPE,
       changes: [change("a", 5)],
     });
-    expect(clearApprovalWhenRequestGrows).toHaveBeenCalledWith(tx, {
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(tx, {
       bookingId: SCOPE.bookingId,
       organizationId: SCOPE.organizationId,
       actorUserId: SCOPE.actorUserId,
     });
 
-    vi.mocked(clearApprovalWhenRequestGrows).mockClear();
+    vi.mocked(applyRequestGrowthRule).mockClear();
     slicesHold({ "slice-a": { quantity: 5 } });
     await setStandaloneBookedQuantities({
       ...SCOPE,
       changes: [change("a", 2)],
     });
-    expect(clearApprovalWhenRequestGrows).not.toHaveBeenCalled();
+    expect(applyRequestGrowthRule).not.toHaveBeenCalled();
   });
 
   it("locks the booking before any asset, the order a check-out uses", async () => {

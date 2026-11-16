@@ -9,7 +9,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { clearApprovalWhenRequestGrows } from "./request-change.server";
+import { applyRequestGrowthRule } from "./request-change.server";
 
 /**
  * Booked Quantity Service
@@ -58,7 +58,7 @@ type BookingScope = {
   organizationId: string;
   /**
    * Who makes the change. Raising an amount on an approved request clears
-   * its approval unless this member may approve (`clearApprovalWhenRequestGrows`).
+   * its approval unless this member may approve (`applyRequestGrowthRule`).
    */
   actorUserId: string | null;
   /** The booking's own window, or null for a dateless booking. */
@@ -191,7 +191,7 @@ export async function setStandaloneBookedQuantitiesWithinTx(
   }
   // A raised amount asks for more than an approval covered.
   if (applied.some((a) => a.quantity > a.previousQuantity)) {
-    await clearApprovalWhenRequestGrows(tx, {
+    await applyRequestGrowthRule(tx, {
       bookingId,
       organizationId,
       actorUserId,

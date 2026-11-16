@@ -8,7 +8,7 @@
 import { BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
-import { clearApprovalWhenRequestGrows } from "./request-change.server";
+import { applyRequestGrowthRule } from "./request-change.server";
 
 // @vitest-environment node
 
@@ -44,6 +44,9 @@ const args = {
   actorUserId: "user-1",
 };
 
+/** Runs the rule for the default actor and booking. */
+const applyRule = () => applyRequestGrowthRule(tx as never, args);
+
 const APPROVED = {
   status: BookingStatus.RESERVED,
   approvedAt: new Date("2026-11-16T09:00:00.000Z"),
@@ -60,11 +63,9 @@ beforeEach(() => {
   });
 });
 
-describe("clearApprovalWhenRequestGrows", () => {
+describe("applyRequestGrowthRule", () => {
   it("clears the approval of a requester's grown request and notes why", async () => {
-    await expect(
-      clearApprovalWhenRequestGrows(tx as never, args)
-    ).resolves.toBe(true);
+    await expect(applyRequestGrowthRule(tx as never, args)).resolves.toBe(true);
 
     expect(tx.booking.updateMany).toHaveBeenCalledWith({
       where: { id: "booking-1", organizationId: "org-1" },
@@ -82,9 +83,9 @@ describe("clearApprovalWhenRequestGrows", () => {
   it("keeps the approval when the change is an approver's", async () => {
     tx.userOrganization.findUnique.mockResolvedValue({ roles: ["MANAGER"] });
 
-    await expect(
-      clearApprovalWhenRequestGrows(tx as never, args)
-    ).resolves.toBe(false);
+    await expect(applyRequestGrowthRule(tx as never, args)).resolves.toBe(
+      false
+    );
     expect(tx.booking.updateMany).not.toHaveBeenCalled();
   });
 
@@ -97,9 +98,9 @@ describe("clearApprovalWhenRequestGrows", () => {
       requireApprovalForSelfService: false,
     });
 
-    await expect(
-      clearApprovalWhenRequestGrows(tx as never, args)
-    ).resolves.toBe(false);
+    await expect(applyRequestGrowthRule(tx as never, args)).resolves.toBe(
+      false
+    );
     expect(tx.booking.updateMany).not.toHaveBeenCalled();
   });
 
@@ -113,27 +114,64 @@ describe("clearApprovalWhenRequestGrows", () => {
       requireApprovalForSelfService: false,
     });
 
-    await expect(
-      clearApprovalWhenRequestGrows(tx as never, args)
-    ).resolves.toBe(false);
+    await expect(applyRequestGrowthRule(tx as never, args)).resolves.toBe(
+      false
+    );
   });
 
   it.each([
     ["a request still pending", { ...APPROVED, approvedAt: null }],
-    ["a booking already out", { ...APPROVED, status: BookingStatus.ONGOING }],
     ["a draft", { status: BookingStatus.DRAFT, approvedAt: null }],
   ])("leaves %s alone", async (_label, booking) => {
     tx.booking.findFirst.mockResolvedValue(booking);
 
-    await expect(
-      clearApprovalWhenRequestGrows(tx as never, args)
-    ).resolves.toBe(false);
+    await expect(applyRequestGrowthRule(tx as never, args)).resolves.toBe(
+      false
+    );
     expect(tx.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([BookingStatus.ONGOING, BookingStatus.OVERDUE])(
+    "refuses a requester asking for more on a %s booking, naming both ways out",
+    async (status) => {
+      tx.booking.findFirst.mockResolvedValue({
+        status,
+        approvedAt: new Date(),
+      });
+
+      await expect(applyRule()).rejects.toThrow(
+        /Ask someone who can approve bookings to add it, or make a new booking request/
+      );
+      expect(tx.booking.updateMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it("lets an approver add to a booking already out", async () => {
+    tx.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.ONGOING,
+      approvedAt: new Date(),
+    });
+    tx.userOrganization.findUnique.mockResolvedValue({ roles: ["MANAGER"] });
+
+    await expect(applyRule()).resolves.toBe(false);
+  });
+
+  it("lets a member whose switch is off add to a booking already out", async () => {
+    tx.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.ONGOING,
+      approvedAt: new Date(),
+    });
+    tx.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    await expect(applyRule()).resolves.toBe(false);
   });
 
   it("leaves a system write alone", async () => {
     await expect(
-      clearApprovalWhenRequestGrows(tx as never, { ...args, actorUserId: null })
+      applyRequestGrowthRule(tx as never, { ...args, actorUserId: null })
     ).resolves.toBe(false);
     expect(tx.booking.findFirst).not.toHaveBeenCalled();
   });

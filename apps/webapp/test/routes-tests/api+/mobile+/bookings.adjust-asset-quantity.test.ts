@@ -31,7 +31,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
-import { clearApprovalWhenRequestGrows } from "~/modules/booking/request-change.server";
+import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -50,7 +50,7 @@ import { ShelfError } from "~/utils/error";
 // why: whether a raised amount clears an approval is the approval helper's
 // call, with its own suite; here only who it is told made the change.
 vi.mock("~/modules/booking/request-change.server", () => ({
-  clearApprovalWhenRequestGrows: vi.fn().mockResolvedValue(false),
+  applyRequestGrowthRule: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -241,7 +241,7 @@ describe("POST /api/mobile/bookings/adjust-asset-quantity", () => {
     // excluded, comparing the fresh in-tx quantity against the request.
     expect(lockMock).toHaveBeenCalledWith(tx, ASSET_ID, ORG_ID);
     // Raising an amount asks for more: the approval helper decides, told who.
-    expect(clearApprovalWhenRequestGrows).toHaveBeenCalledWith(
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
         bookingId: BOOKING_ID,

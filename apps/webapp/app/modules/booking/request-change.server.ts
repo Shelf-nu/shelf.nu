@@ -1,27 +1,30 @@
 /**
- * What a change to a booking's contents does to its approval.
+ * What a change that asks for more does to a booking's approval.
  *
- * Rule: an approval covers what was approved. When someone who may not
- * approve changes an approved RESERVED booking so that it asks for MORE (a
- * booked amount raised, a model reservation added or raised), the approval is
- * cleared in the same transaction and the booking is a pending request again.
- * Asking for less (lowering an amount, removing items) keeps the approval, and
- * so does a change made by someone who may approve: their change is their
- * decision. "May not approve" is read as "their own reservation would be a
- * request": a role whose approval switch is off keeps its approval, since its
- * reservations are final.
+ * Rule: an approval covers what was approved. When a member whose own
+ * reservations need approval (their role's approval switch is on) changes a
+ * booking so that it asks for MORE (a booked amount raised, a model
+ * reservation added or raised, the end date moved later):
+ * - on an approved RESERVED booking, the approval is cleared in the same
+ *   transaction and the booking is a pending request again;
+ * - on a booking already checked out (ONGOING or OVERDUE), the change is
+ *   refused: the extra items would leave without anyone approving them. The
+ *   member asks someone who can approve to add it, or makes a new booking
+ *   request for the extra items.
+ * Asking for less (lowering an amount, removing items) is unaffected, and so
+ * is a change made by someone who may approve or by a role whose switch is off.
  *
- * Dates are not in this list because no role can change a booking's period
- * once it is past DRAFT (`updateBasicBooking`); adding assets or kits is
- * closed to roles that cannot approve once a booking is reserved
- * (`canManageBookingItems`), so the item paths a requester can still reach are
- * the booked amounts and the model reservations.
+ * Adding assets or kits, and scans that add them, are closed to these roles
+ * once a booking is past DRAFT (`canManageBookingItems`), and no role changes
+ * a booking's start once it is past DRAFT, so the paths this rule guards are
+ * the booked amounts, the model reservations and the extension of a started
+ * booking.
  *
- * Every write that can raise a request runs this inside its transaction,
- * after it has locked the booking row.
+ * Every write that can ask for more runs this before it commits.
  *
  * @see {@link file://./booked-quantity.server.ts}
  * @see {@link file://../booking-model-request/service.server.ts}
+ * @see {@link file://./service.server.ts} `extendBooking`
  */
 import { BookingStatus } from "@prisma/client";
 import type { Booking, Organization, Prisma, User } from "@prisma/client";
@@ -31,6 +34,7 @@ import {
   roleReservesAsRequest,
   type BookingApprovalSwitches,
 } from "~/utils/bookings";
+import { ShelfError } from "~/utils/error";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
 import { createSystemBookingNote } from "../booking-note/service.server";
@@ -43,21 +47,24 @@ type RequestChangeTx = Pick<
 >;
 
 /**
- * Clears the approval of an approved RESERVED booking whose request grew,
- * when the actor may not approve. Call it only for a change that asks for
- * more; a change that asks for less keeps the approval.
+ * Applies the rule above to one change that asks for more. Call it only for
+ * such a change; a change that asks for less needs nothing.
  *
- * Writes an activity note so the history shows why the booking is pending
- * again. The earlier `BOOKING_APPROVED` event stays: it is what happened.
+ * Clearing writes an activity note so the history shows why the booking is
+ * pending again. The earlier `BOOKING_APPROVED` event stays: it is what
+ * happened.
  *
  * @param tx - The transaction making the change, holding the booking row lock
+ *   where the caller takes one
  * @param args.bookingId - The booking whose request grew
  * @param args.organizationId - Its workspace
  * @param args.actorUserId - Who made the change; a system write has none and
- *   keeps the approval
+ *   is not held to the rule
  * @returns `true` when the approval was cleared
+ * @throws {ShelfError} 400 when the booking has already been checked out and
+ *   the actor's own reservations need approval
  */
-export async function clearApprovalWhenRequestGrows(
+export async function applyRequestGrowthRule(
   tx: RequestChangeTx,
   {
     bookingId,
@@ -74,17 +81,17 @@ export async function clearApprovalWhenRequestGrows(
     where: { id: bookingId, organizationId },
     select: { status: true, approvedAt: true },
   });
-  if (
-    !booking ||
-    booking.status !== BookingStatus.RESERVED ||
-    booking.approvedAt === null
-  ) {
-    return false;
-  }
+  if (!booking) return false;
+  const isApprovedReservation =
+    booking.status === BookingStatus.RESERVED && booking.approvedAt !== null;
+  const hasStarted =
+    booking.status === BookingStatus.ONGOING ||
+    booking.status === BookingStatus.OVERDUE;
+  // A draft, a request still pending, or a closed booking: nothing to guard.
+  if (!isApprovedReservation && !hasStarted) return false;
 
-  // Only a member whose own reservation would be a request loses the
-  // approval. Everyone else (approvers, and a role whose switch is off) keeps
-  // it.
+  // Only a member whose own reservation would be a request is held to the
+  // rule. Everyone else (approvers, and a role whose switch is off) is not.
   const switches = await tx.bookingSettings.findUnique({
     where: { organizationId },
     select: BOOKING_APPROVAL_SWITCHES_SELECT,
@@ -98,6 +105,21 @@ export async function clearApprovalWhenRequestGrows(
     }))
   ) {
     return false;
+  }
+
+  // A booking already out cannot become a request again: the extra items
+  // would leave without anyone approving them. Refused, with both ways out.
+  if (hasStarted) {
+    throw new ShelfError({
+      cause: null,
+      title: "Approval required",
+      message:
+        "This booking has already been checked out, so it can't ask for more now. Ask someone who can approve bookings to add it, or make a new booking request for the extra items.",
+      additionalData: { bookingId, status: booking.status },
+      label: "Booking",
+      status: 400,
+      shouldBeCaptured: false,
+    });
   }
 
   await tx.booking.updateMany({

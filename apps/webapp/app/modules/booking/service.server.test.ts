@@ -11969,6 +11969,59 @@ describe("extendBooking", () => {
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
+  it("refuses a later end from a Self service member whose reservations need approval", async () => {
+    // why: a started booking cannot become a request again, so a requester
+    // asking for more time is refused rather than taking it unapproved.
+    const started = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-ss-extend",
+          checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(started);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce({
+      status: BookingStatus.ONGOING,
+      approvedAt: new Date("2025-01-01T08:00:00.000Z"),
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValueOnce({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValueOnce({
+      roles: ["SELF_SERVICE"],
+    });
+
+    const error = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-03T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
+      roles: [OrganizationRoles.SELF_SERVICE],
+    }).catch((e: ShelfError) => e);
+
+    expect((error as ShelfError).message).toContain(
+      "make a new booking request for the extra items"
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("should extend booking successfully", async () => {
     expect.assertions(3);
 

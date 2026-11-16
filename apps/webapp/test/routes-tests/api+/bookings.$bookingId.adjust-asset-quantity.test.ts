@@ -12,7 +12,7 @@ import { AssetType, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { permissionContext } from "@helpers/role-access";
-import { clearApprovalWhenRequestGrows } from "~/modules/booking/request-change.server";
+import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
 
 import { action } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
 import { requirePermission } from "~/utils/roles.server";
@@ -67,7 +67,7 @@ const consumptionMocks = vi.hoisted(() => ({
 // why: whether a raised amount clears an approval is the approval helper's
 // call, with its own suite; here only who it is told made the change.
 vi.mock("~/modules/booking/request-change.server", () => ({
-  clearApprovalWhenRequestGrows: vi.fn().mockResolvedValue(false),
+  applyRequestGrowthRule: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -235,7 +235,7 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
     expect(response.status).toBe(200);
     expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
     // The acting member reaches the approval helper with the raised amount.
-    expect(clearApprovalWhenRequestGrows).toHaveBeenCalledWith(
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(
       expect.anything(),
       // The signed-in member, never the booking's creator or custodian.
       expect.objectContaining({ actorUserId: "user-current" })

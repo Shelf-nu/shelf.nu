@@ -293,7 +293,10 @@ import {
   sendBookingPushToCustodian,
   sendBookingPushToReplacedCustodian,
 } from "./push.server";
-import { actorReservesAsRequest } from "./request-change.server";
+import {
+  actorReservesAsRequest,
+  applyRequestGrowthRule,
+} from "./request-change.server";
 import { readBookingRequestVersion } from "./request-version.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
@@ -14509,6 +14512,16 @@ export async function extendBooking({
           organizationId
         );
         if (lockedStatus !== booking.status) throw bookingChangedError();
+
+        // A later end asks for more than was approved: refused for a member
+        // whose own reservations need approval (see `applyRequestGrowthRule`).
+        if (movesLater) {
+          await applyRequestGrowthRule(tx, {
+            bookingId: booking.id,
+            organizationId,
+            actorUserId: userId,
+          });
+        }
 
         // Only a later end adds time to the booking's window; an earlier end
         // shrinks it and cannot overlap anything it did not already overlap.
