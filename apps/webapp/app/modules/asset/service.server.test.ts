@@ -844,6 +844,16 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+    // The copy's arrival at the location reaches the Activity Summary.
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_LOCATION_CHANGED",
+        assetId: "asset-new",
+        fromValue: null,
+        toValue: "loc-a",
+      }),
+      expect.anything()
+    );
   });
 
   it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
@@ -1490,6 +1500,99 @@ describe("createAsset quantity validation", () => {
         },
       ],
     });
+  });
+});
+
+describe("createAsset first placement in the Activity Summary", () => {
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+
+  /** The actions `createAsset` recorded, in call order. */
+  function recordedActions() {
+    return mockRecordEvent.mock.calls.map(
+      ([input]) => (input as { action: string }).action
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: createAsset proves the location belongs to the org before placing
+    // the asset there; a hit is how the org-scoped lookup says it does.
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-store",
+    } as never);
+  });
+
+  it("records an individual asset's location as a move from nowhere", async () => {
+    await createAsset({
+      title: "Sofa",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      locationId: "loc-store",
+      type: "INDIVIDUAL",
+    });
+
+    expect(recordedActions()).toEqual([
+      "ASSET_CREATED",
+      "ASSET_LOCATION_CHANGED",
+    ]);
+    expect(mockRecordEvent).toHaveBeenLastCalledWith(
+      {
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_LOCATION_CHANGED",
+        entityType: "ASSET",
+        entityId: "asset-new",
+        assetId: "asset-new",
+        locationId: "loc-store",
+        field: "locationId",
+        fromValue: null,
+        toValue: "loc-store",
+        meta: {},
+      },
+      expect.anything()
+    );
+  });
+
+  it("names the units a quantity-tracked pool starts with at its location", async () => {
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      locationId: "loc-store",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    expect(mockRecordEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: "ASSET_LOCATION_CHANGED",
+        fromValue: null,
+        toValue: "loc-store",
+        meta: { quantity: 40 },
+      }),
+      expect.anything()
+    );
+  });
+
+  it("records no location event for an asset created without a location", async () => {
+    await createAsset({
+      title: "Lamp",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+    });
+
+    expect(recordedActions()).toEqual(["ASSET_CREATED"]);
   });
 });
 

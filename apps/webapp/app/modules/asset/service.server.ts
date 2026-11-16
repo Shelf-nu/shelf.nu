@@ -1455,6 +1455,31 @@ export async function createAsset({
           tx
         );
 
+        // The first placement, in the same shape as a move from nowhere, so
+        // the Activity Summary shows where the asset arrived.
+        if (locationId) {
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED",
+              entityType: "ASSET",
+              entityId: created.id,
+              assetId: created.id,
+              locationId,
+              field: "locationId",
+              fromValue: null,
+              toValue: locationId,
+              // Qty-tracked: the units placed. No-op for INDIVIDUAL.
+              meta: assetQtyMeta(
+                { type: type ?? AssetType.INDIVIDUAL },
+                quantity
+              ),
+            },
+            tx
+          );
+        }
+
         // Re-read so the returned shape has the pivot we just created
         // (the initial create's include came back empty for it).
         return locationId

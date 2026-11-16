@@ -5,7 +5,8 @@
  * `ASSET_IMPORT_CHUNK_SIZE` rows) in a single transaction, with one batch
  * statement per table. Each row ends up exactly as `createAsset` would leave
  * it: the asset with its sequential id, a QR code, tags, placement, kit pivot,
- * direct custody, custom field values, barcodes and one `ASSET_CREATED` event.
+ * direct custody, custom field values, barcodes, one `ASSET_CREATED` event and,
+ * for a placed row, one `ASSET_LOCATION_CHANGED` event from no location.
  * Kit custody is not written here: the FINALIZE step assigns it per kit.
  *
  * The first statement advances `AssetImport.processedRows` guarded on the
@@ -41,6 +42,7 @@ import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { resolveImportedAssetModel } from "~/modules/asset-model/service.server";
 import { BARCODE_IMPORT_COLUMNS } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { assetQtyMeta } from "~/utils/asset-quantity";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import {
   buildCustomFieldValue,
@@ -884,6 +886,29 @@ export async function writeImportChunk({
             entityType: "ASSET" as const,
             entityId: row.assetId,
             assetId: row.assetId,
+          })),
+          tx
+        );
+
+        // Each first placement, in the same shape as a move from nowhere, so
+        // the Activity Summary shows where the asset arrived.
+        await recordEvents(
+          withLocation.map((p) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: p.row.assetId,
+            assetId: p.row.assetId,
+            locationId: p.locationId!,
+            field: "locationId",
+            fromValue: null,
+            toValue: p.locationId!,
+            // Qty-tracked: the units placed. No-op for INDIVIDUAL.
+            meta: assetQtyMeta(
+              { type: p.type ?? AssetType.INDIVIDUAL },
+              poolQuantity(p)
+            ),
           })),
           tx
         );

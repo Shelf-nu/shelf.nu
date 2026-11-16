@@ -362,6 +362,54 @@ describe("writeImportChunk", () => {
     ]);
   });
 
+  it("records each placed row's location as a move from nowhere", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    await writeImportChunk(
+      args({
+        rows: [
+          row("i1", { location: "Store" }),
+          row("q1", {
+            type: "QUANTITY_TRACKED",
+            quantity: "40",
+            consumptionType: "TWO_WAY",
+            location: "Store",
+          }),
+          row("n1"),
+        ],
+      })
+    );
+
+    const calls = vi.mocked(recordEvents).mock.calls;
+    expect(calls.map(([events]) => events.map((e) => e.action))).toEqual([
+      ["ASSET_CREATED", "ASSET_CREATED", "ASSET_CREATED"],
+      ["ASSET_LOCATION_CHANGED", "ASSET_LOCATION_CHANGED"],
+    ]);
+    expect(calls[1]).toEqual([
+      [
+        {
+          organizationId: "org",
+          actorUserId: "user",
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: "i1",
+          assetId: "i1",
+          locationId: "loc-store",
+          field: "locationId",
+          fromValue: null,
+          toValue: "loc-store",
+          meta: {},
+        },
+        expect.objectContaining({
+          assetId: "q1",
+          fromValue: null,
+          toValue: "loc-store",
+          meta: { quantity: 40 },
+        }),
+      ],
+      tx,
+    ]);
+  });
+
   it("kit rows get the kit pivot and no direct custody", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
     await writeImportChunk(
