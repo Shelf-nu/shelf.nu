@@ -63,8 +63,10 @@ vi.mock("~/database/db.server", () => {
         const operator = condition as {
           in?: unknown[];
           not?: unknown;
+          notIn?: unknown[];
           mode?: "insensitive";
         };
+        if ("notIn" in operator) return !operator.notIn!.includes(actual);
         if ("in" in operator) {
           if (operator.mode !== "insensitive") {
             return operator.in!.includes(actual);
@@ -433,6 +435,45 @@ describe("a write that fails after the release", () => {
 
     expect(holders()).toEqual([leftBehind]);
     expect(holders("ZZ-LIVE-1")).toEqual([live]);
+  });
+});
+
+describe("a write that updates an unattached barcode by id", () => {
+  it("updateBarcode keeps the row it updates", async () => {
+    seed({ id: "left-behind" });
+
+    await updateBarcode({
+      id: "left-behind",
+      organizationId: ORG,
+      type: BarcodeType.DataMatrix,
+      value: VALUE,
+    });
+
+    expect(holders()).toEqual([
+      expect.objectContaining({
+        id: "left-behind",
+        type: BarcodeType.DataMatrix,
+      }),
+    ]);
+  });
+
+  it("updateBarcodes keeps the row it updates", async () => {
+    seed({ id: "left-behind" });
+
+    await updateBarcodes({
+      ...base,
+      ...asset,
+      barcodes: [
+        { id: "left-behind", type: BarcodeType.DataMatrix, value: VALUE },
+      ],
+    });
+
+    expect(holders()).toEqual([
+      expect.objectContaining({
+        id: "left-behind",
+        type: BarcodeType.DataMatrix,
+      }),
+    ]);
   });
 });
 

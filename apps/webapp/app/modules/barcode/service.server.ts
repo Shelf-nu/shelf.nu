@@ -108,6 +108,9 @@ export type BarcodeReleaseClient = Pick<ExtendedPrismaClient, "barcode">;
  * @param client - The root client or the caller's transaction client
  * @param args.barcodes - The barcodes about to be written, as submitted
  * @param args.organizationId - The caller's workspace
+ * @param args.keepIds - Rows the caller is about to update by id. They are
+ *   never deleted, so the update still finds its row even when that row is
+ *   unattached and already holds the submitted value.
  * @returns The pending delete of the matching unattached rows
  */
 export function releaseUnattachedBarcodes(
@@ -115,9 +118,11 @@ export function releaseUnattachedBarcodes(
   {
     barcodes,
     organizationId,
+    keepIds = [],
   }: {
     barcodes: { type: BarcodeType; value: string }[];
     organizationId: Organization["id"];
+    keepIds?: Barcode["id"][];
   }
 ) {
   return client.barcode.deleteMany({
@@ -131,6 +136,7 @@ export function releaseUnattachedBarcodes(
       },
       assetId: null,
       kitId: null,
+      ...(keepIds.length > 0 && { id: { notIn: keepIds } }),
     },
   });
 }
@@ -338,6 +344,7 @@ export async function updateBarcode({
       releaseUnattachedBarcodes(db, {
         barcodes: [{ type, value }],
         organizationId,
+        keepIds: [id],
       }),
       db.barcode.update(updateArgs),
     ]);
@@ -777,6 +784,7 @@ export async function updateBarcodes({
         releaseUnattachedBarcodes(db, {
           barcodes: barcodesTakingAValue,
           organizationId,
+          keepIds: barcodesToUpdate.map((barcode) => barcode.id!),
         })
       );
     }

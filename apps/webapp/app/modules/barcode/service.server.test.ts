@@ -746,6 +746,7 @@ describe("updateBarcodes", () => {
         value: { in: ["UPDATED123", "NEW123"], mode: "insensitive" },
         assetId: null,
         kitId: null,
+        id: { notIn: ["barcode-1"] },
       },
     });
   });
@@ -811,6 +812,7 @@ describe("updateBarcodes", () => {
         value: { in: ["UPDATED123"], mode: "insensitive" },
         assetId: null,
         kitId: null,
+        id: { notIn: ["barcode-1"] },
       },
     });
     expect(db.barcode.deleteMany).toHaveBeenNthCalledWith(2, {
