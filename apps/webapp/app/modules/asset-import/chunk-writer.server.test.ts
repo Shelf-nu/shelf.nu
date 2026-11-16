@@ -12,6 +12,7 @@ import { recordEvents } from "~/modules/activity-event/service.server";
 import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { assertCategoriesBelongToOrg } from "~/utils/org-validation.server";
 import type { WriteImportChunkArgs } from "./chunk-writer.server";
 import { appendImportWarnings, writeImportChunk } from "./chunk-writer.server";
@@ -477,6 +478,8 @@ describe("writeImportChunk", () => {
 
   it("keeps a committed chunk when the names for its location lines cannot be read", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    // why: the skipped lines must leave a trace in the logs.
+    const logError = vi.spyOn(Logger, "error").mockImplementation(() => {});
     vi.mocked(db.location.findMany).mockRejectedValueOnce(
       new Error("connection lost")
     );
@@ -487,10 +490,17 @@ describe("writeImportChunk", () => {
 
     expect(result).toMatchObject({ applied: true });
     expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalData: { userId: "user", organizationId: "org" },
+      })
+    );
   });
 
   it("writes no location lines when the importing user is gone", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    // why: the skipped lines must leave a trace in the logs.
+    const logError = vi.spyOn(Logger, "error").mockImplementation(() => {});
     vi.mocked(db.user.findUnique).mockResolvedValueOnce(null);
 
     const result = await writeImportChunk(
@@ -499,6 +509,11 @@ describe("writeImportChunk", () => {
 
     expect(result).toMatchObject({ applied: true });
     expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalData: { userId: "user", organizationId: "org" },
+      })
+    );
   });
 
   it("leaves out a row whose location was deleted after the commit", async () => {
