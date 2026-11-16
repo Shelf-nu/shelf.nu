@@ -142,6 +142,10 @@ sign-on as the only way in. It only takes effect while a single sign-on method
 (SAML SSO or the custom OIDC login) is enabled, so the login page is never left
 without a method.
 
+The companion app is covered too: its API accepts only sessions that were
+obtained through single sign-on, and signs out a session obtained with a
+password or a one-time code.
+
 **Default value:** `false`  
 **Environment variable:** `DISABLE_EMAIL_LOGIN`
 

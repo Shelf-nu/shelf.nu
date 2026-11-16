@@ -5,6 +5,7 @@ import type {
   OrganizationRoles,
   Prisma,
 } from "@prisma/client";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -29,6 +30,7 @@ import {
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import { isSingleSignOnSession } from "~/utils/sso.server";
 import { teamTierLimitHasLapsed } from "~/utils/stripe.server";
 import {
   assertCanUseBookings,
@@ -129,6 +131,24 @@ export async function requireMobileAuth(request: Request) {
       message: "User not found in database",
       label: "Auth",
       status: 404,
+    });
+  }
+
+  // With email login switched off (DISABLE_EMAIL_LOGIN) only a session obtained
+  // through single sign-on is accepted, as on the web. The decision reads how
+  // the session was obtained, not the account: a password account linked to an
+  // identity provider signs in through it and must keep working. The token was
+  // accepted by `auth.getUser` above, so its `amr` claim can be trusted.
+  if (config.disableEmailLogin && !isSingleSignOnSession(token)) {
+    await revokeAllSessions(token);
+    throw new ShelfError({
+      cause: null,
+      status: 403,
+      title: "Email login is disabled",
+      message:
+        "Signing in with email and password is disabled. Please use single sign-on.",
+      label: "Auth",
+      shouldBeCaptured: false,
     });
   }
 

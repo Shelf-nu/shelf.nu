@@ -22,8 +22,10 @@ export async function action({ request }: ActionFunctionArgs) {
         );
 
         // A login code is an email login. Signup codes stay governed by
-        // DISABLE_SIGNUP, so only the login mode is refused here.
-        if (mode === "login" && config.disableEmailLogin) {
+        // DISABLE_SIGNUP, so only the signup modes pass. `mode` is optional,
+        // and a request without one asks for a login code.
+        const isSignupMode = mode === "signup" || mode === "confirm_signup";
+        if (config.disableEmailLogin && !isSignupMode) {
           throw new ShelfError({
             cause: null,
             title: "Email login is disabled",

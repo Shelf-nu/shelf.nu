@@ -130,4 +130,16 @@ describe("POST /send-otp", () => {
     expect(result.init?.status).toBe(403);
     expect(sendOTP).not.toHaveBeenCalled();
   });
+
+  it("refuses a request that names no mode, which asks for a login code", async () => {
+    const result = await sendOtpRoute.action(
+      createActionArgs({
+        request: formPost("/send-otp", { email: "jane@example.com" }),
+      })
+    );
+
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(403);
+    expect(sendOTP).not.toHaveBeenCalled();
+  });
 });

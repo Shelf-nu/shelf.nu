@@ -46,7 +46,11 @@ import {
 } from "~/utils/env";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import type { SsoCallbackClaims } from "~/utils/sso.server";
-import { normalizeSsoGroups, readAmrMethods } from "~/utils/sso.server";
+import {
+  normalizeSsoGroups,
+  OAUTH_AMR_METHOD,
+  readAmrMethods,
+} from "~/utils/sso.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import type { OidcWorkspaceMapping } from "./oidc-workspace-mappings.server";
 import {
@@ -55,12 +59,6 @@ import {
   oidcWorkspaceMappings,
 } from "./oidc-workspace-mappings.server";
 import { deleteAuthAccount } from "./service.server";
-
-/**
- * The `amr` method GoTrue records for a sign-in completed through an OAuth or
- * OIDC provider, custom providers included.
- */
-const OAUTH_AMR_METHOD = "oauth";
 
 /**
  * Builds the URL that starts the custom OIDC login: Supabase's authorize
@@ -433,8 +431,16 @@ export async function resolveUserAndOrgForOidcCallback({
         });
       } catch (createError) {
         // The auth user exists only because of this login. Without a Shelf
-        // user it is an account nobody can use, so it is removed again.
-        await deleteAuthAccount(userId);
+        // user it is an account nobody can use, so it is removed again. A
+        // concurrent login may have created the Shelf user in the meantime:
+        // then the auth account is in use and must stay.
+        const createdMeanwhile = await db.user.findUnique({
+          where: { id: userId },
+          select: { id: true },
+        });
+        if (!createdMeanwhile) {
+          await deleteAuthAccount(userId);
+        }
         throw createError;
       }
     }

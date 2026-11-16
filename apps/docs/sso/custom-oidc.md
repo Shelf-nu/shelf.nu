@@ -189,16 +189,16 @@ docker compose up --build
 
 The first start builds Shelf from the checkout, which takes several minutes.
 When the `shelf` container logs `Server started on port 3000`, open
-<http://localhost:3000> and click **Log in with Keycloak**. Your browser warns
+`http://localhost:3000` and click **Log in with Keycloak**. Your browser warns
 about Keycloak's certificate the first time, because it is issued by the
 example's own certificate authority. Accept it once.
 
 | URL                                    | What                                       |
 | -------------------------------------- | ------------------------------------------ |
-| <http://localhost:3000>                | Shelf                                      |
-| <https://keycloak.shelf.internal:8443> | Keycloak admin console (`admin` / `admin`) |
-| <http://localhost:8025>                | Mailpit, shows every email that is sent    |
-| <http://localhost:8000>                | Supabase API (Auth and Storage), no UI     |
+| `http://localhost:3000`                | Shelf                                      |
+| `https://keycloak.shelf.internal:8443` | Keycloak admin console (`admin` / `admin`) |
+| `http://localhost:8025`                | Mailpit, shows every email that is sent    |
+| `http://localhost:8000`                | Supabase API (Auth and Storage), no UI     |
 
 Ports 3000, 8000, 8443 and 8025 must be free. Use Chrome or Firefox: Safari
 does not accept Shelf's `Secure` session cookie on plain `http://localhost`.

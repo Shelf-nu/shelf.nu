@@ -228,6 +228,12 @@ function createEmailAccountExistsError() {
 const SSO_SAML_AMR_METHOD = "sso/saml";
 
 /**
+ * The `amr` method GoTrue records for a sign-in completed through an OAuth or
+ * OIDC provider, custom providers included.
+ */
+export const OAUTH_AMR_METHOD = "oauth";
+
+/**
  * Reads the authentication methods from an access token's `amr` claim. GoTrue
  * writes either `{ method, timestamp }` entries or bare strings (custom access
  * token hooks), so both are accepted.
@@ -268,6 +274,26 @@ export function readAmrMethods(accessToken: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Whether a session was obtained through single sign-on (SAML SSO or an OAuth
+ * or OIDC provider) rather than with an email address (password, one-time
+ * code, magic link). A token whose methods cannot be read counts as not single
+ * sign-on.
+ *
+ * SECURITY: the `amr` claim is read WITHOUT verifying the signature. Pass only
+ * a token GoTrue has just vouched for: one returned by `refreshAccessToken`,
+ * or one accepted by `auth.getUser` in the same request.
+ *
+ * @param accessToken - a JWT issued by GoTrue
+ * @returns true when the session's sign-in went through an identity provider
+ */
+export function isSingleSignOnSession(accessToken: string): boolean {
+  const methods = readAmrMethods(accessToken);
+  return (
+    methods.includes(SSO_SAML_AMR_METHOD) || methods.includes(OAUTH_AMR_METHOD)
+  );
 }
 
 /**

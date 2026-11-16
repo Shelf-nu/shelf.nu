@@ -78,7 +78,7 @@ import {
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
-import { randomUsernameFromEmail } from "~/utils/user";
+import { randomUsernameFromEmail, resolveUserDisplayName } from "~/utils/user";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { lockMembership } from "./membership-lock.server";
 import type { UpdateUserPayload } from "./types";
@@ -985,7 +985,7 @@ export async function updateUserFromSSO(
             await ensureUserTeamMember(tx, {
               userId,
               organizationId: org.id,
-              name: `${firstName} ${lastName}`,
+              name: resolveUserDisplayName(user),
             });
           });
         }
@@ -1009,7 +1009,7 @@ export async function updateUserFromSSO(
           await ensureUserTeamMember(tx, {
             userId,
             organizationId: org.id,
-            name: `${firstName} ${lastName}`,
+            name: resolveUserDisplayName(user),
           });
         });
 

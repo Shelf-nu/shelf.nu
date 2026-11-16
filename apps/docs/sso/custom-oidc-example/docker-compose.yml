@@ -76,12 +76,12 @@ services:
           - keycloak.shelf.internal
       idp: {}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
       # Keycloak over HTTPS, for the browser.
-      - "8443:8443"
+      - "127.0.0.1:8443:8443"
       # Shelf shares this container's network (see below), so its port is
       # published here.
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     healthcheck:
       # The CA that the auth container has to trust exists once Caddy is up.
       test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
@@ -190,7 +190,7 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "8025:8025"
+      - "127.0.0.1:8025:8025"
 
   # Registers Keycloak as the custom OIDC provider `custom:keycloak` in
   # Supabase Auth and creates the storage buckets, then exits. It retries
