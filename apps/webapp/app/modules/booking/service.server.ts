@@ -137,6 +137,7 @@ import {
   roleReservesAsRequest,
   BOOKING_APPROVAL_SWITCHES_SELECT,
   BOOKING_APPROVAL_ENABLED_WHERE,
+  PENDING_APPROVAL_NOTE_STATUS,
   type BookingApprovalSwitches,
 } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -582,6 +583,13 @@ async function recordBookingStatusChangedEvent({
  * @param userId - ID of the user who performed the action (if manual)
  * @param action - Optional custom action description (e.g., "checked-out", "checked-in")
  * @param custodianUserId - Optional custodian user ID for status badge extra info
+ * @param fromPendingApproval - The booking was a reservation request waiting for approval
+ * @param toPendingApproval - The transition made the booking a reservation request
+ *
+ * The two approval flags change only the note's wording and chips: a request is
+ * stored as RESERVED, but its requester does not hold a reservation yet, so the
+ * note shows "Pending approval" where the status would read RESERVED. The
+ * `BOOKING_STATUS_CHANGED` event keeps the stored statuses for reports.
  */
 export async function createStatusTransitionNote({
   bookingId,
@@ -592,6 +600,8 @@ export async function createStatusTransitionNote({
   action,
   custodianUserId,
   methodClause = "",
+  fromPendingApproval = false,
+  toPendingApproval = false,
 }: {
   bookingId: string;
   organizationId: string;
@@ -606,9 +616,19 @@ export async function createStatusTransitionNote({
    * note; a system transition has no method.
    */
   methodClause?: string;
+  fromPendingApproval?: boolean;
+  toPendingApproval?: boolean;
 }) {
-  const fromStatusBadge = wrapBookingStatusForNote(fromStatus, custodianUserId);
-  const toStatusBadge = wrapBookingStatusForNote(toStatus, custodianUserId);
+  const fromStatusBadge = fromPendingApproval
+    ? wrapBookingStatusForNote(PENDING_APPROVAL_NOTE_STATUS)
+    : wrapBookingStatusForNote(fromStatus, custodianUserId);
+  const toStatusBadge = toPendingApproval
+    ? wrapBookingStatusForNote(PENDING_APPROVAL_NOTE_STATUS)
+    : wrapBookingStatusForNote(toStatus, custodianUserId);
+  // A request is made, not a reservation: the requester holds nothing yet.
+  const transitionAction = toPendingApproval
+    ? "requested a reservation"
+    : undefined;
 
   let content: string;
 
@@ -625,7 +645,9 @@ export async function createStatusTransitionNote({
     const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const actionText =
-      action || getActionTextFromTransition(fromStatus, toStatus);
+      action ||
+      transitionAction ||
+      getActionTextFromTransition(fromStatus, toStatus);
     content = `${userLink} ${actionText}${methodClause}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
   } else {
     // System-initiated transition
@@ -647,6 +669,50 @@ export async function createStatusTransitionNote({
     fromStatus,
     toStatus,
   });
+}
+
+/**
+ * The status clause an approval note ends with. Approving does not change the
+ * stored status (the booking stays RESERVED), but for the requester the request
+ * becomes a reservation, so the note reads like the other status changes.
+ */
+function approvalStatusClause(): string {
+  return `. Status changed from ${wrapBookingStatusForNote(
+    PENDING_APPROVAL_NOTE_STATUS
+  )} to ${wrapBookingStatusForNote(BookingStatus.RESERVED)}`;
+}
+
+/**
+ * Which of these bookings are reservation requests still waiting for approval,
+ * for the wording of the notes a revert, cancel or archive writes. Pass the
+ * snapshots read before the change. The workspace's switches are read once,
+ * and only when one of the bookings could be pending.
+ *
+ * @param args.organizationId - The bookings' workspace
+ * @param args.bookings - Status and approval of each booking before the change
+ * @returns The ids of the bookings that were pending approval
+ */
+async function pendingApprovalBookingIds({
+  organizationId,
+  bookings,
+}: {
+  organizationId: Organization["id"];
+  bookings: Pick<Booking, "id" | "status" | "approvedAt">[];
+}): Promise<Set<Booking["id"]>> {
+  const candidates = bookings.filter((booking) =>
+    isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: true,
+    })
+  );
+  if (candidates.length === 0) return new Set();
+  const switches = await db.bookingSettings.findUnique({
+    where: { organizationId },
+    select: BOOKING_APPROVAL_SWITCHES_SELECT,
+  });
+  if (!isBookingApprovalEnabled(switches)) return new Set();
+  return new Set(candidates.map((booking) => booking.id));
 }
 
 /**
@@ -2932,7 +2998,7 @@ export async function reserveBooking({
       });
     }
 
-    // Add activity log for status change to RESERVED
+    // Add activity log for status change to RESERVED, or to a request
     await createStatusTransitionNote({
       bookingId: updatedBooking.id,
       organizationId,
@@ -2940,6 +3006,7 @@ export async function reserveBooking({
       toStatus: updatedBooking.status,
       userId,
       custodianUserId: updatedBooking.custodianUserId || undefined,
+      toPendingApproval: needsApproval,
     });
 
     return updatedBooking;
@@ -3240,7 +3307,7 @@ async function recordApprovalOnCheckout(
       organizationId,
       content: `${wrapUserLinkForNote(
         approver
-      )} approved the booking request by checking it out`,
+      )} approved the booking request by checking it out${approvalStatusClause()}`,
     },
     tx
   );
@@ -13362,6 +13429,7 @@ export async function archiveBooking({
         select: {
           id: true,
           status: true,
+          approvedAt: true,
           to: true,
           activeSchedulerReference: true,
         },
@@ -13451,6 +13519,9 @@ export async function archiveBooking({
       toStatus: BookingStatus.ARCHIVED,
       userId,
       custodianUserId: updatedBooking.custodianUserId || undefined,
+      fromPendingApproval: (
+        await pendingApprovalBookingIds({ organizationId, bookings: [booking] })
+      ).has(booking.id),
     });
 
     // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
@@ -13493,6 +13564,7 @@ export async function cancelBooking({
         select: {
           id: true,
           status: true,
+          approvedAt: true,
           bookingAssets: {
             include: {
               asset: {
@@ -13655,7 +13727,8 @@ export async function cancelBooking({
       });
     }
 
-    // Add activity log for booking cancellation
+    // Add activity log for booking cancellation. A request cancelled before
+    // approval reads "Pending approval -> Cancelled".
     await createStatusTransitionNote({
       bookingId: booking.id,
       organizationId,
@@ -13663,6 +13736,12 @@ export async function cancelBooking({
       toStatus: BookingStatus.CANCELLED,
       userId,
       custodianUserId: booking.custodianUserId || undefined,
+      fromPendingApproval: (
+        await pendingApprovalBookingIds({
+          organizationId,
+          bookings: [bookingFound],
+        })
+      ).has(bookingFound.id),
     });
 
     // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
@@ -13917,8 +13996,9 @@ export async function approveBooking({
           include: BOOKING_INCLUDE_FOR_EMAIL,
         });
 
-        // Not a status transition (the booking stays RESERVED), so this is a
-        // plain system note, paired with the structured event reports count.
+        // The stored status stays RESERVED, so no BOOKING_STATUS_CHANGED event:
+        // a system note reading as a status change for the requester, paired
+        // with the structured event reports count.
         await createSystemBookingNote(
           {
             bookingId: updated.id,
@@ -13926,7 +14006,7 @@ export async function approveBooking({
             content: `${wrapUserLinkForNote({
               ...approver,
               id: userId,
-            })} approved the booking request`,
+            })} approved the booking request${approvalStatusClause()}`,
           },
           tx
         );
@@ -14050,7 +14130,7 @@ export async function revertBookingToDraft({
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, approvedAt: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -14111,7 +14191,11 @@ export async function revertBookingToDraft({
         throw cause;
       });
 
-    // Add activity log for booking revert to draft
+    // Add activity log for booking revert to draft. A request sent back
+    // before approval reads "Pending approval -> Draft".
+    const fromPendingApproval = (
+      await pendingApprovalBookingIds({ organizationId, bookings: [booking] })
+    ).has(booking.id);
     if (userId) {
       await createStatusTransitionNote({
         bookingId: draftBooking.id,
@@ -14120,6 +14204,7 @@ export async function revertBookingToDraft({
         toStatus: BookingStatus.DRAFT,
         userId,
         custodianUserId: draftBooking.custodianUserId || undefined,
+        fromPendingApproval,
       });
     } else {
       // System-initiated revert (fallback)
@@ -14129,6 +14214,7 @@ export async function revertBookingToDraft({
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         custodianUserId: draftBooking.custodianUserId || undefined,
+        fromPendingApproval,
       });
     }
 
@@ -18201,6 +18287,7 @@ export async function bulkArchiveBookings({
       select: {
         id: true,
         status: true,
+        approvedAt: true,
         to: true,
         custodianUserId: true,
         activeSchedulerReference: true,
@@ -18365,6 +18452,12 @@ export async function bulkArchiveBookings({
      * the status change. It only held the interactive-tx connection open across
      * N sequential note writes, which on large selections blew past Prisma's
      * 5s default and aborted the commit with P2028 (Sentry SHELF-WEBAPP-1KQ). */
+    // An expired request archived before approval reads "Pending approval ->
+    // Archived", decided from the snapshot read before the archive.
+    const pendingIds = await pendingApprovalBookingIds({
+      organizationId,
+      bookings: archivedBookings,
+    });
     for (const booking of archivedBookings) {
       await createStatusTransitionNote({
         bookingId: booking.id,
@@ -18373,6 +18466,7 @@ export async function bulkArchiveBookings({
         toStatus: BookingStatus.ARCHIVED,
         userId,
         custodianUserId: booking.custodianUserId || undefined,
+        fromPendingApproval: pendingIds.has(booking.id),
       });
     }
 
@@ -18469,6 +18563,14 @@ export async function bulkCancelBookings({
       access,
       action: "cancel",
     });
+
+    // Requests cancelled before approval read "Pending approval -> Cancelled"
+    // in their notes, decided from the snapshot read above.
+    const pendingIds = await pendingApprovalBookingIds({
+      organizationId,
+      bookings,
+    });
+
     await assertSelectAllWithinOwnership({
       bookingIds,
       matchedCount: bookings.length,
@@ -18588,6 +18690,7 @@ export async function bulkCancelBookings({
           toStatus: BookingStatus.CANCELLED,
           userId,
           custodianUserId: booking.custodianUserId || undefined,
+          fromPendingApproval: pendingIds.has(booking.id),
         });
       }
 

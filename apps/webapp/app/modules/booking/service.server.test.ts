@@ -4458,6 +4458,15 @@ describe("reserveBooking", () => {
             subject: expect.stringContaining("Booking request received"),
           })
         );
+        // The requester holds no reservation yet, so the note names the
+        // request and its "Pending approval" state, not RESERVED.
+        expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: expect.stringMatching(
+              /requested a reservation\. Status changed from \{% booking_status status="DRAFT"[^%]*\/%\} to \{% booking_status status="PENDING_APPROVAL" \/%\}$/
+            ),
+          })
+        );
       });
 
       it("approves an administrator's own reservation in the same write", async () => {
@@ -4476,6 +4485,13 @@ describe("reserveBooking", () => {
         expect(sendEmail).toHaveBeenCalledWith(
           expect.objectContaining({
             subject: expect.stringContaining("Booking reserved"),
+          })
+        );
+        expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: expect.stringMatching(
+              /reserved the booking\. Status changed from \{% booking_status status="DRAFT"[^%]*\/%\} to \{% booking_status status="RESERVED"[^%]*\/%\}$/
+            ),
           })
         );
       });
@@ -11279,6 +11295,69 @@ describe("revertBookingToDraft", () => {
     expect(result).toEqual(draftBooking);
   });
 
+  describe("activity note for a request sent back", () => {
+    afterEach(() => {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+    });
+
+    /**
+     * Reverts booking-1, read as RESERVED with the given approval, in a
+     * workspace with the Base approval switch on.
+     *
+     * @returns The content of the status note the revert wrote
+     */
+    async function revertAndReadNote(approvedAt: Date | null) {
+      const reserved = {
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        approvedAt,
+        bookingAssets: [],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...reserved,
+        status: BookingStatus.DRAFT,
+        approvedAt: null,
+      });
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: false,
+      });
+
+      await revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      });
+
+      const call = vitest
+        .mocked(bookingNoteService.createSystemBookingNote)
+        .mock.calls.find(([args]) =>
+          String(args.content).includes("reverted booking to draft")
+        );
+      return String(call?.[0].content);
+    }
+
+    it("starts from Pending approval for a request not yet approved", async () => {
+      expect(await revertAndReadNote(null)).toMatch(
+        /Status changed from \{% booking_status status="PENDING_APPROVAL" \/%\} to \{% booking_status status="DRAFT"/
+      );
+    });
+
+    it("starts from Reserved for an approved reservation", async () => {
+      expect(
+        await revertAndReadNote(new Date("2026-11-16T10:00:00.000Z"))
+      ).toMatch(
+        /Status changed from \{% booking_status status="RESERVED"[^%]*\/%\} to \{% booking_status status="DRAFT"/
+      );
+    });
+  });
+
   it("refuses the revert when the booking left RESERVED before the write", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
@@ -11682,6 +11761,16 @@ describe("approveBooking", () => {
         eventType: "APPROVED",
         editorUserId: "admin-1",
       })
+    );
+    // For the requester the request becomes a reservation, so the note reads
+    // as that status change; the stored status never moved.
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringMatching(
+          /approved the booking request\. Status changed from \{% booking_status status="PENDING_APPROVAL" \/%\} to \{% booking_status status="RESERVED" \/%\}$/
+        ),
+      }),
+      expect.anything()
     );
     expect(sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -93,15 +93,7 @@ export function BookingStatusBadge({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger>
-            <Badge
-              color={BADGE_COLORS.orange.bg}
-              textColor={BADGE_COLORS.orange.text}
-              withDot={false}
-            >
-              <span className="block whitespace-nowrap">
-                {BOOKING_PSEUDO_STATUS_LABELS.PENDING_APPROVAL}
-              </span>
-            </Badge>
+            <PendingApprovalChip />
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-72">
             <p>
@@ -113,6 +105,25 @@ export function BookingStatusBadge({
         </Tooltip>
       </TooltipProvider>
     </div>
+  );
+}
+
+/**
+ * The amber "Pending approval" chip on its own, without a tooltip. The status
+ * badge wraps it in an explanation for a live booking; an activity note shows
+ * it bare, as the state the booking was in when the note was written.
+ */
+export function PendingApprovalChip() {
+  return (
+    <Badge
+      color={BADGE_COLORS.orange.bg}
+      textColor={BADGE_COLORS.orange.text}
+      withDot={false}
+    >
+      <span className="block whitespace-nowrap">
+        {BOOKING_PSEUDO_STATUS_LABELS.PENDING_APPROVAL}
+      </span>
+    </Badge>
   );
 }
 

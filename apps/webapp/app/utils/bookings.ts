@@ -35,6 +35,14 @@ export const BOOKING_APPROVAL_ENABLED_WHERE: {
 };
 
 /**
+ * The `status` an activity note's `booking_status` tag carries for a
+ * reservation request that is waiting for approval. Not a `BookingStatus`: the
+ * booking is stored as RESERVED, but the person who requested it does not hold
+ * a reservation yet, so the note names the state they see.
+ */
+export const PENDING_APPROVAL_NOTE_STATUS = "PENDING_APPROVAL";
+
+/**
  * Whether booking approval is on for any role in the workspace. This is the
  * switch the pending derivation reads: a request made under either switch is
  * pending while either is still on.
