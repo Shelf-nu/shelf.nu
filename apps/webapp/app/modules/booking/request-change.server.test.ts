@@ -17,15 +17,9 @@ vi.mock("~/modules/booking-note/service.server", () => ({
   createSystemBookingNote: vi.fn().mockResolvedValue(undefined),
 }));
 
-// why: the actor's display name for the note; no database here.
-vi.mock("~/modules/user/service.server", () => ({
-  getUserByID: vi.fn().mockResolvedValue({
-    id: "user-1",
-    firstName: "Sam",
-    lastName: "Student",
-    displayName: null,
-  }),
-}));
+// why: the module imports the shared client as a default for its reads; every
+// read here goes through the recording transaction below instead.
+vi.mock("~/database/db.server", () => ({ db: {} }));
 
 /** A transaction client recording the booking reads and writes. */
 const tx = {
@@ -33,6 +27,15 @@ const tx = {
   bookingNote: {},
   userOrganization: { findUnique: vi.fn() },
   bookingSettings: { findUnique: vi.fn() },
+  // The actor's name for the note, read through the transaction.
+  user: {
+    findUnique: vi.fn().mockResolvedValue({
+      id: "user-1",
+      firstName: "Sam",
+      lastName: "Student",
+      displayName: null,
+    }),
+  },
 };
 
 const args = {

@@ -206,6 +206,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ? await readBookingRequestVersion(db, {
             bookingId,
             organizationId,
+            pendingOnly: true,
           })
         : null;
 

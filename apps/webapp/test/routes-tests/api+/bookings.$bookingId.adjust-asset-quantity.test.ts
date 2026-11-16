@@ -237,7 +237,8 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
     // The acting member reaches the approval helper with the raised amount.
     expect(clearApprovalWhenRequestGrows).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ actorUserId: expect.any(String) })
+      // The signed-in member, never the booking's creator or custodian.
+      expect.objectContaining({ actorUserId: "user-current" })
     );
   });
 

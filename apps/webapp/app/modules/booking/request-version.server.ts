@@ -15,6 +15,7 @@
  * @see {@link file://./service.server.ts} `approveBooking`
  */
 import { createHash } from "node:crypto";
+import { BookingStatus } from "@prisma/client";
 import type { Booking, Organization } from "@prisma/client";
 import type { db } from "~/database/db.server";
 
@@ -28,6 +29,7 @@ type BookingReader = Pick<typeof db, "booking">;
  * @param client - `db`, or the transaction holding the booking row lock
  * @param args.bookingId - The booking
  * @param args.organizationId - Its workspace
+ * @param args.pendingOnly - Read only a pending request; see the field
  * @returns A hex digest that changes whenever the booking or its contents do
  */
 export async function readBookingRequestVersion(
@@ -35,10 +37,26 @@ export async function readBookingRequestVersion(
   {
     bookingId,
     organizationId,
-  }: { bookingId: Booking["id"]; organizationId: Organization["id"] }
+    pendingOnly = false,
+  }: {
+    bookingId: Booking["id"];
+    organizationId: Organization["id"];
+    /**
+     * Read only a reservation request still waiting for a decision (RESERVED,
+     * never approved), and `null` for anything else without loading its
+     * contents. For page loads, where most bookings are not pending.
+     */
+    pendingOnly?: boolean;
+  }
 ): Promise<string | null> {
   const booking = await client.booking.findFirst({
-    where: { id: bookingId, organizationId },
+    where: {
+      id: bookingId,
+      organizationId,
+      ...(pendingOnly
+        ? { status: BookingStatus.RESERVED, approvedAt: null }
+        : {}),
+    },
     select: {
       updatedAt: true,
       bookingAssets: {

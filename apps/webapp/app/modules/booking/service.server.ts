@@ -200,11 +200,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
-import {
-  ROLE_POLICIES,
-  resolveRole,
-  type RoleAccess,
-} from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
@@ -297,6 +293,7 @@ import {
   sendBookingPushToCustodian,
   sendBookingPushToReplacedCustodian,
 } from "./push.server";
+import { actorReservesAsRequest } from "./request-change.server";
 import { readBookingRequestVersion } from "./request-version.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
@@ -3277,45 +3274,6 @@ async function recordApprovalOnCheckout(
     },
     tx
   );
-}
-
-/**
- * Whether the acting user's own reservation in this workspace would be a
- * request, read from their membership in the database rather than from the
- * caller. Decided by the effective role (`resolveRole`), the same role whose
- * policy `access.policy` carries.
- *
- * @param args.actorUserId - The acting user
- * @param args.organizationId - The workspace
- * @param args.settings - The workspace's approval switches
- * @param args.client - Prisma client to read through; the transaction when
- *   called under the booking row lock
- */
-async function actorReservesAsRequest({
-  actorUserId,
-  organizationId,
-  settings,
-  client = db,
-}: {
-  actorUserId: User["id"];
-  organizationId: Organization["id"];
-  settings: Partial<BookingApprovalSwitches> | null | undefined;
-  /** The transaction, when called under the booking row lock. */
-  client?: Pick<typeof db, "userOrganization">;
-}): Promise<boolean> {
-  const membership = await client.userOrganization.findUnique({
-    where: { userId_organizationId: { userId: actorUserId, organizationId } },
-    select: { roles: true },
-  });
-  if (!membership) return false;
-  // The membership's effective role decides, as it does for
-  // `access.policy` and so for `reserveBooking`: a Self service + Base
-  // membership reserves as Self service.
-  return roleReservesAsRequest({
-    approvalSetting:
-      ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
-    settings,
-  });
 }
 
 /** What {@link approvalOnCheckout} resolved for the acting user. */

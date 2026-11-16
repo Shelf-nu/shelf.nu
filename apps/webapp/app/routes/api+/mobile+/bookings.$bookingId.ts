@@ -130,7 +130,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.approve,
     }))
-      ? await readBookingRequestVersion(db, { bookingId, organizationId })
+      ? await readBookingRequestVersion(db, {
+          bookingId,
+          organizationId,
+          pendingOnly: true,
+        })
       : null;
 
     const booking = await db.booking.findFirst({

@@ -25,11 +25,11 @@
  */
 import { BookingStatus } from "@prisma/client";
 import type { Booking, Organization, Prisma, User } from "@prisma/client";
-import type { db } from "~/database/db.server";
-import { getUserByID } from "~/modules/user/service.server";
+import { db } from "~/database/db.server";
 import {
   BOOKING_APPROVAL_SWITCHES_SELECT,
   roleReservesAsRequest,
+  type BookingApprovalSwitches,
 } from "~/utils/bookings";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
@@ -39,7 +39,7 @@ import { USER_NAME_SELECT } from "../user/fields";
 /** A transaction client that can read and write bookings and their notes. */
 type RequestChangeTx = Pick<
   typeof db,
-  "booking" | "bookingNote" | "bookingSettings" | "userOrganization"
+  "booking" | "bookingNote" | "bookingSettings" | "user" | "userOrganization"
 >;
 
 /**
@@ -83,26 +83,19 @@ export async function clearApprovalWhenRequestGrows(
   }
 
   // Only a member whose own reservation would be a request loses the
-  // approval: their role's switch decides, by their effective role, as it
-  // does for `reserveBooking`. Everyone else (approvers, and a role whose
-  // switch is off) keeps it.
-  const [membership, switches] = await Promise.all([
-    tx.userOrganization.findUnique({
-      where: { userId_organizationId: { userId: actorUserId, organizationId } },
-      select: { roles: true },
-    }),
-    tx.bookingSettings.findUnique({
-      where: { organizationId },
-      select: BOOKING_APPROVAL_SWITCHES_SELECT,
-    }),
-  ]);
+  // approval. Everyone else (approvers, and a role whose switch is off) keeps
+  // it.
+  const switches = await tx.bookingSettings.findUnique({
+    where: { organizationId },
+    select: BOOKING_APPROVAL_SWITCHES_SELECT,
+  });
   if (
-    !membership ||
-    !roleReservesAsRequest({
-      approvalSetting:
-        ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
+    !(await actorReservesAsRequest({
+      actorUserId,
+      organizationId,
       settings: switches,
-    })
+      client: tx,
+    }))
   ) {
     return false;
   }
@@ -112,7 +105,9 @@ export async function clearApprovalWhenRequestGrows(
     data: { approvedAt: null, approvedById: null },
   });
 
-  const actor = await getUserByID(actorUserId, {
+  // Through the transaction: no second connection while its locks are held.
+  const actor = await tx.user.findUnique({
+    where: { id: actorUserId },
     select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
   });
   await createSystemBookingNote(
@@ -120,11 +115,52 @@ export async function clearApprovalWhenRequestGrows(
       bookingId,
       organizationId,
       content: `${wrapUserLinkForNote({
-        ...actor,
+        firstName: actor?.firstName ?? null,
+        lastName: actor?.lastName ?? null,
+        displayName: actor?.displayName ?? null,
         id: actorUserId,
       })} changed the approved booking request to ask for more, so it needs approval again.`,
     },
     tx
   );
   return true;
+}
+
+/**
+ * Whether the acting user's own reservation in this workspace would be a
+ * request, read from their membership in the database rather than from the
+ * caller. Decided by the effective role (`resolveRole`), the same role whose
+ * policy `access.policy` carries and `reserveBooking` decides by. The one
+ * place this rule lives: the check-out gate and the approval-clearing rule
+ * both ask it.
+ *
+ * @param args.actorUserId - The acting user
+ * @param args.organizationId - The workspace
+ * @param args.settings - The workspace's approval switches
+ * @param args.client - Prisma client to read through; the transaction when
+ *   called under the booking row lock
+ * @returns `true` when the member's reservation would wait for approval
+ */
+export async function actorReservesAsRequest({
+  actorUserId,
+  organizationId,
+  settings,
+  client = db,
+}: {
+  actorUserId: User["id"];
+  organizationId: Organization["id"];
+  settings: Partial<BookingApprovalSwitches> | null | undefined;
+  /** The transaction, when called under the booking row lock. */
+  client?: Pick<typeof db, "userOrganization">;
+}): Promise<boolean> {
+  const membership = await client.userOrganization.findUnique({
+    where: { userId_organizationId: { userId: actorUserId, organizationId } },
+    select: { roles: true },
+  });
+  if (!membership) return false;
+  return roleReservesAsRequest({
+    approvalSetting:
+      ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
+    settings,
+  });
 }
