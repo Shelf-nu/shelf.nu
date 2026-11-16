@@ -16,6 +16,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 
+import { assertEmailLoginEnabled } from "~/modules/auth/email-login.server";
 import {
   refuseAuthenticatedLegacySession,
   revokeSession,
@@ -91,6 +92,11 @@ export function loader({ context, request }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
+    // The loader keeps the page closed while email login is off; this refuses
+    // a request that posts anyway, for both steps, so a reset code issued
+    // earlier cannot set a password either.
+    assertEmailLoginEnabled();
+
     const { intent } = parseData(
       await readFormData(request.clone()),
       z.object({ intent: z.enum(["request-otp", "confirm-otp"]) }),

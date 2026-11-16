@@ -584,6 +584,29 @@ describe("requireMobileAuth", () => {
     expect(user.id).toBe("user-1");
   });
 
+  it("does not ask the decision for a single sign-on session of a non-SSO account", async () => {
+    // An account that is not an SSO account holds such a session when its
+    // identity provider login was linked to it. The decision would refuse the
+    // address here; it must not be reached.
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+    const payload = Buffer.from(
+      JSON.stringify({ amr: [{ method: "oauth", timestamp: 1 }] })
+    ).toString("base64url");
+    const { url } = signedInAs({ ...BASE_ROW, sso: false });
+    const request = new Request(url, {
+      headers: { Authorization: `Bearer header.${payload}.signature` },
+    });
+
+    const { user } = await requireMobileAuth(request);
+
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+    expect(user.id).toBe("user-1");
+  });
+
   describe("with email login switched off", () => {
     beforeEach(() => {
       emailLogin.disabled = true;

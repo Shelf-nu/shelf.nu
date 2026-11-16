@@ -138,7 +138,8 @@ setup and the group to workspace mapping.
 ### disableEmailLogin
 
 Hides password and one-time code login and refuses them, which leaves single
-sign-on as the only way in. It only takes effect while a single sign-on method
+sign-on as the only way in. Password reset and signing up with an email
+address are refused as well, because both end in an email login. It only takes effect while a single sign-on method
 (SAML SSO or the custom OIDC login) is enabled, so the login page is never left
 without a method.
 

@@ -1,11 +1,11 @@
 import type { ActionFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
 
-import { config } from "~/config/shelf.config";
 import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
+import { assertEmailLoginEnabled } from "~/modules/auth/email-login.server";
 import { sendOTP } from "~/modules/auth/service.server";
 import { refreshSignupIntentHeaders } from "~/modules/signup-intent/cookie.server";
-import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { error, getActionMethod, parseData } from "~/utils/http.server";
 import { validateNonSSOSignup } from "~/utils/sso.server";
 
@@ -21,21 +21,10 @@ export async function action({ request }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        // A login code is an email login. Signup codes stay governed by
-        // DISABLE_SIGNUP, so only the signup modes pass. `mode` is optional,
-        // and a request without one asks for a login code.
-        const isSignupMode = mode === "signup" || mode === "confirm_signup";
-        if (config.disableEmailLogin && !isSignupMode) {
-          throw new ShelfError({
-            cause: null,
-            title: "Email login is disabled",
-            message:
-              "Signing in with a one-time code is disabled. Please use single sign-on.",
-            label: "Auth",
-            status: 403,
-            shouldBeCaptured: false,
-          });
-        }
+        // No code of any kind while email login is off: a signup code would
+        // open an account that cannot sign in again. `sendOTP` refuses too;
+        // asking here keeps the signup checks below from running first.
+        assertEmailLoginEnabled();
 
         // Only validate SSO for signup attempts
         if (mode === "signup" || mode === "confirm_signup") {

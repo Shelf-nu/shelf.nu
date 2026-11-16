@@ -22,6 +22,7 @@ import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
+import { assertEmailLoginEnabled } from "~/modules/auth/email-login.server";
 import {
   INVALID_CREDENTIALS_MESSAGE,
   signInWithEmail,
@@ -100,17 +101,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       case "POST": {
         // The form is hidden while email login is off; this refuses a request
         // that posts to the action anyway.
-        if (config.disableEmailLogin) {
-          throw new ShelfError({
-            cause: null,
-            title: "Email login is disabled",
-            message:
-              "Signing in with email and password is disabled. Please use single sign-on.",
-            label: "Auth",
-            status: 403,
-            shouldBeCaptured: false,
-          });
-        }
+        assertEmailLoginEnabled();
 
         // Guard against bots sending non-form content types
         const contentType = request.headers.get("content-type") || "";

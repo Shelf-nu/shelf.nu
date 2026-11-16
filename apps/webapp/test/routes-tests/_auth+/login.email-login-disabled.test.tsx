@@ -1,10 +1,13 @@
 /**
  * Route tests for a deployment that turned email login off
  * (`DISABLE_EMAIL_LOGIN`): the login page shows only single sign-on, and the
- * password form and the login code are refused when posted anyway.
+ * password form, every one-time code and the password reset are refused when
+ * posted anyway.
  *
  * @see apps/webapp/app/routes/_auth+/login.tsx
  * @see apps/webapp/app/routes/_auth+/send-otp.tsx
+ * @see apps/webapp/app/routes/_auth+/forgot-password.tsx
+ * @see apps/webapp/app/modules/auth/email-login.server.ts
  */
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
@@ -26,18 +29,23 @@ const loginConfig = vi.hoisted(() => ({
 }));
 vi.mock("~/config/shelf.config", () => ({ config: loginConfig }));
 
-// why: signInWithEmail and sendOTP call Supabase Auth; a refused request must
-// never reach them.
+// why: these call Supabase Auth; a refused request must never reach them.
 vi.mock("~/modules/auth/service.server", () => ({
   signInWithEmail: vi.fn(),
   sendOTP: vi.fn(),
+  sendResetPasswordLink: vi.fn(),
+  updateAccountPassword: vi.fn(),
 }));
 
 const loginRoute = await import("~/routes/_auth+/login");
 const sendOtpRoute = await import("~/routes/_auth+/send-otp");
-const { signInWithEmail, sendOTP } = await import(
-  "~/modules/auth/service.server"
-);
+const forgotPasswordRoute = await import("~/routes/_auth+/forgot-password");
+const {
+  signInWithEmail,
+  sendOTP,
+  sendResetPasswordLink,
+  updateAccountPassword,
+} = await import("~/modules/auth/service.server");
 
 /**
  * Builds a form POST.
@@ -131,6 +139,21 @@ describe("POST /send-otp", () => {
     expect(sendOTP).not.toHaveBeenCalled();
   });
 
+  it("refuses a signup code too, which would open an account that cannot sign in", async () => {
+    const result = await sendOtpRoute.action(
+      createActionArgs({
+        request: formPost("/send-otp", {
+          email: "jane@example.com",
+          mode: "signup",
+        }),
+      })
+    );
+
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(403);
+    expect(sendOTP).not.toHaveBeenCalled();
+  });
+
   it("refuses a request that names no mode, which asks for a login code", async () => {
     const result = await sendOtpRoute.action(
       createActionArgs({
@@ -141,5 +164,40 @@ describe("POST /send-otp", () => {
     assertIsDataWithResponseInit(result);
     expect(result.init?.status).toBe(403);
     expect(sendOTP).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /forgot-password", () => {
+  it("refuses to send a reset code while email login is off", async () => {
+    const result = await forgotPasswordRoute.action(
+      createActionArgs({
+        request: formPost("/forgot-password", {
+          intent: "request-otp",
+          email: "jane@example.com",
+        }),
+      })
+    );
+
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(403);
+    expect(sendResetPasswordLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses to set a password with a reset code issued earlier", async () => {
+    const result = await forgotPasswordRoute.action(
+      createActionArgs({
+        request: formPost("/forgot-password", {
+          intent: "confirm-otp",
+          email: "jane@example.com",
+          otp: "123456",
+          password: "correct horse battery",
+          confirmPassword: "correct horse battery",
+        }),
+      })
+    );
+
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(403);
+    expect(updateAccountPassword).not.toHaveBeenCalled();
   });
 });

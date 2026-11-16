@@ -17,6 +17,7 @@ import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
+import { createEmailLoginDisabledError } from "~/modules/auth/email-login.server";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import {
   createSsoRequiredError,
@@ -139,17 +140,10 @@ export async function requireMobileAuth(request: Request) {
   // the session was obtained, not the account: a password account linked to an
   // identity provider signs in through it and must keep working. The token was
   // accepted by `auth.getUser` above, so its `amr` claim can be trusted.
-  if (config.disableEmailLogin && !isSingleSignOnSession(token)) {
+  const isSsoSession = isSingleSignOnSession(token);
+  if (config.disableEmailLogin && !isSsoSession) {
     await revokeAllSessions(token);
-    throw new ShelfError({
-      cause: null,
-      status: 403,
-      title: "Email login is disabled",
-      message:
-        "Signing in with email and password is disabled. Please use single sign-on.",
-      label: "Auth",
-      shouldBeCaptured: false,
-    });
+    throw createEmailLoginDisabledError();
   }
 
   // The companion signs in with a password straight against Supabase, so this
@@ -158,7 +152,12 @@ export async function requireMobileAuth(request: Request) {
   // companion sessions are the SSO sessions of `User.sso` accounts. A refused account
   // has every session revoked first, so its refresh token cannot mint another
   // access token for the companion or the web.
-  if (!user.sso) {
+  //
+  // A session obtained through single sign-on is never asked: the decision is
+  // about signing in with an email address, and an account that is not an SSO
+  // account can hold such a session when its identity provider login was
+  // linked to it.
+  if (!user.sso && !isSsoSession) {
     const decision = await getLegacyLoginDecisionForUser({
       userId: user.id,
       email: user.email,
