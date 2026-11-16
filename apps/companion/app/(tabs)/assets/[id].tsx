@@ -159,6 +159,7 @@ export default function AssetDetailScreen() {
     setError,
     setIsLoading,
     fetchAsset,
+    reloadAsset,
     onRefresh,
   } = useAssetData(id, currentOrg?.id);
 
@@ -493,8 +494,8 @@ export default function AssetDetailScreen() {
 
   // ── Archive (active assets) ───────────────────────
 
-  // One archive at a time: the first tap's request may still be running when
-  // the menu is opened again.
+  // One archive at a time. The action row hides while loading, but that waits
+  // for a render; the ref refuses a second send before it lands.
   const archiveInFlight = useRef(false);
 
   // Same action as the web asset page's Archive. The web archives on one
@@ -543,11 +544,15 @@ export default function AssetDetailScreen() {
       });
       if (outcome.kind === "failed") {
         Alert.alert("Couldn't archive", outcome.message);
+        // A refusal often means the asset changed elsewhere (custody, a
+        // booking): reload it so the screen and the pre-tap check catch up.
+        await reloadAsset();
         return;
       }
       if (outcome.kind === "cancelled") return;
 
-      await settleArchiveChange(asset.id, fetchAsset);
+      // The archive landed: a failed reload keeps the screen, not an error.
+      await settleArchiveChange(asset.id, reloadAsset);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // The archived badge and notice say the rest; a draft still holding the
       // asset is news the screen does not show.
