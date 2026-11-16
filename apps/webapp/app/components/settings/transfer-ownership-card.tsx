@@ -7,6 +7,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { GENERAL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import type { UserNameFields } from "~/utils/user";
@@ -150,7 +151,10 @@ export default function TransferOwnershipCard({
   /** Personal workspaces cannot be transferred — the server rejects them too */
   if (isPersonalWorkspace) {
     return (
-      <Card className={tw(className)} id="transfer-ownership">
+      <Card
+        className={tw(className)}
+        id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
+      >
         <h4 className="mb-1 text-text-lg font-semibold">
           Transfer workspace ownership
         </h4>
@@ -169,7 +173,10 @@ export default function TransferOwnershipCard({
   /** Non-owners cannot transfer, but must still be able to discover who can */
   if (!canTransferOwnership) {
     return (
-      <Card className={tw(className)} id="transfer-ownership">
+      <Card
+        className={tw(className)}
+        id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
+      >
         <h4 className="mb-1 text-text-lg font-semibold">
           Transfer workspace ownership
         </h4>
@@ -183,7 +190,10 @@ export default function TransferOwnershipCard({
   }
 
   return (
-    <Card className={tw(className)} id="transfer-ownership">
+    <Card
+      className={tw(className)}
+      id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
+    >
       <h4 className="mb-1 text-text-lg font-semibold">
         Transfer workspace ownership
       </h4>

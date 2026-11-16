@@ -12,6 +12,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
 import { getValidationErrors } from "~/utils/http";
 import { handleActivationKeyPress } from "~/utils/keyboard";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 
 export const TimeSettingsSchema = z.object({
   bufferStartTime: z.coerce
@@ -52,7 +53,7 @@ export function TimeSettings({
   );
 
   return (
-    <Card>
+    <Card id={BOOKING_SETTINGS_ANCHORS.timeRestrictions}>
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>

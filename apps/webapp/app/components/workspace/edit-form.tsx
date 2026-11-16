@@ -17,6 +17,7 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { GENERAL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -174,7 +175,10 @@ const WorkspaceGeneralEditForms = ({
       className="flex  flex-col gap-2"
       encType="multipart/form-data"
     >
-      <Card className={tw("my-0", className)}>
+      <Card
+        id={GENERAL_SETTINGS_ANCHORS.general}
+        className={tw("my-0", className)}
+      >
         <div className="mb-6">
           <h3 className="text-text-lg font-semibold">General</h3>
           <p className="text-sm text-gray-600">
@@ -413,7 +417,10 @@ const WorkspacePermissionsEditForm = ({
   const disabled = useDisabled(fetcher);
 
   return organization.type === OrganizationType.TEAM ? (
-    <Card className={tw("my-0 w-full", className)}>
+    <Card
+      id={GENERAL_SETTINGS_ANCHORS.permissions}
+      className={tw("my-0 w-full", className)}
+    >
       <div className="border-b pb-5">
         <h3 className="text-text-lg font-semibold">Permissions</h3>
         <p className="text-sm text-gray-600">
@@ -652,7 +659,7 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
 
   return isOwner && organization.enabledSso && organization.ssoDetails ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
-      <Card className={tw("my-0 ", className)}>
+      <Card id={GENERAL_SETTINGS_ANCHORS.sso} className={tw("my-0", className)}>
         <div className=" border-b pb-5">
           <h2 className=" text-[18px] font-semibold">SSO details</h2>
           <p>
@@ -867,7 +874,10 @@ const WorkspaceScimTokensSection = ({
 
   return (
     <>
-      <Card className={tw("my-0", className)}>
+      <Card
+        id={GENERAL_SETTINGS_ANCHORS.scim}
+        className={tw("my-0", className)}
+      >
         <div className="border-b pb-5">
           <h2 className="text-[18px] font-semibold">SCIM provisioning</h2>
           <p className="text-sm text-gray-600">

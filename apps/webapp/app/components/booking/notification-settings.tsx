@@ -27,6 +27,7 @@ import {
   PICKABLE_RECIPIENT_AUDIENCE,
   RESERVATION_AUDIENCE,
 } from "~/utils/permissions/role-audience";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "./notification-preview";
 
@@ -135,7 +136,10 @@ export function NotificationSettings({
   );
 
   return (
-    <Card className="mt-0 overflow-visible">
+    <Card
+      id={BOOKING_SETTINGS_ANCHORS.notifications}
+      className="mt-0 overflow-visible"
+    >
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">
           Email Notification Recipients

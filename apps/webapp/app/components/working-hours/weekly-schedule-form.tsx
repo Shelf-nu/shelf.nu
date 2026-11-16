@@ -8,6 +8,7 @@ import {
   WEEK_DISPLAY_ORDER,
 } from "~/modules/working-hours/constants";
 import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { Switch } from "../forms/switch";
 import { TimeSelect } from "../forms/time-select";
 import { Button } from "../shared/button";
@@ -157,7 +158,7 @@ export const WeeklyScheduleForm = ({
   };
 
   return (
-    <Card>
+    <Card id={BOOKING_SETTINGS_ANCHORS.weeklySchedule}>
       <fetcher.Form
         method="post"
         className="flex flex-col gap-2"

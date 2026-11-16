@@ -52,11 +52,14 @@ export type ExplicitRequirementSwitch = {
  * @returns The settings card
  */
 export function ExplicitRequirementSettingsCard({
+  id,
   header,
   exemption,
   intent,
   switches,
 }: {
+  /** Anchor id, so `/settings/bookings#<id>` scrolls to this card */
+  id: string;
   header: { title: string; subHeading?: string };
   /** Who the switches never apply to, shown under the heading at all times */
   exemption: string;
@@ -70,7 +73,7 @@ export function ExplicitRequirementSettingsCard({
   const formRevision = useRevisionOnRefusedSave(fetcher);
 
   return (
-    <Card className="mt-0">
+    <Card id={id} className="mt-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>

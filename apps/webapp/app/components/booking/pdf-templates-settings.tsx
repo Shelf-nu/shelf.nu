@@ -35,6 +35,7 @@ import { EMPTY_SLOT } from "~/modules/pdf-template/form";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import Input from "../forms/input";
 import type { SearchableSelectOption } from "../forms/searchable-select";
 import { SearchableSelect } from "../forms/searchable-select";
@@ -86,7 +87,7 @@ export function PdfTemplatesSettings({
   const editing = templates.find((item) => item.id === editingId) ?? null;
 
   return (
-    <Card className="my-0 w-full">
+    <Card id={BOOKING_SETTINGS_ANCHORS.pdfTemplates} className="my-0 w-full">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">PDF templates</h3>
         <p className="text-sm text-gray-600">

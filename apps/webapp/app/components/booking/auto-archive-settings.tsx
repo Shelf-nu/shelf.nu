@@ -12,6 +12,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
 import { getValidationErrors } from "~/utils/http";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 
 export const AutoArchiveToggleSchema = z.object({
   autoArchiveBookings: z
@@ -73,7 +74,7 @@ export function AutoArchiveSettings({
   );
 
   return (
-    <Card className="my-0">
+    <Card id={BOOKING_SETTINGS_ANCHORS.automation} className="my-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>

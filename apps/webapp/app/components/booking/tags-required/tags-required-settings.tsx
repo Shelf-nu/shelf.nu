@@ -5,6 +5,7 @@ import FormRow from "~/components/forms/form-row";
 import { Switch } from "~/components/forms/switch";
 import { Card } from "~/components/shared/card";
 import { useDisabled } from "~/hooks/use-disabled";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 
 export const TagsRequiredSettingsSchema = z.object({
   tagsRequired: z
@@ -25,7 +26,7 @@ export function TagsRequiredSettings({
   const zo = useZorm("TagsRequiredForm", TagsRequiredSettingsSchema);
 
   return (
-    <Card>
+    <Card id={BOOKING_SETTINGS_ANCHORS.tagsRequirement}>
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>

@@ -27,6 +27,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { EMAIL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 
 export const emailFooterSchema = z.object({
   customEmailFooter: z.string().max(500).optional().default(""),
@@ -158,7 +159,10 @@ export default function EmailSettingsPage() {
   return (
     <div className="flex flex-col gap-8 xl:flex-row">
       {/* Left column: Form */}
-      <div className="flex flex-1 flex-col gap-4">
+      <div
+        id={EMAIL_SETTINGS_ANCHORS.customEmailFooter}
+        className="flex flex-1 scroll-mt-4 flex-col gap-4"
+      >
         <div>
           <h3 className="text-text-lg font-semibold">Custom email footer</h3>
           <p className="text-sm text-gray-600">
