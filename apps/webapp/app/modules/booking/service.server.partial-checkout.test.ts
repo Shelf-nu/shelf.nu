@@ -24,7 +24,6 @@ import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
-import { hashRequest } from "./request-version.server";
 import {
   buildOverriddenReservationNotes,
   computeBookingAssetRemainingToCheckOut,
@@ -104,10 +103,6 @@ vitest.mock("~/database/db.server", () => {
       },
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
-        // why: an approver's first scan reads the request version again
-        // under the booking lock (`readBookingRequestVersion`); the approver
-        // cases stage the request row.
-        findFirst: vitest.fn().mockResolvedValue(null),
         // why: computeBookingAssetRemainingToCheckOut's legacy-ONGOING
         // fallback (bug #96 follow-up) reads `booking.status` via a cheap
         // findUnique. Default to RESERVED so the fallback short-circuits and
@@ -350,8 +345,8 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
-// why: the first-scan gate asks whether the acting user may approve a pending
-// request (an approver's scan approves it). Default: may not.
+// why: permission reads stay out of these cases; a pending request is refused
+// for everyone, approvers included. Default: may not.
 vitest.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vitest.fn().mockResolvedValue(false),
 }));
@@ -506,20 +501,6 @@ const baseParams = {
   organizationId: "org-1",
   userId: "user-1",
   hints: mockHints,
-};
-
-/**
- * A pending request as `readBookingRequestVersion` reads it. Its digest is the
- * version an approver's page carries; any other string is a changed request.
- */
-const PENDING_REQUEST_ROW = {
-  status: BookingStatus.RESERVED,
-  approvedAt: null,
-  updatedAt: new Date("2026-11-01T10:00:00Z"),
-  bookingAssets: [
-    { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
-  ],
-  modelRequests: [],
 };
 
 describe("partialCheckoutBooking", () => {
@@ -686,14 +667,11 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
-  it("lets an approver's first scan approve the pending request with the transition", async () => {
-    expect.assertions(1);
-
+  it("refuses an approver's first scan of a pending request too: approving comes first", async () => {
     // The row lock still reads the booking RESERVED: this is its first scan.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
       { status: BookingStatus.RESERVED },
     ]);
-
     vitest.mocked(hasPermission).mockResolvedValue(true);
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
@@ -709,72 +687,15 @@ describe("partialCheckoutBooking", () => {
       approvedAt: null,
     });
 
-    // The request as the approver's page showed it, read again under the lock.
-    (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
-      PENDING_REQUEST_ROW
-    );
-
-    await partialCheckoutBooking({
-      ...baseParams,
-      assetIds: ["asset-1"],
-      reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
-    });
-
-    expect(db.booking.update).toHaveBeenCalledWith(
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).rejects.toThrow(/Approve the request first/);
+    expect(db.booking.update).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          status: BookingStatus.ONGOING,
-          approvedAt: expect.any(Date),
-          approvedBy: { connect: { id: baseParams.userId } },
-        }),
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
       })
     );
   });
-
-  it.each([
-    ["without the request version", undefined, /not been approved yet/],
-    [
-      "with the version of a request that changed since",
-      "stale",
-      /changed since you opened it/,
-    ],
-  ])(
-    "refuses an approver's first scan of a pending request %s",
-    async (_label, reviewedVersion, message) => {
-      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
-        { status: BookingStatus.RESERVED },
-      ]);
-      vitest.mocked(hasPermission).mockResolvedValue(true);
-      (
-        db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue({
-        requireApprovalForBase: true,
-        requireApprovalForSelfService: true,
-      });
-      (
-        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
-      (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue(
-        { status: BookingStatus.RESERVED, approvedAt: null }
-      );
-      (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
-        PENDING_REQUEST_ROW
-      );
-
-      await expect(
-        partialCheckoutBooking({
-          ...baseParams,
-          assetIds: ["asset-1"],
-          reviewedVersion,
-        })
-      ).rejects.toThrow(message);
-      expect(db.booking.update).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: BookingStatus.ONGOING }),
-        })
-      );
-    }
-  );
 
   it("uses the locked row's approval, not the pre-transaction snapshot", async () => {
     expect.assertions(1);

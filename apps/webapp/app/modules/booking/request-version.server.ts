@@ -101,17 +101,3 @@ export function hashRequest(request: {
   });
   return createHash("sha256").update(canonical).digest("hex");
 }
-
-/** The form field every approving form posts the version it showed in. */
-export const REVIEWED_VERSION_FIELD = "reviewedVersion";
-
-/**
- * The request version a posted form carries, or `null` when it carries none.
- *
- * @param formData - The submitted form
- * @returns The version string, or `null`
- */
-export function readReviewedVersion(formData: FormData): string | null {
-  const value = formData.get(REVIEWED_VERSION_FIELD);
-  return typeof value === "string" && value.length > 0 ? value : null;
-}

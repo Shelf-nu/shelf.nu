@@ -999,12 +999,13 @@ export function assertBookingIsApproved({
       cause: null,
       title: "Approval required",
       message:
-        "This booking request has not been approved yet. An administrator or manager needs to approve it before the equipment can be checked out.",
+        "This booking request has not been approved yet. Approve the request first, then check it out. Only an owner, administrator or manager can approve it.",
       additionalData: { bookingId, status },
       label,
       status: 400,
-      // Business-rule refusal, not a server fault: the UI steers admins to
-      // Approve first, so this fires on stale tabs and direct calls.
+      // Business-rule refusal, not a server fault: approving and checking out
+      // are two steps for everyone, and the UI offers Approve instead of
+      // check-out, so this fires on stale tabs and direct calls.
       shouldBeCaptured: false,
     });
   }

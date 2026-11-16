@@ -435,12 +435,14 @@ describe("resolveBookingActions: a request waiting for approval", () => {
   };
   const pending = buildBooking({ approvedAt: null, custodianUserId: ME });
 
-  it("keeps Check out for a viewer who may approve: their check-out approves", () => {
+  it("hides Check out from a viewer who may approve too: they approve first", () => {
+    // Approving and checking out are two steps, so the list row never offers
+    // a check-out the server refuses.
     const actions = resolveFor(pending, {
       roles: [OrganizationRoles.MANAGER],
       settings: APPROVAL_ON,
     });
-    expect(actions.checkOut.visible).toBe(true);
+    expect(actions.checkOut.visible).toBe(false);
   });
 
   it("hides Check out from a Self Service custodian while their request waits", () => {

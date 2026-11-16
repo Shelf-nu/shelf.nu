@@ -14,13 +14,15 @@ const PENDING_FOR_APPROVER = {
 };
 
 describe("bookingApprovalView", () => {
-  it("shows the pill and Approve for an approver of a pending request", () => {
+  it("shows the pill and Approve, never check-out, to an approver of a pending request", () => {
+    // Approving and checking out are two steps: the request is approved
+    // first, then checked out.
     assert.deepEqual(bookingApprovalView(PENDING_FOR_APPROVER), {
       isPending: true,
       canApprove: true,
       showApprove: true,
       reservationIsRequest: false,
-      mayCheckOutNow: true,
+      mayCheckOutNow: false,
     });
   });
 
@@ -35,13 +37,13 @@ describe("bookingApprovalView", () => {
     assert.equal(view.mayCheckOutNow, false);
   });
 
-  it("hides Approve on an ended request but keeps the approver's check-out", () => {
+  it("hides Approve on an ended request, and still offers no check-out", () => {
     const view = bookingApprovalView(
       { ...PENDING_FOR_APPROVER, to: "2026-11-01T17:00:00.000Z" },
       new Date("2026-11-10T12:00:00.000Z")
     );
     assert.equal(view.showApprove, false);
-    assert.equal(view.mayCheckOutNow, true);
+    assert.equal(view.mayCheckOutNow, false);
   });
 
   it("words a draft's reservation as a request when the server says so", () => {

@@ -61,10 +61,7 @@ import {
   loadNextReservations,
   NO_NEXT_RESERVATIONS,
 } from "~/modules/booking/next-reservations.server";
-import {
-  readBookingRequestVersion,
-  readReviewedVersion,
-} from "~/modules/booking/request-version.server";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -2009,9 +2006,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // The confirm dialog's "From location" picks, one per pool at two
           // or more placements. Absent when the dialog asked nothing.
           sourceLocations: parseSourceLocationsFromFormData(formData),
-          // The request version this page showed: an approver's check-out of
-          // a pending request approves it, and is refused without it.
-          reviewedVersion: readReviewedVersion(formData),
         });
 
         sendNotification({

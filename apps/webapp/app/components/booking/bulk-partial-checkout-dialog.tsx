@@ -33,7 +33,6 @@ import {
   clearSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
 } from "~/atoms/list";
-import { ReviewedVersionField } from "~/components/booking/approval/reviewed-version-field";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   makeCheckoutEligibility,
@@ -597,7 +596,6 @@ export default function BulkPartialCheckoutDialog({
           }}
         >
           <input type="hidden" name="returnJson" value="true" />
-          <ReviewedVersionField />
 
           {/* Only deduped asset IDs are sent to the backend (kits excluded). */}
           {selectedAssetIds.map((assetId: string, index: number) => (

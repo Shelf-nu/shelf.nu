@@ -526,10 +526,6 @@ function ScannerContent({ booking }: ScannerScreenProps) {
     // out yet: a check-out reaching one asks where its units come from. Empty
     // when nothing needs asking, or from a server that does not send it.
     checkoutSourceQuestions: CheckoutSourceQuestion[];
-    // The request version the booking was read at, present only for someone
-    // who may approve a pending request. Their check-out approves it, so it
-    // carries this version and the server refuses one that changed since.
-    requestVersion: string | null;
   } | null>(null);
   const bookingName = bookingCtx?.name;
 
@@ -562,7 +558,6 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         ),
         requireExplicitCheckout: !canOfferQuickCheckout(data),
         checkoutSourceQuestions: data.checkoutSourceQuestions ?? [],
-        requestVersion: data.booking.requestVersion ?? null,
       });
     },
     []
@@ -2510,8 +2505,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         timeZone,
         sourceLocations,
         // Every unit here was scanned.
-        BOOKING_METHOD.scanned,
-        bookingCtx?.requestVersion
+        BOOKING_METHOD.scanned
       )
       .finally(() => {
         bookingSubmitLock.current = false;
@@ -2853,8 +2847,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         undefined,
         sourceLocations,
         // Every row here was scanned.
-        BOOKING_METHOD.scanned,
-        bookingCtx?.requestVersion
+        BOOKING_METHOD.scanned
       )
       .finally(() => {
         bookingSubmitLock.current = false;

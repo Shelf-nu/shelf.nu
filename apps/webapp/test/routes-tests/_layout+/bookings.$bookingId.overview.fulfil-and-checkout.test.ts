@@ -58,8 +58,14 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 // why: the loader's booking read; each loader case supplies the booking.
+const { assertRequestMayBeCheckedOutMock } = vi.hoisted(() => ({
+  assertRequestMayBeCheckedOutMock: vi.fn(),
+}));
 vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
+  // why: the pending-request refusal has its own suite; here it answers per
+  // test (default: not pending).
+  assertRequestMayBeCheckedOut: assertRequestMayBeCheckedOutMock,
 }));
 
 // why: the sink we assert is never reached on a refused request. The
@@ -110,14 +116,11 @@ function post({
   creatorId = "someone-else",
   custodianUserId = "someone-else",
   requireExplicitCheckoutForAdmin = false,
-  reviewedVersion,
 }: {
   roles: OrganizationRoles[];
   creatorId?: string;
   custodianUserId?: string;
   requireExplicitCheckoutForAdmin?: boolean;
-  /** The request version the page showed, posted by the fulfil form. */
-  reviewedVersion?: string;
 }) {
   fulfilMock.mockResolvedValue({
     booking: { id: "booking-1", name: "Load-in", status: "ONGOING" },
@@ -143,10 +146,7 @@ function post({
         // repeated plain key collapses to a string and the schema 400s BEFORE
         // the guard, which would make the refusal assertions pass for the wrong
         // reason.
-        body: new URLSearchParams({
-          "assetIds[0]": "asset-1",
-          ...(reviewedVersion ? { reviewedVersion } : {}),
-        }),
+        body: new URLSearchParams({ "assetIds[0]": "asset-1" }),
       }
     ),
     params: { bookingId: "booking-1" },
@@ -228,21 +228,6 @@ describe("fulfil-and-checkout action", () => {
       requireExplicitCheckout: false,
     });
     expect(bookingSettingsMock).toHaveBeenCalledWith("org-1");
-  });
-
-  it("hands the service the request version the page showed, or none", async () => {
-    await post({
-      roles: [OrganizationRoles.ADMIN],
-      reviewedVersion: "v-shown",
-    });
-    expect(fulfilMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reviewedVersion: "v-shown" })
-    );
-
-    await post({ roles: [OrganizationRoles.ADMIN] });
-    expect(fulfilMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reviewedVersion: null })
-    );
   });
 
   it("records every unit the fulfil scanner sends out as scanned on the web", async () => {
@@ -381,5 +366,27 @@ describe("fulfil-and-checkout loader", () => {
     }).catch((response: Response) => response);
 
     expect((thrown as Response).status).toBe(400);
+  });
+
+  it("does not open the scanner on a pending request, for an approver either", async () => {
+    assertRequestMayBeCheckedOutMock.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message: "This booking request has not been approved yet.",
+        shouldBeCaptured: false,
+      })
+    );
+    const thrown = await load({
+      roles: [OrganizationRoles.ADMIN],
+      status: "RESERVED",
+    }).catch((response: Response) => response);
+
+    expect((thrown as Response).status).toBe(400);
+    expect(assertRequestMayBeCheckedOutMock).toHaveBeenCalledWith({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
   });
 });

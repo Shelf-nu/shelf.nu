@@ -195,31 +195,6 @@ describe("POST /api/mobile/bookings/checkout", () => {
     });
   });
 
-  it("hands the service the request version the screen showed, so an approver's check-out is bound to it", async () => {
-    await action(
-      createActionArgs({
-        request: createCheckoutRequest({
-          bookingId: "booking-1",
-          requestVersion: "v-shown",
-        }),
-      })
-    );
-    expect(checkoutBooking).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reviewedVersion: "v-shown" })
-    );
-
-    // An older app sends none: the service then refuses an approver's
-    // check-out of a pending request, and nothing else changes.
-    await action(
-      createActionArgs({
-        request: createCheckoutRequest({ bookingId: "booking-1" }),
-      })
-    );
-    expect(checkoutBooking).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reviewedVersion: undefined })
-    );
-  });
-
   it("returns 404 when the booking is not in the workspace", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue(null);
 

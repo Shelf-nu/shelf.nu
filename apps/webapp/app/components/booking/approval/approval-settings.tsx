@@ -81,9 +81,8 @@ export function ApprovalSettings({
                 A Base user never checks out themself: an administrator or
                 manager hands the gear over. With this on, their reservation is
                 a request that shows as "Pending approval" until an
-                administrator or manager approves it, either with the Approve
-                button or simply by checking it out. The requested items are
-                held either way.
+                administrator or manager approves it with the Approve button,
+                then checks it out. The requested items are held either way.
               </div>
             }
             className="pt-0"

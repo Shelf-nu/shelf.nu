@@ -435,8 +435,7 @@ function BookingDetailScreen({ id }: { id: string }) {
           currentOrg.id,
           booking.id,
           getTimeZone(),
-          sourceLocations,
-          booking.requestVersion
+          sourceLocations
         ));
       } catch {
         err = "Something went wrong";
@@ -655,7 +654,6 @@ function BookingDetailScreen({ id }: { id: string }) {
     const orgId = currentOrg.id;
     const bookingId = booking.id;
     const bookingName = booking.name;
-    const requestVersion = booking.requestVersion;
     await submitFromSheet({
       lock: bookingSubmitLock,
       request: () =>
@@ -667,8 +665,7 @@ function BookingDetailScreen({ id }: { id: string }) {
           checkouts.length > 0 ? checkouts : undefined,
           sourceLocations,
           // Rows ticked in this screen's list, never scanned.
-          BOOKING_METHOD.selected,
-          requestVersion
+          BOOKING_METHOD.selected
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();
@@ -1859,8 +1856,7 @@ function BookingDetailScreen({ id }: { id: string }) {
    * restricted role, whose writes are scoped to their own bookings — being the
    * booking's creator or its custodian. Offering either to someone the server
    * would reject just trades a visible button for a 403. A pending request is
-   * checked out only by someone who may approve it (their first scan approves
-   * it), as on the web.
+   * never checked out, by anyone: it is approved first, as on the web.
    */
   const canUseProgressiveCheckout =
     canPartialCheckout &&

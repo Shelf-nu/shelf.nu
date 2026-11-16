@@ -41,15 +41,13 @@ import { REVERT_TO_DRAFT_RESCHEDULE_HINT } from "./checkout-dialog";
 import type * as CheckoutDialogModule from "./checkout-dialog";
 
 // why: react-router hooks need a router context — stub them so we can drive
-// loader/action data per test. The dialog reads `useLoaderData`,
-// `useActionData`, `useNavigation` (via `useDisabled`) and the booking page's
-// loader data for the request version (none here).
+// loader/action data per test. The dialog only reads `useLoaderData`,
+// `useActionData`, and `useNavigation` (via `useDisabled`).
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
   return {
     ...actual,
     useLoaderData: vi.fn(),
-    useRouteLoaderData: vi.fn(() => undefined),
     useActionData: vi.fn(() => undefined),
     useNavigation: vi.fn(() => ({ state: "idle" })),
   };

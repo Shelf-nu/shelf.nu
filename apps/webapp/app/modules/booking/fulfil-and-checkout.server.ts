@@ -38,7 +38,6 @@
 import { AssetType, BookingStatus, type Booking } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
-import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   addScannedAssetsToBooking,
   assertRequestMayBeCheckedOut,
@@ -106,12 +105,11 @@ export async function fulfilAndCheckOut({
   // org-scoped way. See `.claude/rules/kit-members-via-kit-slices.md`.
   // Before anything is written: the scanned-only path below commits the
   // assignment of scanned units before its check-out, so a pending request
-  // the caller may not approve must be refused here, not after.
-  const { approvesRequest } = await assertRequestMayBeCheckedOut({
+  // must be refused here, not after. A pending request is never checked out,
+  // by anyone: it is approved first.
+  await assertRequestMayBeCheckedOut({
     bookingId: args.bookingId,
     organizationId: args.organizationId,
-    actorUserId: args.userId,
-    reviewedVersion: args.reviewedVersion,
   });
 
   const scannedKits = await resolveScannedKits(args);
@@ -141,7 +139,7 @@ export async function fulfilAndCheckOut({
     }
   }
 
-  return checkOutScannedUnits(args, scannedKits, known, approvesRequest);
+  return checkOutScannedUnits(args, scannedKits, known);
 }
 
 /** The booking's status and window, as {@link readBookingStatus} reads them. */
@@ -289,12 +287,7 @@ async function readBookingStatus({
 async function checkOutScannedUnits(
   args: Omit<FulfilAndCheckOutArgs, "requireExplicitCheckout">,
   scannedKits: ScannedKits,
-  known?: BookingWindowRow,
-  /**
-   * The preflight found an approver checking out a pending request and
-   * compared the version they saw, before this path assigned anything.
-   */
-  approvesRequest = false
+  known?: BookingWindowRow
 ): Promise<FulfilAndCheckOutResult> {
   const { bookingId, organizationId, userId, assetIds, kitIds = [] } = args;
 
@@ -524,12 +517,6 @@ async function checkOutScannedUnits(
     intentChoice: args.checkoutIntentChoice,
     provenance: args.provenance,
     sourceLocations: args.sourceLocations,
-    // The approver's version was compared by the preflight before this path
-    // assigned the scanned units; the check-out compares the version as it
-    // stands after those additions of the approver's own.
-    reviewedVersion: approvesRequest
-      ? await readBookingRequestVersion(db, { bookingId, organizationId })
-      : undefined,
   });
 
   return {

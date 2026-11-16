@@ -255,9 +255,9 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
     approvedAt: null,
   } as never;
 
-  it("marks a never-approved reservation pending and keeps check-out for an approver", async () => {
-    // why: an approver's check-out approves the request in the same step, so
-    // the phone keeps drawing the button for them.
+  it("marks a never-approved reservation pending and offers an approver Approve, not check-out", async () => {
+    // why: approving and checking out are two steps; every app version reads
+    // this flag, so no build draws a check-out the server refuses.
     const flags = await approvalFlagsFor({
       roles: [OrganizationRoles.MANAGER],
       settings: requiresApproval,
@@ -266,7 +266,7 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
       mayCheckout: true,
     });
     expect(flags.isPendingApproval).toBe(true);
-    expect(flags.canCheckout).toBe(true);
+    expect(flags.canCheckout).toBe(false);
     expect(flags.canApprove).toBe(true);
     // The version Approve sends back, so a changed request is refused.
     expect(flags.requestVersion).toEqual(expect.any(String));

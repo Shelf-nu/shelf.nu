@@ -171,25 +171,6 @@ describe("booking page checkOut intent: expired-reservation end date", () => {
     );
   });
 
-  it("hands checkoutBooking the request version the page showed, or none", async () => {
-    await post({
-      intent: "checkOut",
-      checkoutIntentChoice: CheckoutIntentEnum["without-adjusted-date"],
-      reviewedVersion: "v-shown",
-    });
-    expect(checkoutBookingMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reviewedVersion: "v-shown" })
-    );
-
-    await post({
-      intent: "checkOut",
-      checkoutIntentChoice: CheckoutIntentEnum["without-adjusted-date"],
-    });
-    expect(checkoutBookingMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reviewedVersion: null })
-    );
-  });
-
   it("refuses a missing end date with a 400 under expiredCheckoutNewTo and checks nothing out", async () => {
     const response = await post({
       intent: "checkOut",

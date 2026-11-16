@@ -79,35 +79,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const {
-      bookingId,
-      assetIds,
-      kitIds,
-      method,
-      timeZone,
-      sourceLocations,
-      requestVersion,
-    } = await parseMobileBody(
-      z.object({
-        bookingId: z.string().min(1),
-        // The request version the screen showed: an approver's check-out of
-        // a pending request approves it and is refused without it.
-        requestVersion: z.string().min(1).optional(),
-        assetIds: z.array(z.string()).default([]),
-        kitIds: z.array(z.string()).optional().default([]),
-        // The fulfil scanner only ever declares `"scanned"`. Anything else,
-        // or nothing (an older bundle), is recorded as null rather than
-        // guessed, and never refuses the hand-over.
-        method: z.literal(BOOKING_METHOD.scanned).optional().catch(undefined),
-        timeZone: z.string().optional(),
-        // Where each scanned pool's units leave from, keyed by `assetId`
-        // (the slice may be created by this request) or `bookingAssetId`;
-        // `null` = Unplaced. Omitted by older apps: the default applies.
-        sourceLocations: mobileSourceLocationsSchema,
-      }),
-      request,
-      "Booking"
-    );
+    const { bookingId, assetIds, kitIds, method, timeZone, sourceLocations } =
+      await parseMobileBody(
+        z.object({
+          bookingId: z.string().min(1),
+          assetIds: z.array(z.string()).default([]),
+          kitIds: z.array(z.string()).optional().default([]),
+          // The fulfil scanner only ever declares `"scanned"`. Anything else,
+          // or nothing (an older bundle), is recorded as null rather than
+          // guessed, and never refuses the hand-over.
+          method: z.literal(BOOKING_METHOD.scanned).optional().catch(undefined),
+          timeZone: z.string().optional(),
+          // Where each scanned pool's units leave from, keyed by `assetId`
+          // (the slice may be created by this request) or `bookingAssetId`;
+          // `null` = Unplaced. Omitted by older apps: the default applies.
+          sourceLocations: mobileSourceLocationsSchema,
+        }),
+        request,
+        "Booking"
+      );
 
     // Load the booking's reservation window so the full check-out can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
@@ -192,7 +182,6 @@ export async function action({ request }: ActionFunctionArgs) {
       to: existingBooking.to,
       provenance: { surface: "phone", method: method ?? null },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
-      reviewedVersion: requestVersion,
     });
 
     return data({

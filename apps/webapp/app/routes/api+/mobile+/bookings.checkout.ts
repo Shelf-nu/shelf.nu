@@ -61,19 +61,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, timeZone, sourceLocations, requestVersion } =
-      await parseMobileBody(
-        z.object({
-          bookingId: z.string().min(1),
-          timeZone: z.string().optional(),
-          sourceLocations: mobileSourceLocationsSchema,
-          // The request version the screen showed: an approver's check-out of
-          // a pending request approves it and is refused without it.
-          requestVersion: z.string().min(1).optional(),
-        }),
-        request,
-        "Booking"
-      );
+    const { bookingId, timeZone, sourceLocations } = await parseMobileBody(
+      z.object({
+        bookingId: z.string().min(1),
+        timeZone: z.string().optional(),
+        sourceLocations: mobileSourceLocationsSchema,
+      }),
+      request,
+      "Booking"
+    );
 
     // Load the booking's reservation window so checkoutBooking can run its
     // asset-conflict guard. That guard is gated on `from && to`; without these
@@ -166,7 +162,6 @@ export async function action({ request }: ActionFunctionArgs) {
       // "Check Out All Assets": the phone's one tap.
       provenance: { surface: "phone", method: "quick" },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
-      reviewedVersion: requestVersion,
     });
 
     return data({

@@ -10,7 +10,6 @@ import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import type { ZodObject, ZodString } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { ReviewedVersionField } from "~/components/booking/approval/reviewed-version-field";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
@@ -483,9 +482,6 @@ function EditBookingFormInner({
       className="edit-booking-form"
       id="edit-booking-form"
     >
-      {/* An approver's check-out of a pending request approves it, so it
-          carries the request version this page showed. */}
-      <ReviewedVersionField />
       {isEditable ? (
         <UnsavedChangesGuard
           formRef={formElementRef}
@@ -633,7 +629,9 @@ function EditBookingFormInner({
                   ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
                     hasItemsToCheckOut)) &&
                 canCheckOutBooking &&
-                (!isPendingApproval || canApproveBooking)
+                // A pending request is approved first (Approve above), never
+                // checked out: approving and checking out are two steps.
+                !isPendingApproval
               }
             >
               {(() => {

@@ -827,11 +827,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
-    // Approval gate: while a reservation request is pending, only a caller
-    // who may approve can check out (their check-out approves it); the
-    // server-side service guard refuses everyone else regardless of app
-    // version. This flag keeps the app from drawing a button the server
-    // would refuse. Derived with the same shared helper the web + service use.
+    // Approval gate: a pending reservation request is never checked out, by
+    // anyone; it is approved first. The service refuses the check-out
+    // whatever the app version, and this flag keeps every app version from
+    // drawing a button the server would refuse. Derived with the same shared
+    // helper the web and the service use.
     const isPendingApproval = isBookingPendingApproval({
       status: booking.status,
       approvedAt: booking.approvedAt,
@@ -852,7 +852,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       writesBooking &&
       canCheckoutByState &&
       canCheckoutPerm &&
-      (!isPendingApproval || canApprovePerm);
+      !isPendingApproval;
     // Who may decide the request: the same `booking:approve` answer the web
     // Approve button and the `approve-booking` intent resolve, so the phone
     // never draws (or withholds) a decision the server would answer otherwise.

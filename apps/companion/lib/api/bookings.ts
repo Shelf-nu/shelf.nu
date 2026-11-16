@@ -147,13 +147,7 @@ export const bookingsApi = {
      * the location the units leave from, or `null` for the unplaced units.
      * Left out, the server records its own default for each pool.
      */
-    sourceLocations?: Record<string, string | null>,
-    /**
-     * The request version the screen showed ({@link BookingDetail.requestVersion}).
-     * Checking out a pending request as an approver approves it, and the
-     * server refuses that without the version or when the request changed.
-     */
-    requestVersion?: string | null
+    sourceLocations?: Record<string, string | null>
   ) =>
     apiFetch<BookingActionResponse>(
       `/api/mobile/bookings/checkout?orgId=${orgId}`,
@@ -163,7 +157,6 @@ export const bookingsApi = {
           bookingId,
           timeZone,
           ...(sourceLocations ? { sourceLocations } : {}),
-          ...(requestVersion ? { requestVersion } : {}),
         }),
       }
     ),
@@ -192,9 +185,7 @@ export const bookingsApi = {
     timeZone?: string,
     /** Same shape and meaning as on {@link checkoutBooking}. */
     sourceLocations?: Record<string, string | null>,
-    method?: BookingMethod,
-    /** Same meaning as on {@link checkoutBooking}. */
-    requestVersion?: string | null
+    method?: BookingMethod
   ) =>
     apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
@@ -208,7 +199,6 @@ export const bookingsApi = {
               kitIds,
               timeZone,
               ...(sourceLocations ? { sourceLocations } : {}),
-              ...(requestVersion ? { requestVersion } : {}),
             },
             method
           )
@@ -266,9 +256,7 @@ export const bookingsApi = {
     checkouts?: CheckoutDisposition[],
     /** Same shape and meaning as on {@link checkoutBooking}. */
     sourceLocations?: Record<string, string | null>,
-    method?: BookingMethod,
-    /** Same meaning as on {@link checkoutBooking}. */
-    requestVersion?: string | null
+    method?: BookingMethod
   ) =>
     apiFetch<PartialCheckoutResponse>(
       `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
@@ -282,7 +270,6 @@ export const bookingsApi = {
               checkouts,
               timeZone,
               ...(sourceLocations ? { sourceLocations } : {}),
-              ...(requestVersion ? { requestVersion } : {}),
             },
             method
           )
