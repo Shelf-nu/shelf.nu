@@ -27,7 +27,10 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useClearScanDraftOnSave } from "~/hooks/use-scan-draft";
+import {
+  unconfirmedScanSaveAtom,
+  useClearScanDraftOnSave,
+} from "~/hooks/use-scan-draft";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
@@ -133,6 +136,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   // already hold new scans) cannot set the result, and through it clear the
   // new list's scan draft.
   const submissionRef = useRef(0);
+  const setUnconfirmedSave = useSetAtom(unconfirmedScanSaveAtom);
 
   const zo = useZorm("AddToLocation", BulkLocationUpdateSchema, {
     onValidSubmit: async (e) => {
@@ -191,6 +195,11 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
         setResult(locationState);
       } catch (error) {
+        // No answer: the server may have saved it anyway, so the list is
+        // marked and a restored copy warns before it is sent again.
+        if (submission === submissionRef.current) {
+          setUnconfirmedSave(true);
+        }
         setResult({
           status: "error",
           errorMessage:

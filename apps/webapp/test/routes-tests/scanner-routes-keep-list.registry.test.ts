@@ -162,6 +162,30 @@ describe("scanner routes keep a draft of their list", () => {
   });
 
   /**
+   * The bulk drawers save with plain requests, outside the route's action. A
+   * request that gets no answer may still have been saved, so it marks the
+   * list, and a copy restored after a reload warns before it is sent again.
+   */
+  it.each([
+    "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
+    "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
+  ])("%s marks a save that got no answer", (file) => {
+    const marks = read(file).match(
+      /\.catch\(\(error\) => \{\s*markUnconfirmed\(\);/g
+    );
+    // One for the assets request, one for the kits request.
+    expect(marks).toHaveLength(2);
+  });
+
+  it("update location marks a save that got no answer", () => {
+    expect(
+      read("../../components/scanner/drawer/uses/update-location-drawer.tsx")
+    ).toMatch(
+      /\} catch \(error\) \{[\s\S]*?setUnconfirmedSave\(true\);[\s\S]*?setResult\(\{/
+    );
+  });
+
+  /**
    * A location save that failed keeps its list, and so its draft, when the
    * result dialog is closed: moving assets to where they already are changes
    * nothing, so sending it again is safe.

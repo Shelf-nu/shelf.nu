@@ -9,7 +9,11 @@ import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { unconfirmedScanSaveAtom } from "~/hooks/use-scan-draft";
+import {
+  retiredScanSubmitFailureAtom,
+  unconfirmedScanSaveAtom,
+} from "~/hooks/use-scan-draft";
+import type { ScanSubmitFailure } from "~/utils/scan-submit-failure";
 import { ScanSubmitFailureAlert } from "./scan-submit-failure-alert";
 
 // why: the notice reads the route's action data and navigation state, which
@@ -206,5 +210,24 @@ describe("ScanSubmitFailureAlert", () => {
 
       expect(screen.queryByRole("alert")).toBeNull();
     });
+  });
+
+  /**
+   * The last action answer stays until the next submission. Once its list is
+   * emptied, a new list scanned on the same page was never sent.
+   */
+  it("says nothing about a failure whose list was emptied", () => {
+    const failure: ScanSubmitFailure = { kind: "timeout", status: 524 };
+    mockActionData.mockReturnValue({ scanSubmitFailure: failure });
+    const store = createStore();
+    store.set(retiredScanSubmitFailureAtom, failure);
+
+    render(
+      <Provider store={store}>
+        <ScanSubmitFailureAlert />
+      </Provider>
+    );
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -31,6 +31,7 @@ import {
 } from "~/utils/scan-draft";
 import {
   anyPartSaved,
+  retiredScanSubmitFailureAtom,
   unconfirmedScanSaveAtom,
   useClearScanDraftOnSave,
   useScanDraftOnEntry,
@@ -293,6 +294,20 @@ describe.each(SCANNERS)(
       rerender();
 
       expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
+    });
+
+    it("retires the failure once its list is emptied", () => {
+      const store = createStore();
+      const { rerender } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+      const failure = { kind: "timeout", status: 524 };
+      mockActionData.mockReturnValue({ scanSubmitFailure: failure });
+      rerender();
+      expect(store.get(retiredScanSubmitFailureAtom)).toBeNull();
+
+      act(() => store.set(scannedItemsAtom, {}));
+
+      expect(store.get(retiredScanSubmitFailureAtom)).toBe(failure);
     });
 
     it("does not mark a draft for a save the gateway turned away", () => {

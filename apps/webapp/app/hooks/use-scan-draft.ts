@@ -36,6 +36,7 @@ import {
   saveScanDraft,
   scanDraftKey,
 } from "~/utils/scan-draft";
+import type { ScanSubmitFailure } from "~/utils/scan-submit-failure";
 import { getScanSubmitFailure } from "~/utils/scan-submit-failure";
 
 /**
@@ -54,6 +55,16 @@ const SIGN_IN_PATH = "/login";
  * and `ScanSubmitFailureAlert` shows it when the failure itself is gone.
  */
 export const unconfirmedScanSaveAtom = atom(false);
+
+/**
+ * The save failure whose list has since been emptied. React Router keeps the
+ * last action answer until the next submission, so without this a new list
+ * scanned on the same page would show the old failure's notice although it
+ * was never sent. `ScanSubmitFailureAlert` ignores the failure held here.
+ */
+export const retiredScanSubmitFailureAtom = atom<ScanSubmitFailure | null>(
+  null
+);
 
 /**
  * Raised by a scanner that saves in place, without navigating, once its save
@@ -190,6 +201,8 @@ export function useScanDraft({
   // new object, so a second unanswered save after the list was emptied and
   // refilled marks the new list too.
   const submitFailure = getScanSubmitFailure(useActionData());
+  const submitFailureRef = useRef(submitFailure);
+  submitFailureRef.current = submitFailure;
   useEffect(() => {
     if (submitFailure && submitFailure.kind !== "rejected") {
       setUnconfirmedSave(true);
@@ -249,9 +262,13 @@ export function useScanDraft({
       }
       savedInPlaceRef.current = false;
     }
-    // An emptied list has nothing left that may have been saved.
+    // An emptied list has nothing left that may have been saved, and the
+    // notice about its save goes with it.
     if (emptied && store.get(unconfirmedScanSaveAtom)) {
       setUnconfirmedSave(false);
+    }
+    if (emptied && submitFailureRef.current) {
+      store.set(retiredScanSubmitFailureAtom, submitFailureRef.current);
     }
     saveScanDraft(draftKey, current, {
       context,

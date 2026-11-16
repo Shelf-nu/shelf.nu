@@ -42,7 +42,11 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { anyPartSaved, useClearScanDraftOnSave } from "~/hooks/use-scan-draft";
+import {
+  anyPartSaved,
+  unconfirmedScanSaveAtom,
+  useClearScanDraftOnSave,
+} from "~/hooks/use-scan-draft";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
@@ -195,6 +199,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // already hold new scans) cannot set the result, and through it clear the
   // new list's scan draft.
   const submissionRef = useRef(0);
+  const setUnconfirmedSave = useSetAtom(unconfirmedScanSaveAtom);
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -202,6 +207,14 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
       const setResult: typeof setCustodyState = (update) => {
         if (submission === submissionRef.current) {
           setCustodyState(update);
+        }
+      };
+      // No answer (the request failed, or the answer was a gateway's page):
+      // the server may have saved it anyway, so the list is marked and a
+      // restored copy warns before it can be sent again.
+      const markUnconfirmed = () => {
+        if (submission === submissionRef.current) {
+          setUnconfirmedSave(true);
         }
       };
       setDialogOpen(true);
@@ -259,6 +272,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             }));
           })
           .catch((error) => {
+            markUnconfirmed();
             setResult((state) => ({
               ...state,
               assetStatus: "error",
@@ -304,6 +318,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             }));
           })
           .catch((error) => {
+            markUnconfirmed();
             setResult((state) => ({
               ...state,
               kitStatus: "error",

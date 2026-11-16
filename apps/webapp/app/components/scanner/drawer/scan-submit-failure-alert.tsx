@@ -15,7 +15,10 @@ import { useAtomValue } from "jotai";
 import { useActionData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
-import { unconfirmedScanSaveAtom } from "~/hooks/use-scan-draft";
+import {
+  retiredScanSubmitFailureAtom,
+  unconfirmedScanSaveAtom,
+} from "~/hooks/use-scan-draft";
 import type { ScanSubmitFailureKind } from "~/utils/scan-submit-failure";
 import { getScanSubmitFailure } from "~/utils/scan-submit-failure";
 
@@ -100,7 +103,10 @@ export function ScanSubmitFailureAlert({
 }: {
   savedCheck?: ScanSavedCheck;
 }) {
-  const failure = getScanSubmitFailure(useActionData());
+  const answered = getScanSubmitFailure(useActionData());
+  const retired = useAtomValue(retiredScanSubmitFailureAtom);
+  // A failure whose list was emptied belongs to no list on screen.
+  const failure = answered !== null && answered !== retired ? answered : null;
   const unconfirmedSave = useAtomValue(unconfirmedScanSaveAtom);
   const submitting = useDisabled();
 
