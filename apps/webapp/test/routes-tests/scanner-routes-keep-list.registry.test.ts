@@ -144,6 +144,24 @@ describe("scanner routes keep a draft of their list", () => {
   });
 
   /**
+   * Closing a bulk result dialog with "Done" while the save is still running
+   * lets the operator scan a new list. The old save's late answer must not
+   * set the result, or it would clear the new list's draft.
+   */
+  it.each([
+    "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
+    "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
+    "../../components/scanner/drawer/uses/update-location-drawer.tsx",
+  ])("%s ignores a save answered after its dialog closed", (file) => {
+    const source = read(file);
+    expect(source).toMatch(/const submission = \+\+submissionRef\.current;/);
+    expect(source).toMatch(/if \(submission === submissionRef\.current\)/);
+    expect(source).toMatch(
+      /function cleanupState\(\) \{\s*submissionRef\.current \+= 1;/
+    );
+  });
+
+  /**
    * A location save that failed keeps its list, and so its draft, when the
    * result dialog is closed: moving assets to where they already are changes
    * nothing, so sending it again is safe.

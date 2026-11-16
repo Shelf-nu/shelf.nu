@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
@@ -128,16 +128,27 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
     status: "processing",
   });
   const disabled = useDisabled();
+  // Identifies the save the result dialog is showing. Closing the dialog
+  // moves it on, so an answer that arrives after "Done" (when the list may
+  // already hold new scans) cannot set the result, and through it clear the
+  // new list's scan draft.
+  const submissionRef = useRef(0);
 
   const zo = useZorm("AddToLocation", BulkLocationUpdateSchema, {
     onValidSubmit: async (e) => {
       e.preventDefault();
+      const submission = ++submissionRef.current;
+      const setResult = (result: LocationState) => {
+        if (submission === submissionRef.current) {
+          setLocationState(result);
+        }
+      };
       setDialogOpen(true);
       const { assetIds, newLocationId, kitIds } = e.data;
 
       // Skip if no assets or no kitIds to process
       if (assetIds.length === 0 && kitIds.length === 0) {
-        setLocationState({
+        setResult({
           status: "error",
           errorMessage: "No assets or kits selected to update location",
         });
@@ -178,9 +189,9 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
           locationState = foldLocationPart(locationState, kitsData);
         }
 
-        setLocationState(locationState);
+        setResult(locationState);
       } catch (error) {
-        setLocationState({
+        setResult({
           status: "error",
           errorMessage:
             error instanceof ShelfError
@@ -199,6 +210,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   useClearScanDraftOnSave(locationState.status === "success");
 
   function cleanupState() {
+    submissionRef.current += 1;
     // A save that failed keeps its list (and so its draft) to fix and send
     // again. Moving an asset to the location it is already at changes
     // nothing, so a retry after a partial failure repeats no saved work.

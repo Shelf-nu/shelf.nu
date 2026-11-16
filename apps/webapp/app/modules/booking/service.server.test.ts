@@ -19382,7 +19382,7 @@ describe("addScannedAssetsToBooking", () => {
    * again. The second submission has to be a no-op, not a second copy.
    */
   it("changes nothing when a save that already landed is submitted again", async () => {
-    expect.assertions(4);
+    expect.assertions(5);
 
     // why: `clearAllMocks` keeps implementations, so the overrides below
     // would answer every later test in the file. Each goes back when this
@@ -19480,8 +19480,14 @@ describe("addScannedAssetsToBooking", () => {
     );
 
     // And the activity trail does not narrate an add that did not happen.
+    // The per-asset notes go through `createNotesPerAsset`, which may be
+    // called with nothing to write but must never be handed a note.
     expect(activityEventService.recordEvents).not.toHaveBeenCalled();
     expect(noteService.createNotes).not.toHaveBeenCalled();
+    const perAssetNotes = (
+      noteService.createNotesPerAsset as ReturnType<typeof vitest.fn>
+    ).mock.calls.flatMap(([args]) => (args as { notes: unknown[] }).notes);
+    expect(perAssetNotes).toEqual([]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { AssetStatus, AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -168,9 +168,20 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
 
+  // Identifies the save the result dialog is showing. Closing the dialog
+  // moves it on, so an answer that arrives after "Done" (when the list may
+  // already hold new scans) cannot set the result, and through it clear the
+  // new list's scan draft.
+  const submissionRef = useRef(0);
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
+      const submission = ++submissionRef.current;
+      const setResult: typeof setCustodyState = (update) => {
+        if (submission === submissionRef.current) {
+          setCustodyState(update);
+        }
+      };
       setDialogOpen(true);
       const { assetIds, kitIds } = e.data;
 
@@ -200,14 +211,14 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         })
           .then((response) => response.json())
           .then((data) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               assetStatus: data.error ? "error" : "success",
               ...(data.error && { assetErrorMessage: data.error.message }),
             }));
           })
           .catch((error) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               assetStatus: "error",
               assetErrorMessage:
@@ -218,7 +229,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           });
       } else {
         // No assets to process, mark as skipped
-        setCustodyState((state) => ({
+        setResult((state) => ({
           ...state,
           assetStatus: "skipped",
         }));
@@ -242,14 +253,14 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         })
           .then((response) => response.json())
           .then((data) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               kitStatus: data.error ? "error" : "success",
               ...(data.error && { kitErrorMessage: data.error.message }),
             }));
           })
           .catch((error) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               kitStatus: "error",
               kitErrorMessage:
@@ -260,7 +271,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           });
       } else {
         // No kits to process, mark as skipped
-        setCustodyState((state) => ({
+        setResult((state) => ({
           ...state,
           kitStatus: "skipped",
         }));
@@ -278,6 +289,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   );
 
   function cleanupState() {
+    submissionRef.current += 1;
     setCustodyState({
       assetStatus: "processing",
       kitStatus: "processing",
