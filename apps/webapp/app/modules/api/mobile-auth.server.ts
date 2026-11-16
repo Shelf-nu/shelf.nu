@@ -22,6 +22,7 @@ import {
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   type PermissionAction,
   type PermissionEntity,
@@ -192,6 +193,9 @@ export async function requireMobileAuth(request: Request) {
  * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
  * switch `managersCanEditAssets`, so the companion can resolve the same
  * `RoleAccess` and the same matrix answers the server does for that workspace.
+ * It also carries `inactive`, `inactiveReason` and `inactiveMessage`: whether
+ * every other mobile route refuses requests there (see
+ * `mobileWorkspaceStateFor`), from the same read.
  *
  * @param userId - the authenticated user
  * @returns organizations in landing order, plus the explicit last-selected id
@@ -207,9 +211,20 @@ export async function getUserOrganizations(userId: string) {
     ],
     select: {
       roles: true,
-      user: { select: { sso: true, lastSelectedOrganizationId: true } },
+      user: {
+        select: {
+          sso: true,
+          lastSelectedOrganizationId: true,
+          // The gate reads the caller's Shelf system roles (Shelf admins
+          // pass), so the inactive state below comes from this one read.
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.user.select,
+        },
+      },
       organization: {
         select: {
+          // What the gate reads (type, owner and owner tier, admin switch),
+          // so `/me` marks each workspace inactive without a second read.
+          ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT.organization.select,
           id: true,
           name: true,
           type: true,
@@ -265,12 +280,23 @@ export async function getUserOrganizations(userId: string) {
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
   return {
-    organizations: ordered.map((uo) => ({
-      ...uo.organization,
-      barcodesEnabled: canUseBarcodes(uo.organization),
-      auditsEnabled: canUseAudits(uo.organization),
-      roles: uo.roles,
-    })),
+    organizations: ordered.map((uo) => {
+      // The gate-only columns (owner, owner tier, admin switch) decide the
+      // inactive state and stay out of the response.
+      const {
+        userId: _ownerId,
+        workspaceDisabled: _workspaceDisabled,
+        owner: _owner,
+        ...organization
+      } = uo.organization;
+      return {
+        ...organization,
+        barcodesEnabled: canUseBarcodes(uo.organization),
+        auditsEnabled: canUseAudits(uo.organization),
+        roles: uo.roles,
+        ...mobileWorkspaceStateFor(uo, userId),
+      };
+    }),
     lastSelectedOrganizationId,
   };
 }
@@ -328,16 +354,14 @@ const CONTACT_OWNER_SUFFIX =
 /** Disabled workspace, said to everyone: only Shelf staff can switch it back. */
 const CONTACT_SUPPORT_SUFFIX = "Contact Shelf support for more information.";
 
-/**
- * Title of the 403 an inactive workspace gets. Routes that answer with a
- * structured `reason` (the scan lookups) recognise the refusal by it, through
- * {@link isMobileWorkspaceInactiveError}.
- */
+/** Title of the 403 an inactive workspace gets. */
 const MOBILE_WORKSPACE_INACTIVE_TITLE = "Workspace inactive";
 
 /**
- * The `reason` a scan lookup sends with an inactive-workspace refusal, so the
- * companion can title the answer without reading the message text.
+ * Marks an inactive-workspace refusal: carried on the 403's `additionalData`
+ * (which `makeShelfError` keeps through every wrap), and sent by the scan
+ * lookups as the error `reason`, so the companion can title the answer
+ * without reading the message text.
  */
 export const MOBILE_WORKSPACE_INACTIVE_REASON = "workspace_inactive";
 
@@ -375,14 +399,16 @@ function inactiveWorkspaceMessage({
 
 /**
  * Whether an error is the 403 an inactive workspace gets from
- * {@link getMobileWorkspaceAccess}, wrapped or not.
+ * {@link getMobileWorkspaceAccess}, wrapped or not. Reads the structured
+ * marker on `additionalData`, never the title or message.
  *
  * @param error - Any error, usually the result of `makeShelfError`.
  * @returns `true` for the inactive-workspace refusal.
  */
 export function isMobileWorkspaceInactiveError(error: ShelfError): boolean {
   return (
-    error.status === 403 && error.title === MOBILE_WORKSPACE_INACTIVE_TITLE
+    error.status === 403 &&
+    error.additionalData?.reason === MOBILE_WORKSPACE_INACTIVE_REASON
   );
 }
 
@@ -470,7 +496,11 @@ export function mobileWorkspaceAccessFromMembership({
         // `organization.userId` is the workspace owner.
         isOwner: membership.organization.userId === userId,
       }),
-      additionalData: { userId, organizationId },
+      additionalData: {
+        userId,
+        organizationId,
+        reason: MOBILE_WORKSPACE_INACTIVE_REASON,
+      },
       label: "Auth",
       status: 403,
       shouldBeCaptured: false,
@@ -520,52 +550,52 @@ export type MobileWorkspaceState = {
   inactiveMessage: string | null;
 };
 
+/** An active workspace, as `/api/mobile/me` reports it. */
+const ACTIVE_WORKSPACE_STATE: MobileWorkspaceState = {
+  inactive: false,
+  inactiveReason: null,
+  inactiveMessage: null,
+};
+
 /**
- * Reads, for each of the caller's workspaces, whether the mobile API refuses
- * requests there. Same rules as {@link getMobileWorkspaceAccess}, from one
- * membership read, so the app can mark an inactive workspace before any
- * request in it fails.
+ * Whether the mobile API refuses requests in one of the caller's workspaces,
+ * by the same rule as {@link getMobileWorkspaceAccess}, from a membership row
+ * that carries {@link MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT}. The state is
+ * extra information on `/me`: if it cannot be worked out, the workspace is
+ * reported active (logged), and every other route still refuses it.
  *
- * @param args.userId - The signed-in caller.
- * @param args.organizationIds - The caller's workspaces, as `/me` lists them.
- * @returns The state of each workspace, keyed by its id. An id the caller is
- *   not a member of is left out.
+ * @param membership - The caller's membership row.
+ * @param userId - The signed-in caller.
+ * @returns The workspace's state for the app.
  */
-export async function getMobileWorkspaceStates({
-  userId,
-  organizationIds,
-}: {
-  userId: string;
-  organizationIds: string[];
-}): Promise<Map<string, MobileWorkspaceState>> {
-  const states = new Map<string, MobileWorkspaceState>();
-  if (organizationIds.length === 0) return states;
-
-  const memberships = await db.userOrganization.findMany({
-    where: { userId, organizationId: { in: organizationIds } },
-    select: {
-      organizationId: true,
-      ...MOBILE_WORKSPACE_GATE_MEMBERSHIP_SELECT,
-    },
-  });
-
-  for (const membership of memberships) {
+function mobileWorkspaceStateFor(
+  membership: MobileWorkspaceGateMembership,
+  userId: string
+): MobileWorkspaceState {
+  try {
     const inactiveReason = getMobileWorkspaceInactiveReason(membership);
-    states.set(membership.organizationId, {
-      inactive: inactiveReason !== null,
+    if (!inactiveReason) return ACTIVE_WORKSPACE_STATE;
+    return {
+      inactive: true,
       inactiveReason,
-      inactiveMessage: inactiveReason
-        ? inactiveWorkspaceMessage({
-            inactiveReason,
-            scope: "workspace",
-            // `organization.userId` is the workspace owner.
-            isOwner: membership.organization.userId === userId,
-          })
-        : null,
-    });
+      inactiveMessage: inactiveWorkspaceMessage({
+        inactiveReason,
+        scope: "workspace",
+        // `organization.userId` is the workspace owner.
+        isOwner: membership.organization.userId === userId,
+      }),
+    };
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to work out whether a workspace is active",
+        additionalData: { userId },
+        label: "Auth",
+      })
+    );
+    return ACTIVE_WORKSPACE_STATE;
   }
-
-  return states;
 }
 
 /**

@@ -159,7 +159,10 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         if (!reads.isLatest(readId)) return true;
 
         if (fetchError || !data) {
-          if (!silent) {
+          // A quiet read stays quiet, unless it overtook a load the person is
+          // still waiting on: then its failure is that load's answer, and it
+          // must show, or the app would read the empty list as "no workspace".
+          if (!silent || reads.foregroundPending()) {
             setError(fetchError || "Failed to load workspace data");
           }
           return false;

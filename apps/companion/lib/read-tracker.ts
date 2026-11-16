@@ -15,7 +15,8 @@
 /**
  * @param setLoading - Sets the loading state.
  * @returns `begin` to start a read, `isLatest` to ask whether a read may
- *   apply its answer, and `end` to finish a read on every path.
+ *   apply its answer, `foregroundPending` to ask whether a foreground read
+ *   still waits on data, and `end` to finish a read on every path.
  */
 export function createReadTracker(setLoading: (loading: boolean) => void) {
   let latest = 0;
@@ -47,6 +48,16 @@ export function createReadTracker(setLoading: (loading: boolean) => void) {
     /** Whether no newer read has started since this one. */
     isLatest(id: number): boolean {
       return id === latest;
+    },
+
+    /**
+     * Whether a foreground read is still waiting on data: the one that turned
+     * loading on, or the read it handed loading to. A background read that
+     * fails while this is true is the answer the person is waiting for, so it
+     * must report its failure instead of staying quiet.
+     */
+    foregroundPending(): boolean {
+      return owner !== null;
     },
 
     /** Finishes a read, on success, failure or when overtaken. */

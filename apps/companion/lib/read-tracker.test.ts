@@ -59,4 +59,38 @@ describe("createReadTracker", () => {
     reads.end(foreground);
     assert.equal(isLoading(), false);
   });
+
+  test("a foreground read overtaken by a background one leaves the background read answerable for failure", () => {
+    const { reads } = tracker();
+    const foreground = reads.begin(true);
+    const background = reads.begin(false);
+
+    // The background read is the latest and fails while the first load waits:
+    // it must report the failure, since the overtaken read applies nothing.
+    assert.equal(reads.isLatest(background), true);
+    assert.equal(reads.foregroundPending(), true);
+
+    reads.end(background);
+    reads.end(foreground);
+    assert.equal(reads.foregroundPending(), false);
+  });
+
+  test("a background read with no foreground read waiting stays quiet", () => {
+    const { reads } = tracker();
+    const background = reads.begin(false);
+
+    assert.equal(reads.foregroundPending(), false);
+    reads.end(background);
+  });
+
+  test("the overtaken read handing over keeps the background read answerable", () => {
+    const { reads } = tracker();
+    const foreground = reads.begin(true);
+    const background = reads.begin(false);
+    reads.end(foreground);
+
+    assert.equal(reads.foregroundPending(), true);
+    reads.end(background);
+    assert.equal(reads.foregroundPending(), false);
+  });
 });

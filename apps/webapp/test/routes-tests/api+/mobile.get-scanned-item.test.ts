@@ -210,16 +210,16 @@ describe("GET /api/mobile/get-scanned-item/:qrId", () => {
     const message =
       "The workspace this code belongs to is inactive because its subscription has expired.";
     // The gate's refusal; the `ShelfError` mock keeps message and status, so
-    // the title the route reads is set on it here.
+    // the structured marker the route reads is set on it here.
     const inactiveError = Object.assign(
       new ShelfError({
         cause: null,
-        title: "Workspace inactive",
         message,
         label: "Auth",
         status: 403,
+        additionalData: { reason: "workspace_inactive" },
       }),
-      { title: "Workspace inactive" }
+      { additionalData: { reason: "workspace_inactive" } }
     );
     vitest.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
       access: "inactive",

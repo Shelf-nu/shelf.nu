@@ -197,9 +197,10 @@ function BookingsListContent() {
    *
    * why: a third control row under the search box would push the bookings
    * down and read as clutter, and the switch changes the WHOLE screen, so it
-   * belongs with the title rather than among the filters it replaces. Both options stay visible, since a segmented control
-   * is discoverable in a way a single toggling icon is not, and this is a
-   * feature nobody knows exists yet.
+   * belongs with the title rather than among the filters it replaces. Both
+   * options stay visible, since a segmented control is discoverable in a way
+   * a single toggling icon is not, and this is a feature nobody knows exists
+   * yet.
    */
   useLayoutEffect(() => {
     navigation.setOptions({
