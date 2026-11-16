@@ -7,7 +7,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { archivedAssetMessage } from "~/modules/asset/archive-messages";
-import { isModelShortfallMessage } from "~/modules/asset/archive-shortfall";
+import {
+  isModelShortfallMessage,
+  MODEL_SHORTFALL_REASON,
+} from "~/modules/asset/archive-shortfall";
 import { archiveAsset } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -15,12 +18,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
-
-/**
- * The error `reason` sent with the model-reservation shortfall warning, so the
- * app offers "Archive anyway" without matching on the message text.
- */
-export const MODEL_SHORTFALL_REASON = "model_shortfall";
 
 /**
  * POST /api/mobile/asset/archive

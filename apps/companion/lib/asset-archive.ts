@@ -30,6 +30,9 @@ import { markAssetChanged } from "./asset-refresh";
 /**
  * The error `reason` the server sends with the model-reservation warning: the
  * archive was refused and rolled back, and may be resent as confirmed.
+ * MIRROR of `MODEL_SHORTFALL_REASON` in
+ * `apps/webapp/app/modules/asset/archive-shortfall.ts`; the route test and
+ * this module's test pin the same string on each side.
  */
 export const MODEL_SHORTFALL_REASON = "model_shortfall";
 
@@ -73,6 +76,12 @@ type ArchiveCheckAsset = {
  * Why this asset cannot be archived yet, or `null` when it can. The same
  * words, in the same order, as the web's disabled Archive item.
  *
+ * The server refuses every status other than `AVAILABLE`, so every such
+ * status is blocked here. The web reads "in use" as checked out or holding a
+ * custody row, and a member of a kit in use as the kit's case; an asset marked
+ * in custody with neither (no custody row, no kit in use) gets the in-use
+ * reason too, rather than a tap the server refuses.
+ *
  * @param asset - the asset detail payload
  * @param isQtyTracked - the asset tracks units (`QUANTITY_TRACKED`)
  */
@@ -80,10 +89,16 @@ export function archiveBlockedReason(
   asset: ArchiveCheckAsset,
   isQtyTracked: boolean
 ): string | null {
+  const isInUnavailableKit = Boolean(
+    asset.kit && asset.kit.status !== "AVAILABLE"
+  );
   return archiveAssetBlockedReason({
     isQuantityTracked: isQtyTracked,
-    isInUse: asset.status === "CHECKED_OUT" || Boolean(asset.custody),
-    isInUnavailableKit: Boolean(asset.kit && asset.kit.status !== "AVAILABLE"),
+    isInUse:
+      asset.status === "CHECKED_OUT" ||
+      Boolean(asset.custody) ||
+      (asset.status !== "AVAILABLE" && !isInUnavailableKit),
+    isInUnavailableKit,
   });
 }
 

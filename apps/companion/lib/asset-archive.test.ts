@@ -89,6 +89,31 @@ test("an asset in custody is refused", () => {
   );
 });
 
+test("every status the server refuses is blocked before the tap", () => {
+  // Marked in custody with no custody row in the payload, and no kit in use.
+  assert.equal(
+    archiveBlockedReason({ ...available, status: "IN_CUSTODY" }, false),
+    "Check the asset in and release any custody before archiving it."
+  );
+  for (const status of ["IN_CUSTODY", "CHECKED_OUT"]) {
+    assert.notEqual(
+      archiveBlockedReason({ ...available, status }, false),
+      null,
+      status
+    );
+  }
+});
+
+test("a member in custody through its kit gets the kit's reason, as on the web", () => {
+  assert.equal(
+    archiveBlockedReason(
+      { ...available, status: "IN_CUSTODY", kit: { status: "IN_CUSTODY" } },
+      false
+    ),
+    "This asset is part of a kit that's currently in use."
+  );
+});
+
 test("a member of a kit in use is refused; one of an available kit is not", () => {
   assert.equal(
     archiveBlockedReason(
