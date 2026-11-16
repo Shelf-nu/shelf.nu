@@ -7,7 +7,9 @@
  * cleared in the same transaction and the booking is a pending request again.
  * Asking for less (lowering an amount, removing items) keeps the approval, and
  * so does a change made by someone who may approve: their change is their
- * decision.
+ * decision. "May not approve" is read as "their own reservation would be a
+ * request": a role whose approval switch is off keeps its approval, since its
+ * reservations are final.
  *
  * Dates are not in this list because no role can change a booking's period
  * once it is past DRAFT (`updateBasicBooking`); adding assets or kits is
@@ -25,17 +27,20 @@ import { BookingStatus } from "@prisma/client";
 import type { Booking, Organization, Prisma, User } from "@prisma/client";
 import type { db } from "~/database/db.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  roleReservesAsRequest,
+} from "~/utils/bookings";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
 
 /** A transaction client that can read and write bookings and their notes. */
-type RequestChangeTx = Pick<typeof db, "booking" | "bookingNote">;
+type RequestChangeTx = Pick<
+  typeof db,
+  "booking" | "bookingNote" | "bookingSettings" | "userOrganization"
+>;
 
 /**
  * Clears the approval of an approved RESERVED booking whose request grew,
@@ -77,13 +82,30 @@ export async function clearApprovalWhenRequestGrows(
     return false;
   }
 
-  const mayApprove = await hasPermission({
-    userId: actorUserId,
-    organizationId,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.approve,
-  });
-  if (mayApprove) return false;
+  // Only a member whose own reservation would be a request loses the
+  // approval: their role's switch decides, by their effective role, as it
+  // does for `reserveBooking`. Everyone else (approvers, and a role whose
+  // switch is off) keeps it.
+  const [membership, switches] = await Promise.all([
+    tx.userOrganization.findUnique({
+      where: { userId_organizationId: { userId: actorUserId, organizationId } },
+      select: { roles: true },
+    }),
+    tx.bookingSettings.findUnique({
+      where: { organizationId },
+      select: BOOKING_APPROVAL_SWITCHES_SELECT,
+    }),
+  ]);
+  if (
+    !membership ||
+    !roleReservesAsRequest({
+      approvalSetting:
+        ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
+      settings: switches,
+    })
+  ) {
+    return false;
+  }
 
   await tx.booking.updateMany({
     where: { id: bookingId, organizationId },

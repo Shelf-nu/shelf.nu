@@ -8,16 +8,9 @@
 import { BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { clearApprovalWhenRequestGrows } from "./request-change.server";
 
 // @vitest-environment node
-
-// why: whether the actor may approve is the permission matrix's answer; each
-// case sets it.
-vi.mock("~/utils/permissions/permission.validator.server", () => ({
-  hasPermission: vi.fn(),
-}));
 
 // why: the note is asserted by its content, not written to a database.
 vi.mock("~/modules/booking-note/service.server", () => ({
@@ -38,6 +31,8 @@ vi.mock("~/modules/user/service.server", () => ({
 const tx = {
   booking: { findFirst: vi.fn(), updateMany: vi.fn() },
   bookingNote: {},
+  userOrganization: { findUnique: vi.fn() },
+  bookingSettings: { findUnique: vi.fn() },
 };
 
 const args = {
@@ -54,7 +49,12 @@ const APPROVED = {
 beforeEach(() => {
   vi.clearAllMocks();
   tx.booking.findFirst.mockResolvedValue(APPROVED);
-  vi.mocked(hasPermission).mockResolvedValue(false);
+  // A Self service member, whose own approval switch is on.
+  tx.userOrganization.findUnique.mockResolvedValue({ roles: ["SELF_SERVICE"] });
+  tx.bookingSettings.findUnique.mockResolvedValue({
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: true,
+  });
 });
 
 describe("clearApprovalWhenRequestGrows", () => {
@@ -77,12 +77,42 @@ describe("clearApprovalWhenRequestGrows", () => {
   });
 
   it("keeps the approval when the change is an approver's", async () => {
-    vi.mocked(hasPermission).mockResolvedValue(true);
+    tx.userOrganization.findUnique.mockResolvedValue({ roles: ["MANAGER"] });
 
     await expect(
       clearApprovalWhenRequestGrows(tx as never, args)
     ).resolves.toBe(false);
     expect(tx.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the approval when the member's own approval switch is off", async () => {
+    // why: Base approval on, Self service off. A Self service reservation is
+    // final; clearing its approval would leave it pending under Base's switch
+    // and block its owner's check-out.
+    tx.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    await expect(
+      clearApprovalWhenRequestGrows(tx as never, args)
+    ).resolves.toBe(false);
+    expect(tx.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("judges a mixed membership by its effective role", async () => {
+    // Self service + Base resolves to Self service, as `access.policy` does.
+    tx.userOrganization.findUnique.mockResolvedValue({
+      roles: ["BASE", "SELF_SERVICE"],
+    });
+    tx.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    await expect(
+      clearApprovalWhenRequestGrows(tx as never, args)
+    ).resolves.toBe(false);
   });
 
   it.each([
