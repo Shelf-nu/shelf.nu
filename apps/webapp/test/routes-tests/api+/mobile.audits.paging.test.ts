@@ -77,6 +77,7 @@ vi.mock("~/modules/audit/service.server", () => ({
   ),
 }));
 
+import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { loader } from "~/routes/api+/mobile+/audits";
 
 type ListPayload = {
@@ -185,5 +186,20 @@ describe("mobile audits list paging", () => {
 
     expect(rows).toHaveLength(21 + 15);
     expect(rows.some((r) => r.status === AuditStatus.ARCHIVED)).toBe(false);
+  });
+
+  it("drops repeated and unknown statuses and passes paging through", async () => {
+    seed(0);
+    vi.mocked(getAuditsForOrganization).mockClear();
+
+    await fetchPage("COMPLETED,COMPLETED,BOGUS", 3);
+
+    expect(getAuditsForOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: [AuditStatus.COMPLETED],
+        page: 3,
+        perPage: 20,
+      })
+    );
   });
 });

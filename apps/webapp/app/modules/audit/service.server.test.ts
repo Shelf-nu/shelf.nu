@@ -2357,6 +2357,28 @@ describe("audit service", () => {
       });
     });
 
+    it("keeps a listed ARCHIVED status instead of hiding archived audits", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: [AuditStatus.PENDING, AuditStatus.ARCHIVED],
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toEqual({
+        in: [AuditStatus.PENDING, AuditStatus.ARCHIVED],
+      });
+    });
+
+    it("filters a one-item status list by plain equality", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: [AuditStatus.ACTIVE],
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toBe(AuditStatus.ACTIVE);
+    });
+
     it("filters to audits containing the asset when assetId is set", async () => {
       await getAuditsForOrganization({
         organizationId: "org-1",

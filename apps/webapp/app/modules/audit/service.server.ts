@@ -3208,10 +3208,10 @@ export async function getAuditsForOrganization(params: {
    */
   assignedToUserId?: string | null;
   /**
-   * When true, sort by `(dueDate asc nulls last, createdAt desc)` so the
-   * companion's audit list surfaces overdue and upcoming-due items
-   * first. Overrides `orderBy` / `orderDirection`. Mobile-only — the
-   * webapp uses its own column-sort UI.
+   * When true, sort by `(dueDate asc nulls last, createdAt desc, id asc)` so
+   * the companion's audit list surfaces overdue and upcoming-due items first,
+   * and consecutive pages never repeat or skip a row. Overrides `orderBy` /
+   * `orderDirection`. Mobile only: the webapp uses its own column-sort UI.
    */
   prioritizeDeadlines?: boolean;
   /**
