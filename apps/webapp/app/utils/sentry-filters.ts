@@ -158,6 +158,59 @@ function isExpectedRouteErrorRejection(event: ErrorEvent): boolean {
 }
 
 /**
+ * Matches errors from the script a crypto wallet injects into every page
+ * (Brave's built-in wallet, MetaMask-style extensions), which sets
+ * `window.ethereum.selectedAddress` before the wallet object exists. Safari
+ * words it "evaluating 'window.ethereum.selectedAddress = undefined'",
+ * Chromium "Cannot set properties of undefined (setting 'selectedAddress')".
+ * Shelf never touches `window.ethereum`, so neither phrase comes from app code.
+ */
+const WALLET_INJECTION_PATTERN = /window\.ethereum|'selectedAddress'/;
+
+/**
+ * Path every file of the client bundle is served under (`assetsDir` and the
+ * chunk names in `vite.config.ts`). A stack frame whose URL contains it ran
+ * Shelf's own code.
+ */
+const CLIENT_BUNDLE_PATH = "/file-assets/";
+
+/**
+ * Whether an exception has a stack frame from Shelf's own client bundle.
+ *
+ * Judged by the frame's URL, not `in_app`: the browser SDK sets `in_app: true`
+ * on every frame it parses, so a script an extension injects into the page,
+ * or an inline script, looks first-party by that flag.
+ *
+ * @param value - A serialized Sentry exception entry
+ * @returns `true` when at least one frame comes from the client bundle
+ */
+function hasClientBundleFrame(value: SentryExceptionValue): boolean {
+  return (
+    value.stacktrace?.frames?.some((f) =>
+      (f.filename ?? "").includes(CLIENT_BUNDLE_PATH)
+    ) ?? false
+  );
+}
+
+/**
+ * Whether an event is a crypto wallet's injected script failing on the page
+ * rather than an error in Shelf. Requires that no exception in the event has a
+ * frame from the client bundle as well, so an error thrown or rethrown by our
+ * own code is never dropped by its wording alone. An event holds several
+ * exceptions when one is the cause of another.
+ *
+ * @param event - The Sentry error event
+ * @returns `true` when the error comes from an injected wallet script
+ */
+function isWalletInjectionError(event: ErrorEvent): boolean {
+  const values = event.exception?.values ?? [];
+  return (
+    values.some((v) => WALLET_INJECTION_PATTERN.test(v.value ?? "")) &&
+    !values.some(hasClientBundleFrame)
+  );
+}
+
+/**
  * Client `beforeSend` hook body: decides whether a captured browser error is
  * worth sending to Sentry. Returns the (unchanged) event to send it, or
  * `null` to drop it.
@@ -258,6 +311,12 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // global unhandled-rejection handler instead of the error boundary. Same
   // policy as the boundary branch below (see isExpectedRouteErrorRejection).
   if (isExpectedRouteErrorRejection(event)) {
+    return null;
+  }
+
+  // Hard-filter errors from a crypto wallet's injected script; they run in
+  // the page but are not Shelf code (see isWalletInjectionError).
+  if (isWalletInjectionError(event)) {
     return null;
   }
 

@@ -116,6 +116,98 @@ describe("handleClientBeforeSend — noise filters", () => {
   });
 });
 
+describe("handleClientBeforeSend: crypto wallet scripts injected into the page", () => {
+  /**
+   * A wallet error as the browser SDK reports it: one frame at `filename`,
+   * marked `in_app` like every frame the SDK parses.
+   */
+  function walletEvent(value: string, filename: string): ErrorEvent {
+    return {
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value,
+            stacktrace: {
+              frames: [{ filename, lineno: 1, colno: 16, in_app: true }],
+            },
+          },
+        ],
+      },
+    } as ErrorEvent;
+  }
+
+  const SAFARI_MESSAGE =
+    "undefined is not an object (evaluating 'window.ethereum.selectedAddress = undefined')";
+  const CHROMIUM_MESSAGE =
+    "Cannot set properties of undefined (setting 'selectedAddress')";
+
+  it("drops a script injected inline into the page document", () => {
+    expect(
+      handleClientBeforeSend(
+        walletEvent(
+          SAFARI_MESSAGE,
+          "https://app.shelf.nu/account-details/general"
+        )
+      )
+    ).toBeNull();
+  });
+
+  it.each([
+    "chrome-extension://abcdefgh/inpage.js",
+    "moz-extension://1234-5678/inpage.js",
+    "safari-web-extension://ABCD/inpage.js",
+  ])("drops a script served by an extension (%s)", (filename) => {
+    expect(
+      handleClientBeforeSend(walletEvent(CHROMIUM_MESSAGE, filename))
+    ).toBeNull();
+  });
+
+  it("drops the message when it arrives with no stack", () => {
+    expect(
+      handleClientBeforeSend(
+        makeEvent({ type: "TypeError", value: CHROMIUM_MESSAGE })
+      )
+    ).toBeNull();
+  });
+
+  it("keeps a wallet error that our own code caught and rethrew", () => {
+    const wallet = walletEvent(
+      CHROMIUM_MESSAGE,
+      "chrome-extension://abcdefgh/inpage.js"
+    );
+    const event = {
+      exception: {
+        values: [
+          ...(wallet.exception?.values ?? []),
+          {
+            type: "Error",
+            value: "Could not connect the wallet",
+            stacktrace: {
+              frames: [
+                {
+                  filename:
+                    "https://app.shelf.nu/file-assets/abc123/root-X1.js",
+                  in_app: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    } as ErrorEvent;
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+
+  it("keeps the same wording when it comes from the client bundle", () => {
+    const event = walletEvent(
+      CHROMIUM_MESSAGE,
+      "https://app.shelf.nu/file-assets/abc123/root-X1.js"
+    );
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+});
+
 describe("handleClientBeforeSend: JavaScript chunks that fail to load", () => {
   it.each([
     "Failed to fetch dynamically imported module: https://app.shelf.nu/file-assets/abc/assets._index-X1.js",
