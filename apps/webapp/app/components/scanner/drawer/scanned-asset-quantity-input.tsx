@@ -13,11 +13,15 @@
  * (`shrink-0`).
  *
  * State lives in `scannedAssetQuantitiesAtom`, keyed by `assetId`, so the
- * drawer's clear / remove paths drop entries for free. This bound is a
- * display aid only: the services re-check the real pool on the write.
+ * drawer's clear / remove paths drop entries for free. A stored value above
+ * the row's current `max` (one put back from a scan draft after units were
+ * taken elsewhere, or a pool that shrank) is lowered to `max` as soon as the
+ * row shows it, so the drawer never sends more than the row offers. This bound
+ * is a display aid only: the services re-check the real pool on the write.
  */
 
 import type { ChangeEvent } from "react";
+import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   scannedAssetQuantitiesAtom,
@@ -43,7 +47,16 @@ export function ScannedAssetQuantityInput({
 }) {
   const quantities = useAtomValue(scannedAssetQuantitiesAtom);
   const setQuantity = useSetAtom(setScannedAssetQuantityAtom);
-  const value = quantities[assetId] ?? 1;
+  const stored = quantities[assetId];
+  const value = stored ?? 1;
+
+  // Lower a stored quantity that no longer fits. A cap below 1 leaves it
+  // alone: there is no valid quantity to lower it to.
+  useEffect(() => {
+    if (stored !== undefined && max >= 1 && stored > max) {
+      setQuantity({ assetId, quantity: max });
+    }
+  }, [assetId, max, stored, setQuantity]);
 
   return (
     <div

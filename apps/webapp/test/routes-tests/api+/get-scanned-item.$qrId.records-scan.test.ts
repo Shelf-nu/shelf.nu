@@ -220,6 +220,20 @@ describe("GET /api/get-scanned-item/:qrId records the scan", () => {
     expect(await resolve("qr-1")).toBe(404);
   });
 
+  it("answers a QR linked to nothing with a 4xx, so a scan draft lets it go", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: ORG_ID,
+      assetId: null,
+      kitId: null,
+      asset: null,
+      kit: null,
+    });
+
+    expect(await resolve("qr-1")).toBe(404);
+    expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
+  });
+
   it("records nothing for a QR from another workspace", async () => {
     mockGetQr.mockResolvedValue({
       id: "qr-1",

@@ -19433,6 +19433,8 @@ describe("addScannedAssetsToBooking", () => {
       }
     );
 
+    // why: the write is asserted below with an empty create list; the row it
+    // returns stands in for the booking the service reads back afterwards.
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({
       id: "booking-scan",
@@ -19440,6 +19442,8 @@ describe("addScannedAssetsToBooking", () => {
       status: BookingStatus.RESERVED,
     });
 
+    // why: the scanned kit, already on the booking through the slice the
+    // read above returns, so it is not added again.
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue([
       {

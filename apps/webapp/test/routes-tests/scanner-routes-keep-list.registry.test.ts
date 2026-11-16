@@ -108,6 +108,52 @@ describe("scanner routes keep a draft of their list", () => {
     );
   });
 
+  /**
+   * The page opens on "View asset", which shows no list. A restored bulk list
+   * must switch the page back to the action it was parked under, or it comes
+   * back out of sight. The decision itself is tested in
+   * restore-scanner-action.test.ts; this pins that the route acts on it.
+   */
+  it("returns a restored bulk list to the action it was parked under", () => {
+    expect(read("scanner.tsx")).toMatch(
+      /onRestore: \(parkedAction\) => \{\s*const restored = scannerActionToRestore\(parkedAction, availableActions\);\s*if \(restored\) \{\s*setAction\(restored\);/
+    );
+  });
+
+  /**
+   * The bulk actions save in place and keep the list on screen under their
+   * result dialog. Each must tell the draft once the whole save succeeded, or
+   * a reload before the dialog is closed brings back scans already saved. The
+   * drawers are impractical to mount, so their wiring is pinned by source.
+   */
+  it.each([
+    [
+      "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
+      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
+    ],
+    [
+      "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
+      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
+    ],
+    [
+      "../../components/scanner/drawer/uses/update-location-drawer.tsx",
+      /useClearScanDraftOnSave\(locationState\.status === "success"\)/,
+    ],
+  ])("%s clears the bulk draft once its save succeeds", (file, wiring) => {
+    expect(read(file)).toMatch(wiring);
+  });
+
+  /**
+   * A location save that failed keeps its list, and so its draft, when the
+   * result dialog is closed: moving assets to where they already are changes
+   * nothing, so sending it again is safe.
+   */
+  it("keeps a failed bulk location list when its result is dismissed", () => {
+    expect(
+      read("../../components/scanner/drawer/uses/update-location-drawer.tsx")
+    ).toMatch(/if \(locationState\.status !== "error"\) \{\s*clearItems\(\);/);
+  });
+
   it.each([
     ["../../hooks/use-booking-assign-session-initialization.ts", '"assign"'],
     ["../../hooks/use-booking-fulfil-session-initialization.ts", '"fulfil"'],

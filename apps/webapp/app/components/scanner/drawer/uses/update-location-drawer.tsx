@@ -48,11 +48,8 @@ import {
   TextLoader,
 } from "../generic-item-row";
 import { buildUpdateLocationBlockers } from "./location-scan-blockers";
-
-type LocationState = {
-  status: "processing" | "success" | "error";
-  errorMessage?: string;
-};
+import type { LocationState } from "./update-location-result";
+import { foldLocationPart } from "./update-location-result";
 
 /**
  * Drawer component for managing scanned assets to be added to a location
@@ -163,10 +160,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             }
           );
           const assetsData = await assetsResponse.json();
-          locationState = {
-            status: assetsData.error ? "error" : "success",
-            ...(assetsData.error && { errorMessage: assetsData.error.message }),
-          };
+          locationState = foldLocationPart(locationState, assetsData);
         }
 
         if (kitIds.length) {
@@ -181,10 +175,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             body: kitFormData,
           });
           const kitsData = await kitsResponse.json();
-          locationState = {
-            status: kitsData.error ? "error" : "success",
-            ...(kitsData.error && { errorMessage: kitsData.error.message }),
-          };
+          locationState = foldLocationPart(locationState, kitsData);
         }
 
         setLocationState(locationState);
@@ -208,10 +199,15 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   useClearScanDraftOnSave(locationState.status === "success");
 
   function cleanupState() {
+    // A save that failed keeps its list (and so its draft) to fix and send
+    // again. Moving an asset to the location it is already at changes
+    // nothing, so a retry after a partial failure repeats no saved work.
+    if (locationState.status !== "error") {
+      clearItems();
+    }
     setLocationState({
       status: "processing",
     });
-    clearItems();
   }
 
   return (

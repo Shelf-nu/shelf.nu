@@ -130,6 +130,8 @@ describe("getQr status", () => {
     const err = await thrownBy(new Error("Can't reach database server"));
 
     expect(err.status).toBe(500);
+    // A row showing this must not tell the operator the code is unknown.
+    expect(err.message).not.toMatch(/doesn't exist/);
   });
 });
 

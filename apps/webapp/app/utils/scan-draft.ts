@@ -8,20 +8,24 @@
  * beside the atom, scoped to one flow and one target, and a flow opts in by
  * restoring from it on entry and writing to it as the list changes.
  *
- * **Only the codes are stored.** A `ScanListItem` carries the asset's entire
+ * **No row payload is stored.** A `ScanListItem` carries the asset's entire
  * server payload, which is both far too large for this and stale the moment it
- * is written. A restored entry comes back in the shape of a code that has just
- * been scanned and is still being looked up: no `data` and no `type`, so
- * `GenericItemRow` resolves it again on mount and a resumed list is as current
- * as a freshly scanned one. The `type` is left out on purpose. Scanner drawers
- * read `data` from any entry that has a `type`, which holds for every entry a
- * scan produces, and a restored entry must not be the one exception.
+ * is written. A draft keeps each code with how it was scanned, plus what the
+ * operator set around the list: the units entered and the "From location"
+ * picked on the rows (keyed by asset id), and an optional context (on the bulk
+ * scanner, the action the list belongs to). A restored entry comes back in the
+ * shape of a code that has just been scanned and is still being looked up: no
+ * `data` and no `type`, so `GenericItemRow` resolves it again on mount and a
+ * resumed list is as current as a freshly scanned one. The `type` is left out
+ * on purpose. Scanner drawers read `data` from any entry that has a `type`,
+ * which holds for every entry a scan produces, and a restored entry must not be
+ * the one exception.
  *
  * This is a stopgap for one browser on one device. The real fix is a persisted
  * server-side session, tracked in GitHub issue #3160.
  *
  * @see {@link file://./../components/scanner/drawer/generic-item-row.tsx} for
- *   the re-resolution that makes storing codes alone sufficient.
+ *   the re-resolution that lets a draft leave the row payload out.
  */
 import type { ScanListItems } from "~/atoms/qr-scanner";
 import {
