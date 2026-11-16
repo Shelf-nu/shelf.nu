@@ -8,6 +8,7 @@ import type {
 } from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -76,19 +77,11 @@ async function assertBarcodeTargetBelongsToOrg({
 /**
  * The slice of a Prisma client that {@link releaseUnattachedBarcodes} needs.
  * The root client and an interactive transaction client both satisfy it.
+ * Derived from the extended client rather than the generated
+ * `Prisma.TransactionClient`, because the extended client's delegates are not
+ * assignable to the generated ones.
  */
-export type BarcodeReleaseClient = {
-  barcode: {
-    deleteMany: (args: {
-      where: {
-        organizationId: string;
-        value: { in: string[] };
-        assetId: null;
-        kitId: null;
-      };
-    }) => Prisma.PrismaPromise<Prisma.BatchPayload>;
-  };
-};
+export type BarcodeReleaseClient = Pick<ExtendedPrismaClient, "barcode">;
 
 /**
  * Frees barcode values held by unattached rows, so the caller can write them.
@@ -329,17 +322,20 @@ export async function updateBarcode({
       }
     }
 
+    const updateArgs = { where: { id, organizationId }, data: updateData };
+
+    // The value only changes when both type and value are given; otherwise
+    // there is no value to free and the update runs on its own.
+    if (type === undefined || value === undefined) {
+      return await db.barcode.update(updateArgs);
+    }
+
     const [, barcode] = await db.$transaction([
       releaseUnattachedBarcodes(db, {
-        // The value only changes when both type and value are given.
-        barcodes:
-          type !== undefined && value !== undefined ? [{ type, value }] : [],
+        barcodes: [{ type, value }],
         organizationId,
       }),
-      db.barcode.update({
-        where: { id, organizationId },
-        data: updateData,
-      }),
+      db.barcode.update(updateArgs),
     ]);
     return barcode;
   } catch (cause) {

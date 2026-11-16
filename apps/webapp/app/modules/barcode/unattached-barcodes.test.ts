@@ -19,6 +19,7 @@
 import { BarcodeType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { db } from "~/database/db.server";
 import { VALIDATION_ERROR } from "~/utils/error";
 import {
   createBarcode,
@@ -137,16 +138,28 @@ vi.mock("~/database/db.server", () => {
     barcode,
     asset: { findMany: findAllRequestedIds },
     kit: { findMany: findAllRequestedIds },
-    // Batch entries are awaited in order, as a real batch runs them.
+    // Batch entries are awaited in order, as a real batch runs them. When
+    // any step throws, the table goes back to what it held before, as a
+    // real transaction rolls back.
     $transaction: async (work: unknown) => {
-      if (typeof work === "function") {
-        return (work as (tx: unknown) => unknown)(db);
+      const snapshot = {
+        rows: table.rows.map((row) => ({ ...row })),
+        nextId: table.nextId,
+      };
+      try {
+        if (typeof work === "function") {
+          return await (work as (tx: unknown) => unknown)(db);
+        }
+        const results = [];
+        for (const operation of work as Promise<unknown>[]) {
+          results.push(await operation);
+        }
+        return results;
+      } catch (cause) {
+        table.rows = snapshot.rows;
+        table.nextId = snapshot.nextId;
+        throw cause;
       }
-      const results = [];
-      for (const operation of work as Promise<unknown>[]) {
-        results.push(await operation);
-      }
-      return results;
     },
   };
   return { db };
@@ -263,6 +276,7 @@ const WRITE_PATHS: WritePath[] = [
 ];
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   table.rows = [];
   table.nextId = 1;
 });
@@ -349,5 +363,67 @@ describe("validateBarcodeUniqueness", () => {
         ORG
       )
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("a write that fails after the release", () => {
+  it("createBarcode keeps the unattached barcode", async () => {
+    const leftBehind = seed({ id: "left-behind" });
+    // why: a single create cannot clash with a value the release just freed,
+    // so the write after the release is made to fail on its own.
+    vi.spyOn(db.barcode, "create").mockImplementationOnce(
+      // why: the mocked delegate returns a plain promise, not a PrismaPromise.
+      () => Promise.reject(new Error("ZZ write failed")) as never
+    );
+
+    await expect(
+      createBarcode({
+        ...base,
+        ...asset,
+        type: BarcodeType.Code128,
+        value: VALUE,
+      })
+    ).rejects.toThrow();
+
+    expect(holders()).toEqual([leftBehind]);
+  });
+
+  it("updateBarcodes keeps the unattached barcode when another value is taken", async () => {
+    const leftBehind = seed({ id: "left-behind" });
+    const live = seed({
+      id: "live",
+      value: "ZZ-LIVE-1",
+      assetId: "asset-live",
+    });
+
+    await expect(
+      updateBarcodes({
+        ...base,
+        ...asset,
+        barcodes: [
+          { type: BarcodeType.Code128, value: VALUE },
+          { type: BarcodeType.Code128, value: "ZZ-LIVE-1" },
+        ],
+      })
+    ).rejects.toThrow();
+
+    expect(holders()).toEqual([leftBehind]);
+    expect(holders("ZZ-LIVE-1")).toEqual([live]);
+  });
+});
+
+describe("updateBarcode without a new value", () => {
+  it.each([
+    { name: "type only", change: { type: BarcodeType.DataMatrix } },
+    { name: "empty", change: {} },
+  ])("sends no delete ($name)", async ({ change }) => {
+    seed({ id: "own", value: "ZZ-OWN-1", assetId: "asset-new" });
+    const leftBehind = seed({ id: "left-behind" });
+    const deleteMany = vi.spyOn(db.barcode, "deleteMany");
+
+    await updateBarcode({ id: "own", organizationId: ORG, ...change });
+
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(holders()).toEqual([leftBehind]);
   });
 });
