@@ -133,12 +133,26 @@ export type ArchiveAnswer<T> = {
   status?: number;
 };
 
+/**
+ * A request that ended without the server's answer. `uncertain` marks one
+ * that never got an HTTP answer (a timeout, a dropped connection, an
+ * unreadable body): the server may have applied it anyway.
+ */
+export type FailedRequest = {
+  kind: "failed";
+  message: string;
+  uncertain?: true;
+};
+
 /** How an archive attempt ended. */
 export type ArchiveOutcome<T> =
   | { kind: "archived"; data: T }
-  /** The user declined "Archive anyway"; the server changed nothing. */
+  /**
+   * Nothing was sent, or nothing more: the user declined "Archive anyway",
+   * or the screen moved before a send.
+   */
   | { kind: "cancelled" }
-  | { kind: "failed"; message: string };
+  | FailedRequest;
 
 /**
  * HTTP statuses a server without the archive route answers with. The web's
@@ -146,6 +160,45 @@ export type ArchiveOutcome<T> =
  * path it does not know gets 405; a plain 404 covers a server without it.
  */
 const MISSING_ROUTE_STATUSES = [404, 405];
+
+/**
+ * Added to the message of a request that got no answer, since the asset is
+ * reloaded right after and may show the change went through.
+ */
+export const UNCONFIRMED_NOTE =
+  "The asset was reloaded to show where it stands.";
+
+/**
+ * Whether a request ended with no HTTP answer, so the server may have applied
+ * it. `apiFetch` sets `status` on every answer the server gave, refusals
+ * included, and leaves it unset for a timeout, a network failure or an
+ * unreadable body.
+ *
+ * @param answer - the request's answer, without data
+ */
+export function isUnconfirmed(answer: ArchiveAnswer<unknown>): boolean {
+  return answer.status === undefined;
+}
+
+/**
+ * Turns an answer without data into a failed request, flagging it uncertain
+ * when no HTTP answer came back.
+ *
+ * @param answer - the request's answer
+ * @param message - what to show for it
+ */
+export function failedRequest(
+  answer: ArchiveAnswer<unknown>,
+  message: string
+): FailedRequest {
+  return isUnconfirmed(answer)
+    ? {
+        kind: "failed",
+        message: `${message} ${UNCONFIRMED_NOTE}`,
+        uncertain: true,
+      }
+    : { kind: "failed", message };
+}
 
 /**
  * The message for a refused archive: the server's own words, except for a
@@ -172,6 +225,8 @@ export function archiveFailureMessage(answer: ArchiveAnswer<unknown>): string {
  * archive was refused and rolled back; `confirmShortfall` shows the server's
  * message and resolves `true` to resend as confirmed, `false` to stop with
  * nothing changed. Every other refusal ends the attempt with its message.
+ * Nothing is sent when the screen no longer shows the scope captured as the
+ * confirm opened.
  *
  * @param options.send - posts the archive; `true` confirms the shortfall
  * @param options.confirmShortfall - asks the user, with the server's message
@@ -188,11 +243,15 @@ export async function runArchive<T>({
   confirmShortfall: (message: string) => Promise<boolean>;
   isStillHere: () => boolean;
 }): Promise<ArchiveOutcome<T>> {
+  // The scope was captured when the confirm opened; a screen that moved
+  // behind it shows another asset, so the tap is not taken as meant for this
+  // one, and nothing is sent.
+  if (!isStillHere()) return { kind: "cancelled" };
   const first = await send(false);
   if (first.data) return { kind: "archived", data: first.data };
 
   if (first.errorDetails?.reason !== MODEL_SHORTFALL_REASON) {
-    return { kind: "failed", message: archiveFailureMessage(first) };
+    return failedRequest(first, archiveFailureMessage(first));
   }
 
   // The warning names bookings and models, not the asset. On a screen that
@@ -207,7 +266,7 @@ export async function runArchive<T>({
 
   const confirmed = await send(true);
   if (confirmed.data) return { kind: "archived", data: confirmed.data };
-  return { kind: "failed", message: archiveFailureMessage(confirmed) };
+  return failedRequest(confirmed, archiveFailureMessage(confirmed));
 }
 
 /**
@@ -241,10 +300,31 @@ export function captureRequestScope(read: () => RequestScope): () => boolean {
   };
 }
 
+/**
+ * Reinstates an asset once the user confirmed, unless the screen moved behind
+ * the confirm (the scope was captured when it opened).
+ *
+ * @param options.send - posts the reinstate
+ * @param options.isStillHere - from {@link captureRequestScope}
+ * @returns how it ended, for {@link landArchiveChange}
+ */
+export async function runReinstate({
+  send,
+  isStillHere,
+}: {
+  send: () => Promise<ArchiveAnswer<unknown>>;
+  isStillHere: () => boolean;
+}): Promise<ArchiveChangeResult> {
+  if (!isStillHere()) return { kind: "cancelled" };
+  const answer = await send();
+  if (answer.data) return { kind: "changed", archivedAt: null };
+  return failedRequest(answer, answer.error ?? "Couldn't reinstate the asset.");
+}
+
 /** How an archive or reinstate request ended, for {@link landArchiveChange}. */
 export type ArchiveChangeResult =
-  | { kind: "failed"; message: string }
-  /** Nothing was changed on the server (a declined "Archive anyway"). */
+  | FailedRequest
+  /** Nothing was sent, or the server changed nothing. */
   | { kind: "cancelled" }
   /** The server changed the asset; `archivedAt` is `null` after a reinstate. */
   | { kind: "changed"; archivedAt: string | null };
@@ -262,6 +342,8 @@ export type ArchiveChangeResult =
  *
  * The list marker is set for the changed asset whatever the screen shows: it
  * is keyed by that asset, so the assets list refetches its row on next focus.
+ * An uncertain failure sets it too, since the change may have landed; the
+ * asset detail also refetches on its next focus until a reload succeeds.
  *
  * @param result - how the request ended
  * @param options.assetId - the asset the request was sent for
@@ -292,6 +374,7 @@ export async function landArchiveChange(
   if (result.kind === "cancelled") return;
 
   if (result.kind === "failed") {
+    if (result.uncertain) markAssetChanged(assetId);
     if (!isStillHere()) return;
     showRefusal(result.message);
     await refetch();

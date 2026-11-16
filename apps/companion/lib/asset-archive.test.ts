@@ -17,6 +17,8 @@ import {
   canOfferArchive,
   moreMenuActions,
   runArchive,
+  runReinstate,
+  UNCONFIRMED_NOTE,
   captureRequestScope,
   landArchiveChange,
   type ArchiveChangeResult,
@@ -328,13 +330,34 @@ test("a refusal of the confirmed resend is shown as is", async () => {
 
 // ── After the change lands ───────────────────────────────
 
+test("the screen moved while the first confirm was open: nothing is sent", async () => {
+  const { send, sent } = sender([archived]);
+
+  const outcome = await runArchive({
+    send,
+    // Captured as the confirm opened; a deep link moved the screen since.
+    isStillHere: () => false,
+    confirmShortfall: async () => true,
+  });
+
+  assert.deepEqual(outcome, { kind: "cancelled" });
+  assert.deepEqual(sent, []);
+});
+
 test("the screen moved before the shortfall prompt: no prompt, nothing resent", async () => {
-  const { send, sent } = sender([shortfall]);
+  const answers = sender([shortfall]);
+  const sent = answers.sent;
+  let here = true;
+  const send = async (confirm: boolean) => {
+    const answer = await answers.send(confirm);
+    here = false; // a deep link opened another asset while the request ran
+    return answer;
+  };
   let asked = false;
 
   const outcome = await runArchive({
     send,
-    isStillHere: () => false,
+    isStillHere: () => here,
     confirmShortfall: async () => {
       asked = true;
       return true;
@@ -361,6 +384,97 @@ test("the screen moved while the prompt was open: a confirm sends nothing", asyn
 
   assert.deepEqual(outcome, { kind: "cancelled" });
   assert.deepEqual(sent, [false]);
+});
+
+// ── No answer from the server ────────────────────────────
+
+/** What `apiFetch` answers for a timed-out request: no HTTP status. */
+const timedOut: ArchiveAnswer<Archived> = {
+  data: null,
+  error: "Request timed out. Check your connection.",
+};
+
+test("a timed-out archive is uncertain: it may have landed", async () => {
+  const { send } = sender([timedOut]);
+
+  const outcome = await runArchive({
+    send,
+    isStillHere: () => true,
+    confirmShortfall: async () => true,
+  });
+
+  assert.deepEqual(outcome, {
+    kind: "failed",
+    message: `Request timed out. Check your connection. ${UNCONFIRMED_NOTE}`,
+    uncertain: true,
+  });
+});
+
+test("a timed-out confirmed resend is uncertain too", async () => {
+  const { send } = sender([shortfall, timedOut]);
+
+  const outcome = await runArchive({
+    send,
+    isStillHere: () => true,
+    confirmShortfall: async () => true,
+  });
+
+  assert.equal(outcome.kind === "failed" && outcome.uncertain, true);
+});
+
+test("a refusal the server answered is not uncertain", async () => {
+  const { send } = sender([
+    {
+      data: null,
+      error: "Refused",
+      errorDetails: { message: "Refused" },
+      status: 400,
+    },
+  ]);
+
+  const outcome = await runArchive({
+    send,
+    isStillHere: () => true,
+    confirmShortfall: async () => true,
+  });
+
+  assert.deepEqual(outcome, { kind: "failed", message: "Refused" });
+});
+
+// ── Reinstate ────────────────────────────────────────────
+
+test("a reinstate confirmed after the screen moved sends nothing", async () => {
+  let sent = 0;
+
+  const result = await runReinstate({
+    send: async () => {
+      sent += 1;
+      return { data: { asset: { id: "asset-1" } }, error: null };
+    },
+    isStillHere: () => false,
+  });
+
+  assert.deepEqual(result, { kind: "cancelled" });
+  assert.equal(sent, 0);
+});
+
+test("a reinstate ends changed, refused, or uncertain without an answer", async () => {
+  const run = (answer: ArchiveAnswer<unknown>) =>
+    runReinstate({ send: async () => answer, isStillHere: () => true });
+
+  assert.deepEqual(await run({ data: { ok: true }, error: null }), {
+    kind: "changed",
+    archivedAt: null,
+  });
+  assert.deepEqual(await run({ data: null, error: "Refused", status: 400 }), {
+    kind: "failed",
+    message: "Refused",
+  });
+  assert.deepEqual(await run(timedOut), {
+    kind: "failed",
+    message: `Request timed out. Check your connection. ${UNCONFIRMED_NOTE}`,
+    uncertain: true,
+  });
 });
 
 // ── Is this still the screen the request started on? ─────
@@ -458,6 +572,8 @@ test("a successful reinstate shows as active even when the reload fails", async 
 });
 
 test("a refusal shows its message and reloads the asset", async () => {
+  const before = assetChangeVersion("asset-refused");
+
   const result = await land(
     { kind: "failed", message: "Refused" },
     { assetId: "asset-refused" }
@@ -465,6 +581,26 @@ test("a refusal shows its message and reloads the asset", async () => {
 
   assert.deepEqual(result.refusals, ["Refused"]);
   assert.equal(result.refetched, 1);
+  // The server answered "no": nothing changed, so nothing is marked.
+  assert.equal(assetChangeVersion("asset-refused"), before);
+});
+
+test("an uncertain failure marks the asset changed, here or not", async () => {
+  for (const [assetId, here] of [
+    ["asset-uncertain-here", () => true],
+    ["asset-uncertain-moved", () => false],
+  ] as const) {
+    const before = assetChangeVersion(assetId);
+
+    await land(
+      { kind: "failed", message: "Timed out", uncertain: true },
+      { assetId, here }
+    );
+
+    // The list, and this detail on its next focus, refetch until a reload
+    // shows whether the change landed.
+    assert.notEqual(assetChangeVersion(assetId), before, assetId);
+  }
 });
 
 /**

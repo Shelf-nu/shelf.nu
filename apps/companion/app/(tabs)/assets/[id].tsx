@@ -83,6 +83,7 @@ import {
   moreMenuActions,
   runArchive,
   captureRequestScope,
+  runReinstate,
   landArchiveChange,
   type RequestScope,
 } from "@/lib/asset-archive";
@@ -476,41 +477,49 @@ export default function AssetDetailScreen() {
   // ── Reinstate (archived assets) ───────────────────
 
   // Same action as the web asset page's "Reinstate", behind a confirm because
-  // it puts the asset back in service for everyone in the workspace.
+  // it puts the asset back in service for everyone in the workspace. The
+  // request's scope is the one shown as the confirm opens.
   const handleReinstate = () => {
     if (!asset) return;
+    const isStillHere = captureRequestScope(() => shownScopeRef.current);
     Alert.alert(
       "Reinstate asset?",
       `"${asset.title}" becomes active again: it can be booked, moved and put in custody.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Reinstate", onPress: () => void performReinstate() },
+        {
+          text: "Reinstate",
+          onPress: () => void performReinstate(isStillHere),
+        },
       ]
     );
   };
 
-  const performReinstate = async () => {
+  /**
+   * Sends the reinstate for the asset this render shows.
+   *
+   * @param isStillHere - the scope captured as the confirm opened
+   */
+  const performReinstate = async (isStillHere: () => boolean) => {
     if (!currentOrg || !asset) return;
+    const orgId = currentOrg.id;
     const assetId = asset.id;
-    const isStillHere = captureRequestScope(() => shownScopeRef.current);
     setIsReinstating(true);
     try {
-      const { error: err } = await api.reinstateAsset(currentOrg.id, assetId);
+      const result = await runReinstate({
+        send: () => api.reinstateAsset(orgId, assetId),
+        isStillHere,
+      });
       // A failed reload keeps the reinstated screen, not the error state.
-      await landArchiveChange(
-        err
-          ? { kind: "failed", message: err }
-          : { kind: "changed", archivedAt: null },
-        {
-          assetId,
-          isStillHere,
-          showRefusal: (message) => Alert.alert("Couldn't reinstate", message),
-          apply: (archivedAt) => applyArchivedAt(assetId, archivedAt),
-          refetch: reloadAsset,
-          onChanged: () =>
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-        }
-      );
+      await landArchiveChange(result, {
+        assetId,
+        isStillHere,
+        showRefusal: (message) => Alert.alert("Couldn't reinstate", message),
+        apply: (archivedAt) => applyArchivedAt(assetId, archivedAt),
+        refetch: reloadAsset,
+        onChanged: () =>
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+      });
     } finally {
       setIsReinstating(false);
     }
@@ -531,6 +540,7 @@ export default function AssetDetailScreen() {
   // Same action as the web asset page's Archive. The web archives on one
   // click; the phone confirms first, because an action sheet is easy to
   // mis-tap. A state the server would refuse is explained instead of sent.
+  // The request's scope is the one shown as the confirm opens.
   const handleArchive = () => {
     if (!asset || archiveInFlight.current) return;
     const blocked = archiveBlockedReason(asset, isQuantityTracked(asset));
@@ -538,12 +548,13 @@ export default function AssetDetailScreen() {
       Alert.alert("Can't archive this asset", blocked);
       return;
     }
+    const isStillHere = captureRequestScope(() => shownScopeRef.current);
     Alert.alert(
       "Archive asset?",
       `"${asset.title}" will be hidden from your lists and can't be booked or assigned custody. You can reinstate it any time.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Archive", onPress: () => void performArchive() },
+        { text: "Archive", onPress: () => void performArchive(isStillHere) },
       ]
     );
   };
@@ -562,16 +573,21 @@ export default function AssetDetailScreen() {
       );
     });
 
-  const performArchive = async () => {
+  /**
+   * Archives the asset this render shows, asking again on a model shortfall.
+   *
+   * @param isStillHere - the scope captured as the confirm opened
+   */
+  const performArchive = async (isStillHere: () => boolean) => {
     if (!currentOrg || !asset || archiveInFlight.current) return;
     archiveInFlight.current = true;
     setIsActionLoading(true);
+    const orgId = currentOrg.id;
     const assetId = asset.id;
-    const isStillHere = captureRequestScope(() => shownScopeRef.current);
     try {
       const outcome = await runArchive({
         send: (confirmModelShortfall) =>
-          api.archiveAsset(currentOrg.id, assetId, { confirmModelShortfall }),
+          api.archiveAsset(orgId, assetId, { confirmModelShortfall }),
         confirmShortfall: confirmArchiveAnyway,
         isStillHere,
       });
