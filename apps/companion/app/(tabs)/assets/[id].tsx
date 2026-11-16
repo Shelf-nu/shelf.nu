@@ -493,14 +493,21 @@ export default function AssetDetailScreen() {
       Alert.alert("Couldn't reinstate", err);
       return;
     }
-    await settleArchiveChange(
-      asset.id,
-      fetchAsset,
-      () => workspaceIdRef.current === startedIn
-    );
+    // A failed reload keeps the reinstated screen, not the error state.
+    await settleArchiveChange({
+      assetId: asset.id,
+      archivedAt: null,
+      apply: applyArchivedAt,
+      refetch: reloadAsset,
+      isStillCurrent: () => workspaceIdRef.current === startedIn,
+    });
     setIsReinstating(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
+
+  /** Puts the server's archive state on the asset shown on this screen. */
+  const applyArchivedAt = (archivedAt: string | null) =>
+    setAsset((current) => (current ? { ...current, archivedAt } : current));
 
   // ── Archive (active assets) ───────────────────────
 
@@ -563,8 +570,15 @@ export default function AssetDetailScreen() {
       }
       if (outcome.kind === "cancelled") return;
 
-      // The archive landed: a failed reload keeps the screen, not an error.
-      await settleArchiveChange(asset.id, reloadAsset, isStillCurrent);
+      // The archive landed: the answer marks it archived on screen, and a
+      // failed reload keeps that, not the error state.
+      await settleArchiveChange({
+        assetId: asset.id,
+        archivedAt: outcome.data.asset.archivedAt,
+        apply: applyArchivedAt,
+        refetch: reloadAsset,
+        isStillCurrent,
+      });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // The archived badge and notice say the rest; a draft still holding the
       // asset is news the screen does not show.

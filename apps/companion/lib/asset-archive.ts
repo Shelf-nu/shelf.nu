@@ -202,22 +202,37 @@ export async function runArchive<T>({
 /**
  * After an archive or a reinstate lands: tells every screen holding the asset
  * (the assets list skips refetches for a while, a second stack may show the
- * same detail) that it changed, then reloads this screen's copy.
+ * same detail) that it changed, shows the new state from the server's answer,
+ * then reloads this screen's copy.
  *
- * The reload is skipped when the member switched workspace while the request
- * ran: `refetch` reads the workspace the request started in, and its answer
- * would replace the new workspace's load.
+ * The answer's `archivedAt` is applied before the reload, so the screen shows
+ * the archived (or reinstated) state even when the reload fails. Both steps
+ * are skipped when the member switched workspace while the request ran: they
+ * belong to the workspace the request started in.
  *
- * @param assetId - the asset archived or reinstated
- * @param refetch - reloads the asset on the current screen
- * @param isStillCurrent - whether the workspace the request started in is
- *   still the active one
+ * @param options.assetId - the asset archived or reinstated
+ * @param options.archivedAt - from the server's answer: the archive time, or
+ *   `null` after a reinstate
+ * @param options.apply - puts `archivedAt` on the asset shown on this screen
+ * @param options.refetch - reloads the asset on the current screen
+ * @param options.isStillCurrent - whether the workspace the request started
+ *   in is still the active one
  */
-export async function settleArchiveChange(
-  assetId: string,
-  refetch: () => Promise<unknown>,
-  isStillCurrent: () => boolean
-): Promise<void> {
+export async function settleArchiveChange({
+  assetId,
+  archivedAt,
+  apply,
+  refetch,
+  isStillCurrent,
+}: {
+  assetId: string;
+  archivedAt: string | null;
+  apply: (archivedAt: string | null) => void;
+  refetch: () => Promise<unknown>;
+  isStillCurrent: () => boolean;
+}): Promise<void> {
   markAssetChanged(assetId);
-  if (isStillCurrent()) await refetch();
+  if (!isStillCurrent()) return;
+  apply(archivedAt);
+  await refetch();
 }

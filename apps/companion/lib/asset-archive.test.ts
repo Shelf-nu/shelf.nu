@@ -321,36 +321,90 @@ test("a refusal of the confirmed resend is shown as is", async () => {
 
 // ── After the change lands ───────────────────────────────
 
+/**
+ * Runs `settleArchiveChange` against a fake screen whose asset starts in the
+ * state before the change (`before`) and returns what the screen shows after.
+ */
+async function settle({
+  assetId,
+  archivedAt,
+  before,
+  current = true,
+  reloadFails = false,
+}: {
+  assetId: string;
+  archivedAt: string | null;
+  before: string | null;
+  current?: boolean;
+  reloadFails?: boolean;
+}) {
+  let shown = before;
+  let refetched = 0;
+  await settleArchiveChange({
+    assetId,
+    archivedAt,
+    apply: (value) => {
+      shown = value;
+    },
+    refetch: async () => {
+      refetched += 1;
+      // The screen's quiet reload keeps the asset it has when the GET fails.
+      if (!reloadFails) shown = archivedAt;
+    },
+    isStillCurrent: () => current,
+  });
+  return { shown, refetched };
+}
+
 test("an archive or reinstate tells the list and other stacks, then reloads", async () => {
   const before = assetChangeVersion("asset-settle");
-  let refetched = 0;
 
-  await settleArchiveChange(
-    "asset-settle",
-    async () => {
-      refetched += 1;
-    },
-    () => true
-  );
+  const { refetched } = await settle({
+    assetId: "asset-settle",
+    archivedAt: "2026-11-16T10:00:00.000Z",
+    before: null,
+  });
 
   // The assets list refetches on its next focus instead of showing the old row.
   assert.notEqual(assetChangeVersion("asset-settle"), before);
   assert.equal(refetched, 1);
 });
 
-test("after a workspace switch mid-request, the reload is skipped", async () => {
+test("a successful archive shows as archived even when the reload fails", async () => {
+  const { shown } = await settle({
+    assetId: "asset-archived",
+    archivedAt: "2026-11-16T10:00:00.000Z",
+    before: null,
+    reloadFails: true,
+  });
+
+  // From the archive answer, not from the failed GET.
+  assert.equal(shown, "2026-11-16T10:00:00.000Z");
+});
+
+test("a successful reinstate shows as active even when the reload fails", async () => {
+  const { shown } = await settle({
+    assetId: "asset-reinstated",
+    archivedAt: null,
+    before: "2026-11-01T10:00:00.000Z",
+    reloadFails: true,
+  });
+
+  assert.equal(shown, null);
+});
+
+test("after a workspace switch mid-request, nothing lands on the screen", async () => {
   const before = assetChangeVersion("asset-switched");
-  let refetched = 0;
 
-  await settleArchiveChange(
-    "asset-switched",
-    async () => {
-      refetched += 1;
-    },
-    () => false
-  );
+  const { shown, refetched } = await settle({
+    assetId: "asset-switched",
+    archivedAt: "2026-11-16T10:00:00.000Z",
+    before: null,
+    current: false,
+  });
 
-  // The old workspace's answer must not replace the new workspace's load.
+  // The old workspace's answer must not replace the new workspace's asset.
+  assert.equal(shown, null);
   assert.equal(refetched, 0);
   assert.notEqual(assetChangeVersion("asset-switched"), before);
 });
