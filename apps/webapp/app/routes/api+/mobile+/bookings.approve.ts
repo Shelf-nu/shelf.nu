@@ -39,6 +39,11 @@ const BodySchema = z.object({
    * older app builds do not send it.
    */
   updatedAt: z.coerce.date().optional(),
+  /**
+   * The request version the screen showed (the booking plus everything it
+   * holds), so a change to its items is caught too. Optional for older builds.
+   */
+  requestVersion: z.string().min(1).optional(),
 });
 
 /**
@@ -62,7 +67,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, updatedAt } = await parseMobileBody(
+    const { bookingId, updatedAt, requestVersion } = await parseMobileBody(
       BodySchema,
       request,
       "Booking"
@@ -93,6 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       hints,
       reviewedUpdatedAt: updatedAt,
+      reviewedVersion: requestVersion,
     });
 
     return data({

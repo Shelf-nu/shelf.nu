@@ -40,6 +40,7 @@ import { db } from "~/database/db.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
@@ -102,6 +103,15 @@ export async function fulfilAndCheckOut({
   // them are resolved here rather than trusted from the client, so every
   // surface — web drawer, mobile endpoint, companion — books a kit the same
   // org-scoped way. See `.claude/rules/kit-members-via-kit-slices.md`.
+  // Before anything is written: the scanned-only path below commits the
+  // assignment of scanned units before its check-out, so a pending request
+  // the caller may not approve must be refused here, not after.
+  await assertRequestMayBeCheckedOut({
+    bookingId: args.bookingId,
+    organizationId: args.organizationId,
+    actorUserId: args.userId,
+  });
+
   const scannedKits = await resolveScannedKits(args);
   await assertScannedUnitsAreNotKitMembers({
     bookingId: args.bookingId,

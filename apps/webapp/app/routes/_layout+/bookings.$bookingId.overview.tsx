@@ -61,6 +61,7 @@ import {
   loadNextReservations,
   NO_NEXT_RESERVATIONS,
 } from "~/modules/booking/next-reservations.server";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -1256,12 +1257,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : [];
 
+    // The version an approver approves: only a request still waiting for a
+    // decision needs it, and Approve sends it back so a request that changed
+    // since this page loaded is refused.
+    const requestVersion =
+      booking.status === BookingStatus.RESERVED && booking.approvedAt === null
+        ? await readBookingRequestVersion(db, {
+            bookingId: booking.id,
+            organizationId,
+          })
+        : null;
+
     return data(
       payload({
         userId,
         currentOrganization,
         header,
         booking,
+        requestVersion,
         modelShortfalls,
         modelName,
         /**
@@ -2259,7 +2272,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "approve-booking": {
-        const { reviewedUpdatedAt } = parseData(
+        const { reviewedUpdatedAt, reviewedVersion } = parseData(
           formData,
           ApproveBookingSchema,
           { additionalData: { userId, id, organizationId } }
@@ -2270,6 +2283,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
           hints: getClientHint(request),
           reviewedUpdatedAt,
+          reviewedVersion,
         });
 
         sendNotification({

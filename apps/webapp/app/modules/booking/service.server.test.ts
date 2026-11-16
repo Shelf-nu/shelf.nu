@@ -66,6 +66,7 @@ import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import { hashRequest } from "./request-version.server";
 import {
   createBooking,
   partialCheckinBooking,
@@ -93,6 +94,7 @@ import {
   computeBookingKitDrift,
   revertBookingToDraft,
   approveBooking,
+  assertRequestMayBeCheckedOut,
   getBookingsForCalendar,
   getPendingApprovalCount,
   extendBooking,
@@ -11661,6 +11663,63 @@ describe("approveBooking", () => {
       })
     ).rejects.toThrow(/changed since you opened it/);
     expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses when what the request holds changed since it was reviewed", async () => {
+    // why: a kit edit adds a slice without touching the booking row; the
+    // request version covers the slices, so the approval is still refused.
+    mockApprovalContext({});
+    const updatedAt = new Date("2026-11-16T10:00:00.000Z");
+    const reviewedVersion = hashRequest({
+      updatedAt,
+      bookingAssets: [
+        { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+      ],
+      modelRequests: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce({
+      updatedAt,
+      bookingAssets: [
+        { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+        { id: "ba-2", assetId: "asset-2", assetKitId: "ak-1", quantity: 1 },
+      ],
+      modelRequests: [],
+    });
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: mockClientHints,
+        reviewedVersion,
+      })
+    ).rejects.toThrow(/changed since you opened it/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("approves when the request still holds what was reviewed", async () => {
+    mockApprovalContext({});
+    const request = {
+      updatedAt: new Date("2026-11-16T10:00:00.000Z"),
+      bookingAssets: [
+        { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+      ],
+      modelRequests: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce(request);
+
+    await approveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      hints: mockClientHints,
+      reviewedVersion: hashRequest(request),
+    });
+
+    expect(db.booking.update).toHaveBeenCalled();
   });
 
   it("approves only the version reviewed", async () => {
@@ -26792,5 +26851,71 @@ describe("getBookingsForCalendar approval styling", () => {
     expect(events.some((event) => event.extendedProps.isPendingApproval)).toBe(
       false
     );
+  });
+});
+
+describe("assertRequestMayBeCheckedOut", () => {
+  const args = {
+    bookingId: "booking-1",
+    organizationId: "org-1",
+    actorUserId: "user-1",
+  };
+
+  afterEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest
+      .mocked(hasPermission)
+      .mockImplementation(({ action }: { action: string }) =>
+        Promise.resolve(action !== "approve")
+      );
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+  });
+
+  it("refuses a pending request for a caller who may not approve", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: true,
+    });
+
+    await expect(assertRequestMayBeCheckedOut(args)).rejects.toThrow(
+      /not been approved yet/
+    );
+  });
+
+  it("lets an approver through, and anything not pending", async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    await expect(assertRequestMayBeCheckedOut(args)).resolves.toBeUndefined();
+
+    vitest.mocked(hasPermission).mockResolvedValue(false);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: new Date(),
+    });
+    await expect(assertRequestMayBeCheckedOut(args)).resolves.toBeUndefined();
   });
 });

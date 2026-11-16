@@ -297,6 +297,7 @@ import {
   sendBookingPushToCustodian,
   sendBookingPushToReplacedCustodian,
 } from "./push.server";
+import { readBookingRequestVersion } from "./request-version.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
@@ -3365,6 +3366,56 @@ async function resolveApprovalBeforeTx({
     return undefined;
   }
   return approvalOnCheckout({ actorUserId, organizationId });
+}
+
+/**
+ * Refuses a check-out of a pending reservation request before anything is
+ * written, for an actor who may not approve it.
+ *
+ * Every check-out also decides this again inside its own transaction, under
+ * the booking row lock (`settleApprovalWithinTx`). This preflight is for the
+ * flows that commit other writes first, such as assigning scanned units
+ * before checking them out, so a refused request leaves nothing changed.
+ *
+ * @param args.bookingId - The booking about to be checked out
+ * @param args.organizationId - Its workspace
+ * @param args.actorUserId - The acting user
+ * @throws {ShelfError} 400 when the booking is a pending request and the
+ *   actor may not approve it
+ */
+export async function assertRequestMayBeCheckedOut({
+  bookingId,
+  organizationId,
+  actorUserId,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Organization["id"];
+  actorUserId: User["id"] | null | undefined;
+}): Promise<void> {
+  const booking = await db.booking.findFirst({
+    where: { id: bookingId, organizationId },
+    select: { status: true, approvedAt: true },
+  });
+  if (!booking) return;
+  const isPendingRequest =
+    booking.status === BookingStatus.RESERVED && booking.approvedAt === null;
+  if (!isPendingRequest) return;
+  // `null`: pending, and the actor may not approve. `undefined`: approval is
+  // off in the workspace (nothing is pending), or there is no actor, which
+  // the transaction's own gate refuses.
+  const approval = await resolveApprovalBeforeTx({
+    booking,
+    organizationId,
+    actorUserId,
+  });
+  if (approval === null) {
+    assertBookingIsApproved({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: true,
+      bookingId,
+    });
+  }
 }
 
 /**
@@ -13796,6 +13847,7 @@ export async function approveBooking({
   userId,
   hints,
   reviewedUpdatedAt,
+  reviewedVersion,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId: User["id"];
   hints: ClientHint;
@@ -13806,6 +13858,13 @@ export async function approveBooking({
    * Absent from callers that predate it (older phone builds).
    */
   reviewedUpdatedAt?: Date | null;
+  /**
+   * The request version the approver saw (`readBookingRequestVersion`): the
+   * booking with every slice and model reservation, so a change to what the
+   * request holds is caught whichever write made it. Checked under the
+   * booking row lock. Absent from callers that predate it.
+   */
+  reviewedVersion?: string | null;
 }) {
   try {
     const [settings, bookingFound] = await Promise.all([
@@ -13921,6 +13980,27 @@ export async function approveBooking({
      */
     const approvedBooking = await db
       .$transaction(async (tx) => {
+        if (reviewedVersion) {
+          // Under the row lock, so the request cannot change between this
+          // read and the approval below through any write that locks the
+          // booking first.
+          await lockBookingForStatusCheck(tx, bookingFound.id, organizationId);
+          const currentVersion = await readBookingRequestVersion(tx, {
+            bookingId: bookingFound.id,
+            organizationId,
+          });
+          if (currentVersion !== reviewedVersion) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              status: 400,
+              shouldBeCaptured: false,
+              message:
+                "This booking request changed since you opened it. Reload it and review it again before approving.",
+              additionalData: { bookingId: id },
+            });
+          }
+        }
         const updated = await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
           where: {

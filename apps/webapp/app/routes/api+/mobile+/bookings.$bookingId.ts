@@ -52,6 +52,7 @@ import {
   isExtendableStatus,
 } from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
@@ -834,6 +835,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Approve button and the `approve-booking` intent resolve, so the phone
     // never draws (or withholds) a decision the server would answer otherwise.
     const canApprove = isPendingApproval && canApprovePerm;
+    // The version an approval approves, sent back with Approve so a request
+    // that changed since this screen loaded is refused.
+    const requestVersion = canApprove
+      ? await readBookingRequestVersion(db, {
+          bookingId: booking.id,
+          organizationId,
+        })
+      : null;
     // Told BEFORE the reservation: whether this caller's Reserve would land as
     // a request waiting for a decision. The same rule `reserveBooking` applies
     // (workspace requires approval, and the caller's role is one whose
@@ -1115,6 +1124,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // renders a "Pending approval" badge and hides checkout.
         isPendingApproval,
         canApprove,
+        requestVersion,
         reservationNeedsApproval,
       },
       checkedInAssetIds,

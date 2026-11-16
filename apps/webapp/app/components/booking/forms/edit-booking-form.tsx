@@ -227,6 +227,7 @@ function EditBookingFormInner({
     booking: loaderBooking,
     lifecycleProgress,
     checkoutSourceQuestions,
+    requestVersion,
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
@@ -617,6 +618,7 @@ function EditBookingFormInner({
                   name: name ?? "",
                   status,
                   updatedAt: loaderBooking.updatedAt,
+                  requestVersion,
                 }}
               />
             </When>

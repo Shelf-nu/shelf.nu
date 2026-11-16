@@ -11,6 +11,7 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
@@ -55,6 +56,9 @@ vi.mock("~/modules/booking/utils.server", () => ({
 // their own suites in service.server.test.ts; this module only chooses and
 // sequences them, which is what these tests pin.
 vi.mock("~/modules/booking/service.server", () => ({
+  // why: the pending-approval preflight reads the booking and the actor's
+  // permission; its own suite covers that, here only whether it refused.
+  assertRequestMayBeCheckedOut: vi.fn().mockResolvedValue(undefined),
   fulfilModelRequestsAndCheckout: vi.fn(),
   addScannedAssetsToBooking: vi.fn(),
   partialCheckoutBooking: vi.fn(),
@@ -196,6 +200,27 @@ function primeRulePath() {
 }
 
 describe("fulfilAndCheckOut", () => {
+  it.each([true, false])(
+    "writes nothing for a pending request the caller may not approve (explicit check-out %s)",
+    async (requireExplicitCheckout) => {
+      vi.mocked(assertRequestMayBeCheckedOut).mockRejectedValueOnce(
+        new Error("This booking request has not been approved yet.")
+      );
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        status: BookingStatus.RESERVED,
+      } as never);
+
+      await expect(
+        fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout })
+      ).rejects.toThrow(/not been approved yet/);
+
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+      expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+      expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+      expect(partialCheckoutBooking).not.toHaveBeenCalled();
+    }
+  );
+
   it("runs the full fulfil-and-check-out when the rule does not apply", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       status: BookingStatus.RESERVED,

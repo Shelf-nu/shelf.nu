@@ -1193,6 +1193,12 @@ export type BookingDetail = {
    */
   canApprove?: boolean;
   /**
+   * The request version this screen shows (the booking plus everything it
+   * holds), sent back with Approve so a request that changed since is
+   * refused. Present only with `canApprove`; absent on an older server.
+   */
+  requestVersion?: string | null;
+  /**
    * True on a DRAFT whose reservation by this caller would wait for approval
    * (workspace requires it, and the caller's role is one whose reservations
    * do). The screen then words Reserve as a request. Absent on an older

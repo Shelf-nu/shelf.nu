@@ -900,7 +900,8 @@ function BookingDetailScreen({ id }: { id: string }) {
             const { error: err } = await api.approveBooking(
               currentOrg.id,
               booking.id,
-              booking.updatedAt
+              booking.updatedAt,
+              booking.requestVersion
             );
             setIsActioning(false);
             if (err) {
