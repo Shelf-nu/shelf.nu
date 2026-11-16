@@ -801,7 +801,7 @@ function BookingDetailScreen({ id }: { id: string }) {
           text: reservationIsRequest ? "Request" : "Reserve",
           onPress: async () => {
             setIsActioning(true);
-            const { error: err } = await api.reserveBooking(
+            const { data: reserved, error: err } = await api.reserveBooking(
               currentOrg.id,
               booking.id,
               getTimeZone()
@@ -812,11 +812,16 @@ function BookingDetailScreen({ id }: { id: string }) {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
+            // Mutation changed this booking: force the list to refetch.
             markBookingsListDirty();
+            // What the reservation became, from the server's write; the
+            // prediction made when the booking loaded is only the fallback
+            // for an older server.
+            const becameRequest =
+              reserved?.isPendingApproval ?? reservationIsRequest;
             Alert.alert(
-              reservationIsRequest ? "Request sent" : "Reserved",
-              reservationIsRequest
+              becameRequest ? "Request sent" : "Reserved",
+              becameRequest
                 ? `"${booking.name}" is waiting for approval. You will receive an email once it has been reviewed.`
                 : `"${booking.name}" is now reserved.`,
               [{ text: "OK", onPress: () => fetchBooking() }]
@@ -894,11 +899,15 @@ function BookingDetailScreen({ id }: { id: string }) {
             setIsActioning(true);
             const { error: err } = await api.approveBooking(
               currentOrg.id,
-              booking.id
+              booking.id,
+              booking.updatedAt
             );
             setIsActioning(false);
             if (err) {
               Alert.alert("Couldn't approve", err);
+              // Show the booking as the server has it: it may already be
+              // approved by someone else.
+              fetchBooking();
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

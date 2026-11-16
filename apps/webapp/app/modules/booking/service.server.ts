@@ -13774,9 +13774,17 @@ export async function approveBooking({
   organizationId,
   userId,
   hints,
+  reviewedUpdatedAt,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId: User["id"];
   hints: ClientHint;
+  /**
+   * The booking's `updatedAt` as the approver saw it. A request sent back,
+   * edited and submitted again is RESERVED and unapproved once more, so the
+   * status alone cannot tell it from the one the approver reviewed; this can.
+   * Absent from callers that predate it (older phone builds).
+   */
+  reviewedUpdatedAt?: Date | null;
 }) {
   try {
     const [settings, bookingFound] = await Promise.all([
@@ -13787,7 +13795,13 @@ export async function approveBooking({
       db.booking
         .findUniqueOrThrow({
           where: { id, organizationId },
-          select: { id: true, status: true, approvedAt: true, to: true },
+          select: {
+            id: true,
+            status: true,
+            approvedAt: true,
+            to: true,
+            updatedAt: true,
+          },
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -13829,6 +13843,21 @@ export async function approveBooking({
         status: 400,
         shouldBeCaptured: false,
         message: "This booking request has already been approved.",
+        additionalData: { bookingId: id },
+      });
+    }
+
+    if (
+      reviewedUpdatedAt &&
+      bookingFound.updatedAt.getTime() !== reviewedUpdatedAt.getTime()
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message:
+          "This booking request changed since you opened it. Reload it and review it again before approving.",
         additionalData: { bookingId: id },
       });
     }
@@ -13877,6 +13906,9 @@ export async function approveBooking({
             id: bookingFound.id,
             status: BookingStatus.RESERVED,
             approvedAt: null,
+            // The version the approver reviewed, when known: a resubmission
+            // that lands between the read above and this write is refused.
+            ...(reviewedUpdatedAt ? { updatedAt: reviewedUpdatedAt } : {}),
           },
           data: {
             approvedAt: new Date(),
@@ -13925,7 +13957,7 @@ export async function approveBooking({
         cause: null,
         label,
         message:
-          "This booking was approved by someone else just now. Please refresh to see its current state.",
+          "This booking changed or was approved by someone else just now. Please refresh to see its current state.",
         additionalData: { bookingId: id, organizationId },
         shouldBeCaptured: false,
         status: 400,

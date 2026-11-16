@@ -129,7 +129,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       request,
       organizationId,
       searchParams,
-      pathname: "/bookings",
+      rewriteBookingsFilterCookie: true,
     });
     if (stalePendingRedirect) return stalePendingRedirect;
 

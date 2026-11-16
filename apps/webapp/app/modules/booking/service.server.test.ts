@@ -11572,6 +11572,58 @@ describe("approveBooking", () => {
     });
   }
 
+  it("refuses a request that changed since the approver opened it", async () => {
+    // why: a request sent back, edited and resubmitted is RESERVED and
+    // unapproved again; only its version tells it from the one reviewed.
+    mockApprovalContext({});
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+      to: new Date("2099-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-11-16T10:05:00.000Z"),
+    });
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: mockClientHints,
+        reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
+      })
+    ).rejects.toThrow(/changed since you opened it/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("approves only the version reviewed", async () => {
+    const reviewed = new Date("2026-11-16T10:00:00.000Z");
+    mockApprovalContext({});
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+      to: new Date("2099-01-01T00:00:00.000Z"),
+      updatedAt: reviewed,
+    });
+
+    await approveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      hints: mockClientHints,
+      reviewedUpdatedAt: reviewed,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ updatedAt: reviewed }),
+      })
+    );
+  });
+
   it("refuses a request whose end date has passed", async () => {
     mockApprovalContext({ to: new Date("2020-01-01T00:00:00.000Z") });
 

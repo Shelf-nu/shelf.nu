@@ -112,6 +112,23 @@ describe("POST /api/mobile/bookings/approve", () => {
     expect(body.booking.approvedAt).toBe("2026-11-02T12:00:00.000Z");
   });
 
+  it("forwards the version on screen so a changed request is refused", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.MANAGER] }) as never
+    );
+
+    await post({
+      bookingId: "booking-1",
+      updatedAt: "2026-11-16T10:00:00.000Z",
+    });
+
+    expect(approveBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
+      })
+    );
+  });
+
   it("answers 404 for a booking outside the caller's workspace", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: [OrganizationRoles.MANAGER] }) as never

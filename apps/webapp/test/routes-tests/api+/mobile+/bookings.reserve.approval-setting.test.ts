@@ -180,4 +180,25 @@ describe("POST /api/mobile/bookings/reserve forwards the caller's approval setti
       );
     }
   );
+
+  it("reports what the reservation became, from the write", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.BASE] }) as never
+    );
+    vi.mocked(reserveBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Camera kit",
+      status: "RESERVED",
+      approvedAt: null,
+    } as never);
+    expect((await reserve()).body.isPendingApproval).toBe(true);
+
+    vi.mocked(reserveBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Camera kit",
+      status: "RESERVED",
+      approvedAt: new Date("2026-11-16T10:00:00.000Z"),
+    } as never);
+    expect((await reserve()).body.isPendingApproval).toBe(false);
+  });
 });

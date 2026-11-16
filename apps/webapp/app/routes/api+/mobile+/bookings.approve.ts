@@ -33,6 +33,12 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 const BodySchema = z.object({
   bookingId: z.string().min(1),
+  /**
+   * The booking's `updatedAt` as the screen showed it, so a request that was
+   * sent back and resubmitted meanwhile is not approved unseen. Optional:
+   * older app builds do not send it.
+   */
+  updatedAt: z.coerce.date().optional(),
 });
 
 /**
@@ -56,7 +62,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
+    const { bookingId, updatedAt } = await parseMobileBody(
+      BodySchema,
+      request,
+      "Booking"
+    );
 
     const { access } = await getMobileUserContext(user.id, organizationId);
     const booking = await db.booking.findFirst({
@@ -82,6 +92,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       userId: user.id,
       hints,
+      reviewedUpdatedAt: updatedAt,
     });
 
     return data({

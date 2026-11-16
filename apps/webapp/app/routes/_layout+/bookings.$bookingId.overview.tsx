@@ -14,6 +14,7 @@ import type {
   MetaFunction,
 } from "react-router";
 import { z } from "zod";
+import { ApproveBookingSchema } from "~/components/booking/approval/approve-booking-dialog";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -120,10 +121,7 @@ import {
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
-import {
-  calculateTotalValueOfAssets,
-  isBookingApprovalEnabled,
-} from "~/utils/bookings";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -1885,12 +1883,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           seesAllBookings: access.bookings.seeAll,
         });
 
-        // A reservation request reads as a request, not a done deal: the
-        // service left `approvedAt` empty because the workspace requires
-        // approval for this member's role.
-        const isPendingRequest =
-          isBookingApprovalEnabled(bookingSettings) &&
-          booking.approvedAt === null;
+        // A reservation request reads as a request, not a done deal.
+        // `reserveBooking` writes `approvedAt` on every reservation (now, or
+        // empty for a request), so its result alone decides; a settings read
+        // from earlier in this action could be out of date.
+        const isPendingRequest = booking.approvedAt === null;
         sendNotification({
           title: isPendingRequest ? "Request sent" : "Booking reserved",
           message: isPendingRequest
@@ -2262,11 +2259,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "approve-booking": {
+        const { reviewedUpdatedAt } = parseData(
+          formData,
+          ApproveBookingSchema,
+          { additionalData: { userId, id, organizationId } }
+        );
         await approveBooking({
           id,
           organizationId,
           userId,
           hints: getClientHint(request),
+          reviewedUpdatedAt,
         });
 
         sendNotification({

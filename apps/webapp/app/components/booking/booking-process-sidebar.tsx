@@ -63,7 +63,7 @@ const ITEMS: Array<ProcessItem> = [
  * the softer review-at-will flow.
  */
 const ADMIN_REVIEW_WITH_APPROVAL =
-  "Your booking is a request until an administrator or manager approves it. You will receive an email when it is approved, or when it is sent back to draft for changes. It cannot be checked out before approval.";
+  "Your booking is a request until an administrator or manager approves it. You will receive an email when it is approved, or when it is sent back to draft for changes. It cannot be checked out before approval, unless an administrator or manager checks it out to you, which approves it in the same step.";
 
 export default function BookingProcessSidebar({
   className,

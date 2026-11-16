@@ -161,7 +161,6 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       request,
       organizationId,
       searchParams,
-      pathname: "/calendar",
     });
     if (stalePendingRedirect) return stalePendingRedirect;
 

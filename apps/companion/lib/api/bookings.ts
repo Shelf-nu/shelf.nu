@@ -365,12 +365,17 @@ export const bookingsApi = {
    * Approve a pending reservation request. The booking stays RESERVED and
    * becomes checkout-able; who may approve is enforced server-side.
    */
-  approveBooking: (orgId: string, bookingId: string) =>
+  approveBooking: (orgId: string, bookingId: string, updatedAt: string) =>
     apiFetch<BookingMutationResponse>(
       `/api/mobile/bookings/approve?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId }),
+        // `updatedAt` is the version on screen: the server refuses to approve
+        // a request that changed since it loaded.
+        body: JSON.stringify({ bookingId, updatedAt }),
+        // A retried approval after a lost response would be refused as
+        // already approved and read as a failure.
+        retry: false,
       }
     ),
 

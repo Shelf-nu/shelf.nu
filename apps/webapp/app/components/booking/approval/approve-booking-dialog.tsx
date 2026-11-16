@@ -9,12 +9,24 @@
  */
 import { useReducer, type ReactNode } from "react";
 import { BookingStatus, type Booking } from "@prisma/client";
+import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
 import { Dialog, DialogPortal } from "../../layout/dialog";
 import { Button } from "../../shared/button";
 
+/**
+ * The approve form's fields: the version of the request the approver saw,
+ * which the server compares before approving.
+ */
+export const ApproveBookingSchema = z.object({
+  reviewedUpdatedAt: z.coerce.date().optional(),
+});
+
 type ApproveBookingDialogProps = {
-  booking: Pick<Booking, "name" | "status">;
+  /** `updatedAt` is the version on screen, sent so a changed request is refused. */
+  booking: Pick<Booking, "name" | "status"> & {
+    updatedAt: Date | string;
+  };
   /** Render prop for the trigger so callers control its look (header button
    *  vs dropdown row). */
   trigger?: (openDialog: () => void) => ReactNode;
@@ -126,6 +138,11 @@ export default function ApproveBookingDialog({
               onSubmit={() => dispatch({ type: "submit" })}
             >
               <input type="hidden" name="intent" value="approve-booking" />
+              <input
+                type="hidden"
+                name="reviewedUpdatedAt"
+                value={new Date(booking.updatedAt).toISOString()}
+              />
               <Button
                 variant="secondary"
                 className="flex-1"

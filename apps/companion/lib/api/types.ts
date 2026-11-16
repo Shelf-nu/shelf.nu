@@ -1356,6 +1356,12 @@ export type BookingMutationResponse = {
     status: BookingStatus;
   };
   /**
+   * Reserve only: whether the reservation became a request waiting for
+   * approval, decided by the write itself. Absent on other mutations and on
+   * servers that predate it.
+   */
+  isPendingApproval?: boolean;
+  /**
    * Duplicate only: how many archived assets the server left out of the copy
    * (archived assets cannot be booked). Absent on other mutations and on
    * servers that predate archiving.

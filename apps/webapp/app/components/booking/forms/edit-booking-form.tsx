@@ -615,7 +615,13 @@ function EditBookingFormInner({
                 !isReservationExpired(status, loaderBooking.to)
               }
             >
-              <ApproveBookingDialog booking={{ name: name ?? "", status }} />
+              <ApproveBookingDialog
+                booking={{
+                  name: name ?? "",
+                  status,
+                  updatedAt: loaderBooking.updatedAt,
+                }}
+              />
             </When>
 
             <When
