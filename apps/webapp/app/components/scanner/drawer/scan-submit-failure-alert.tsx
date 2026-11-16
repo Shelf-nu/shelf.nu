@@ -70,6 +70,10 @@ const RESTORED_UNCONFIRMED_HEADLINE =
 const RESTORED_UNCONFIRMED_ADVICE =
   "The save may have gone through, so check before you confirm again.";
 
+/** Added to a refusal when an earlier save of the same list got no answer. */
+const EARLIER_UNCONFIRMED_ADVICE =
+  "An earlier save of this list got no answer and may have gone through, so check before you confirm again.";
+
 /** HTTP 413: the request was larger than the gateway accepts. */
 const TOO_LARGE_STATUS = 413;
 
@@ -104,6 +108,12 @@ export function ScanSubmitFailureAlert({
     return null;
   }
 
+  // A refused retry says nothing was saved by that attempt only. An earlier
+  // one that got no answer may still have gone through, so its warning and
+  // check link stay beside the refusal.
+  const earlierSaveUnconfirmed =
+    unconfirmedSave && failure?.kind === "rejected";
+
   if (!failure) {
     // The failure went with the page (a reload, an error page), but the list
     // came back from a draft that remembers it may already be saved.
@@ -131,10 +141,18 @@ export function ScanSubmitFailureAlert({
         {failure.status === TOO_LARGE_STATUS
           ? TOO_LARGE_ADVICE
           : ADVICE[failure.kind]}
-        {savedCheck && failure.kind !== "rejected" ? (
+        {savedCheck &&
+        !earlierSaveUnconfirmed &&
+        failure.kind !== "rejected" ? (
           <SavedCheckLink savedCheck={savedCheck} />
         ) : null}
       </p>
+      {earlierSaveUnconfirmed ? (
+        <p>
+          {EARLIER_UNCONFIRMED_ADVICE}
+          {savedCheck ? <SavedCheckLink savedCheck={savedCheck} /> : null}
+        </p>
+      ) : null}
     </div>
   );
 }

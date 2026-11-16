@@ -186,14 +186,15 @@ export function useScanDraft({
   );
   // A save that got no answer may have gone through. A gateway's refusal
   // ("rejected") means nothing was saved, so it raises no mark.
+  // Keyed on the failure itself, not on a yes/no: each save answers with a
+  // new object, so a second unanswered save after the list was emptied and
+  // refilled marks the new list too.
   const submitFailure = getScanSubmitFailure(useActionData());
-  const unanswered =
-    submitFailure !== null && submitFailure.kind !== "rejected";
   useEffect(() => {
-    if (unanswered) {
+    if (submitFailure && submitFailure.kind !== "rejected") {
       setUnconfirmedSave(true);
     }
-  }, [unanswered, setUnconfirmedSave]);
+  }, [submitFailure, setUnconfirmedSave]);
 
   // The mark belongs to this scanner's list: the next scanner starts clean.
   useEffect(() => () => setUnconfirmedSave(false), [setUnconfirmedSave]);

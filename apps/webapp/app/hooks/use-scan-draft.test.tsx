@@ -272,6 +272,29 @@ describe.each(SCANNERS)(
       expect(reloaded.get(unconfirmedScanSaveAtom)).toBe(true);
     });
 
+    it("marks a second list whose save also got no answer", () => {
+      const store = createStore();
+      const { rerender } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+      mockActionData.mockReturnValue({
+        scanSubmitFailure: { kind: "timeout", status: 524 },
+      });
+      rerender();
+
+      // The operator clears the list and scans a new one.
+      act(() => store.set(scannedItemsAtom, {}));
+      act(() => store.set(scannedItemsAtom, { "qr-2": scanned() }));
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(false);
+
+      // Its save times out too: a new answer of the same kind.
+      mockActionData.mockReturnValue({
+        scanSubmitFailure: { kind: "timeout", status: 524 },
+      });
+      rerender();
+
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
+    });
+
     it("does not mark a draft for a save the gateway turned away", () => {
       const store = createStore();
       const { rerender } = render(store, { scope, targetId });

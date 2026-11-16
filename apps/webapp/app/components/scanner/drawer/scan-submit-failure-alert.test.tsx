@@ -181,6 +181,23 @@ describe("ScanSubmitFailureAlert", () => {
       expect(screen.queryByRole("alert")).toBeNull();
     });
 
+    it("keeps the earlier warning and its link beside a refused retry", () => {
+      mockActionData.mockReturnValue({
+        scanSubmitFailure: { kind: "rejected", status: 429 },
+      });
+
+      renderMarked(true);
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("The save was not accepted.");
+      expect(alert).toHaveTextContent(
+        "An earlier save of this list got no answer"
+      );
+      expect(
+        screen.getByRole("link", { name: "Open the booking" })
+      ).toBeInTheDocument();
+    });
+
     it("steps aside while the list is being sent again", () => {
       mockActionData.mockReturnValue(undefined);
       mockNavigation.mockReturnValue({ state: "submitting" });
