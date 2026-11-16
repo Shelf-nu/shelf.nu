@@ -138,6 +138,16 @@ export async function setStandaloneBookedQuantitiesWithinTx(
     changes,
   }: BookingScope & { changes: BookedQuantityChange[] }
 ): Promise<AppliedBookedQuantityChange[]> {
+  // A changed amount changes the booking: move its version, so an approver
+  // looking at the request from before cannot approve it unseen. Done before
+  // the asset locks, so the booking row is locked first, the same order a
+  // check-out takes them in.
+  if (changes.length > 0) {
+    await tx.booking.updateMany({
+      where: { id: bookingId, organizationId },
+      data: { updatedAt: new Date() },
+    });
+  }
   const ordered = [...changes].sort((a, b) =>
     a.assetId.localeCompare(b.assetId)
   );
@@ -170,14 +180,6 @@ export async function setStandaloneBookedQuantitiesWithinTx(
       assetTitle: change.assetTitle,
       previousQuantity: slice.quantity,
       quantity: change.quantity,
-    });
-  }
-  // A changed amount changes the booking: move its version, so an approver
-  // looking at the request from before cannot approve it unseen.
-  if (applied.some((a) => a.previousQuantity !== a.quantity)) {
-    await tx.booking.updateMany({
-      where: { id: bookingId, organizationId },
-      data: { updatedAt: new Date() },
     });
   }
   return applied;
