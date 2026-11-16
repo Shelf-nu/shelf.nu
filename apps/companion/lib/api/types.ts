@@ -49,6 +49,16 @@ export type Organization = {
    * older servers; read as `false`, which only ever under-offers.
    */
   managersCanEditAssets?: boolean;
+  /**
+   * From `/api/mobile/me`: `true` when the mobile API refuses requests in this
+   * workspace (a lapsed Team plan, or switched off by a Shelf admin). Absent on
+   * older servers, which refuse nothing; read it through `isWorkspaceInactive`.
+   */
+  inactive?: boolean;
+  /** Why the workspace is inactive, or `null` when it is active. */
+  inactiveReason?: "lapsed" | "disabled" | null;
+  /** The server's text for an inactive workspace, or `null` when it is active. */
+  inactiveMessage?: string | null;
 };
 
 export type MeResponse = {
