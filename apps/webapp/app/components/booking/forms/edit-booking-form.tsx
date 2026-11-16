@@ -17,7 +17,10 @@ import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRerenderAt } from "~/hooks/use-rerender-at";
-import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
+import {
+  useReservationIsRequest,
+  useReservationWordedAsRequest,
+} from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { useWorkingHours } from "~/hooks/use-working-hours";
@@ -32,7 +35,6 @@ import {
   bookingCustodianIsSelf,
   isBookingPendingApproval,
   isBookingApprovalEnabled,
-  roleReservesAsRequest,
 } from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
@@ -313,6 +315,7 @@ function EditBookingFormInner({
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const reservationIsRequest = useReservationIsRequest();
+  const reserveWordedAsRequest = useReservationWordedAsRequest();
 
   /**
    * Why the start date blocks Reserve, read from the date the form would
@@ -582,13 +585,7 @@ function EditBookingFormInner({
                 {/* When the workspace requires approval, a Self-service
                     user's Reserve is a REQUEST too, so the button must say so,
                     or the pending state that follows reads as a failure. */}
-                {reservationIsRequest ||
-                roleReservesAsRequest({
-                  approvalSetting: roleAccess.policy.bookings.approvalSetting,
-                  settings: bookingSettings,
-                })
-                  ? "Request reservation"
-                  : "Reserve"}
+                {reserveWordedAsRequest ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
 

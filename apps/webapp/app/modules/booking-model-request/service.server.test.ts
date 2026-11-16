@@ -81,6 +81,9 @@ vitest.mock("~/database/db.server", () => ({
     },
     booking: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: a transaction changing a booking's model reservations moves the
+      // booking's version (`updatedAt`) before it takes any lock.
+      updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
       // why: the pool reads the OTHER bookings that touch the window, each
       // with the units it names and the reservations it is owed, so the
       // pool can be measured at the instant demand peaks.
@@ -2733,7 +2736,7 @@ describe("removeBookingModelRequest", () => {
   });
 
   it("deletes the row on a DRAFT booking", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
@@ -2761,6 +2764,12 @@ describe("removeBookingModelRequest", () => {
         assetModelId: MODEL_ID,
         fulfilledQuantity: 0,
       },
+    });
+    // The booking's version moves, so a pending request cannot be approved
+    // from a page that still showed this reservation.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, organizationId: ORG_ID },
+      data: { updatedAt: expect.any(Date) },
     });
   });
 
