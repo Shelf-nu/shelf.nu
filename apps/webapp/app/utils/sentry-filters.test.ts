@@ -171,6 +171,34 @@ describe("handleClientBeforeSend: crypto wallet scripts injected into the page",
     ).toBeNull();
   });
 
+  it("keeps a wallet error that our own code caught and rethrew", () => {
+    const wallet = walletEvent(
+      CHROMIUM_MESSAGE,
+      "chrome-extension://abcdefgh/inpage.js"
+    );
+    const event = {
+      exception: {
+        values: [
+          ...(wallet.exception?.values ?? []),
+          {
+            type: "Error",
+            value: "Could not connect the wallet",
+            stacktrace: {
+              frames: [
+                {
+                  filename:
+                    "https://app.shelf.nu/file-assets/abc123/root-X1.js",
+                  in_app: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    } as ErrorEvent;
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+
   it("keeps the same wording when it comes from the client bundle", () => {
     const event = walletEvent(
       CHROMIUM_MESSAGE,

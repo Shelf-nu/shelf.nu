@@ -194,19 +194,19 @@ function hasClientBundleFrame(value: SentryExceptionValue): boolean {
 
 /**
  * Whether an event is a crypto wallet's injected script failing on the page
- * rather than an error in Shelf. Requires that no frame comes from the client
- * bundle as well, so an error thrown by our own code is never dropped by its
- * wording alone.
+ * rather than an error in Shelf. Requires that no exception in the event has a
+ * frame from the client bundle as well, so an error thrown or rethrown by our
+ * own code is never dropped by its wording alone. An event holds several
+ * exceptions when one is the cause of another.
  *
  * @param event - The Sentry error event
  * @returns `true` when the error comes from an injected wallet script
  */
 function isWalletInjectionError(event: ErrorEvent): boolean {
+  const values = event.exception?.values ?? [];
   return (
-    event.exception?.values?.some(
-      (v) =>
-        WALLET_INJECTION_PATTERN.test(v.value ?? "") && !hasClientBundleFrame(v)
-    ) ?? false
+    values.some((v) => WALLET_INJECTION_PATTERN.test(v.value ?? "")) &&
+    !values.some(hasClientBundleFrame)
   );
 }
 
