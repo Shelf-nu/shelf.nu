@@ -42,6 +42,10 @@ import {
 } from "@/lib/use-safe-edges";
 import { createStyles } from "@/lib/create-styles";
 import { planScan, runScanPlan, scanMissFeedback } from "@/lib/qr-utils";
+import {
+  isWorkspaceInactiveRefusal,
+  workspaceInactiveScanResult,
+} from "@/lib/workspace-access";
 import { getActiveServer, getKnownServerUrls } from "@/lib/server";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
@@ -1064,14 +1068,19 @@ function AuditScannerContent() {
 
         if (outcome.kind === "qr") {
           // ── Shelf QR / SAM path ──
-          const { data: qrData, error } = outcome.answer;
+          const { data: qrData, error, errorDetails } = outcome.answer;
           if (error || !qrData?.qr?.asset) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            // A code from an inactive workspace says so, as on the Scan tab.
+            const inactive = isWorkspaceInactiveRefusal(errorDetails)
+              ? workspaceInactiveScanResult(error)
+              : null;
             showToast(
               "error",
-              error ? "Lookup Failed" : "No Asset Linked",
-              error || "This QR code is not linked to any asset."
+              inactive?.title ?? (error ? "Lookup Failed" : "No Asset Linked"),
+              inactive?.message ??
+                (error || "This QR code is not linked to any asset.")
             );
             finalizeScan();
             return;
@@ -1082,15 +1091,25 @@ function AuditScannerContent() {
           asset = qrData.qr.asset;
         } else {
           // ── Barcode path ──
-          const { data: barcodeData, error: barcodeError } = outcome.answer;
+          const {
+            data: barcodeData,
+            error: barcodeError,
+            errorDetails: barcodeErrorDetails,
+          } = outcome.answer;
 
           if (barcodeError || !barcodeData?.barcode?.asset) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            // A code from an inactive workspace says so, as on the Scan tab.
+            const inactive = isWorkspaceInactiveRefusal(barcodeErrorDetails)
+              ? workspaceInactiveScanResult(barcodeError)
+              : null;
             showToast(
               "error",
-              barcodeError ? "Lookup Failed" : "No Asset Linked",
-              barcodeError || "This barcode is not linked to any asset."
+              inactive?.title ??
+                (barcodeError ? "Lookup Failed" : "No Asset Linked"),
+              inactive?.message ??
+                (barcodeError || "This barcode is not linked to any asset.")
             );
             finalizeScan();
             return;
