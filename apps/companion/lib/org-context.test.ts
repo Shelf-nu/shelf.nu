@@ -30,6 +30,22 @@ let meAnswer: {
 /** How many `/me` reads the provider made. */
 let meReads = 0;
 
+/** The answer a `/me` read gives. */
+type MeResult = { data: unknown; error: string | null };
+/**
+ * When set, each `/me` read waits here until the test answers it, so a test
+ * controls the order in which overlapping reads finish.
+ */
+let heldReads: ((result: MeResult) => void)[] | null = null;
+
+/** The answer a successful `/me` read gives, from `meAnswer`. */
+function meSuccess(): MeResult {
+  return {
+    data: { user: { id: "user-1", email: "test@example.com" }, ...meAnswer },
+    error: null,
+  };
+}
+
 /** A workspace as `/api/mobile/me` sends it. */
 function org(id: string, inactive: boolean): Organization {
   return {
@@ -52,13 +68,9 @@ mock.module(pathToFileURL(join(__dirname, "api.ts")).href, {
     api: {
       me: async () => {
         meReads += 1;
-        return {
-          data: {
-            user: { id: "user-1", email: "test@example.com" },
-            ...meAnswer,
-          },
-          error: null,
-        };
+        const held = heldReads;
+        if (held) return new Promise<MeResult>((resolve) => held.push(resolve));
+        return meSuccess();
       },
     },
     onForbidden: forbidden.onForbidden,
@@ -120,6 +132,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = null;
   meReads = 0;
+  heldReads = null;
 });
 
 describe("OrgProvider", () => {
@@ -151,5 +164,28 @@ describe("OrgProvider", () => {
     // The first refusal re-reads at once; the second falls inside the 15 s
     // gap and waits as the one trailing re-read, which unmounting cancels.
     assert.equal(meReads, 2);
+  });
+
+  it("shows the failure when a quiet re-read overtakes the first load and fails", async () => {
+    meAnswer = {
+      organizations: [org("active-team", false)],
+      lastSelectedOrganizationId: null,
+    };
+    heldReads = [];
+    const reads = heldReads;
+    mounted = await renderProvider();
+    assert.equal(mounted.org().isLoading, true, "the first load is waiting");
+
+    // A refusal while the first load waits starts the quiet re-read.
+    await act(async () => forbidden.notifyForbidden());
+    assert.equal(reads.length, 2);
+
+    // The quiet re-read fails, then the overtaken first load answers.
+    await act(async () => reads[1]({ data: null, error: "Network error" }));
+    await act(async () => reads[0](meSuccess()));
+
+    // The person sees why nothing loaded, not "No workspace assigned".
+    assert.equal(mounted.org().error, "Network error");
+    assert.equal(mounted.org().isLoading, false);
   });
 });
