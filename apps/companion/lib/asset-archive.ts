@@ -37,8 +37,8 @@ import { markAssetChanged } from "./asset-refresh";
 export const MODEL_SHORTFALL_REASON = "model_shortfall";
 
 /**
- * Shown when the server has no archive route: a 404 without the mobile API's
- * error envelope. True for Shelf Cloud and self-hosted servers alike.
+ * Shown when the server has no archive route. True for Shelf Cloud and
+ * self-hosted servers alike.
  */
 export const ARCHIVE_UNAVAILABLE_MESSAGE =
   "Archiving isn't available on this server yet.";
@@ -141,14 +141,25 @@ export type ArchiveOutcome<T> =
   | { kind: "failed"; message: string };
 
 /**
+ * HTTP statuses a server without the archive route answers with. The web's
+ * catch-all route (`routes/$.tsx`) has a loader and no action, so a POST to a
+ * path it does not know gets 405; a plain 404 covers a server without it.
+ */
+const MISSING_ROUTE_STATUSES = [404, 405];
+
+/**
  * The message for a refused archive: the server's own words, except for a
- * server without the route, whose 404 carries no mobile error envelope (a 404
- * WITH the envelope is the service's "asset not found", shown as is).
+ * server without the route, whose 404 or 405 carries no mobile error envelope
+ * (a 404 WITH the envelope is the service's "asset not found", shown as is).
  *
  * @param answer - the failed request's answer
  */
 export function archiveFailureMessage(answer: ArchiveAnswer<unknown>): string {
-  if (answer.status === 404 && !answer.errorDetails) {
+  if (
+    answer.status !== undefined &&
+    MISSING_ROUTE_STATUSES.includes(answer.status) &&
+    !answer.errorDetails
+  ) {
     return ARCHIVE_UNAVAILABLE_MESSAGE;
   }
   return answer.error ?? "Couldn't archive the asset.";

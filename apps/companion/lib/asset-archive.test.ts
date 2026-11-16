@@ -165,6 +165,19 @@ test("a server without the route says archiving isn't available", () => {
   );
 });
 
+test("a POST the server's catch-all route answers (405, HTML) says the same", () => {
+  // What a server without the route answers: its catch-all page has no action.
+  assert.equal(
+    archiveFailureMessage({
+      data: null,
+      error: "Server error (405)",
+      errorDetails: null,
+      status: 405,
+    }),
+    ARCHIVE_UNAVAILABLE_MESSAGE
+  );
+});
+
 test("a 404 with the envelope is the service's 'not found', shown as is", () => {
   const message =
     "This asset does not exist or does not belong to your workspace.";
