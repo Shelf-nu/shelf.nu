@@ -42,9 +42,11 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import type { SubmittedParts } from "~/hooks/use-scan-draft";
 import {
-  anyPartSaved,
+  allPartsSaved,
   inPlaceSaveAnswer,
+  savedPartRows,
   useClearScanDraftOnSave,
   useInPlaceSaveMark,
 } from "~/hooks/use-scan-draft";
@@ -57,6 +59,7 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
+import { readBulkSaveAnswer } from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -206,6 +209,11 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const saveMark = useInPlaceSaveMark();
   const noAnswerRef = useRef(false);
   const settledRef = useRef(0);
+  // What the current save sent, so the rows of a part that saved can leave
+  // the list when another part did not.
+  const submittedRef = useRef<SubmittedParts>({ assetIds: [], kitIds: [] });
+  const scanList = useAtomValue(scannedItemsAtom);
+  const removeRows = useSetAtom(removeMultipleScannedItemsAtom);
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -223,6 +231,10 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         }
       };
       noAnswerRef.current = false;
+      submittedRef.current = {
+        assetIds: e.data.assetIds ?? [],
+        kitIds: e.data.kitIds ?? [],
+      };
       saveMark.start();
       setDialogOpen(true);
       const { custodian, assetIds, kitIds } = e.data;
@@ -270,7 +282,9 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           method: "POST",
           body: assetFormData,
         })
-          .then((response) => response.json())
+          .then((response) =>
+            readBulkSaveAnswer<{ error?: { message: string } }>(response)
+          )
           .then((data) => {
             setResult((state) => ({
               ...state,
@@ -316,7 +330,9 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           method: "POST",
           body: kitFormData,
         })
-          .then((response) => response.json())
+          .then((response) =>
+            readBulkSaveAnswer<{ error?: { message: string } }>(response)
+          )
           .then((data) => {
             setResult((state) => ({
               ...state,
@@ -350,15 +366,17 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const clearItems = useSetAtom(clearScannedItemsAtom);
 
   // The list stays on screen under the result until the dialog is closed.
-  // Once any part has saved its draft goes, so a reload before then does not
-  // bring back scans that are already saved and send them again.
+  // Once the whole list has saved its draft goes, so a reload before then
+  // does not bring back scans that are already saved.
   useClearScanDraftOnSave(
-    anyPartSaved([custodyState.assetStatus, custodyState.kitStatus])
+    allPartsSaved([custodyState.assetStatus, custodyState.kitStatus])
   );
 
   // Once every part has answered, the mark is settled: a refusal takes it
-  // back off, no answer keeps it, and a save leaves the draft to the save
-  // signal above.
+  // back off, no answer keeps it, and a full save leaves the draft to the
+  // save signal above. When only part of the list saved, that part's rows
+  // leave the list now (a retry must not send them again), and the rest stays
+  // with the draft and the mark until it gets a confirmed answer.
   useEffect(() => {
     if (!dialogOpen || settledRef.current === submissionRef.current) {
       return;
@@ -369,13 +387,29 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     );
     if (answer) {
       settledRef.current = submissionRef.current;
+      if (answer !== "saved") {
+        const confirmed = savedPartRows(scanList, submittedRef.current, {
+          assets: custodyState.assetStatus === "success",
+          kits: custodyState.kitStatus === "success",
+        });
+        if (confirmed.length > 0) {
+          removeRows(confirmed);
+        }
+      }
       saveMark.settle(answer);
     }
-  }, [custodyState.assetStatus, custodyState.kitStatus, dialogOpen, saveMark]);
+  }, [
+    custodyState.assetStatus,
+    custodyState.kitStatus,
+    dialogOpen,
+    saveMark,
+    scanList,
+    removeRows,
+  ]);
 
   function cleanupState() {
     submissionRef.current += 1;
-    const saved = anyPartSaved([
+    const saved = allPartsSaved([
       custodyState.assetStatus,
       custodyState.kitStatus,
     ]);
@@ -386,7 +420,8 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     });
     // A parked list is cleared only on a confirmed answer. A list that was
     // refused, got no answer, or is still waiting (Done pressed mid-save)
-    // stays, with its draft and its unconfirmed mark.
+    // stays, with its draft and its unconfirmed mark; the rows of a part that
+    // saved have already left it.
     if (saved) {
       clearItems();
     }

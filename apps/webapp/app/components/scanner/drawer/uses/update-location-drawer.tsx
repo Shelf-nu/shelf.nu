@@ -38,6 +38,7 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
+import { readBulkSaveAnswer } from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -177,7 +178,9 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
               body: formData,
             }
           );
-          const assetsData = await assetsResponse.json();
+          const assetsData = await readBulkSaveAnswer<{
+            error?: { message: string };
+          }>(assetsResponse);
           locationState = foldLocationPart(locationState, assetsData);
         }
 
@@ -192,7 +195,9 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             method: "POST",
             body: kitFormData,
           });
-          const kitsData = await kitsResponse.json();
+          const kitsData = await readBulkSaveAnswer<{
+            error?: { message: string };
+          }>(kitsResponse);
           locationState = foldLocationPart(locationState, kitsData);
         }
 

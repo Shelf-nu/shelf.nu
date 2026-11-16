@@ -15,6 +15,7 @@ import {
   classifyScanSubmitFailure,
   getScanSubmitFailure,
   keepScanListOnSubmitFailure,
+  readBulkSaveAnswer,
 } from "./scan-submit-failure";
 
 /** What React Router throws for a non-app response with this status. */
@@ -184,5 +185,48 @@ describe("getScanSubmitFailure", () => {
     ["a success payload", { error: null }],
   ])("returns null for %s", (_label, actionData) => {
     expect(getScanSubmitFailure(actionData)).toBeNull();
+  });
+});
+
+/**
+ * A bulk save sent with a plain request: only the app's own answer counts as
+ * an answer. Anything else is a save that may have gone through.
+ */
+describe("readBulkSaveAnswer", () => {
+  function answer(status: number, body: string) {
+    return new Response(body, {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("returns a success", async () => {
+    await expect(
+      readBulkSaveAnswer(answer(200, JSON.stringify({ success: true })))
+    ).resolves.toEqual({ success: true });
+  });
+
+  it("returns the app's refusal, whatever its status", async () => {
+    const refusal = { error: { message: "Not allowed" } };
+    await expect(
+      readBulkSaveAnswer(answer(403, JSON.stringify(refusal)))
+    ).resolves.toEqual(refusal);
+    await expect(
+      readBulkSaveAnswer(answer(500, JSON.stringify(refusal)))
+    ).resolves.toEqual(refusal);
+  });
+
+  it("rejects a gateway's JSON page, which is no answer", async () => {
+    await expect(
+      readBulkSaveAnswer(
+        answer(504, JSON.stringify({ message: "Gateway Timeout" }))
+      )
+    ).rejects.toThrow();
+  });
+
+  it("rejects a body that is not JSON", async () => {
+    await expect(
+      readBulkSaveAnswer(new Response("<html>524</html>", { status: 524 }))
+    ).rejects.toThrow();
   });
 });

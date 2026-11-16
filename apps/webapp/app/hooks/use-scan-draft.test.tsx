@@ -30,9 +30,10 @@ import {
   scanDraftKey,
 } from "~/utils/scan-draft";
 import {
-  anyPartSaved,
+  allPartsSaved,
   inPlaceSaveAnswer,
   retiredScanSubmitFailureAtom,
+  savedPartRows,
   unconfirmedScanSaveAtom,
   useClearScanDraftOnSave,
   useInPlaceSaveMark,
@@ -685,33 +686,61 @@ describe("bulk scanner: one list across its actions", () => {
   });
 });
 
-/**
- * A save sent in parts counts as saved once any part is: that part must not be
- * sent again from a restored list.
- */
-describe("anyPartSaved", () => {
+/** A save sent in parts counts as saved only when every part is. */
+describe("allPartsSaved", () => {
   it.each([
     [["success", "success"], true],
     [["success", "skipped"], true],
-    [["success", "error"], true],
-    [["processing", "success"], true],
+    [["success", "error"], false],
+    [["processing", "success"], false],
     [["skipped", "skipped"], false],
     [["error", "skipped"], false],
-    [["processing", "processing"], false],
   ] as const)("%j -> %s", (statuses, expected) => {
-    expect(anyPartSaved(statuses)).toBe(expected);
+    expect(allPartsSaved(statuses)).toBe(expected);
   });
 });
 
-/** A save sent in parts is settled once every part has answered. */
+/**
+ * When only part of a bulk save went through, its rows leave the list so a
+ * retry cannot send them again, and the rest stays.
+ */
+describe("savedPartRows", () => {
+  const items = {
+    "qr-a": { data: { id: "asset-1" }, type: "asset" },
+    "qr-k": { data: { id: "kit-1" }, type: "kit" },
+    "qr-p": { codeType: "qr", pendingLookup: true },
+  } as unknown as Parameters<typeof savedPartRows>[0];
+  const submitted = { assetIds: ["asset-1"], kitIds: ["kit-1"] };
+
+  it("names the rows of the part that saved", () => {
+    expect(
+      savedPartRows(items, submitted, { assets: true, kits: false })
+    ).toEqual(["qr-a"]);
+    expect(
+      savedPartRows(items, submitted, { assets: false, kits: true })
+    ).toEqual(["qr-k"]);
+  });
+
+  it("leaves rows that were not sent, or not resolved, in the list", () => {
+    expect(
+      savedPartRows(
+        items,
+        { assetIds: ["asset-2"], kitIds: [] },
+        { assets: true, kits: true }
+      )
+    ).toEqual([]);
+  });
+});
+
 describe("inPlaceSaveAnswer", () => {
   it.each([
     [["processing", "success"], false, null],
     [["success", "skipped"], false, "saved"],
-    [["success", "error"], false, "saved"],
+    // Partly saved: the answer is the unsaved part's.
+    [["success", "error"], false, "refused"],
+    [["success", "error"], true, "unanswered"],
     [["error", "skipped"], false, "refused"],
     [["error", "error"], true, "unanswered"],
-    [["success", "error"], true, "unanswered"],
   ] as const)("%j, no answer %s -> %s", (statuses, noAnswer, expected) => {
     expect(inPlaceSaveAnswer(statuses, noAnswer)).toBe(expected);
   });

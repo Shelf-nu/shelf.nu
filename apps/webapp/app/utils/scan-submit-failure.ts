@@ -194,3 +194,32 @@ export async function keepScanListOnSubmitFailure({
     );
   }
 }
+
+/**
+ * Reads the answer to a bulk scanner save sent with a plain `fetch` (the bulk
+ * actions save in place, outside a route action).
+ *
+ * The app answers both a save and a refusal with JSON, a refusal under an
+ * `error` key. Anything else is no answer: a body that is not JSON (a
+ * gateway's page) makes `response.json()` reject, and a failing status whose
+ * JSON has no `error` key (a gateway or proxy answering in JSON) is turned
+ * into a rejection here. Either way the caller's `catch` treats it as a save
+ * that may have gone through, never as a success.
+ *
+ * @param response - The answer to the save request
+ * @returns The app's answer: its payload, or its refusal under `error`
+ * @throws When the answer did not come from the app
+ */
+export async function readBulkSaveAnswer<T extends { error?: unknown }>(
+  response: Response
+): Promise<T> {
+  const body = (await response.json()) as T | null;
+  const isAppAnswer =
+    body !== null &&
+    typeof body === "object" &&
+    (response.ok || "error" in body);
+  if (!isAppAnswer) {
+    throw new Error(`The save got no answer from the app (${response.status})`);
+  }
+  return body;
+}

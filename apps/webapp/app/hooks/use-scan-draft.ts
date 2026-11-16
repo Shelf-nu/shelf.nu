@@ -29,6 +29,7 @@ import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
 import { useActionData, useLocation, useNavigation } from "react-router";
+import type { ScanListItems } from "~/atoms/qr-scanner";
 import {
   scannedAssetQuantitiesAtom,
   scannedAssetSourcesAtom,
@@ -82,22 +83,54 @@ export const retiredScanSubmitFailureAtom = atom<ScanSubmitFailure | null>(
 const scanListSavedInPlaceAtom = atom(false);
 
 /**
- * Whether any part of a save sent in parts (assets and kits go to separate
- * endpoints) has been saved. Once one has, the list must not come back from
- * its draft: sending it again would repeat that part, and a custody change
- * adds units rather than setting them. Closing the result dialog empties the
- * list in that case too, so the draft goes the same way, only sooner.
+ * Whether a save sent in parts (assets and kits go to separate endpoints) saved
+ * the whole list: every part saved or had nothing to send, and at least one
+ * part saved. Only then is the parked list cleared.
  *
- * @param statuses - Each part's status, e.g. `["success", "error"]`
- * @returns `true` once at least one part is saved
+ * @param statuses - Each part's status, e.g. `["success", "skipped"]`
+ * @returns `true` only when the whole list is saved
  */
-export function anyPartSaved(statuses: readonly string[]): boolean {
-  return statuses.some((status) => status === "success");
+export function allPartsSaved(statuses: readonly string[]): boolean {
+  return (
+    statuses.every((status) => status === "success" || status === "skipped") &&
+    statuses.some((status) => status === "success")
+  );
+}
+
+/** The rows a save sent in parts, as it was submitted. */
+export type SubmittedParts = { assetIds: string[]; kitIds: string[] };
+
+/**
+ * The rows of the parts that were saved when the rest of the save was not.
+ *
+ * Those rows are confirmed and must leave the list, or a retry would send them
+ * again (a custody change adds units). The rows of the other parts stay, with
+ * the draft and its mark, until they get a confirmed answer of their own.
+ *
+ * @param items - The scan list
+ * @param submitted - The asset and kit ids each part sent
+ * @param saved - Which parts were saved
+ * @returns The scan-list keys of the saved rows
+ */
+export function savedPartRows(
+  items: ScanListItems,
+  submitted: SubmittedParts,
+  saved: { assets: boolean; kits: boolean }
+): string[] {
+  const assetIds = new Set(saved.assets ? submitted.assetIds : []);
+  const kitIds = new Set(saved.kits ? submitted.kitIds : []);
+  return Object.entries(items)
+    .filter(([, item]) => {
+      const id = item?.data?.id;
+      if (!id) return false;
+      return item.type === "kit" ? kitIds.has(id) : assetIds.has(id);
+    })
+    .map(([qrId]) => qrId);
 }
 
 /** How a save that stays on the page ended, for {@link useInPlaceSaveMark}. */
 export type InPlaceSaveAnswer =
-  /** At least part of it was saved; the draft goes through the save signal. */
+  /** All of it was saved; the draft goes through the save signal. */
   | "saved"
   /** The server answered and saved nothing. */
   | "refused"
@@ -110,7 +143,9 @@ export type InPlaceSaveAnswer =
  * @param statuses - Each part's status: `"processing"`, `"success"`,
  *   `"error"` or `"skipped"`
  * @param noAnswer - Whether any part got no answer
- * @returns The answer, or `null` while a part is still waiting
+ * @returns The answer, or `null` while a part is still waiting. A partly
+ *   saved list answers for its unsaved part: `"unanswered"` or `"refused"`
+ *   (its saved rows leave the list, see {@link savedPartRows}).
  */
 export function inPlaceSaveAnswer(
   statuses: readonly string[],
@@ -119,10 +154,10 @@ export function inPlaceSaveAnswer(
   if (statuses.includes("processing")) {
     return null;
   }
-  if (noAnswer) {
-    return "unanswered";
+  if (allPartsSaved(statuses)) {
+    return "saved";
   }
-  return anyPartSaved(statuses) ? "saved" : "refused";
+  return noAnswer ? "unanswered" : "refused";
 }
 
 /**

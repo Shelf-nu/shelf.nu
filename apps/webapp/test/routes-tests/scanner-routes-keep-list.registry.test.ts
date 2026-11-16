@@ -129,11 +129,11 @@ describe("scanner routes keep a draft of their list", () => {
   it.each([
     [
       "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
-      /useClearScanDraftOnSave\(\s*anyPartSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
+      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
     ],
     [
       "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
-      /useClearScanDraftOnSave\(\s*anyPartSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
+      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
     ],
     [
       "../../components/scanner/drawer/uses/update-location-drawer.tsx",
@@ -175,6 +175,33 @@ describe("scanner routes keep a draft of their list", () => {
     );
     // One for the assets request, one for the kits request.
     expect(marks).toHaveLength(2);
+  });
+
+  /**
+   * The bulk drawers read each answer through `readBulkSaveAnswer`, so a
+   * gateway's page (JSON or not) counts as no answer, never as a save.
+   */
+  it.each([
+    ["../../components/scanner/drawer/uses/assign-custody-drawer.tsx", 2],
+    ["../../components/scanner/drawer/uses/release-custody-drawer.tsx", 2],
+    ["../../components/scanner/drawer/uses/update-location-drawer.tsx", 2],
+  ])("%s reads only the app's own answer", (file, requests) => {
+    const source = read(file);
+    expect(source.match(/readBulkSaveAnswer</g)).toHaveLength(requests);
+    expect(source).not.toMatch(/response\.json\(\)|Response\.json\(\)/);
+  });
+
+  /**
+   * When only part of a custody save went through, its rows leave the list
+   * and the rest stays with the draft until it gets a confirmed answer.
+   */
+  it.each([
+    "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
+    "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
+  ])("%s takes only the saved part out of the list", (file) => {
+    expect(read(file)).toMatch(
+      /if \(answer !== "saved"\) \{\s*const confirmed = savedPartRows\(/
+    );
   });
 
   it("update location marks a save that got no answer", () => {
