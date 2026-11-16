@@ -31,7 +31,7 @@ import {
 /** The transaction client the service is handed; reset per test. */
 const tx = {
   bookingAsset: { findUnique: vi.fn(), update: vi.fn() },
-  // A changed amount moves the booking's version (`updatedAt`).
+  // why: a changed amount moves the booking's version (`updatedAt`) first.
   booking: { updateMany: vi.fn() },
 };
 

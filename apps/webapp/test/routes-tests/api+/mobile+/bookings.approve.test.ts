@@ -120,11 +120,13 @@ describe("POST /api/mobile/bookings/approve", () => {
     await post({
       bookingId: "booking-1",
       updatedAt: "2026-11-16T10:00:00.000Z",
+      requestVersion: "abc123",
     });
 
     expect(approveBooking).toHaveBeenCalledWith(
       expect.objectContaining({
         reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
+        reviewedVersion: "abc123",
       })
     );
   });

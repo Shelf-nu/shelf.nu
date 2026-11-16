@@ -201,6 +201,7 @@ async function approvalFlagsFor({
     booking: {
       isPendingApproval: boolean;
       canApprove: boolean;
+      requestVersion: string | null;
       reservationNeedsApproval: boolean;
     };
   };
@@ -208,6 +209,7 @@ async function approvalFlagsFor({
     canCheckout: body.canCheckout,
     isPendingApproval: body.booking.isPendingApproval,
     canApprove: body.booking.canApprove,
+    requestVersion: body.booking.requestVersion,
     reservationNeedsApproval: body.booking.reservationNeedsApproval,
   };
 }
@@ -266,6 +268,8 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
     expect(flags.isPendingApproval).toBe(true);
     expect(flags.canCheckout).toBe(true);
     expect(flags.canApprove).toBe(true);
+    // The version Approve sends back, so a changed request is refused.
+    expect(flags.requestVersion).toEqual(expect.any(String));
   });
 
   it("withholds check-out from a custodian who may not approve while the request is pending", async () => {
@@ -288,6 +292,7 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
     });
     expect(flags.isPendingApproval).toBe(true);
     expect(flags.canApprove).toBe(false);
+    expect(flags.requestVersion).toBeNull();
   });
 
   it("reads nothing as pending while the workspace does not require approval", async () => {

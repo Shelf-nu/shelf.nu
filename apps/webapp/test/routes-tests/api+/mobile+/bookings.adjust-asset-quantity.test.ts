@@ -135,7 +135,7 @@ const tx = {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
-  // A changed amount moves the booking's version (`updatedAt`).
+  // why: a changed amount moves the booking's version (`updatedAt`) first.
   booking: { updateMany: vi.fn() },
 };
 

@@ -155,6 +155,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
@@ -186,6 +187,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         entity: PermissionEntity.booking,
         action: PermissionAction.read,
       });
+
+    /**
+     * The version an approver approves, read BEFORE anything this page shows,
+     * so a change that commits while the page loads makes the version older
+     * than the contents on screen, never newer: Approve then refuses instead
+     * of approving what the approver did not see. Read only for someone who
+     * may approve, and used only while the booking is a pending request.
+     */
+    const reviewableVersion =
+      authSession?.userId &&
+      (await hasPermission({
+        userId: authSession.userId,
+        organizationId,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.approve,
+      }))
+        ? await readBookingRequestVersion(db, {
+            bookingId,
+            organizationId,
+          })
+        : null;
 
     // Get the booking with basic asset information
     const [booking, tags, notifyData] = await Promise.all([
@@ -1257,15 +1279,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : [];
 
-    // The version an approver approves: only a request still waiting for a
-    // decision needs it, and Approve sends it back so a request that changed
-    // since this page loaded is refused.
+    // Only a request still waiting for a decision needs the version.
     const requestVersion =
       booking.status === BookingStatus.RESERVED && booking.approvedAt === null
-        ? await readBookingRequestVersion(db, {
-            bookingId: booking.id,
-            organizationId,
-          })
+        ? reviewableVersion
         : null;
 
     return data(

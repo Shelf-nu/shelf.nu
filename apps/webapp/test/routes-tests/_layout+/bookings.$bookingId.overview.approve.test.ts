@@ -180,6 +180,25 @@ describe("booking page approve-booking intent", () => {
   });
 });
 
+describe("booking page approve-booking intent: the version reviewed", () => {
+  it("hands the version the approver saw to the service", async () => {
+    actAs([OrganizationRoles.MANAGER]);
+
+    await post({
+      intent: "approve-booking",
+      reviewedUpdatedAt: "2026-11-16T10:00:00.000Z",
+      reviewedVersion: "abc123",
+    });
+
+    expect(approveBookingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
+        reviewedVersion: "abc123",
+      })
+    );
+  });
+});
+
 describe("booking page revert-to-draft intent", () => {
   it("passes the reason through to the service", async () => {
     actAs([OrganizationRoles.MANAGER]);

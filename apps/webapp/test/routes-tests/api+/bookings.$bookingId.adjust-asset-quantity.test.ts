@@ -44,6 +44,7 @@ const dbMocks = vi.hoisted(() => {
           findUnique: bookingAssetFindUnique,
           update: vi.fn().mockResolvedValue(undefined),
         },
+        // why: a changed amount moves the booking's version (updatedAt) first.
         booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       })
     ),

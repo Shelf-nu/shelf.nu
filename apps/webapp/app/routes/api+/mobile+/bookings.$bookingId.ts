@@ -115,6 +115,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       z.object({ bookingId: z.string().min(1) })
     );
 
+    /**
+     * The version an approver approves, read BEFORE the booking and its
+     * contents below, so a change that commits while this loads makes the
+     * version older than what the screen shows, never newer: Approve then
+     * refuses instead of approving what the approver did not see. Read only
+     * for someone who may approve; sent only with `canApprove`.
+     */
+    const reviewableVersion = (await hasPermission({
+      userId: user.id,
+      organizationId,
+      roles,
+      workspace: access.workspaceGrants,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.approve,
+    }))
+      ? await readBookingRequestVersion(db, { bookingId, organizationId })
+      : null;
+
     const booking = await db.booking.findFirst({
       where: {
         id: bookingId,
@@ -835,14 +853,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Approve button and the `approve-booking` intent resolve, so the phone
     // never draws (or withholds) a decision the server would answer otherwise.
     const canApprove = isPendingApproval && canApprovePerm;
-    // The version an approval approves, sent back with Approve so a request
-    // that changed since this screen loaded is refused.
-    const requestVersion = canApprove
-      ? await readBookingRequestVersion(db, {
-          bookingId: booking.id,
-          organizationId,
-        })
-      : null;
+    // Sent back with Approve so a request that changed since this screen
+    // loaded is refused.
+    const requestVersion = canApprove ? reviewableVersion : null;
     // Told BEFORE the reservation: whether this caller's Reserve would land as
     // a request waiting for a decision. The same rule `reserveBooking` applies
     // (workspace requires approval, and the caller's role is one whose
