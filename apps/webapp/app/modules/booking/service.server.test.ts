@@ -4222,6 +4222,9 @@ describe("reserveBooking", () => {
     db.bookingAsset.findFirst.mockResolvedValue(null);
     //@ts-expect-error missing vitest type
     db.bookingModelRequest.count.mockResolvedValue(1);
+    // The row lock reads the booking still DRAFT: nothing reserved it since.
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: "DRAFT" }]);
     stubCustodianTeamMembers({ "team-1": "user-1" });
   });
 
@@ -4230,6 +4233,8 @@ describe("reserveBooking", () => {
     // `mockResolvedValue` survive `clearAllMocks`, so without this the
     // reserve-friendly values above leak into every later describe.
     restoreTeamMemberFindFirst();
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: "ONGOING" }]);
     //@ts-expect-error missing vitest type
     db.bookingAsset.count.mockResolvedValue(0);
     //@ts-expect-error missing vitest type
@@ -4620,6 +4625,30 @@ describe("reserveBooking", () => {
       })
     );
     expect(result).toEqual(reservedBooking);
+  });
+
+  it("refuses when the locked row is no longer a draft", async () => {
+    // why: a reservation or check-out that committed after the read before
+    // the transaction must not be overwritten by this one.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      bookingAssets: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: "ONGOING" }]);
+
+    await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+      /already ongoing/
+    );
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.RESERVED }),
+      })
+    );
   });
 
   it("locks the booking row before anything else in its transaction", async () => {
@@ -23002,6 +23031,10 @@ describe("model reservation guard — write paths", () => {
     it("re-validates every INDIVIDUAL row on the draft in the reserve transaction", async () => {
       expect.assertions(3);
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking(reserveParams);
 
       // The kit-driven unit counts too: it is off the model's pool for these
@@ -23027,6 +23060,10 @@ describe("model reservation guard — write paths", () => {
     it("formats a pool refusal for the caller and keeps other bookings unnamed by default", async () => {
       expect.assertions(2);
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking({ ...reserveParams, userId: "user-2" });
 
       const expected = expect.objectContaining({
@@ -23041,6 +23078,10 @@ describe("model reservation guard — write paths", () => {
     it("names other bookings in a pool refusal for a caller who sees every booking", async () => {
       expect.assertions(2);
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking({
         ...reserveParams,
         userId: "user-2",
@@ -23060,6 +23101,10 @@ describe("model reservation guard — write paths", () => {
       expect.assertions(2);
       guard.mockRejectedValueOnce(refusal());
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await expect(reserveBooking(reserveParams)).rejects.toThrow(
         /reserved by model/
       );
@@ -25631,6 +25676,10 @@ describe("booking emails name who acted", () => {
     db.bookingAsset.count.mockResolvedValueOnce(1);
     mockBerlinRecipient();
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -26005,6 +26054,10 @@ describe("booking emails name who acted", () => {
       },
     ]);
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -26101,6 +26154,10 @@ describe("booking emails name who acted", () => {
       },
     ]);
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -26181,6 +26238,10 @@ describe("booking emails name who acted", () => {
     db.bookingAsset.count.mockResolvedValueOnce(1);
     mockBerlinRecipient();
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     const result = await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -26246,6 +26307,10 @@ describe("booking emails name who acted", () => {
       db.bookingAsset.count.mockResolvedValueOnce(1);
       mockBerlinRecipient();
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking({
         id: "booking-1",
         name: "Test Booking",

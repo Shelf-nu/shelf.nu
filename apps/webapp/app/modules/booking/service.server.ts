@@ -2613,7 +2613,23 @@ export async function reserveBooking({
       // The booking row first, before any asset lock below: every path that
       // changes a booking's items or amounts takes the booking row first, the
       // order a check-out uses, so two of them cannot wait on each other.
-      await lockBookingForStatusCheck(tx, id, organizationId);
+      const lockedStatus = await lockBookingForStatusCheck(
+        tx,
+        id,
+        organizationId
+      );
+      // Decided again on the locked row: a reservation or check-out that
+      // committed since the read above must not be overwritten by this one.
+      if (lockedStatus !== BookingStatus.DRAFT) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          message: `This booking is already ${lockedStatus.toLowerCase()}. Only DRAFT bookings can be reserved.`,
+          additionalData: { bookingId: id, status: lockedStatus },
+        });
+      }
 
       /**
        * Eligibility, re-read through `tx` immediately before the status write.
