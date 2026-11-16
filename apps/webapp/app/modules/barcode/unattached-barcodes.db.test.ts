@@ -336,6 +336,19 @@ describe.skipIf(!DATABASE_URL)("unattached barcodes (real database)", () => {
       60_000
     );
 
+    it("takes a value whose left-behind barcode differs only in case", async () => {
+      const value = freshValue();
+      await LEFT_BEHIND_BY[0].leave(value);
+      const lowerCase = value.toLowerCase();
+
+      const target = await write("ExternalQR", lowerCase);
+
+      expect(await holders(value)).toEqual([]);
+      expect(await holders(lowerCase)).toEqual([
+        { type: "ExternalQR", ...target },
+      ]);
+    }, 60_000);
+
     it.each(HELD_BY)(
       "refuses a value held by $name and names it",
       async ({ hold, heldBy }) => {

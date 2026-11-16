@@ -94,7 +94,10 @@ export type BarcodeReleaseClient = Pick<ExtendedPrismaClient, "barcode">;
  * takes the value with the type it submitted.
  *
  * Only rows that are in `organizationId`, carry one of the submitted values
- * and are attached to nothing are removed. A value held by a live asset or
+ * and are attached to nothing are removed. Values match ignoring case:
+ * barcode lookup finds a scanned value in its own case and in upper case, so
+ * an unattached row that differs only in case would otherwise answer scans of
+ * the new value. A value held by a live asset or
  * kit is left alone and still fails the caller's write on the unique index.
  * Scans that recorded a removed row keep their scanned `code`; their
  * `barcodeId` is nulled by the foreign key.
@@ -124,6 +127,7 @@ export function releaseUnattachedBarcodes(
         in: barcodes.map(({ type, value }) =>
           normalizeBarcodeValue(type, value)
         ),
+        mode: "insensitive",
       },
       assetId: null,
       kitId: null,

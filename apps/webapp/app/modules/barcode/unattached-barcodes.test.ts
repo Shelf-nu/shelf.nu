@@ -60,8 +60,20 @@ vi.mock("~/database/db.server", () => {
       }
       const actual = row[key as keyof Row];
       if (condition !== null && typeof condition === "object") {
-        const operator = condition as { in?: unknown[]; not?: unknown };
-        if ("in" in operator) return operator.in!.includes(actual);
+        const operator = condition as {
+          in?: unknown[];
+          not?: unknown;
+          mode?: "insensitive";
+        };
+        if ("in" in operator) {
+          if (operator.mode !== "insensitive") {
+            return operator.in!.includes(actual);
+          }
+          return operator.in!.some(
+            (candidate) =>
+              String(candidate).toLowerCase() === String(actual).toLowerCase()
+          );
+        }
         if ("not" in operator) return actual !== operator.not;
       }
       return actual === condition;
@@ -303,6 +315,18 @@ describe.each(WRITE_PATHS)("$name", ({ target, seedOwn, write }) => {
 
     expect(holders()).toEqual([
       expect.objectContaining({ ...attachedTo, type: BarcodeType.DataMatrix }),
+    ]);
+  });
+
+  it("takes a value whose unattached barcode differs only in case", async () => {
+    seedOwn?.();
+    seed({ id: "left-behind", value: VALUE });
+
+    await write(BarcodeType.ExternalQR, VALUE.toLowerCase());
+
+    expect(holders()).toEqual([]);
+    expect(holders(VALUE.toLowerCase())).toEqual([
+      expect.objectContaining({ ...attachedTo, type: BarcodeType.ExternalQR }),
     ]);
   });
 

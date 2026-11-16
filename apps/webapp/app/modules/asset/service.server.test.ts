@@ -2868,7 +2868,7 @@ describe("createAsset reused barcodes", () => {
     expect(db.barcode.deleteMany).toHaveBeenCalledWith({
       where: {
         organizationId: "org-A",
-        value: { in: ["ZZ-LABEL-1", "zz-Label-2"] },
+        value: { in: ["ZZ-LABEL-1", "zz-Label-2"], mode: "insensitive" },
         assetId: null,
         kitId: null,
       },

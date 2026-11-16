@@ -743,7 +743,7 @@ describe("updateBarcodes", () => {
     expect(db.barcode.deleteMany).toHaveBeenCalledWith({
       where: {
         organizationId: "org-1",
-        value: { in: ["UPDATED123", "NEW123"] },
+        value: { in: ["UPDATED123", "NEW123"], mode: "insensitive" },
         assetId: null,
         kitId: null,
       },
@@ -808,7 +808,7 @@ describe("updateBarcodes", () => {
     expect(db.barcode.deleteMany).toHaveBeenNthCalledWith(1, {
       where: {
         organizationId: "org-1",
-        value: { in: ["UPDATED123"] },
+        value: { in: ["UPDATED123"], mode: "insensitive" },
         assetId: null,
         kitId: null,
       },
