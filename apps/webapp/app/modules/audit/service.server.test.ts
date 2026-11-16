@@ -2324,7 +2324,59 @@ describe("audit service", () => {
       expect(findManyArgs.orderBy).toEqual([
         { dueDate: { sort: "asc", nulls: "last" } },
         { createdAt: "desc" },
+        { id: "asc" },
       ]);
+    });
+
+    it("filters a list of statuses in the database and counts the same rows", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: [AuditStatus.PENDING, AuditStatus.ACTIVE],
+        page: 2,
+        perPage: 20,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      const countArgs = mockDb.auditSession.count.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toEqual({
+        in: [AuditStatus.PENDING, AuditStatus.ACTIVE],
+      });
+      expect(findManyArgs).toMatchObject({ skip: 20, take: 20 });
+      expect(countArgs?.where).toEqual(findManyArgs?.where);
+    });
+
+    it("treats an empty status list like no status (archived hidden)", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: [],
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toEqual({
+        notIn: [AuditStatus.ARCHIVED],
+      });
+    });
+
+    it("keeps a listed ARCHIVED status instead of hiding archived audits", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: [AuditStatus.PENDING, AuditStatus.ARCHIVED],
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toEqual({
+        in: [AuditStatus.PENDING, AuditStatus.ARCHIVED],
+      });
+    });
+
+    it("filters a one-item status list by plain equality", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: [AuditStatus.ACTIVE],
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toBe(AuditStatus.ACTIVE);
     });
 
     it("filters to audits containing the asset when assetId is set", async () => {
