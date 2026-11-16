@@ -5547,6 +5547,112 @@ export async function computeBookingAssetSliceRemaining(
   return Math.max(0, booked - logged);
 }
 
+/** Units still to check in, per asset and per slice, on one booking. */
+export type BookingCheckinRemaining = {
+  /** Same value {@link computeBookingAssetRemaining} gives, by asset id. */
+  byAsset: Map<string, number>;
+  /** Same value {@link computeBookingAssetSliceRemaining} gives, by slice id. */
+  bySlice: Map<string, number>;
+};
+
+/**
+ * Batched sibling of {@link computeBookingAssetRemaining} and
+ * {@link computeBookingAssetSliceRemaining}: the units still to check in for
+ * MANY assets on ONE booking, and for each of their slices, in two queries
+ * whatever the number of assets.
+ *
+ * A check-in session reads this once, under the asset locks, and then counts
+ * each disposition's units off in memory. That gives the same numbers as
+ * re-querying after every disposition, because the session's own logs are
+ * the only ones written while it holds the locks, and each disposition writes
+ * exactly the units it claims (a RETURN log plus the CONSUME / LOSS / DAMAGE
+ * ledger rows), tagged with its slice when it names one.
+ *
+ * - Asset level: `Σ(BookingAsset.quantity) − Σ(every check-in log of the
+ *   asset)`, legacy untagged logs included.
+ * - Slice level: `slice.quantity − Σ(logs tagged with that slice)`.
+ *
+ * Both floor at 0. An asset or slice not on the booking reads 0.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking the assets belong to
+ * @param assetIds - Assets to measure (duplicates ignored)
+ * @returns Remaining units by asset id and by slice id
+ */
+export async function computeBookingCheckinRemaining(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  bookingId: Booking["id"],
+  assetIds: Asset["id"][]
+): Promise<BookingCheckinRemaining> {
+  const ids = [...new Set(assetIds)];
+  const byAsset = new Map<string, number>();
+  const bySlice = new Map<string, number>();
+  if (ids.length === 0) return { byAsset, bySlice };
+
+  const [slices, loggedGroups] = (await Promise.all([
+    tx.bookingAsset.findMany({
+      where: { bookingId, assetId: { in: ids } },
+      select: { id: true, assetId: true, quantity: true },
+    }),
+    tx.consumptionLog.groupBy({
+      by: ["assetId", "bookingAssetId"],
+      where: {
+        bookingId,
+        assetId: { in: ids },
+        category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+      },
+      _sum: { quantity: true },
+    }),
+  ])) as [
+    Array<{ id: string; assetId: string; quantity: number | null }>,
+    Array<{
+      assetId: string;
+      bookingAssetId: string | null;
+      _sum: { quantity: number | null } | null;
+    }>,
+  ];
+
+  const loggedByAsset = new Map<string, number>();
+  const loggedBySlice = new Map<string, number>();
+  for (const group of loggedGroups) {
+    const quantity = group._sum?.quantity ?? 0;
+    loggedByAsset.set(
+      group.assetId,
+      (loggedByAsset.get(group.assetId) ?? 0) + quantity
+    );
+    if (group.bookingAssetId) {
+      loggedBySlice.set(
+        group.bookingAssetId,
+        (loggedBySlice.get(group.bookingAssetId) ?? 0) + quantity
+      );
+    }
+  }
+
+  const bookedByAsset = new Map<string, number>();
+  for (const slice of slices) {
+    const booked = slice.quantity ?? 0;
+    bookedByAsset.set(
+      slice.assetId,
+      (bookedByAsset.get(slice.assetId) ?? 0) + booked
+    );
+    bySlice.set(
+      slice.id,
+      Math.max(0, booked - (loggedBySlice.get(slice.id) ?? 0))
+    );
+  }
+  for (const assetId of ids) {
+    byAsset.set(
+      assetId,
+      Math.max(
+        0,
+        (bookedByAsset.get(assetId) ?? 0) - (loggedByAsset.get(assetId) ?? 0)
+      )
+    );
+  }
+  return { byAsset, bySlice };
+}
+
 /**
  * Minimal Prisma surface the batched checkout "remaining" helpers touch. Both
  * the extended top-level client (`db`) and an interactive transaction client
@@ -8624,10 +8730,11 @@ export async function partialCheckinBooking({
        * sorted id order, the order every other booking flow locks in. The
        * loop below walks `dispositions` in payload order, so locking as it goes
        * would let two sessions that share assets take the locks in reverse and
-       * deadlock. Its own lock call then re-acquires a row this transaction
-       * already holds, which only re-reads it.
+       * deadlock. The locked rows are kept, and this session's own pool
+       * decrements are applied to them as it goes, so no disposition has to
+       * read its asset again.
        */
-      for (const assetId of [
+      const qtyAssetIdsInSession = [
         ...new Set(
           dispositions
             .filter(
@@ -8635,20 +8742,45 @@ export async function partialCheckinBooking({
             )
             .map((d) => d.assetId)
         ),
-      ].sort()) {
-        await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+      ].sort();
+      const lockedAssetById = new Map<
+        string,
+        Awaited<ReturnType<typeof lockAssetForQuantityUpdate>>
+      >();
+      for (const assetId of qtyAssetIdsInSession) {
+        lockedAssetById.set(
+          assetId,
+          await lockAssetForQuantityUpdate(tx, assetId, organizationId)
+        );
       }
+
+      /**
+       * Units still to check in, read once under the locks and counted down
+       * as each disposition claims units (see
+       * `computeBookingCheckinRemaining` for why that matches a fresh read).
+       */
+      const checkinRemaining = await computeBookingCheckinRemaining(
+        tx,
+        id,
+        qtyAssetIdsInSession
+      );
 
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
         }
 
-        const lockedAsset = await lockAssetForQuantityUpdate(
-          tx,
-          disp.assetId,
-          organizationId
-        );
+        const lockedAsset = lockedAssetById.get(disp.assetId);
+        if (!lockedAsset) {
+          // Every quantity-tracked disposition's asset was locked above.
+          throw new ShelfError({
+            cause: null,
+            status: 500,
+            label,
+            message: "Something went wrong while checking in the booking.",
+            additionalData: { assetId: disp.assetId, bookingId: id },
+          });
+        }
 
         // Read under the asset lock and before this session writes any log
         // for the asset, so a concurrent session cannot slip in between.
@@ -8670,15 +8802,12 @@ export async function partialCheckinBooking({
         }
 
         /**
-         * Re-query remaining inside the transaction, AFTER the lock. This
-         * closes the race with another check-in session that committed
-         * between our loader read and our tx start.
+         * Remaining as read under the lock, minus what this session already
+         * claimed. Reading inside the transaction closes the race with another
+         * check-in session that committed between our loader read and our tx
+         * start.
          */
-        const remaining = await computeBookingAssetRemaining(
-          tx,
-          id,
-          disp.assetId
-        );
+        const remaining = checkinRemaining.byAsset.get(disp.assetId) ?? 0;
 
         /**
          * Per-slice cap (Polish-7b): when the drawer targets a specific
@@ -8691,11 +8820,8 @@ export async function partialCheckinBooking({
          */
         let cap = remaining;
         if (disp.bookingAssetId) {
-          const sliceRemaining = await computeBookingAssetSliceRemaining(
-            tx,
-            id,
-            disp.bookingAssetId
-          );
+          const sliceRemaining =
+            checkinRemaining.bySlice.get(disp.bookingAssetId) ?? 0;
           cap = Math.min(cap, sliceRemaining);
         }
 
@@ -8885,9 +9011,14 @@ export async function partialCheckinBooking({
             where: { id: disp.assetId },
             data: { quantity: { decrement: poolDecrement } },
           });
-          // Audit the stock drop. `lockedAsset` was freshly re-read per
-          // disposition, so from/to chains through sequential decrements when
-          // one asset has several dispositions.
+          // Keep the locked row in step with the write, so a later
+          // disposition of the same asset starts from the decremented pool.
+          lockedAssetById.set(disp.assetId, {
+            ...lockedAsset,
+            quantity: beforeQuantity - poolDecrement,
+          });
+          // Audit the stock drop. from/to chains through sequential
+          // decrements when one asset has several dispositions.
           quantityChangeEvents.push({
             organizationId,
             actorUserId: userId,
@@ -8942,6 +9073,15 @@ export async function partialCheckinBooking({
         }
 
         const pendingAfter = remaining - claimed;
+        // Count the claim off what is left: this disposition just wrote
+        // logs for exactly these units, tagged with its slice when it has one.
+        checkinRemaining.byAsset.set(disp.assetId, pendingAfter);
+        if (dispBookingAssetId) {
+          checkinRemaining.bySlice.set(
+            dispBookingAssetId,
+            (checkinRemaining.bySlice.get(dispBookingAssetId) ?? 0) - claimed
+          );
+        }
         if (pendingAfter === 0) {
           fullyReconciledQtyAssetIds.push(disp.assetId);
         }
@@ -8990,11 +9130,13 @@ export async function partialCheckinBooking({
           )
         ),
       ];
-      for (const assetId of qtyCheckinIds) {
-        const [otherBookings, custodyCount] = await Promise.all([
-          tx.bookingAsset.count({
+      // One grouped read per question for the whole batch, not one per asset.
+      if (qtyCheckinIds.length > 0) {
+        const [heldByOtherBookings, heldInCustody] = (await Promise.all([
+          tx.bookingAsset.groupBy({
+            by: ["assetId"],
             where: {
-              assetId,
+              assetId: { in: qtyCheckinIds },
               bookingId: { not: id },
               booking: {
                 status: {
@@ -9003,12 +9145,22 @@ export async function partialCheckinBooking({
               },
             },
           }),
-          tx.custody.count({ where: { assetId } }),
+          tx.custody.groupBy({
+            by: ["assetId"],
+            where: { assetId: { in: qtyCheckinIds } },
+          }),
+        ])) as [Array<{ assetId: string }>, Array<{ assetId: string }>];
+        const stillHeld = new Set([
+          ...heldByOtherBookings.map((row) => row.assetId),
+          ...heldInCustody.map((row) => row.assetId),
         ]);
-        if (otherBookings === 0 && custodyCount === 0) {
-          await tx.asset.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` comes from `effectiveAssetIds` validated against the org-scoped booking assets earlier in partialCheckinBooking
-            where: { id: assetId },
+        const freedAssetIds = qtyCheckinIds.filter(
+          (assetId) => !stillHeld.has(assetId)
+        );
+        if (freedAssetIds.length > 0) {
+          await tx.asset.updateMany({
+            // Scope to the caller's org (cross-org IDOR defence).
+            where: { id: { in: freedAssetIds }, organizationId },
             data: { status: AssetStatus.AVAILABLE },
           });
         }
