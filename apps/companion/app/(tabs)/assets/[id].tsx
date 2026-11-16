@@ -163,6 +163,11 @@ export default function AssetDetailScreen() {
     onRefresh,
   } = useAssetData(id, currentOrg?.id);
 
+  // The active workspace, read after an await: a request's own closure still
+  // holds the workspace it started in.
+  const workspaceIdRef = useRef(currentOrg?.id);
+  workspaceIdRef.current = currentOrg?.id;
+
   // Custody actions
   const {
     isActionLoading,
@@ -481,13 +486,18 @@ export default function AssetDetailScreen() {
   const performReinstate = async () => {
     if (!currentOrg || !asset) return;
     setIsReinstating(true);
+    const startedIn = currentOrg.id;
     const { error: err } = await api.reinstateAsset(currentOrg.id, asset.id);
     if (err) {
       setIsReinstating(false);
       Alert.alert("Couldn't reinstate", err);
       return;
     }
-    await settleArchiveChange(asset.id, fetchAsset);
+    await settleArchiveChange(
+      asset.id,
+      fetchAsset,
+      () => workspaceIdRef.current === startedIn
+    );
     setIsReinstating(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -536,6 +546,8 @@ export default function AssetDetailScreen() {
     if (!currentOrg || !asset || archiveInFlight.current) return;
     archiveInFlight.current = true;
     setIsActionLoading(true);
+    const startedIn = currentOrg.id;
+    const isStillCurrent = () => workspaceIdRef.current === startedIn;
     try {
       const outcome = await runArchive({
         send: (confirmModelShortfall) =>
@@ -546,13 +558,13 @@ export default function AssetDetailScreen() {
         Alert.alert("Couldn't archive", outcome.message);
         // A refusal often means the asset changed elsewhere (custody, a
         // booking): reload it so the screen and the pre-tap check catch up.
-        await reloadAsset();
+        if (isStillCurrent()) await reloadAsset();
         return;
       }
       if (outcome.kind === "cancelled") return;
 
       // The archive landed: a failed reload keeps the screen, not an error.
-      await settleArchiveChange(asset.id, reloadAsset);
+      await settleArchiveChange(asset.id, reloadAsset, isStillCurrent);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // The archived badge and notice say the rest; a draft still holding the
       // asset is news the screen does not show.

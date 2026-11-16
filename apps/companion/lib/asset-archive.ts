@@ -204,13 +204,20 @@ export async function runArchive<T>({
  * (the assets list skips refetches for a while, a second stack may show the
  * same detail) that it changed, then reloads this screen's copy.
  *
+ * The reload is skipped when the member switched workspace while the request
+ * ran: `refetch` reads the workspace the request started in, and its answer
+ * would replace the new workspace's load.
+ *
  * @param assetId - the asset archived or reinstated
  * @param refetch - reloads the asset on the current screen
+ * @param isStillCurrent - whether the workspace the request started in is
+ *   still the active one
  */
 export async function settleArchiveChange(
   assetId: string,
-  refetch: () => Promise<unknown>
+  refetch: () => Promise<unknown>,
+  isStillCurrent: () => boolean
 ): Promise<void> {
   markAssetChanged(assetId);
-  await refetch();
+  if (isStillCurrent()) await refetch();
 }

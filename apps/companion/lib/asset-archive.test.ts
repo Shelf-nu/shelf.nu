@@ -325,11 +325,32 @@ test("an archive or reinstate tells the list and other stacks, then reloads", as
   const before = assetChangeVersion("asset-settle");
   let refetched = 0;
 
-  await settleArchiveChange("asset-settle", async () => {
-    refetched += 1;
-  });
+  await settleArchiveChange(
+    "asset-settle",
+    async () => {
+      refetched += 1;
+    },
+    () => true
+  );
 
   // The assets list refetches on its next focus instead of showing the old row.
   assert.notEqual(assetChangeVersion("asset-settle"), before);
   assert.equal(refetched, 1);
+});
+
+test("after a workspace switch mid-request, the reload is skipped", async () => {
+  const before = assetChangeVersion("asset-switched");
+  let refetched = 0;
+
+  await settleArchiveChange(
+    "asset-switched",
+    async () => {
+      refetched += 1;
+    },
+    () => false
+  );
+
+  // The old workspace's answer must not replace the new workspace's load.
+  assert.equal(refetched, 0);
+  assert.notEqual(assetChangeVersion("asset-switched"), before);
 });
