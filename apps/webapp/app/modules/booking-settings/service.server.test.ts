@@ -15,6 +15,14 @@ import {
 // why: testing booking settings service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
+    // why: the settings save runs in a transaction; the callback gets the
+    // same mock as its client
+    $transaction: vitest.fn((callback: (tx: unknown) => unknown) =>
+      callback(db)
+    ),
+    // why: the stamp of leftover reservations is raw SQL; the tests read
+    // the statement it was given
+    $executeRaw: vitest.fn().mockResolvedValue(0),
     bookingSettings: {
       findUnique: vitest.fn(),
       findUniqueOrThrow: vitest.fn(),
@@ -947,5 +955,85 @@ describe("getBookingNotificationSettingsForOrg", () => {
       getBookingNotificationSettingsForOrg(mockOrganizationId)
     ).rejects.toBeInstanceOf(ShelfError);
     expect(db.bookingSettings.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateBookingSettings: turning booking approval on", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** The SQL text and values of the one raw statement the save ran. */
+  function stampStatement() {
+    const [strings, ...values] = vitest.mocked(db.$executeRaw).mock
+      .calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+    return { sql: strings.join("?"), values };
+  }
+
+  it("stamps the workspace's unapproved reservations when the first switch goes on", async () => {
+    // With both switches off every reservation is stamped approved when it is
+    // made, so an unstamped one is left over from before approval existed
+    // (or from a deploy overlap), never a request.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue({
+      ...mockBookingSettingsData,
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      requireApprovalForBase: true,
+    });
+
+    expect(db.$executeRaw).toHaveBeenCalledTimes(1);
+    const { sql, values } = stampStatement();
+    expect(sql).toContain('UPDATE "Booking"');
+    expect(sql).toContain('"approvedAt" IS NULL');
+    expect(sql).toContain("'RESERVED'");
+    expect(sql).toContain('"organizationId" = ?');
+    expect(values).toEqual([mockOrganizationId]);
+  });
+
+  it("leaves pending requests alone when approval was already on", async () => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue({
+      ...mockBookingSettingsData,
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+
+    await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      requireApprovalForSelfService: true,
+    });
+
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("stamps nothing when approval is turned off or not touched", async () => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue(mockBookingSettingsData);
+
+    await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      requireApprovalForBase: false,
+    });
+    await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      bufferStartTime: 48,
+    });
+
+    expect(db.$executeRaw).not.toHaveBeenCalled();
   });
 });

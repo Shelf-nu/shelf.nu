@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
+import {
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  isBookingApprovalEnabled,
+} from "~/utils/bookings";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking Settings";
@@ -171,11 +175,49 @@ export async function getBookingSettingsForOrganization(
 }
 
 /**
+ * Stamps every unapproved reservation of a workspace as approved, in the save
+ * that turns its first approval switch on.
+ *
+ * While both switches are off, `reserveBooking` stamps every reservation
+ * approved as it is made, so a RESERVED booking with no stamp in that state
+ * is never a request: it predates approval, or was made by a server version
+ * that did not know the column (the overlap between running the migrations
+ * and the new version taking over). Without the stamp, turning a switch on
+ * would show those reservations as pending and refuse their check-out.
+ *
+ * It runs inside the settings transaction, so it covers exactly the
+ * reservations made while approval was off, with no deploy-time step. The
+ * stamp is the booking's last update, as the backfill migration
+ * (`20261110120100_backfill_booking_approval`) sets it.
+ *
+ * @param tx - The settings transaction
+ * @param organizationId - The workspace turning approval on
+ */
+async function stampLeftoverReservationsApproved(
+  tx: Pick<typeof db, "$executeRaw">,
+  organizationId: string
+) {
+  // Raw SQL so the stamp does not move `updatedAt`, the request version an
+  // approver compares. Columns carry no `@map`: field names are column names.
+  await tx.$executeRaw`
+    UPDATE "Booking"
+    SET "approvedAt" = COALESCE("updatedAt", "createdAt", NOW())
+    WHERE "organizationId" = ${organizationId}
+      AND "approvedAt" IS NULL
+      AND "status" = 'RESERVED'
+  `;
+}
+
+/**
  * Updates an organization's booking settings.
  *
  * Only the fields passed with a value are written; every field left
  * `undefined` keeps its stored value, so each settings card can save its own
  * fields without resending the others.
+ *
+ * A save that turns the workspace's first approval switch on also stamps its
+ * unapproved reservations approved, in the same transaction (see
+ * {@link stampLeftoverReservationsApproved}).
  *
  * @param args - The organization id plus the settings fields to change
  * @returns The updated settings, in the {@link BOOKING_SETTINGS_SELECT} shape
@@ -258,10 +300,33 @@ export async function updateBookingSettings({
     if (notifyAdminsOnNewBooking !== undefined)
       updateData.notifyAdminsOnNewBooking = notifyAdminsOnNewBooking;
 
-    const bookingSettings = await db.bookingSettings.update({
-      where: { organizationId },
-      data: updateData,
-      select: BOOKING_SETTINGS_SELECT,
+    // Only a save that turns a switch on can start approval.
+    const mayTurnApprovalOn =
+      requireApprovalForBase === true || requireApprovalForSelfService === true;
+
+    const bookingSettings = await db.$transaction(async (tx) => {
+      const before = mayTurnApprovalOn
+        ? await tx.bookingSettings.findUnique({
+            where: { organizationId },
+            select: BOOKING_APPROVAL_SWITCHES_SELECT,
+          })
+        : null;
+
+      const updated = await tx.bookingSettings.update({
+        where: { organizationId },
+        data: updateData,
+        select: BOOKING_SETTINGS_SELECT,
+      });
+
+      if (
+        mayTurnApprovalOn &&
+        !isBookingApprovalEnabled(before) &&
+        isBookingApprovalEnabled(updated)
+      ) {
+        await stampLeftoverReservationsApproved(tx, organizationId);
+      }
+
+      return updated;
     });
 
     return bookingSettings;
