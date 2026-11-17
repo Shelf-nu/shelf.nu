@@ -108,6 +108,9 @@ export const handle = {
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
   const { locationId } = getParams(params, paramsSchema);
+  // The assets and the kits are saved by separate calls. Once the assets are
+  // saved, a failure in the kits step is not "nothing saved".
+  let assetsSaved = false;
 
   try {
     const { organizationId } = await requirePermission({
@@ -142,6 +145,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         removedAssetIds: [],
         assetQuantities,
       });
+      assetsSaved = true;
     }
 
     if (kitIds.length) {
@@ -158,7 +162,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return scanSaveError(reason);
+    return scanSaveError(reason, { partlySaved: assetsSaved });
   }
 }
 

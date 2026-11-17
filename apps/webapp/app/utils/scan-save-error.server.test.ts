@@ -42,4 +42,19 @@ describe("scanSaveError", () => {
       });
     }
   );
+
+  /**
+   * An action that saves in steps can have committed one when a later one is
+   * refused. That refusal is not "nothing saved", so the mark must stay.
+   */
+  it("marks a refusal after part of the save committed", () => {
+    const answer = scanSaveError(failWith(404), { partlySaved: true });
+
+    expect(answer.init?.status).toBe(404);
+    expect(answer.data.error.message).toBe("The save failed");
+    expect(getScanSubmitFailure(answer.data)).toEqual({
+      kind: "server",
+      status: 404,
+    });
+  });
 });

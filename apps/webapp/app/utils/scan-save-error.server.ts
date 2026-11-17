@@ -9,6 +9,8 @@
  * a 5xx answer also carries a `server` scan submit failure in its body, which
  * the scanner reads the same way as a save that got no answer at all: the list
  * stays marked, and the operator is told to check before confirming again.
+ * An action that saves in steps passes `partlySaved` once a step has
+ * committed, so a later refusal is marked the same way.
  *
  * Use it in the `catch` of every scanner route action that exports
  * `keepScanListOnSubmitFailure` as its client action.
@@ -25,14 +27,20 @@ import type { ScanSubmitFailureData } from "./scan-submit-failure";
  * Builds a scanner save's failure answer.
  *
  * @param reason - The error the save failed with
- * @returns The app's error payload with the error's status. A 5xx payload
- *   also carries `scanSubmitFailure` of kind `server`.
+ * @param options.partlySaved - Whether part of the save had already
+ *   committed when it failed. Defaults to `false`.
+ * @returns The app's error payload with the error's status. A 5xx payload, or
+ *   any payload of a partly saved save, also carries `scanSubmitFailure` of
+ *   kind `server`.
  */
-export function scanSaveError(reason: ShelfError) {
+export function scanSaveError(
+  reason: ShelfError,
+  { partlySaved = false }: { partlySaved?: boolean } = {}
+) {
   // `status` is optional on ShelfError; an unset status is a 500.
   const status = reason.status ?? 500;
   const body = error(reason);
-  if (status < 500) {
+  if (status < 500 && !partlySaved) {
     return data(body, { status });
   }
   const serverFailure: ScanSubmitFailureData = {

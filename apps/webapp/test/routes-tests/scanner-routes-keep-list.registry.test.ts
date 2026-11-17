@@ -69,7 +69,9 @@ describe("scanner routes keep their list when a save gets no answer", () => {
     (file) => {
       const source = readFileSync(path.join(ROUTES_DIR, file), "utf8");
 
-      expect(source).toMatch(/return scanSaveError\(reason\);/);
+      expect(source).toMatch(
+        /return scanSaveError\(reason(, \{ partlySaved: \w+ \})?\);/
+      );
     }
   );
 });
@@ -189,7 +191,8 @@ describe("scanner routes keep a draft of their list", () => {
   it.each([
     ["../../components/scanner/drawer/uses/assign-custody-drawer.tsx", 2],
     ["../../components/scanner/drawer/uses/release-custody-drawer.tsx", 2],
-    ["../../components/scanner/drawer/uses/update-location-drawer.tsx", 2],
+    // One `sendPart` reads both the assets and the kits answer.
+    ["../../components/scanner/drawer/uses/update-location-drawer.tsx", 1],
   ])("%s reads only the app's own answer", (file, requests) => {
     const source = read(file);
     expect(source.match(/readBulkSaveAnswer</g)).toHaveLength(requests);
@@ -202,4 +205,22 @@ describe("scanner routes keep a draft of their list", () => {
   ])("%s keeps its own scope", (file, scope) => {
     expect(read(file)).toContain(`scope: ${scope}`);
   });
+});
+
+/**
+ * The location scanner saves its assets and its kits in two calls. A kits
+ * step refused after the assets saved must keep the "may have gone through"
+ * mark, so the action tells `scanSaveError` the assets already saved.
+ */
+it("the location scanner marks a kits failure after its assets saved", () => {
+  const source = readFileSync(
+    path.join(ROUTES_DIR, "locations.$locationId.scan-assets-kits.tsx"),
+    "utf8"
+  );
+  expect(source).toMatch(
+    /await updateLocationAssets\(\{[\s\S]*?\}\);\s*assetsSaved = true;/
+  );
+  expect(source).toMatch(
+    /return scanSaveError\(reason, \{ partlySaved: assetsSaved \}\);/
+  );
 });

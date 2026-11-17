@@ -51,7 +51,7 @@ import {
 } from "../generic-item-row";
 import { buildUpdateLocationBlockers } from "./location-scan-blockers";
 import type { LocationState } from "./update-location-result";
-import { foldLocationPart } from "./update-location-result";
+import { sendLocationParts } from "./update-location-result";
 
 /**
  * Drawer component for managing scanned assets to be added to a location
@@ -167,59 +167,47 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
       // The result is shown once every part has answered. Each part's status
       // is shown as soon as it answers, so Done pressed while the kits are
       // still waiting takes the saved assets out of the list.
-      let result: LocationState = { status: "processing" };
-      let parts: BulkPartStatuses = {
-        assets: assetIds.length ? "processing" : "skipped",
-        kits: kitIds.length ? "processing" : "skipped",
+      let latest: LocationSave = PENDING_LOCATION_SAVE;
+      const onProgress = (progress: LocationSave) => {
+        latest = progress;
+        show(progress);
       };
-      show({ result, parts });
+      const sendPart = async (path: string, body: FormData) =>
+        readBulkSaveAnswer<{ error?: { message: string } }>(
+          await fetch(path, { method: "POST", body })
+        );
 
       try {
-        if (assetIds.length) {
-          const formData = objectToFormData({
-            assetIds,
-            newLocationId,
-          });
-          const assetsResponse = await fetch(
-            "/api/assets/bulk-update-location",
-            {
-              method: "POST",
-              body: formData,
-            }
-          );
-          const assetsData = await readBulkSaveAnswer<{
-            error?: { message: string };
-          }>(assetsResponse);
-          result = foldLocationPart(result, assetsData);
-          parts = { ...parts, assets: assetsData.error ? "error" : "success" };
-          if (kitIds.length) {
-            show({ result: { status: "processing" }, parts });
-          }
+        const saved = await sendLocationParts({
+          sendAssets: assetIds.length
+            ? () =>
+                sendPart(
+                  "/api/assets/bulk-update-location",
+                  objectToFormData({ assetIds, newLocationId })
+                )
+            : null,
+          sendKits: kitIds.length
+            ? () =>
+                sendPart(
+                  "/api/kits/bulk-actions",
+                  objectToFormData({
+                    kitIds,
+                    newLocationId,
+                    intent: "bulk-update-location",
+                  })
+                )
+            : null,
+          isCurrent: attempt.isCurrent,
+          onProgress,
+        });
+        if (saved) {
+          show(saved);
         }
-
-        if (kitIds.length) {
-          const kitFormData = objectToFormData({
-            kitIds,
-            newLocationId,
-            intent: "bulk-update-location",
-          });
-
-          const kitsResponse = await fetch("/api/kits/bulk-actions", {
-            method: "POST",
-            body: kitFormData,
-          });
-          const kitsData = await readBulkSaveAnswer<{
-            error?: { message: string };
-          }>(kitsResponse);
-          result = foldLocationPart(result, kitsData);
-          parts = { ...parts, kits: kitsData.error ? "error" : "success" };
-        }
-
-        show({ result, parts });
       } catch (error) {
         // No answer: the server may have saved it anyway, so the mark stays.
         // A part that was never sent is not saved either.
         attempt.markUnanswered();
+        const { parts } = latest;
         show({
           result: {
             status: "error",
