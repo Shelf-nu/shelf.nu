@@ -29,7 +29,8 @@ import type { ScanSubmitFailureData } from "./scan-submit-failure";
  *   also carries `scanSubmitFailure` of kind `server`.
  */
 export function scanSaveError(reason: ShelfError) {
-  const status = reason.status;
+  // `status` is optional on ShelfError; an unset status is a 500.
+  const status = reason.status ?? 500;
   const body = error(reason);
   if (status < 500) {
     return data(body, { status });

@@ -74,9 +74,11 @@ export const links: LinksFunction = () => [
  * transit may still have been saved.
  *
  * Only the completion is covered. Removing a scan is submitted in the
- * background and nothing reads its result, so a failure there has to keep
- * reaching the error boundary: turning it into action data would hide a
- * removal the server never made.
+ * background and nothing reads its result, so a remove request that gets no
+ * answer keeps reaching the error boundary: turning it into action data would
+ * hide a removal the server may never have made. A remove the server answers
+ * with an error comes back as fetcher data, which the audit drawer does not
+ * read yet.
  */
 export async function clientAction(args: ClientActionFunctionArgs) {
   // Read from the URL, not the body: the completion form is multipart and

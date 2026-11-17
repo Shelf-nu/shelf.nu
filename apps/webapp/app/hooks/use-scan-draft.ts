@@ -57,8 +57,10 @@ const SIGN_IN_PATH = "/login";
 
 /**
  * Whether the list on screen was sent in a save that got no answer, so it may
- * already be saved. Raised when the route's action reports such a failure, or
- * when a restored draft carries the mark; lowered when the list is emptied, a
+ * already be saved. Raised as a save is sent (by the route, or by a bulk action
+ * through `useInPlaceSaveMark`), kept when that save gets no answer or a 5xx,
+ * and raised when a restored draft carries the mark; lowered when the server
+ * refuses the save, the list is emptied, a
  * draft without the mark is restored, or the scanner unmounts. It is stored
  * with the draft, so the warning survives a reload together with the list,
  * and `ScanSubmitFailureAlert` shows it when the failure itself is gone.

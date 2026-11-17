@@ -1,9 +1,16 @@
 /**
  * The scanner drawer's notice for a save that got no answer.
  *
- * Rendered by the shared drawer for every scanner. It shows only when the
- * route's action data carries a transport failure, which happens on routes
- * that export `keepScanListOnSubmitFailure` as their `clientAction`.
+ * Rendered by the shared drawer for every scanner. It has two sources:
+ *
+ * - A failure in the route's action data: a save with no answer (routes that
+ *   export `keepScanListOnSubmitFailure` as their `clientAction`), or a 5xx
+ *   the app answered (`scanSaveError`). A failure whose list has since been
+ *   emptied (`retiredScanSubmitFailureAtom`) is ignored.
+ * - `unconfirmedScanSaveAtom`, with no live failure: the list on screen was
+ *   sent in a save that may have gone through, either restored from a draft
+ *   that carries the mark or sent by a bulk action that saves in place. A
+ *   refusal while the mark is set keeps that warning beside the refusal.
  *
  * The wording is deliberately not "the save failed". A request cut off in
  * transit may still have been carried out by the server, so the notice tells
@@ -96,7 +103,8 @@ const TOO_LARGE_ADVICE =
  *
  * @param props.savedCheck - Optional link to the page that shows the result.
  *   Opens in a new tab so the scanner, and its list, stay where they are.
- * @returns The notice, or `null` when the last save had an answer
+ * @returns The notice, or `null` while a submission is in flight, or when
+ *   there is neither a live failure nor an unconfirmed mark
  */
 export function ScanSubmitFailureAlert({
   savedCheck,
