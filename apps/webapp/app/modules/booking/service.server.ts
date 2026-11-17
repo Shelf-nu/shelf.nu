@@ -1925,10 +1925,35 @@ export async function updateBasicBooking({
       }
     }
 
-    const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L619; this is the write on that same proven id
-      where: { id: booking.id },
-      data: dataToUpdate,
+    const updatedBooking = await db.$transaction(async (tx) => {
+      // Dates and custodian are written only on a draft, decided from the read
+      // above. Decided again on the locked row: a booking reserved (and maybe
+      // approved) since then keeps the dates and custodian it was approved for.
+      if (booking.status === BookingStatus.DRAFT) {
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          booking.id,
+          organizationId
+        );
+        if (lockedStatus !== BookingStatus.DRAFT) {
+          throw new ShelfError({
+            cause: null,
+            title: "Update failed",
+            message:
+              "This booking changed while you were editing it. Reload the page and try again.",
+            additionalData: { bookingId: booking.id, lockedStatus },
+            label,
+            status: 409,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      return tx.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id },
+        data: dataToUpdate,
+      });
     });
 
     // BOOKING ACTIVITY LOG: Create separate notes for each change

@@ -2409,7 +2409,11 @@ describe("getKitIdsToAcquire", () => {
 });
 
 describe("updateBasicBooking", () => {
-  afterEach(restoreTeamMemberFindFirst);
+  afterEach(() => {
+    restoreTeamMemberFindFirst();
+    // Back to the file-wide default lock status.
+    vitest.mocked(db.$queryRaw).mockResolvedValue([{ status: "ONGOING" }]);
+  });
 
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -2417,6 +2421,31 @@ describe("updateBasicBooking", () => {
       "team-member-1": "user-1",
       "team-member-2": "user-2",
     });
+    // The row lock reads the booking as the tests' snapshot has it: a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValue([{ status: BookingStatus.DRAFT }]);
+  });
+
+  it("refuses a draft-only edit when the booking left DRAFT before the write", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      name: "Old Name",
+      tags: [],
+    });
+    // Reserved (and maybe approved) between the read and the write.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValue([{ status: BookingStatus.RESERVED }]);
+
+    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
+      /changed while you were editing/
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   const mockUpdateBookingParams = {
