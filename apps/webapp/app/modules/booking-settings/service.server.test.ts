@@ -972,10 +972,22 @@ describe("updateBookingSettings: turning booking approval on", () => {
     return { sql: strings.join("?"), values };
   }
 
-  /** Answers the locked read of `approvalFirstEnabledAt`. */
-  function firstEnabledAt(value: Date | null) {
+  /**
+   * Answers the locked read: `approvalFirstEnabledAt` and the switches as
+   * they stood before the save (both off unless given).
+   */
+  function firstEnabledAt(
+    value: Date | null,
+    before: { base?: boolean; selfService?: boolean } = {}
+  ) {
     //@ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValue([{ approvalFirstEnabledAt: value }]);
+    db.$queryRaw.mockResolvedValue([
+      {
+        approvalFirstEnabledAt: value,
+        requireApprovalForBase: before.base ?? false,
+        requireApprovalForSelfService: before.selfService ?? false,
+      },
+    ]);
   }
 
   /** The settings row the save writes, with these switches. */
@@ -1032,6 +1044,31 @@ describe("updateBookingSettings: turning booking approval on", () => {
 
     expect(db.$executeRaw).not.toHaveBeenCalled();
     expect(db.bookingSettings.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("records, without stamping, a switch already on whose first switch-on was never recorded", async () => {
+    // A switch turned on by a server version that did not know the marker:
+    // approval has been on, so an unstamped reservation can be a real
+    // request. The settings card sends both switches on every save, so this
+    // save passes `true` without turning anything on.
+    firstEnabledAt(null, { base: true });
+    savedSwitches(true, false);
+
+    await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    const lock = statement(vitest.mocked(db.$queryRaw).mock.calls[0]);
+    expect(lock.sql).toContain('"requireApprovalForBase"');
+    expect(lock.sql).toContain('"requireApprovalForSelfService"');
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+    expect(db.bookingSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { approvalFirstEnabledAt: expect.any(Date) },
+      })
+    );
   });
 
   it("neither locks nor stamps when approval is turned off or not touched", async () => {

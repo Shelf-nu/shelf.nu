@@ -172,24 +172,39 @@ export async function getBookingSettingsForOrganization(
 }
 
 /**
- * Whether the workspace has never turned an approval switch on, read under a
- * lock on its settings row that holds until the transaction ends.
+ * The workspace's approval history, read under a lock on its settings row that
+ * holds until the transaction ends, so two saves at once cannot both see
+ * approval as never enabled.
  *
  * @param tx - The settings transaction
  * @param organizationId - The workspace
- * @returns True while `approvalFirstEnabledAt` is still empty
+ * @returns Whether its first switch-on is recorded, and whether a switch is
+ *   on right now (before this save writes)
  */
-async function approvalNeverEnabledLocked(
+async function readApprovalHistoryLocked(
   tx: Pick<typeof db, "$queryRaw">,
   organizationId: string
-): Promise<boolean> {
-  // Raw SQL for `FOR UPDATE`; the column carries no `@map`.
-  const rows = await tx.$queryRaw<{ approvalFirstEnabledAt: Date | null }[]>`
-    SELECT "approvalFirstEnabledAt" FROM "BookingSettings"
+): Promise<{ firstEnableRecorded: boolean; enabledNow: boolean }> {
+  // Raw SQL for `FOR UPDATE`; these columns carry no `@map`.
+  const rows = await tx.$queryRaw<
+    {
+      approvalFirstEnabledAt: Date | null;
+      requireApprovalForBase: boolean;
+      requireApprovalForSelfService: boolean;
+    }[]
+  >`
+    SELECT "approvalFirstEnabledAt", "requireApprovalForBase",
+      "requireApprovalForSelfService"
+    FROM "BookingSettings"
     WHERE "organizationId" = ${organizationId}
     FOR UPDATE
   `;
-  return rows.length > 0 && rows[0].approvalFirstEnabledAt === null;
+  const row = rows[0];
+  return {
+    // No settings row: nothing to record, and nothing to stamp.
+    firstEnableRecorded: !row || row.approvalFirstEnabledAt !== null,
+    enabledNow: Boolean(row) && isBookingApprovalEnabled(row),
+  };
 }
 
 /**
@@ -324,10 +339,9 @@ export async function updateBookingSettings({
       requireApprovalForBase === true || requireApprovalForSelfService === true;
 
     const bookingSettings = await db.$transaction(async (tx) => {
-      // Locked, so two saves at once cannot both read "never enabled".
-      const neverEnabled = mayTurnApprovalOn
-        ? await approvalNeverEnabledLocked(tx, organizationId)
-        : false;
+      const history = mayTurnApprovalOn
+        ? await readApprovalHistoryLocked(tx, organizationId)
+        : null;
 
       const updated = await tx.bookingSettings.update({
         where: { organizationId },
@@ -335,8 +349,18 @@ export async function updateBookingSettings({
         select: BOOKING_SETTINGS_SELECT,
       });
 
-      if (neverEnabled && isBookingApprovalEnabled(updated)) {
-        await stampLeftoverReservationsApproved(tx, organizationId);
+      if (
+        history &&
+        !history.firstEnableRecorded &&
+        isBookingApprovalEnabled(updated)
+      ) {
+        // Stamp only when this save turns approval on from fully off. A
+        // switch already on means approval has been on (set by a server
+        // version that did not record it), so an unstamped reservation can
+        // be a real request: record the first switch-on, stamp nothing.
+        if (!history.enabledNow) {
+          await stampLeftoverReservationsApproved(tx, organizationId);
+        }
         await tx.bookingSettings.update({
           where: { organizationId },
           data: { approvalFirstEnabledAt: new Date() },
