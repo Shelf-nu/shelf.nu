@@ -106,6 +106,7 @@ import type { ReducedModelReservation } from "~/modules/booking-model-request/se
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import {
   lockAssetForQuantityUpdate,
+  lockAssetRowsForQuantityUpdate,
   lockEveryAssetForQuantityUpdate,
 } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
@@ -5467,84 +5468,138 @@ export function spreadSessionDispositionsOverSlices(args: {
   return spread;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * Units of one asset still to check in on a booking: the asset-level figure of
+ * {@link computeBookingCheckinRemaining}, for a caller that needs one asset.
+ * Reach for the batched helper whenever there are several.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking the asset belongs to
+ * @param assetId - The asset to measure
+ * @returns Units still to check in, floored at 0
+ */
 export async function computeBookingAssetRemaining(
-  tx: any,
+  tx: BookingCheckinRemainingClient,
   bookingId: Booking["id"],
   assetId: Asset["id"]
 ): Promise<number> {
-  // The old `bookingId_assetId` composite unique was replaced by two
-  // partial uniques (manual + kit-driven) so the same asset can have
-  // multiple BookingAsset rows in one booking — sum the per-row
-  // quantities to get the total booked for this (booking, asset)
-  // pair. `ConsumptionLog` is still keyed by (bookingId, assetId)
-  // alone (no per-row attribution), so its aggregate already covers
-  // the booking-asset combination regardless of which slice the
-  // check-in happened against.
-  const [pivots, loggedSum] = await Promise.all([
-    tx.bookingAsset.findMany({
-      where: { bookingId, assetId },
-      select: { quantity: true },
-    }),
-    tx.consumptionLog.aggregate({
-      where: {
-        assetId,
-        bookingId,
-        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
-      },
-      _sum: { quantity: true },
-    }),
+  const { byAsset } = await computeBookingCheckinRemaining(tx, bookingId, [
+    assetId,
   ]);
-
-  const booked = (pivots as Array<{ quantity: number }>).reduce(
-    (sum, p) => sum + (p.quantity ?? 0),
-    0
-  );
-  const logged = loggedSum._sum?.quantity ?? 0;
-  return Math.max(0, booked - logged);
+  return byAsset.get(assetId) ?? 0;
 }
 
 /**
- * Remaining units for a SINGLE BookingAsset slice (Polish-7b per-row
- * check-in cap). Unlike {@link computeBookingAssetRemaining} (which sums
- * every slice of the asset), this bounds one slice:
+ * Minimal Prisma surface the check-in remaining reads touch. Both the
+ * extended top-level client (`db`) and an interactive transaction client
+ * satisfy it, like {@link CheckoutRemainingTxClient} for the check-out side.
+ */
+type BookingCheckinRemainingClient = Pick<
+  ExtendedPrismaClient,
+  "bookingAsset" | "consumptionLog"
+>;
+
+/** Units still to check in, per asset and per slice, on one booking. */
+export type BookingCheckinRemaining = {
+  /** Units still to check in for each asset, by asset id. */
+  byAsset: Map<string, number>;
+  /** Units still to check in for each of those assets' slices, by slice id. */
+  bySlice: Map<string, number>;
+};
+
+/**
+ * The units still to check in for MANY assets on ONE booking, and for each
+ * of their slices, in two queries whatever the number of assets.
  *
- *   `slice.quantity − Σ(ConsumptionLog tagged with this bookingAssetId)`
+ * A check-in session reads this once, under the asset locks, and then counts
+ * each disposition's units off in memory. That gives the same numbers as
+ * re-querying after every disposition, because the session's own logs are
+ * the only ones written while it holds the locks, and each disposition writes
+ * exactly the units it claims (a RETURN log plus the CONSUME / LOSS / DAMAGE
+ * ledger rows), tagged with its slice when it names one.
  *
- * Only logs explicitly attributed to this slice count — legacy
- * `bookingAssetId IS NULL` logs are intentionally excluded here. The
- * caller (`partialCheckinBooking`) takes `min(asset-level remaining,
- * slice remaining)` as the cap, so the asset-level guard still accounts
- * for those NULL logs and the total can never be over-checked-in.
+ * - Asset level: `Σ(BookingAsset.quantity) − Σ(every check-in log of the
+ *   asset)`, legacy untagged logs included.
+ * - Slice level: `slice.quantity − Σ(logs tagged with that slice)`.
+ *
+ * Both floor at 0. An asset or slice not on the booking reads 0.
  *
  * @param tx - Prisma transaction client (or the default `db` client)
- * @param bookingId - Booking the slice belongs to
- * @param bookingAssetId - The BookingAsset row id to measure
+ * @param bookingId - Booking the assets belong to
+ * @param assetIds - Assets to measure (duplicates ignored)
+ * @returns Remaining units by asset id and by slice id
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function computeBookingAssetSliceRemaining(
-  tx: any,
+export async function computeBookingCheckinRemaining(
+  tx: BookingCheckinRemainingClient,
   bookingId: Booking["id"],
-  bookingAssetId: string
-): Promise<number> {
-  const [slice, loggedSum] = await Promise.all([
-    tx.bookingAsset.findUnique({
-      where: { id: bookingAssetId },
-      select: { quantity: true },
+  assetIds: Asset["id"][]
+): Promise<BookingCheckinRemaining> {
+  const ids = [...new Set(assetIds)];
+  const byAsset = new Map<string, number>();
+  const bySlice = new Map<string, number>();
+  if (ids.length === 0) return { byAsset, bySlice };
+
+  const [slices, loggedGroups] = (await Promise.all([
+    tx.bookingAsset.findMany({
+      where: { bookingId, assetId: { in: ids } },
+      select: { id: true, assetId: true, quantity: true },
     }),
-    tx.consumptionLog.aggregate({
+    tx.consumptionLog.groupBy({
+      by: ["assetId", "bookingAssetId"],
       where: {
         bookingId,
-        bookingAssetId,
-        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
+        assetId: { in: ids },
+        category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
       },
       _sum: { quantity: true },
     }),
-  ]);
+  ])) as [
+    Array<{ id: string; assetId: string; quantity: number | null }>,
+    Array<{
+      assetId: string;
+      bookingAssetId: string | null;
+      _sum: { quantity: number | null } | null;
+    }>,
+  ];
 
-  const booked = (slice as { quantity: number } | null)?.quantity ?? 0;
-  const logged = loggedSum._sum?.quantity ?? 0;
-  return Math.max(0, booked - logged);
+  const loggedByAsset = new Map<string, number>();
+  const loggedBySlice = new Map<string, number>();
+  for (const group of loggedGroups) {
+    const quantity = group._sum?.quantity ?? 0;
+    loggedByAsset.set(
+      group.assetId,
+      (loggedByAsset.get(group.assetId) ?? 0) + quantity
+    );
+    if (group.bookingAssetId) {
+      loggedBySlice.set(
+        group.bookingAssetId,
+        (loggedBySlice.get(group.bookingAssetId) ?? 0) + quantity
+      );
+    }
+  }
+
+  const bookedByAsset = new Map<string, number>();
+  for (const slice of slices) {
+    const booked = slice.quantity ?? 0;
+    bookedByAsset.set(
+      slice.assetId,
+      (bookedByAsset.get(slice.assetId) ?? 0) + booked
+    );
+    bySlice.set(
+      slice.id,
+      Math.max(0, booked - (loggedBySlice.get(slice.id) ?? 0))
+    );
+  }
+  for (const assetId of ids) {
+    byAsset.set(
+      assetId,
+      Math.max(
+        0,
+        (bookedByAsset.get(assetId) ?? 0) - (loggedByAsset.get(assetId) ?? 0)
+      )
+    );
+  }
+  return { byAsset, bySlice };
 }
 
 /**
@@ -5791,7 +5846,7 @@ export async function computeBookingAssetRemainingToCheckOut(
 
 /**
  * Per-slice remaining units that can still be checked OUT. Mirror of
- * {@link computeBookingAssetSliceRemaining} (the check-IN side) on the OUT
+ * {@link computeBookingCheckinRemaining} (the check-IN side) on the OUT
  * side: bounds one slice rather than summing every slice of the asset.
  *
  *   `slice.quantity − Σ(PartialBookingCheckout claims attributed to this slice)`
@@ -6894,20 +6949,18 @@ export async function checkinBooking({
          */
 
         /**
-         * Per-asset running pool of remaining units, seeded once from the
-         * asset-level `computeBookingAssetRemaining`. As each slice claims
-         * units we decrement this so the SUM across all slices of one asset
-         * can never exceed the asset-level remaining — the backstop that
-         * accounts for legacy `bookingAssetId IS NULL` logs which the
-         * per-slice helper deliberately excludes.
+         * Units still to check in, for every asset and slice, in one read.
+         * `byAsset` is the per-asset running pool: as each slice claims units
+         * it is decremented, so the SUM across all slices of one asset can
+         * never exceed the asset-level remaining. That is the backstop for
+         * legacy `bookingAssetId IS NULL` logs, which a slice's own remaining
+         * deliberately excludes. A slice's remaining is read once: the loop
+         * below visits each slice once.
          */
-        const assetRemainingSoFar = new Map<string, number>();
-        for (const assetId of qtyTrackedAssetIds) {
-          assetRemainingSoFar.set(
-            assetId,
-            await computeBookingAssetRemaining(tx, id, assetId)
-          );
-        }
+        const checkinRemaining = await computeBookingCheckinRemaining(tx, id, [
+          ...qtyTrackedAssetIds,
+        ]);
+        const assetRemainingSoFar = checkinRemaining.byAsset;
 
         /**
          * Asset-level explicit dispositions (no `bookingAssetId`) apply to
@@ -7035,11 +7088,7 @@ export async function checkinBooking({
         );
 
         for (const slice of qtyTrackedSlices) {
-          const sliceRemaining = await computeBookingAssetSliceRemaining(
-            tx,
-            id,
-            slice.id
-          );
+          const sliceRemaining = checkinRemaining.bySlice.get(slice.id) ?? 0;
           if (sliceRemaining <= 0) continue; // Already reconciled.
 
           // Cap by BOTH the slice's own remaining AND the asset-level
@@ -8624,10 +8673,12 @@ export async function partialCheckinBooking({
        * sorted id order, the order every other booking flow locks in. The
        * loop below walks `dispositions` in payload order, so locking as it goes
        * would let two sessions that share assets take the locks in reverse and
-       * deadlock. Its own lock call then re-acquires a row this transaction
-       * already holds, which only re-reads it.
+       * deadlock. One statement takes every lock in that order and returns
+       * the rows; they are kept, and this session's own pool decrements are
+       * applied to them as it goes, so no disposition has to read its asset
+       * again.
        */
-      for (const assetId of [
+      const qtyAssetIdsInSession = [
         ...new Set(
           dispositions
             .filter(
@@ -8635,8 +8686,75 @@ export async function partialCheckinBooking({
             )
             .map((d) => d.assetId)
         ),
-      ].sort()) {
-        await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+      ].sort();
+      const lockedAssetById = await lockAssetRowsForQuantityUpdate(
+        tx,
+        qtyAssetIdsInSession,
+        organizationId
+      );
+
+      /**
+       * Units still to check in, read once under the locks. The asset's
+       * figure is counted down as each disposition claims units (see
+       * `computeBookingCheckinRemaining` for why that matches a fresh read).
+       */
+      const checkinRemaining = await computeBookingCheckinRemaining(
+        tx,
+        id,
+        qtyAssetIdsInSession
+      );
+
+      /**
+       * Units each asset has in custody, for the pool-drain guard. Read once
+       * under the locks: nothing in this transaction moves custody.
+       */
+      const custodyUnitsByAssetId = new Map<string, number>();
+      if (qtyAssetIdsInSession.length > 0) {
+        const custodyGroups = (await tx.custody.groupBy({
+          by: ["assetId"],
+          where: { assetId: { in: qtyAssetIdsInSession } },
+          _sum: { quantity: true },
+        })) as Array<{
+          assetId: string;
+          _sum: { quantity: number | null } | null;
+        }>;
+        for (const group of custodyGroups) {
+          custodyUnitsByAssetId.set(group.assetId, group._sum?.quantity ?? 0);
+        }
+      }
+
+      /**
+       * Units logged on this booking before this session, for the assets that
+       * hold a kit slice. Read once, under the locks and before this session
+       * writes any log, so a concurrent session cannot slip in between.
+       */
+      const kitHoldingAssetIds = qtyAssetIdsInSession.filter((assetId) =>
+        qtyAssetIdsWithKitSlice.has(assetId)
+      );
+      if (kitHoldingAssetIds.length > 0) {
+        const priorLogs = (await tx.consumptionLog.findMany({
+          where: {
+            bookingId: id,
+            assetId: { in: kitHoldingAssetIds },
+            category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+          },
+          select: { assetId: true, bookingAssetId: true, quantity: true },
+        })) as Array<{
+          assetId: string;
+          bookingAssetId: string | null;
+          quantity: number;
+        }>;
+        for (const assetId of kitHoldingAssetIds) {
+          priorLogsByAssetId.set(
+            assetId,
+            priorLogs
+              .filter((log) => log.assetId === assetId)
+              .map(({ bookingAssetId, quantity }) => ({
+                bookingAssetId,
+                quantity,
+              }))
+          );
+        }
       }
 
       for (const disp of dispositions) {
@@ -8644,41 +8762,27 @@ export async function partialCheckinBooking({
           continue;
         }
 
-        const lockedAsset = await lockAssetForQuantityUpdate(
-          tx,
-          disp.assetId,
-          organizationId
-        );
-
-        // Read under the asset lock and before this session writes any log
-        // for the asset, so a concurrent session cannot slip in between.
-        if (
-          qtyAssetIdsWithKitSlice.has(disp.assetId) &&
-          !priorLogsByAssetId.has(disp.assetId)
-        ) {
-          priorLogsByAssetId.set(
-            disp.assetId,
-            await tx.consumptionLog.findMany({
-              where: {
-                bookingId: id,
-                assetId: disp.assetId,
-                category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
-              },
-              select: { bookingAssetId: true, quantity: true },
-            })
-          );
+        const lockedAsset = lockedAssetById.get(disp.assetId);
+        if (!lockedAsset) {
+          // Unreachable: every quantity-tracked disposition's asset is in
+          // `qtyAssetIdsInSession`, and the lock throws a 404 for any it
+          // cannot find. Narrows the type for the code below.
+          throw new ShelfError({
+            cause: null,
+            status: 500,
+            label,
+            message: "Something went wrong while checking in the booking.",
+            additionalData: { assetId: disp.assetId, bookingId: id },
+          });
         }
 
         /**
-         * Re-query remaining inside the transaction, AFTER the lock. This
-         * closes the race with another check-in session that committed
-         * between our loader read and our tx start.
+         * Remaining as read under the lock, minus what this session already
+         * claimed. Reading inside the transaction closes the race with another
+         * check-in session that committed between our loader read and our tx
+         * start.
          */
-        const remaining = await computeBookingAssetRemaining(
-          tx,
-          id,
-          disp.assetId
-        );
+        const remaining = checkinRemaining.byAsset.get(disp.assetId) ?? 0;
 
         /**
          * Per-slice cap (Polish-7b): when the drawer targets a specific
@@ -8691,11 +8795,8 @@ export async function partialCheckinBooking({
          */
         let cap = remaining;
         if (disp.bookingAssetId) {
-          const sliceRemaining = await computeBookingAssetSliceRemaining(
-            tx,
-            id,
-            disp.bookingAssetId
-          );
+          const sliceRemaining =
+            checkinRemaining.bySlice.get(disp.bookingAssetId) ?? 0;
           cap = Math.min(cap, sliceRemaining);
         }
 
@@ -8785,11 +8886,7 @@ export async function partialCheckinBooking({
          * the physical pool drop below what team members are holding.
          */
         if (poolDecrement > 0) {
-          const custodyAgg = await tx.custody.aggregate({
-            where: { assetId: disp.assetId },
-            _sum: { quantity: true },
-          });
-          const inCustody = custodyAgg._sum?.quantity ?? 0;
+          const inCustody = custodyUnitsByAssetId.get(disp.assetId) ?? 0;
           const projected = (lockedAsset.quantity ?? 0) - poolDecrement;
           if (projected < inCustody) {
             throw new ShelfError({
@@ -8885,9 +8982,14 @@ export async function partialCheckinBooking({
             where: { id: disp.assetId },
             data: { quantity: { decrement: poolDecrement } },
           });
-          // Audit the stock drop. `lockedAsset` was freshly re-read per
-          // disposition, so from/to chains through sequential decrements when
-          // one asset has several dispositions.
+          // Keep the locked row in step with the write, so a later
+          // disposition of the same asset starts from the decremented pool.
+          lockedAssetById.set(disp.assetId, {
+            ...lockedAsset,
+            quantity: beforeQuantity - poolDecrement,
+          });
+          // Audit the stock drop. from/to chains through sequential
+          // decrements when one asset has several dispositions.
           quantityChangeEvents.push({
             organizationId,
             actorUserId: userId,
@@ -8919,9 +9021,9 @@ export async function partialCheckinBooking({
           });
 
           /**
-           * Written per disposition, not once after the loop: the next
-           * disposition of this asset caps itself on this booking's
-           * CONSUME / LOSS / DAMAGE rows, so it must see these.
+           * Written per disposition, not once after the loop: a later
+           * untagged disposition of this asset spreads its units over the
+           * booking's logs it reads above (`priorLogs`), so it must see these.
            */
           await recordStockChanges(tx, {
             organizationId,
@@ -8942,6 +9044,11 @@ export async function partialCheckinBooking({
         }
 
         const pendingAfter = remaining - claimed;
+        // Count the claim off what is left for the asset: this disposition
+        // just wrote logs for exactly these units. A slice's remaining needs
+        // no count-down, because a session names each slice at most once
+        // (repeated asset and slice pairs collapse above).
+        checkinRemaining.byAsset.set(disp.assetId, pendingAfter);
         if (pendingAfter === 0) {
           fullyReconciledQtyAssetIds.push(disp.assetId);
         }
@@ -8990,11 +9097,13 @@ export async function partialCheckinBooking({
           )
         ),
       ];
-      for (const assetId of qtyCheckinIds) {
-        const [otherBookings, custodyCount] = await Promise.all([
-          tx.bookingAsset.count({
+      // One grouped read per question for the whole batch, not one per asset.
+      if (qtyCheckinIds.length > 0) {
+        const [heldByOtherBookings, heldInCustody] = (await Promise.all([
+          tx.bookingAsset.groupBy({
+            by: ["assetId"],
             where: {
-              assetId,
+              assetId: { in: qtyCheckinIds },
               bookingId: { not: id },
               booking: {
                 status: {
@@ -9003,12 +9112,22 @@ export async function partialCheckinBooking({
               },
             },
           }),
-          tx.custody.count({ where: { assetId } }),
+          tx.custody.groupBy({
+            by: ["assetId"],
+            where: { assetId: { in: qtyCheckinIds } },
+          }),
+        ])) as [Array<{ assetId: string }>, Array<{ assetId: string }>];
+        const stillHeld = new Set([
+          ...heldByOtherBookings.map((row) => row.assetId),
+          ...heldInCustody.map((row) => row.assetId),
         ]);
-        if (otherBookings === 0 && custodyCount === 0) {
-          await tx.asset.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` comes from `effectiveAssetIds` validated against the org-scoped booking assets earlier in partialCheckinBooking
-            where: { id: assetId },
+        const freedAssetIds = qtyCheckinIds.filter(
+          (assetId) => !stillHeld.has(assetId)
+        );
+        if (freedAssetIds.length > 0) {
+          await tx.asset.updateMany({
+            // Scope to the caller's org (cross-org IDOR defence).
+            where: { id: { in: freedAssetIds }, organizationId },
             data: { status: AssetStatus.AVAILABLE },
           });
         }
@@ -9797,17 +9916,26 @@ export async function partialCheckinBooking({
     });
     // Counted per ASSET, not per slice: a quantity-tracked asset can hold a
     // standalone slice and several kit-driven ones on one booking, and
-    // `computeBookingAssetRemaining` already answers for all of them.
+    // the asset-level remaining already answers for all of them.
     const slicesByAssetId = new Map<string, typeof outstandingBookingAssets>();
     for (const ba of outstandingBookingAssets) {
       const slices = slicesByAssetId.get(ba.assetId);
       if (slices) slices.push(ba);
       else slicesByAssetId.set(ba.assetId, [ba]);
     }
+    const qtyRemaining = await computeBookingCheckinRemaining(
+      db,
+      id,
+      [...slicesByAssetId]
+        .filter(
+          ([, slices]) => slices[0].asset?.type === AssetType.QUANTITY_TRACKED
+        )
+        .map(([assetId]) => assetId)
+    );
     let remainingAssetCount = 0;
     for (const [assetId, slices] of slicesByAssetId) {
       if (slices[0].asset?.type === AssetType.QUANTITY_TRACKED) {
-        const rem = await computeBookingAssetRemaining(db, id, assetId);
+        const rem = qtyRemaining.byAsset.get(assetId) ?? 0;
         if (rem > 0 || slices.some(isSliceOutByMarker))
           remainingAssetCount += 1;
       } else if (slices.some(isIndividualSliceStillOut)) {
@@ -10847,7 +10975,7 @@ export async function partialCheckoutBooking({
           if (disp.bookingAssetId) {
             // Checkout-side per-slice remaining: booked − prior
             // `PartialBookingCheckout` claims attributed to THIS slice. Must NOT
-            // use the check-IN helper (`computeBookingAssetSliceRemaining`), which
+            // use the check-IN helper (`computeBookingCheckinRemaining`), which
             // only subtracts return `ConsumptionLog`s and would let a slice with
             // prior checkouts be over-claimed here — and would mis-report the
             // note's per-slice "still booked" (which reuses this value below).
