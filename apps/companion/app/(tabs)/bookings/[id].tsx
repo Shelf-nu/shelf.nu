@@ -900,7 +900,8 @@ function BookingDetailScreen({ id }: { id: string }) {
             const { error: err } = await api.approveBooking(
               currentOrg.id,
               booking.id,
-              booking.updatedAt
+              booking.updatedAt,
+              booking.requestVersion
             );
             setIsActioning(false);
             if (err) {
@@ -1855,8 +1856,7 @@ function BookingDetailScreen({ id }: { id: string }) {
    * restricted role, whose writes are scoped to their own bookings — being the
    * booking's creator or its custodian. Offering either to someone the server
    * would reject just trades a visible button for a 403. A pending request is
-   * checked out only by someone who may approve it (their first scan approves
-   * it), as on the web.
+   * never checked out, by anyone: it is approved first, as on the web.
    */
   const canUseProgressiveCheckout =
     canPartialCheckout &&

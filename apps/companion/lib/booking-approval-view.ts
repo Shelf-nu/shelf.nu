@@ -4,7 +4,7 @@ import type { BookingDetail } from "./api/types";
 export type BookingApprovalView = {
   /** The request waits for a decision: show the Pending approval pill. */
   isPending: boolean;
-  /** This caller may decide it, which also lets their check-out approve it. */
+  /** This caller may decide it (Approve request). */
   canApprove: boolean;
   /**
    * Offer "Approve request": the caller may decide it and its end date has
@@ -14,8 +14,8 @@ export type BookingApprovalView = {
   /** Reserving this draft sends a request: word Reserve as a request. */
   reservationIsRequest: boolean;
   /**
-   * Check-out may be offered: a pending request goes out only through someone
-   * who may approve it (their check-out approves it), as on the web.
+   * Check-out may be offered: never on a pending request, for anyone. It is
+   * approved first, then checked out, as on the web.
    */
   mayCheckOutNow: boolean;
 };
@@ -48,6 +48,6 @@ export function bookingApprovalView(
     canApprove,
     showApprove: canApprove && !hasEnded,
     reservationIsRequest: booking?.reservationNeedsApproval === true,
-    mayCheckOutNow: !isPending || canApprove,
+    mayCheckOutNow: !isPending,
   };
 }

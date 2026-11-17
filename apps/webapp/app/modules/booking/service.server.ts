@@ -201,11 +201,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
-import {
-  ROLE_POLICIES,
-  resolveRole,
-  type RoleAccess,
-} from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
@@ -298,6 +294,12 @@ import {
   sendBookingPushToCustodian,
   sendBookingPushToReplacedCustodian,
 } from "./push.server";
+import {
+  actorReservesAsRequest,
+  applyRequestGrowthRule,
+  requestGrowthRefusal,
+} from "./request-change.server";
+import { readBookingRequestVersion } from "./request-version.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
@@ -2546,8 +2548,8 @@ export async function reserveBooking({
       where: { organizationId },
       select: BOOKING_APPROVAL_SWITCHES_SELECT,
     });
-    // Each requesting role has its own switch: Base (on by default) and Self
-    // service (off by default). Everyone else reserves approved.
+    // Each requesting role has its own switch (Base, Self service), both off
+    // by default. Everyone else reserves approved.
     const needsApproval = roleReservesAsRequest({
       approvalSetting: actorApprovalSetting,
       settings: approvalSettings,
@@ -2676,6 +2678,27 @@ export async function reserveBooking({
     // must stay inside the transaction that flips the status, which needs
     // the long budget rather than Prisma's five-second default.
     const updatedBooking = await db.$transaction(async (tx) => {
+      // The booking row first, before any asset lock below: every path that
+      // changes a booking's items or amounts takes the booking row first, the
+      // order a check-out uses, so two of them cannot wait on each other.
+      const lockedStatus = await lockBookingForStatusCheck(
+        tx,
+        id,
+        organizationId
+      );
+      // Decided again on the locked row: a reservation or check-out that
+      // committed since the read above must not be overwritten by this one.
+      if (lockedStatus !== BookingStatus.DRAFT) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          message: `This booking is already ${lockedStatus.toLowerCase()}. Only DRAFT bookings can be reserved.`,
+          additionalData: { bookingId: id, status: lockedStatus },
+        });
+      }
+
       /**
        * Eligibility, re-read through `tx` immediately before the status write.
        *
@@ -3250,199 +3273,80 @@ async function readFullCheckoutDepartures(
 }
 
 /**
- * Whether the acting user approves a pending request by checking it out.
+ * Refuses a check-out of a pending reservation request before anything is
+ * written. Approving and checking out are two steps: a pending request is
+ * never checked out, by anyone, approvers included. An approver approves it
+ * first (`approveBooking`, which checks the request version they saw).
  *
- * An administrator or manager is both the approver and the person handing the
- * gear over, so making them click Approve before Check out would be two steps
- * for one decision. A custodian who may not approve (Self service, Base) is
- * refused by the caller instead.
+ * Every check-out decides this again inside its own transaction, under the
+ * booking row lock (`assertRequestApprovedWithinTx`). This preflight is for
+ * the flows that commit other writes first, such as assigning scanned units
+ * before checking them out, so a refused request leaves nothing changed.
  *
- * @param actorUserId - The acting user; a scheduler-driven check-out has none
- * @param organizationId - The booking's organization
- * @returns The approver and the moment of approval, or `null` when the actor
- * may not approve
+ * @param args.bookingId - The booking about to be checked out
+ * @param args.organizationId - Its workspace
+ * @throws {ShelfError} 400 when the booking is a pending request
  */
-async function approvalOnCheckout({
-  actorUserId,
+export async function assertRequestMayBeCheckedOut({
+  bookingId,
   organizationId,
 }: {
-  actorUserId: User["id"] | null | undefined;
+  bookingId: Booking["id"];
   organizationId: Organization["id"];
-}) {
-  if (!actorUserId) return null;
-  const mayApprove = await hasPermission({
-    userId: actorUserId,
-    organizationId,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.approve,
+}): Promise<void> {
+  const booking = await db.booking.findFirst({
+    where: { id: bookingId, organizationId },
+    select: { status: true, approvedAt: true },
   });
-  if (!mayApprove) return null;
-  const approver = await getUserByID(actorUserId, {
-    select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
-  });
-  return { approver, approvedAt: new Date() };
-}
-
-/**
- * The `BOOKING_APPROVED` event of an approval made by checking the request
- * out, inside the check-out's transaction. No note of its own: the check-out's
- * status note names the approval and reads "Pending approval" to "Ongoing", so
- * the activity shows one step, as the approver took it.
- */
-async function recordApprovalOnCheckout(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tx: any,
-  {
-    bookingId,
-    organizationId,
-    approver,
-  }: {
-    bookingId: Booking["id"];
-    organizationId: Organization["id"];
-    approver: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
-  }
-) {
-  await recordEvent(
-    {
-      organizationId,
-      actorUserId: approver.id,
-      action: "BOOKING_APPROVED",
-      entityType: "BOOKING",
-      entityId: bookingId,
-      bookingId,
-    },
-    tx
-  );
-}
-
-/**
- * Whether the acting user's own reservation in this workspace would be a
- * request, read from their membership in the database rather than from the
- * caller. Decided by the effective role (`resolveRole`), the same role whose
- * policy `access.policy` carries.
- *
- * @param args.actorUserId - The acting user
- * @param args.organizationId - The workspace
- * @param args.settings - The workspace's approval switches
- * @param args.client - Prisma client to read through; the transaction when
- *   called under the booking row lock
- */
-async function actorReservesAsRequest({
-  actorUserId,
-  organizationId,
-  settings,
-  client = db,
-}: {
-  actorUserId: User["id"];
-  organizationId: Organization["id"];
-  settings: Partial<BookingApprovalSwitches> | null | undefined;
-  /** The transaction, when called under the booking row lock. */
-  client?: Pick<typeof db, "userOrganization">;
-}): Promise<boolean> {
-  const membership = await client.userOrganization.findUnique({
-    where: { userId_organizationId: { userId: actorUserId, organizationId } },
-    select: { roles: true },
-  });
-  if (!membership) return false;
-  // The membership's effective role decides, as it does for
-  // `access.policy` and so for `reserveBooking`: a Self service + Base
-  // membership reserves as Self service.
-  return roleReservesAsRequest({
-    approvalSetting:
-      ROLE_POLICIES[resolveRole(membership.roles)].bookings.approvalSetting,
-    settings,
-  });
-}
-
-/** What {@link approvalOnCheckout} resolved for the acting user. */
-type CheckoutApproval = Awaited<ReturnType<typeof approvalOnCheckout>>;
-
-/**
- * Resolves the actor's approval before a check-out transaction opens, when the
- * booking already reads as a pending request or is a draft the actor would
- * have to request, so the permission and user lookups do not run while the
- * booking row lock is held.
- *
- * @param args.booking - The pre-transaction snapshot's status and approval
- * @param args.organizationId - The booking's organization
- * @param args.actorUserId - The acting user
- * @returns The actor's approval (or `null` when they may not approve), or
- *   `undefined` when the snapshot is not pending and the transaction decides
- */
-async function resolveApprovalBeforeTx({
-  booking,
-  organizationId,
-  actorUserId,
-}: {
-  booking: Pick<Booking, "status" | "approvedAt">;
-  organizationId: Organization["id"];
-  actorUserId: User["id"] | null | undefined;
-}): Promise<CheckoutApproval | undefined> {
-  if (!actorUserId) return undefined;
-  const isPendingRequest =
-    booking.status === BookingStatus.RESERVED && booking.approvedAt === null;
-  if (!isPendingRequest && booking.status !== BookingStatus.DRAFT) {
-    return undefined;
-  }
+  if (!booking) return;
+  if (booking.status !== BookingStatus.RESERVED || booking.approvedAt) return;
   const switches = await db.bookingSettings.findUnique({
     where: { organizationId },
     select: BOOKING_APPROVAL_SWITCHES_SELECT,
   });
-  if (!isBookingApprovalEnabled(switches)) return undefined;
-  // A draft only needs the answer from a member whose reservation would be a
-  // request: everyone else checks it out straight away.
-  if (
-    !isPendingRequest &&
-    !(await actorReservesAsRequest({
-      actorUserId,
-      organizationId,
-      settings: switches,
-    }))
-  ) {
-    return undefined;
-  }
-  return approvalOnCheckout({ actorUserId, organizationId });
+  assertBookingIsApproved({
+    status: booking.status,
+    approvedAt: booking.approvedAt,
+    requireBookingApproval: isBookingApprovalEnabled(switches),
+    bookingId,
+  });
 }
 
 /**
  * The approval gate every check-out runs inside its transaction, after the
- * booking row lock: a pending request is approved by an approver's check-out
- * and refused for anyone else. The booking reads go through `tx`, so a revert that
- * cleared the approval after the caller's pre-transaction read is seen here.
+ * booking row lock, and every write a check-out commits on its own before it
+ * (the scanned-only fulfil steps): a pending request is refused for everyone,
+ * so a request that became pending again after a preflight leaves nothing
+ * changed. A draft
+ * checked out straight away is refused for a member whose own reservation
+ * would be a request. The reads go through `tx`, so a revert that cleared the
+ * approval after the caller's pre-transaction read is seen here.
  *
  * @param tx - Prisma transaction client holding the booking row lock
  * @param args.bookingId - Booking being checked out
  * @param args.organizationId - The booking's organization
  * @param args.actorUserId - The acting user; a scheduler-driven check-out has none
- * @param args.resolvedApproval - The actor's approval, when the caller already
- *   resolved it before the transaction; left out, it is resolved here only if
- *   the booking turns out to be pending
- * @returns The approval fields to write with the status change; empty when the
- *   booking needs no approval
  * @throws {ShelfError} 404 when the booking is gone
- * @throws {ShelfError} 400 when the booking is pending, or a draft the actor
- *   would have to request, and the actor may not approve
+ * @throws {ShelfError} 400 when the booking is a pending request, or a draft
+ *   the actor would have to request
  */
-async function settleApprovalWithinTx(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tx: any,
+export async function assertRequestApprovedWithinTx(
+  tx: Pick<typeof db, "booking" | "bookingSettings" | "userOrganization">,
   {
     bookingId,
     organizationId,
     actorUserId,
-    resolvedApproval,
   }: {
     bookingId: Booking["id"];
     organizationId: Organization["id"];
     actorUserId: User["id"] | null | undefined;
-    resolvedApproval?: CheckoutApproval;
   }
-): Promise<Pick<Prisma.BookingUpdateInput, "approvedAt" | "approvedBy">> {
+): Promise<void> {
   const approvalSwitches = await tx.bookingSettings.findUnique({
     where: { organizationId },
     select: BOOKING_APPROVAL_SWITCHES_SELECT,
   });
-  if (!isBookingApprovalEnabled(approvalSwitches)) return {};
+  if (!isBookingApprovalEnabled(approvalSwitches)) return;
 
   const approvalRow = await tx.booking.findUnique({
     where: { id: bookingId, organizationId },
@@ -3469,59 +3373,26 @@ async function settleApprovalWithinTx(
         client: tx,
       }))
     ) {
-      const approval =
-        resolvedApproval !== undefined
-          ? resolvedApproval
-          : await approvalOnCheckout({ actorUserId, organizationId });
-      if (!approval) {
-        throw new ShelfError({
-          cause: null,
-          title: "Approval required",
-          message:
-            "Reserve this booking first: your reservation is sent as a request, and an administrator or manager needs to approve it before the equipment can be checked out.",
-          additionalData: { bookingId, status: approvalRow.status },
-          label,
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
+      throw new ShelfError({
+        cause: null,
+        title: "Approval required",
+        message:
+          "Reserve this booking first: your reservation is sent as a request, and an administrator or manager needs to approve it before the equipment can be checked out.",
+        additionalData: { bookingId, status: approvalRow.status },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
     }
-    return {};
+    return;
   }
 
-  if (
-    !isBookingPendingApproval({
-      status: approvalRow.status,
-      approvedAt: approvalRow.approvedAt ?? null,
-      requireBookingApproval: true,
-    })
-  ) {
-    return {};
-  }
-
-  const approval =
-    resolvedApproval !== undefined
-      ? resolvedApproval
-      : await approvalOnCheckout({ actorUserId, organizationId });
-  if (!approval) {
-    assertBookingIsApproved({
-      status: approvalRow.status,
-      approvedAt: approvalRow.approvedAt ?? null,
-      requireBookingApproval: true,
-      bookingId,
-    });
-    return {};
-  }
-
-  await recordApprovalOnCheckout(tx, {
+  assertBookingIsApproved({
+    status: approvalRow.status,
+    approvedAt: approvalRow.approvedAt ?? null,
+    requireBookingApproval: true,
     bookingId,
-    organizationId,
-    approver: approval.approver,
   });
-  return {
-    approvedAt: approval.approvedAt,
-    approvedBy: { connect: { id: approval.approver.id } },
-  };
 }
 
 /**
@@ -3561,13 +3432,12 @@ async function settleApprovalWithinTx(
  * @param args.hasKits - Whether the kit update should fire
  * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
  * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
- * @param args.resolvedApproval - The actor's approval, if already resolved before the transaction
  * @returns `departedSlices`: every slice whose units left in this call, each
  *   with its asset, read before the stamps made them indistinguishable from
  *   slices an earlier batch sent out. Callers name these assets in the
  *   post-commit "checked out" line.
  * @throws {ShelfError} 400 when the booking holds no items to check out
- * @throws {ShelfError} 400 when the booking is a pending request and the actor may not approve
+ * @throws {ShelfError} 400 when the booking is a pending request
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
@@ -3590,15 +3460,9 @@ async function checkoutBookingWritesWithinTx(
     sourceLocations,
     hints,
     revealOtherBookings = false,
-    resolvedApproval,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
-    /**
-     * The actor's approval when the caller resolved it before the
-     * transaction, so it is not resolved again while the row lock is held.
-     */
-    resolvedApproval?: CheckoutApproval;
     /** Acting user's locale and time zone, for the day a pool refusal names. */
     hints?: ClientHint;
     /**
@@ -3670,15 +3534,11 @@ async function checkoutBookingWritesWithinTx(
   // Approval gate under the row lock: a pending request must not reach
   // ONGOING through either full check-out path, whatever the pre-transaction
   // reads said.
-  Object.assign(
-    dataToUpdate,
-    await settleApprovalWithinTx(tx, {
-      bookingId,
-      organizationId,
-      actorUserId: checkedOutById,
-      resolvedApproval,
-    })
-  );
+  await assertRequestApprovedWithinTx(tx, {
+    bookingId,
+    organizationId,
+    actorUserId: checkedOutById,
+  });
 
   // In the transaction that stamps the kits, so a kit put in custody or taken
   // out elsewhere since the caller's read is still refused.
@@ -4182,7 +4042,6 @@ async function runCheckoutSideEffects({
   bookingSliceIds,
   departedSlices,
   unscannedSliceIds,
-  approvedOnCheckout = false,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
@@ -4213,11 +4072,6 @@ async function runCheckoutSideEffects({
    * holding one of them.
    */
   unscannedSliceIds?: ReadonlySet<string>;
-  /**
-   * The check-out approved a pending request (an approver checking it out),
-   * so its status note names the approval and starts from "Pending approval".
-   */
-  approvedOnCheckout?: boolean;
 }) {
   // Every booking-note write is scoped to the workspace.
   if (userId) {
@@ -4228,10 +4082,6 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
-      fromPendingApproval: approvedOnCheckout,
-      action: approvedOnCheckout
-        ? "approved the request and checked out the booking"
-        : undefined,
       methodClause: bookingMethodClause(
         provenance && unscannedSliceIds?.size
           ? { ...provenance, method: null }
@@ -4625,47 +4475,21 @@ export async function checkoutBooking({
     });
 
     // Approval gate: a pending reservation request (org requires approval,
-    // no approvedAt) cannot be checked out from ANY entry point: web
-    // dialog, mobile route, stale tab or direct POST all funnel through here.
-    // An approver's check-out approves the request instead (decided again,
-    // under the row lock, inside the transaction).
+    // no approvedAt) cannot be checked out from ANY entry point, by anyone:
+    // web dialog, mobile route, stale tab or direct POST all funnel through
+    // here, and the transaction decides again under the row lock.
     const checkoutApprovalSettings = await db.bookingSettings.findUnique({
       where: { organizationId },
       select: BOOKING_APPROVAL_SWITCHES_SELECT,
     });
-    // Resolved once here and handed to the transaction, which re-checks the
-    // pending state under the row lock without resolving the approver again.
-    let resolvedApproval: CheckoutApproval | undefined;
-    if (
-      isBookingPendingApproval({
-        status: bookingFound.status,
-        approvedAt: bookingFound.approvedAt,
-        requireBookingApproval: isBookingApprovalEnabled(
-          checkoutApprovalSettings
-        ),
-      })
-    ) {
-      resolvedApproval = await approvalOnCheckout({
-        actorUserId: userId,
-        organizationId,
-      });
-      if (!resolvedApproval) {
-        assertBookingIsApproved({
-          status: bookingFound.status,
-          approvedAt: bookingFound.approvedAt,
-          requireBookingApproval: true,
-          bookingId: id,
-        });
-      }
-    }
-    // A draft checked out straight away: answered here too, outside the lock.
-    if (bookingFound.status === BookingStatus.DRAFT) {
-      resolvedApproval = await resolveApprovalBeforeTx({
-        booking: bookingFound,
-        organizationId,
-        actorUserId: userId,
-      });
-    }
+    assertBookingIsApproved({
+      status: bookingFound.status,
+      approvedAt: bookingFound.approvedAt,
+      requireBookingApproval: isBookingApprovalEnabled(
+        checkoutApprovalSettings
+      ),
+      bookingId: id,
+    });
 
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
     // not in this org BEFORE any asset-derived logic runs. A legacy
@@ -4929,6 +4753,26 @@ export async function checkoutBooking({
           bookingId: id,
         });
 
+        // An expired reservation re-dated to a new end later than the approved
+        // one asks for more time than was approved: refused for a member whose
+        // own reservations need approval. Approvers pass. An early check-out
+        // (the start moved earlier) is not held to this rule: picking up a
+        // little before the start is everyday use.
+        const asksForMoreTime =
+          rescheduledWindow != null &&
+          rescheduledWindow.to.getTime() > bookingFound.to.getTime();
+        if (
+          asksForMoreTime &&
+          lockedStatus === BookingStatus.RESERVED &&
+          (await applyRequestGrowthRule(tx, {
+            bookingId: id,
+            organizationId,
+            actorUserId: userId,
+          }))
+        ) {
+          throw requestGrowthRefusal({ bookingId: id, status: lockedStatus });
+        }
+
         /**
          * The expired-reservation answer was given for a RESERVED row. If the
          * row moved on meanwhile (another operator's click, a retry after a
@@ -5021,7 +4865,6 @@ export async function checkoutBooking({
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
-          resolvedApproval,
         }));
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -5112,8 +4955,6 @@ export async function checkoutBooking({
       provenance,
       bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
       departedSlices,
-      // Set only by the approval gate, when this check-out approved a request.
-      approvedOnCheckout: dataToUpdate.approvedAt !== undefined,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -5423,14 +5264,6 @@ export async function fulfilModelRequestsAndCheckout({
     let unscannedSliceIds = new Set<string>();
     /** The slices this check-out sent out, set inside the transaction. */
     let departedSlices: Array<{ id: string; assetId: string }> = [];
-    // Resolved here, outside the row lock; the transaction re-checks the
-    // pending state on the locked row.
-    const resolvedApproval = await resolveApprovalBeforeTx({
-      booking: bookingFound,
-      organizationId,
-      actorUserId: userId,
-    });
-
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
@@ -5444,6 +5277,13 @@ export async function fulfilModelRequestsAndCheckout({
           bookingId,
           organizationId
         );
+        // A pending request is refused under the lock, before the scan below
+        // adds anything.
+        await assertRequestApprovedWithinTx(tx, {
+          bookingId,
+          organizationId,
+          actorUserId: userId,
+        });
         // Models before request rows. The reservation writers lock the model
         // first and hold no booking lock, so taking the request rows first
         // inverts that pair and deadlocks the two transactions against each
@@ -5465,6 +5305,12 @@ export async function fulfilModelRequestsAndCheckout({
           hints,
           revealOtherBookings: seesAllBookings,
         });
+        // A scanned extra that answers no reservation asks for more than was
+        // approved. At check-out there is no later approval to wait for, so
+        // a member whose own reservations need approval is refused.
+        if (scanResult.approvalCleared) {
+          throw requestGrowthRefusal({ bookingId, status: lockedStatus });
+        }
         // Read post-commit, for the notes below. A scan that only claimed a
         // unit already on the booking added nothing to narrate.
         addedAssetIds = scanResult.addedAssetIds;
@@ -5542,7 +5388,6 @@ export async function fulfilModelRequestsAndCheckout({
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
-          resolvedApproval,
         }));
 
         /**
@@ -5629,8 +5474,6 @@ export async function fulfilModelRequestsAndCheckout({
       provenance,
       unscannedSliceIds,
       departedSlices,
-      // Set only by the approval gate, when this check-out approved a request.
-      approvedOnCheckout: dataToUpdate.approvedAt !== undefined,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -11087,14 +10930,6 @@ export async function partialCheckoutBooking({
       });
     }
 
-    // Resolved here, outside the row lock; the transaction re-checks the
-    // pending state on the locked row.
-    const resolvedApproval = await resolveApprovalBeforeTx({
-      booking: bookingFound,
-      organizationId,
-      actorUserId: userId,
-    });
-
     const result = await db.$transaction(
       async (tx) => {
         // Authoritative status check, under a row lock held until this
@@ -11992,20 +11827,17 @@ export async function partialCheckoutBooking({
         // Decided on the locked status: a concurrent first scan may already
         // have moved it on.
         let bookingStatusChanged = false;
-        // The first scan approved a pending request (an approver's check-out).
-        let approvedOnCheckout = false;
         if (lockedStatus === BookingStatus.RESERVED) {
           // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
           // The approval gate lives here, not only in the web dialog, because
           // this is the phone scanner's way into ONGOING.
+          await assertRequestApprovedWithinTx(tx, {
+            bookingId: id,
+            organizationId,
+            actorUserId: userId,
+          });
           const transitionData: Prisma.BookingUpdateInput = {
             status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
-            ...(await settleApprovalWithinTx(tx, {
-              bookingId: id,
-              organizationId,
-              actorUserId: userId,
-              resolvedApproval,
-            })),
           };
 
           // Early checkout: if the booking hasn't started yet and the user chose
@@ -12036,7 +11868,6 @@ export async function partialCheckoutBooking({
             select: { id: true },
           });
           bookingStatusChanged = true;
-          approvedOnCheckout = transitionData.approvedAt !== undefined;
         }
 
         // BOOKING ACTIVITY LOG: Log partial check-out activity.
@@ -12125,15 +11956,11 @@ export async function partialCheckoutBooking({
           },
         });
 
-        const statusNote = !bookingStatusChanged
-          ? ""
-          : approvedOnCheckout
-          ? ` and checked out the booking, approving the request (status changed from Pending approval to ${
+        const statusNote = bookingStatusChanged
+          ? ` and checked out the booking (status changed to ${
               isExpired ? "Overdue" : "Ongoing"
             })`
-          : ` and checked out the booking (status changed to ${
-              isExpired ? "Overdue" : "Ongoing"
-            })`;
+          : "";
 
         /**
          * Per-slice qty fragment for the booking-side note — names each
@@ -13866,6 +13693,7 @@ export async function approveBooking({
   userId,
   hints,
   reviewedUpdatedAt,
+  reviewedVersion,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId: User["id"];
   hints: ClientHint;
@@ -13873,9 +13701,17 @@ export async function approveBooking({
    * The booking's `updatedAt` as the approver saw it. A request sent back,
    * edited and submitted again is RESERVED and unapproved once more, so the
    * status alone cannot tell it from the one the approver reviewed; this can.
-   * Absent from callers that predate it (older phone builds).
+   * Optional; both callers send the request version below as well.
    */
   reviewedUpdatedAt?: Date | null;
+  /**
+   * The request version the approver saw (`readBookingRequestVersion`): the
+   * booking with every slice and model reservation, so a change to what the
+   * request holds is caught whichever write made it. Checked under the
+   * booking row lock. Approve is the only way a request is approved, and
+   * always carries it.
+   */
+  reviewedVersion: string;
 }) {
   try {
     const [settings, bookingFound] = await Promise.all([
@@ -13991,6 +13827,25 @@ export async function approveBooking({
      */
     const approvedBooking = await db
       .$transaction(async (tx) => {
+        // Under the row lock, so the request cannot change between this
+        // read and the approval below through any write that locks the
+        // booking first.
+        await lockBookingForStatusCheck(tx, bookingFound.id, organizationId);
+        const currentVersion = await readBookingRequestVersion(tx, {
+          bookingId: bookingFound.id,
+          organizationId,
+        });
+        if (!reviewedVersion || currentVersion !== reviewedVersion) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "This booking request changed since you opened it. Reload it and review it again before approving.",
+            additionalData: { bookingId: id },
+          });
+        }
         const updated = await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
           where: {
@@ -14548,6 +14403,16 @@ export async function extendBooking({
           organizationId
         );
         if (lockedStatus !== booking.status) throw bookingChangedError();
+
+        // A later end asks for more than was approved: refused for a member
+        // whose own reservations need approval (see `applyRequestGrowthRule`).
+        if (movesLater) {
+          await applyRequestGrowthRule(tx, {
+            bookingId: booking.id,
+            organizationId,
+            actorUserId: userId,
+          });
+        }
 
         // Only a later end adds time to the booking's window; an earlier end
         // shrinks it and cannot overlap anything it did not already overlap.
@@ -19065,6 +18930,9 @@ async function createNotesForScannedAssetsAndKits({
  *   A scan that touched nothing new returns both arrays empty.
  *   `archivedKitMembersLeftOut` counts the archived members of scanned kits
  *   that were left out, for the caller's success message.
+ *   `approvalCleared` is true when a scanned extra (a row that answers no
+ *   model reservation) cleared an approved request's approval under the
+ *   request-growth rule; a check-out caller refuses on it.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function addScannedAssetsToBookingWithinTx(
@@ -19784,67 +19652,76 @@ async function addScannedAssetsToBookingWithinTx(
     return requestId;
   }
 
+  // One row per standalone scan + one row per kit slice. An asset scanned
+  // via TWO kits yields TWO kit-driven rows with distinct `assetKitId`; the
+  // standalone bucket stays independent of an asset's incidental kit
+  // memberships.
+  const rowsToCreate = [
+    // Standalone scans: `assetKitId = null`. Quantity precedence:
+    // explicit per-row qty input → 1 (schema default).
+    //
+    // `newStandaloneScans`, not the raw scan: a scanned asset the
+    // booking already holds loose keeps the row it has. Every caller
+    // sends what the operator scanned, which legitimately includes
+    // units already on the booking, and a second standalone row for one
+    // of them collides with `BookingAsset_manual_unique`.
+    ...newStandaloneScans.map((meta) => ({
+      assetId: meta.id,
+      quantity: quantities[meta.id] ?? 1,
+      assetKitId: null,
+      // No kit provenance for a standalone scan, kept explicit so the
+      // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
+      sourceKitId: null,
+      bookingModelRequestId: takeModelRequestId(meta.id),
+    })),
+    // Kit-driven slices: `assetKitId` set, plus `sourceKitId`: the
+    // durable owning-kit pointer that survives the membership row's
+    // deletion. Quantity precedence: explicit slice qty → kit's
+    // `AssetKit.quantity` → 1.
+    //
+    // Kit precedence: the org-validated `AssetKit.kitId` ALWAYS wins;
+    // `slice.kitId` is only a fallback. `||` (not `??`) because a
+    // pre-deploy client that never learned to send `kitId` arrives as
+    // the empty string. Writing that would violate the FK, so it
+    // normalizes to NULL. Both falling through is unreachable: a missing
+    // `AssetKit` row means `assetKitId` below fails the FK first.
+    ...newKitSlices.map((slice) => ({
+      assetId: slice.assetId,
+      quantity:
+        slice.quantity ?? assetKitById.get(slice.assetKitId)?.quantity ?? 1,
+      assetKitId: slice.assetKitId,
+      sourceKitId:
+        assetKitById.get(slice.assetKitId)?.kitId || slice.kitId || null,
+      // A kit member discharges a reservation like any other unit of
+      // its model. `takeModelRequestId` has already been offered every
+      // standalone row above, so this only fires for an asset that
+      // arrived solely via a kit.
+      bookingModelRequestId: takeModelRequestId(slice.assetId),
+    })),
+  ];
+
   const booking = await tx.booking.update({
     where: { id: bookingId, organizationId },
-    data: {
-      bookingAssets: {
-        // One row per standalone scan + one row per kit slice. An asset
-        // scanned via TWO kits yields TWO kit-driven rows with distinct
-        // `assetKitId`; the standalone bucket stays independent of an
-        // asset's incidental kit memberships.
-        create: [
-          // Standalone scans: `assetKitId = null`. Quantity precedence:
-          // explicit per-row qty input → 1 (schema default).
-          //
-          // `newStandaloneScans`, not the raw scan: a scanned asset the
-          // booking already holds loose keeps the row it has. Every caller
-          // sends what the operator scanned, which legitimately includes
-          // units already on the booking, and a second standalone row for one
-          // of them collides with `BookingAsset_manual_unique`.
-          ...newStandaloneScans.map((meta) => ({
-            assetId: meta.id,
-            quantity: quantities[meta.id] ?? 1,
-            assetKitId: null,
-            // No kit provenance for a standalone scan — kept explicit so the
-            // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
-            sourceKitId: null,
-            bookingModelRequestId: takeModelRequestId(meta.id),
-          })),
-          // Kit-driven slices: `assetKitId` set, plus `sourceKitId` — the
-          // durable owning-kit pointer that survives the membership row's
-          // deletion. Quantity precedence: explicit slice qty → kit's
-          // `AssetKit.quantity` → 1.
-          //
-          // Kit precedence: the org-validated `AssetKit.kitId` ALWAYS wins;
-          // `slice.kitId` is only a fallback. `||` (not `??`) because a
-          // pre-deploy client that never learned to send `kitId` arrives as
-          // the empty string — writing that would violate the FK, so it
-          // normalizes to NULL. Both falling through is unreachable: a missing
-          // `AssetKit` row means `assetKitId` below fails the FK first.
-          ...newKitSlices.map((slice) => ({
-            assetId: slice.assetId,
-            quantity:
-              slice.quantity ??
-              assetKitById.get(slice.assetKitId)?.quantity ??
-              1,
-            assetKitId: slice.assetKitId,
-            sourceKitId:
-              assetKitById.get(slice.assetKitId)?.kitId || slice.kitId || null,
-            // A kit member discharges a reservation like any other unit of
-            // its model. `takeModelRequestId` has already been offered every
-            // standalone row above, so this only fires for an asset that
-            // arrived solely via a kit.
-            bookingModelRequestId: takeModelRequestId(slice.assetId),
-          })),
-        ],
-      },
-    },
+    data: { bookingAssets: { create: rowsToCreate } },
     select: {
       id: true,
       name: true,
       status: true,
     },
   });
+
+  // A row that answers no model reservation adds to what the booking asked
+  // for: the request-growth rule decides (an approved request needs approval
+  // again; a booking already out refuses it), for a member whose own
+  // reservations need approval. Assigning units to a reservation is not
+  // growth.
+  const approvalCleared =
+    rowsToCreate.some((row) => row.bookingModelRequestId === null) &&
+    (await applyRequestGrowthRule(tx, {
+      bookingId,
+      organizationId,
+      actorUserId: userId,
+    }));
 
   /**
    * Per-asset event for each newly attached asset. Mirrors the
@@ -19924,7 +19801,13 @@ async function addScannedAssetsToBookingWithinTx(
   // rescan. `claimedAssetIds` travels out for the same reason a caller that
   // wants to report what a scan actually did (as opposed to what it asked
   // for) needs both sets, not just one.
-  return { booking, addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut };
+  return {
+    booking,
+    addedAssetIds,
+    claimedAssetIds,
+    archivedKitMembersLeftOut,
+    approvalCleared,
+  };
 }
 
 /**
@@ -19956,6 +19839,7 @@ export async function addScannedAssetsToBooking({
   inSameTransaction,
   hints,
   seesAllBookings,
+  atCheckout = false,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
@@ -19979,6 +19863,12 @@ export async function addScannedAssetsToBooking({
   inSameTransaction?: (
     tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]
   ) => Promise<void>;
+  /**
+   * True when the add is the first step of a check-out (fulfil and check
+   * out). A scanned extra that clears an approved request's approval is then
+   * refused and rolled back: at check-out no later approval can follow.
+   */
+  atCheckout?: boolean;
   /**
    * The caller's access. Its add-items rule is enforced inside the write
    * transaction against the locked booking status. `null` only for a flow
@@ -20035,6 +19925,22 @@ export async function addScannedAssetsToBooking({
         revealOtherBookings:
           seesAllBookings ?? access?.bookings.seeAll ?? false,
       });
+      if (atCheckout) {
+        if (result.approvalCleared) {
+          throw requestGrowthRefusal({
+            bookingId,
+            status: result.booking.status,
+          });
+        }
+        // The first step of a check-out commits on its own: a request that
+        // is pending again since the caller's preflight is refused here,
+        // under the booking lock the add holds, and the add rolls back.
+        await assertRequestApprovedWithinTx(tx, {
+          bookingId,
+          organizationId,
+          actorUserId: userId,
+        });
+      }
       await inSameTransaction?.(tx);
       return result;
     });

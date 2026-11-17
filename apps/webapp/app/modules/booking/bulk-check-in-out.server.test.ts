@@ -21,7 +21,6 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import {
   bulkCheckinBookings,
   bulkCheckoutBookings,
@@ -65,12 +64,6 @@ vi.mock("~/modules/booking-settings/service.server", () => ({
 // whether there is one.
 vi.mock("./checkout-source-location.server", () => ({
   getCheckoutSourceQuestions: vi.fn().mockResolvedValue([]),
-}));
-
-// why: a caller who may approve is not refused for pending requests; their
-// check-out approves each one. Default: may not.
-vi.mock("~/utils/permissions/permission.validator.server", () => ({
-  hasPermission: vi.fn().mockResolvedValue(false),
 }));
 
 // why: asserted never called. The one-click services write the asset notes,
@@ -148,8 +141,6 @@ function processed(id: string, assetIds: string[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Back to "may not approve": a test that grants it must not leak.
-  vi.mocked(hasPermission).mockResolvedValue(false);
   settingsMock.mockResolvedValue(NO_EXPLICIT_SCAN as never);
   questionsMock.mockResolvedValue([]);
   vi.mocked(getBulkBookingsWhereInput).mockResolvedValue({});
@@ -252,9 +243,10 @@ describe("bulkCheckoutBookings", () => {
     expect(checkoutMock).not.toHaveBeenCalled();
   });
 
-  it("refuses the whole batch when a booking is a request still waiting for approval", async () => {
-    // why: the service would refuse the pending one on its own, but only
-    // when its turn came, after the others were already checked out.
+  it("refuses the whole batch when a booking is a request still waiting for approval, whoever asks", async () => {
+    // A batch carries no request version, so it cannot approve a request,
+    // even for someone who may approve. The batch is refused before any
+    // write rather than when the pending booking's turn comes.
     settingsMock.mockResolvedValueOnce(
       createBookingSettings({
         requireApprovalForBase: true,
@@ -275,26 +267,6 @@ describe("bulkCheckoutBookings", () => {
       ),
     });
     expect(checkoutMock).not.toHaveBeenCalled();
-  });
-
-  it("does not refuse a pending request to a caller who may approve", async () => {
-    // why: the approver's check-out approves the request (the service stamps
-    // it), so the batch rule only guards callers who cannot decide.
-    vi.mocked(hasPermission).mockResolvedValue(true);
-    settingsMock.mockResolvedValue(
-      createBookingSettings({
-        requireApprovalForBase: true,
-        requireApprovalForSelfService: true,
-      })
-    );
-    findManyMock.mockResolvedValue([
-      selected("b1", BookingStatus.RESERVED, { approvedAt: new Date() }),
-      selected("b2", BookingStatus.RESERVED, { approvedAt: null }),
-    ] as never);
-
-    await bulkCheckoutBookings(args(["b1", "b2"]));
-
-    expect(checkoutMock).toHaveBeenCalledTimes(2);
   });
 
   it("refuses the whole batch when a booking is an expired reservation", async () => {

@@ -201,6 +201,7 @@ async function approvalFlagsFor({
     booking: {
       isPendingApproval: boolean;
       canApprove: boolean;
+      requestVersion: string | null;
       reservationNeedsApproval: boolean;
     };
   };
@@ -208,6 +209,7 @@ async function approvalFlagsFor({
     canCheckout: body.canCheckout,
     isPendingApproval: body.booking.isPendingApproval,
     canApprove: body.booking.canApprove,
+    requestVersion: body.booking.requestVersion,
     reservationNeedsApproval: body.booking.reservationNeedsApproval,
   };
 }
@@ -253,9 +255,9 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
     approvedAt: null,
   } as never;
 
-  it("marks a never-approved reservation pending and keeps check-out for an approver", async () => {
-    // why: an approver's check-out approves the request in the same step, so
-    // the phone keeps drawing the button for them.
+  it("marks a never-approved reservation pending and offers an approver Approve, not check-out", async () => {
+    // why: approving and checking out are two steps; every app version reads
+    // this flag, so no build draws a check-out the server refuses.
     const flags = await approvalFlagsFor({
       roles: [OrganizationRoles.MANAGER],
       settings: requiresApproval,
@@ -264,8 +266,27 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
       mayCheckout: true,
     });
     expect(flags.isPendingApproval).toBe(true);
-    expect(flags.canCheckout).toBe(true);
+    expect(flags.canCheckout).toBe(false);
     expect(flags.canApprove).toBe(true);
+    // The version Approve sends back, so a changed request is refused.
+    expect(flags.requestVersion).toEqual(expect.any(String));
+  });
+
+  it("offers no Approve when the version could not be read with the screen", async () => {
+    // why: the request was not pending yet when its version was read, so an
+    // approval from this screen could not be checked against what it shows.
+    const { db } = await import("~/database/db.server");
+    vi.mocked(db.booking.findFirst).mockResolvedValueOnce(null);
+    const flags = await approvalFlagsFor({
+      roles: [OrganizationRoles.MANAGER],
+      settings: requiresApproval,
+      row: pendingRow,
+      approver: true,
+      mayCheckout: true,
+    });
+    expect(flags.isPendingApproval).toBe(true);
+    expect(flags.canApprove).toBe(false);
+    expect(flags.requestVersion).toBeNull();
   });
 
   it("withholds check-out from a custodian who may not approve while the request is pending", async () => {
@@ -288,6 +309,7 @@ describe("GET /api/mobile/bookings/:bookingId: approval flags", () => {
     });
     expect(flags.isPendingApproval).toBe(true);
     expect(flags.canApprove).toBe(false);
+    expect(flags.requestVersion).toBeNull();
   });
 
   it("reads nothing as pending while the workspace does not require approval", async () => {

@@ -25,15 +25,22 @@ import {
   setStandaloneBookedQuantity,
   type BookedQuantityChange,
 } from "./booked-quantity.server";
+import { applyRequestGrowthRule } from "./request-change.server";
 
 // @vitest-environment node
 
 /** The transaction client the service is handed; reset per test. */
 const tx = {
   bookingAsset: { findUnique: vi.fn(), update: vi.fn() },
-  // A changed amount moves the booking's version (`updatedAt`).
+  // why: a changed amount moves the booking's version (`updatedAt`) first.
   booking: { updateMany: vi.fn() },
 };
+
+// why: whether a raised amount clears an approval is decided by the
+// approval helper, which has its own suite; here only when it is asked.
+vi.mock("./request-change.server", () => ({
+  applyRequestGrowthRule: vi.fn().mockResolvedValue(false),
+}));
 
 // why: the database is the integration boundary. `$transaction` hands the
 // service a recording client so reads and writes inside it are observable.
@@ -68,6 +75,7 @@ vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
 const SCOPE = {
   bookingId: "booking-1",
   organizationId: "org-1",
+  actorUserId: "user-1",
   window: {
     from: new Date("2026-09-10T09:00:00.000Z"),
     to: new Date("2026-09-12T17:00:00.000Z"),
@@ -138,6 +146,27 @@ describe("setStandaloneBookedQuantities", () => {
       where: { id: SCOPE.bookingId, organizationId: SCOPE.organizationId },
       data: { updatedAt: expect.any(Date) },
     });
+  });
+
+  it("asks the approval helper when an amount is raised, never when lowered", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(tx, {
+      bookingId: SCOPE.bookingId,
+      organizationId: SCOPE.organizationId,
+      actorUserId: SCOPE.actorUserId,
+    });
+
+    vi.mocked(applyRequestGrowthRule).mockClear();
+    slicesHold({ "slice-a": { quantity: 5 } });
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 2)],
+    });
+    expect(applyRequestGrowthRule).not.toHaveBeenCalled();
   });
 
   it("locks the booking before any asset, the order a check-out uses", async () => {

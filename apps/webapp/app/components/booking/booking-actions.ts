@@ -82,8 +82,7 @@ export type BookingActionsBooking = {
   /**
    * When the reservation was approved; null on a request still waiting for a
    * decision. While a workspace approval switch is on, such a request offers
-   * Check out only to a viewer who may approve (their check-out approves it).
-   * Absent reads as approved.
+   * no Check out to anyone: it is approved first. Absent reads as approved.
    */
   approvedAt?: Date | string | null;
   /** Absent reads as "receipt not available", which disables the receipt. */
@@ -207,7 +206,7 @@ function state(
  *
  * | Key                 | Visible when                                                   | Disabled when                |
  * | ------------------- | -------------------------------------------------------------- | ---------------------------- |
- * | checkOut            | RESERVED, viewer can quick check out, and (approved or viewer may approve) | model units unassigned |
+ * | checkOut            | RESERVED, viewer can quick check out, not a pending request    | model units unassigned       |
  * | checkOutRemaining   | ONGOING/OVERDUE, can quick check out, items left to check out  | never                        |
  * | checkIn             | ONGOING/OVERDUE and the viewer can quick check in              | never                        |
  * | extend              | extendable status and `booking:extend`                         | never                        |
@@ -286,15 +285,15 @@ export function resolveBookingActions({
 
   const unassignedUnits = countUnassignedModelUnits(booking.modelRequests);
 
-  // A reservation request still waiting for a decision: the server refuses
-  // its check-out to anyone who may not approve, and approves it for anyone
-  // who may, so only an approver keeps the button.
+  // A reservation request still waiting for a decision is never checked out,
+  // by anyone: approving and checking out are two steps, and the server
+  // refuses the check-out. An approver approves it from the booking page.
   const isPendingApproval = isBookingPendingApproval({
     status,
     approvedAt: booking.approvedAt,
     requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
   });
-  const mayCheckOutNow = !isPendingApproval || can(PermissionAction.approve);
+  const mayCheckOutNow = !isPendingApproval;
 
   return {
     checkOut: state(

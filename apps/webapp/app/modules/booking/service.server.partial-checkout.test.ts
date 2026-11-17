@@ -345,8 +345,8 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
-// why: the first-scan gate asks whether the acting user may approve a pending
-// request (an approver's scan approves it). Default: may not.
+// why: permission reads stay out of these cases; a pending request is refused
+// for everyone, approvers included. Default: may not.
 vitest.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vitest.fn().mockResolvedValue(false),
 }));
@@ -667,14 +667,11 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
-  it("lets an approver's first scan approve the pending request with the transition", async () => {
-    expect.assertions(2);
-
+  it("refuses an approver's first scan of a pending request too: approving comes first", async () => {
     // The row lock still reads the booking RESERVED: this is its first scan.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
       { status: BookingStatus.RESERVED },
     ]);
-
     vitest.mocked(hasPermission).mockResolvedValue(true);
     (
       db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
@@ -690,31 +687,14 @@ describe("partialCheckoutBooking", () => {
       approvedAt: null,
     });
 
-    await partialCheckoutBooking({
-      ...baseParams,
-      assetIds: ["asset-1"],
-    });
-
-    expect(db.booking.update).toHaveBeenCalledWith(
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).rejects.toThrow(/Approve the request first/);
+    expect(db.booking.update).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          status: BookingStatus.ONGOING,
-          approvedAt: expect.any(Date),
-          approvedBy: { connect: { id: baseParams.userId } },
-        }),
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
       })
     );
-    // One note for the one decision: the partial check-out names the approval
-    // and the move from "Pending approval", with no separate approval note.
-    expect(
-      vitest
-        .mocked(createSystemBookingNote)
-        .mock.calls.map(([args]) => String(args.content))
-    ).toEqual([
-      expect.stringContaining(
-        "and checked out the booking, approving the request (status changed from Pending approval to Ongoing)"
-      ),
-    ]);
   });
 
   it("uses the locked row's approval, not the pre-transaction snapshot", async () => {

@@ -163,7 +163,10 @@ describe("booking page approve-booking intent", () => {
   it("hands a Manager's approval to the service", async () => {
     actAs([OrganizationRoles.MANAGER]);
 
-    const response = await post({ intent: "approve-booking" });
+    const response = await post({
+      intent: "approve-booking",
+      reviewedVersion: "abc123",
+    });
 
     // A success is the route's plain payload, not a Response; only a refusal
     // arrives as one.
@@ -175,6 +178,34 @@ describe("booking page approve-booking intent", () => {
         id: "booking-1",
         organizationId: "org-1",
         userId: CALLER,
+      })
+    );
+  });
+});
+
+describe("booking page approve-booking intent: the version reviewed", () => {
+  it("refuses an approval that carries no version, from a page loaded before the request was pending", async () => {
+    actAs([OrganizationRoles.MANAGER]);
+
+    const response = await post({ intent: "approve-booking" });
+
+    expect(response instanceof Response ? response.status : 200).toBe(400);
+    expect(approveBookingMock).not.toHaveBeenCalled();
+  });
+
+  it("hands the version the approver saw to the service", async () => {
+    actAs([OrganizationRoles.MANAGER]);
+
+    await post({
+      intent: "approve-booking",
+      reviewedUpdatedAt: "2026-11-16T10:00:00.000Z",
+      reviewedVersion: "abc123",
+    });
+
+    expect(approveBookingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
+        reviewedVersion: "abc123",
       })
     );
   });

@@ -52,6 +52,7 @@ import {
   isExtendableStatus,
 } from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
@@ -113,6 +114,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       params,
       z.object({ bookingId: z.string().min(1) })
     );
+
+    /**
+     * The version an approver approves, read BEFORE the booking and its
+     * contents below, so a change that commits while this loads makes the
+     * version older than what the screen shows, never newer: Approve then
+     * refuses instead of approving what the approver did not see. Read only
+     * for someone who may approve; sent only with `canApprove`.
+     */
+    const reviewableVersion = (await hasPermission({
+      userId: user.id,
+      organizationId,
+      roles,
+      workspace: access.workspaceGrants,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.approve,
+    }))
+      ? await readBookingRequestVersion(db, {
+          bookingId,
+          organizationId,
+          pendingOnly: true,
+        })
+      : null;
 
     const booking = await db.booking.findFirst({
       where: {
@@ -804,11 +827,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
-    // Approval gate: while a reservation request is pending, only a caller
-    // who may approve can check out (their check-out approves it); the
-    // server-side service guard refuses everyone else regardless of app
-    // version. This flag keeps the app from drawing a button the server
-    // would refuse. Derived with the same shared helper the web + service use.
+    // Approval gate: a pending reservation request is never checked out, by
+    // anyone; it is approved first. The service refuses the check-out
+    // whatever the app version, and this flag keeps every app version from
+    // drawing a button the server would refuse. Derived with the same shared
+    // helper the web and the service use.
     const isPendingApproval = isBookingPendingApproval({
       status: booking.status,
       approvedAt: booking.approvedAt,
@@ -829,11 +852,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       writesBooking &&
       canCheckoutByState &&
       canCheckoutPerm &&
-      (!isPendingApproval || canApprovePerm);
+      !isPendingApproval;
     // Who may decide the request: the same `booking:approve` answer the web
     // Approve button and the `approve-booking` intent resolve, so the phone
     // never draws (or withholds) a decision the server would answer otherwise.
-    const canApprove = isPendingApproval && canApprovePerm;
+    // Only with the version this screen shows: without it an approval could
+    // not be checked against what the approver saw, so the app offers none
+    // until the booking is reloaded.
+    const canApprove =
+      isPendingApproval && canApprovePerm && reviewableVersion !== null;
+    // Sent back with Approve so a request that changed since this screen
+    // loaded is refused.
+    const requestVersion = canApprove ? reviewableVersion : null;
     // Told BEFORE the reservation: whether this caller's Reserve would land as
     // a request waiting for a decision. The same rule `reserveBooking` applies
     // (workspace requires approval, and the caller's role is one whose
@@ -1115,6 +1145,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // renders a "Pending approval" badge and hides checkout.
         isPendingApproval,
         canApprove,
+        requestVersion,
         reservationNeedsApproval,
       },
       checkedInAssetIds,

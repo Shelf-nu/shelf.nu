@@ -55,7 +55,10 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
-import { getBooking } from "~/modules/booking/service.server";
+import {
+  getBooking,
+  assertRequestMayBeCheckedOut,
+} from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -180,6 +183,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    // A pending request is approved first, never checked out: the scanner is
+    // not opened for it. Its check-out is refused in the service too.
+    await assertRequestMayBeCheckedOut({
+      bookingId: booking.id,
+      organizationId,
+    });
 
     /**
      * Outstanding model requests plus the assets already on the booking that

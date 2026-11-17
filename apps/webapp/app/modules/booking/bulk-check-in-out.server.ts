@@ -51,11 +51,6 @@ import {
 import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { BookingMethodProvenance } from "./checkout-method";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
@@ -403,8 +398,9 @@ export async function bulkCheckoutBookings(
 
     // The service refuses a pending request on its own, but one by one: a
     // mixed batch would be half checked out before the refusal. Name them
-    // here, before any write, like the other batch rules. A caller who may
-    // approve is not refused: their check-out approves each request.
+    // here, before any write, like the other batch rules. Approvers included:
+    // an approval needs the request as the approver saw it, which a batch from
+    // the list does not carry, so each request is approved from its page.
     const pendingApproval = bookings.filter((booking) =>
       isBookingPendingApproval({
         status: booking.status,
@@ -412,20 +408,12 @@ export async function bulkCheckoutBookings(
         requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
       })
     );
-    if (
-      pendingApproval.length > 0 &&
-      !(await hasPermission({
-        userId,
-        organizationId,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.approve,
-      }))
-    ) {
+    if (pendingApproval.length > 0) {
       refuseBatch({
         bookings: pendingApproval,
         rule: `${
           pendingApproval.length === 1 ? "is" : "are"
-        } still waiting for approval, and only an approved request can be checked out`,
+        } still waiting for approval; approve each request from its booking page first`,
         organizationId,
       });
     }

@@ -9,27 +9,29 @@
  */
 
 import { AssetType, OrganizationRoles } from "@prisma/client";
-import { permissionContext } from "@helpers/role-access";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
+import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
 
 import { action } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: data() returns a fetch Response so route handlers can be invoked
 // directly inside vitest without spinning up a full Remix runtime.
-const createDataMock = vi.hoisted(() => {
-  return () =>
-    vi.fn((data: unknown, init?: ResponseInit) => {
-      return new Response(JSON.stringify(data), {
-        status: init?.status || 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers || {}),
-        },
-      });
-    });
-});
+const createDataMock = vi.hoisted(
+  () => () =>
+    vi.fn(
+      (data: unknown, init?: ResponseInit) =>
+        new Response(JSON.stringify(data), {
+          status: init?.status || 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...(init?.headers || {}),
+          },
+        })
+    )
+);
 
 const dbMocks = vi.hoisted(() => {
   // Re-read of the slice's booked quantity UNDER the asset lock (the TOCTOU
@@ -44,6 +46,7 @@ const dbMocks = vi.hoisted(() => {
           findUnique: bookingAssetFindUnique,
           update: vi.fn().mockResolvedValue(undefined),
         },
+        // why: a changed amount moves the booking's version (updatedAt) first.
         booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       })
     ),
@@ -59,6 +62,12 @@ const consumptionMocks = vi.hoisted(() => ({
   // the module here also keeps the real `availability.server` (and its heavy
   // `booking/service.server` import chain) out of this test's module graph.
   assertAssetQuantityAvailable: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: whether a raised amount clears an approval is the approval helper's
+// call, with its own suite; here only who it is told made the change.
+vi.mock("~/modules/booking/request-change.server", () => ({
+  applyRequestGrowthRule: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -225,6 +234,12 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
 
     expect(response.status).toBe(200);
     expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
+    // The acting member reaches the approval helper with the raised amount.
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(
+      expect.anything(),
+      // The signed-in member, never the booking's creator or custodian.
+      expect.objectContaining({ actorUserId: "user-current" })
+    );
   });
 
   it("allows SELF_SERVICE user when they're the custodian (not creator)", async () => {

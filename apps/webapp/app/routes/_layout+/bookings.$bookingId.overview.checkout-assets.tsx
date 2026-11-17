@@ -30,6 +30,7 @@ import {
   getBooking,
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
+  assertRequestMayBeCheckedOut,
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -135,6 +136,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       access,
       userOrganizations,
       request,
+    });
+
+    // A pending request is approved first, never checked out: the scanner is
+    // not opened for it. Its check-out is refused in the service too.
+    await assertRequestMayBeCheckedOut({
+      bookingId: booking.id,
+      organizationId,
     });
 
     // Always fetch partial check-out data for scanner validation. We need this

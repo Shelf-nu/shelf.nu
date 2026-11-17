@@ -227,6 +227,7 @@ function EditBookingFormInner({
     booking: loaderBooking,
     lifecycleProgress,
     checkoutSourceQuestions,
+    requestVersion,
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
@@ -617,6 +618,7 @@ function EditBookingFormInner({
                   name: name ?? "",
                   status,
                   updatedAt: loaderBooking.updatedAt,
+                  requestVersion,
                 }}
               />
             </When>
@@ -627,7 +629,9 @@ function EditBookingFormInner({
                   ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
                     hasItemsToCheckOut)) &&
                 canCheckOutBooking &&
-                (!isPendingApproval || canApproveBooking)
+                // A pending request is approved first (Approve above), never
+                // checked out: approving and checking out are two steps.
+                !isPendingApproval
               }
             >
               {(() => {
