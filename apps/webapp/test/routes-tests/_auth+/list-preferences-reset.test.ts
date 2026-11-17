@@ -25,7 +25,11 @@ vi.mock("~/database/db.server", () => ({ db: {} }));
 // why: pin the SSO kill-switch so the callback runs whatever DISABLE_SSO is
 // set to locally.
 vi.mock("~/config/shelf.config", () => ({
-  config: { disableSSO: false, disableSignup: false },
+  config: {
+    disableSSO: false,
+    disableSignup: false,
+    oidc: { enabled: false, buttonLabel: "Log in with SSO" },
+  },
 }));
 
 // why: signing in and refreshing a session are Supabase calls.

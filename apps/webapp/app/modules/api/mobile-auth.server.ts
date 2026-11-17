@@ -5,6 +5,7 @@ import type {
   OrganizationRoles,
   Prisma,
 } from "@prisma/client";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -16,6 +17,7 @@ import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
+import { createEmailLoginDisabledError } from "~/modules/auth/email-login.server";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import {
   createSsoRequiredError,
@@ -30,6 +32,7 @@ import {
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import { isSingleSignOnSession } from "~/utils/sso.server";
 import { teamTierLimitHasLapsed } from "~/utils/stripe.server";
 import {
   assertCanUseBookings,
@@ -133,13 +136,29 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
+  // With email login switched off (DISABLE_EMAIL_LOGIN) only a session obtained
+  // through single sign-on is accepted, as on the web. The decision reads how
+  // the session was obtained, not the account: a password account linked to an
+  // identity provider signs in through it and must keep working. The token was
+  // accepted by `auth.getUser` above, so its `amr` claim can be trusted.
+  const isSsoSession = isSingleSignOnSession(token);
+  if (config.disableEmailLogin && !isSsoSession) {
+    await revokeAllSessions(token);
+    throw createEmailLoginDisabledError();
+  }
+
   // The companion signs in with a password straight against Supabase, so this
   // is the first point Shelf sees that session. Refuse it when the address must
   // use SSO, as the web sign-in would. SSO users pass without a lookup: their
   // companion sessions are the SSO sessions of `User.sso` accounts. A refused account
   // has every session revoked first, so its refresh token cannot mint another
   // access token for the companion or the web.
-  if (!user.sso) {
+  //
+  // A session obtained through single sign-on is never asked: the decision is
+  // about signing in with an email address, and an account that is not an SSO
+  // account can hold such a session when its identity provider login was
+  // linked to it.
+  if (!user.sso && !isSsoSession) {
     const decision = await getLegacyLoginDecisionForUser({
       userId: user.id,
       email: user.email,

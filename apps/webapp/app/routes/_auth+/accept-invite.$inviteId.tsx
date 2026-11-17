@@ -9,6 +9,7 @@ import {
 } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -151,6 +152,27 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+    /**
+     * With email login switched off (DISABLE_EMAIL_LOGIN), the sign-in below
+     * would be the one way into Shelf that does not go through single sign-on,
+     * and the account it creates could never sign in again. So a visitor who
+     * is not signed in is asked to sign in first, before anything is created,
+     * and the invite stays pending. Signed in, the invite is accepted for that
+     * account further down.
+     */
+    if (!context.isAuthenticated && config.disableEmailLogin) {
+      throw new ShelfError({
+        cause: null,
+        title: "Log in to accept this invite",
+        message:
+          "Please log in with single sign-on first, then open the invitation link again.",
+        additionalData: { inviteId },
+        label: "Invite",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     /**
      * Accepting creates an email/password account for an invitee who has none,
      * then signs in with it. On an SSO domain that account could never be used:

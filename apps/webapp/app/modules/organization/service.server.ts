@@ -187,9 +187,16 @@ export async function createOrganization({
   userId,
   image,
   currency,
+  oidcMappingKey,
 }: Pick<Organization, "name" | "currency"> & {
   userId: User["id"];
   image: File | null;
+  /**
+   * Key of the `OIDC_WORKSPACE_MAPPINGS` entry this workspace is created for.
+   * Written with the workspace in one statement: the column is unique, so of
+   * two logins creating the same entry's workspace at once only one succeeds.
+   */
+  oidcMappingKey?: string;
 }) {
   try {
     const owner = await db.user.findFirstOrThrow({
@@ -216,6 +223,7 @@ export async function createOrganization({
       name,
       currency,
       type: OrganizationType.TEAM,
+      ...(oidcMappingKey ? { oidcMappingKey } : {}),
       hasSequentialIdsMigrated: true, // New organizations don't need migration
       categories: {
         create: defaultUserCategories.map((c) => ({ ...c, userId })),

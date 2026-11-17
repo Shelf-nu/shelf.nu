@@ -1,11 +1,14 @@
 import {
   COLLECT_BUSINESS_INTEL,
+  DISABLE_EMAIL_LOGIN,
   DISABLE_SIGNUP,
   DISABLE_SSO,
   ENABLE_PREMIUM_FEATURES,
   ENABLE_SCIM,
   FREE_TRIAL_DAYS,
   GEOCODING_USER_AGENT,
+  OIDC_BUTTON_LABEL,
+  OIDC_PROVIDER,
   SEND_ONBOARDING_EMAIL,
   SHOW_HOW_DID_YOU_FIND_US,
 } from "~/utils/env";
@@ -17,6 +20,13 @@ export const config: Config = {
   freeTrialDays: Number(FREE_TRIAL_DAYS || 7),
   disableSignup: DISABLE_SIGNUP || false,
   disableSSO: DISABLE_SSO || false,
+  oidc: {
+    enabled: Boolean(OIDC_PROVIDER),
+    buttonLabel: OIDC_BUTTON_LABEL || "Log in with SSO",
+  },
+  // Honoured only while a single sign-on method remains to sign in with.
+  disableEmailLogin:
+    (DISABLE_EMAIL_LOGIN || false) && (!DISABLE_SSO || Boolean(OIDC_PROVIDER)),
   enableScim: ENABLE_SCIM || false,
 
   logoPath: {

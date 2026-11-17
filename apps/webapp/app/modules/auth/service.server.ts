@@ -12,6 +12,7 @@ import { SERVER_URL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { assertEmailLoginEnabled } from "./email-login.server";
 import { mapAuthSession } from "./mappers.server";
 import {
   createSsoRequiredError,
@@ -529,9 +530,14 @@ function isNoAccountForCodeError(error: AuthError): boolean {
  * yet, so its response must not depend on the account behind the address.
  *
  * @param email - the address to send the code to
- * @throws {ShelfError} a wrapped Supabase failure
+ * @throws {ShelfError} 403 while email login is switched off; otherwise a
+ *   wrapped Supabase failure
  */
 export async function sendOTP(email: string) {
+  // Outside the try: the catch below rewrites what it catches, and this
+  // refusal has to reach the caller as it is.
+  assertEmailLoginEnabled();
+
   try {
     const decision = await getLegacyLoginDecision(email);
     if (!decision.allowed) return;
@@ -923,10 +929,15 @@ export async function verifyAuthSession(authSession: AuthSession) {
  * @param email - the address the code was sent to
  * @param otp - the code the person typed
  * @returns the mapped auth session
- * @throws {ShelfError} {@link INVALID_OTP_MESSAGE} for a wrong or expired code
- *   and for a refused address; otherwise a wrapped verification failure
+ * @throws {ShelfError} 403 while email login is switched off;
+ *   {@link INVALID_OTP_MESSAGE} for a wrong or expired code and for a refused
+ *   address; otherwise a wrapped verification failure
  */
 export async function verifyOtpAndSignin(email: string, otp: string) {
+  // Asked before the code is verified, so a code sent while email login was
+  // still on opens no session.
+  assertEmailLoginEnabled();
+
   let authSession: AuthSession;
   try {
     const { data, error } = await getSupabaseAdmin().auth.verifyOtp({

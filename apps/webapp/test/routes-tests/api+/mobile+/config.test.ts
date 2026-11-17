@@ -55,12 +55,15 @@ vi.mock("~/utils/env", () => ({
 const warn = vi.hoisted(() => vi.fn());
 vi.mock("~/utils/logger", () => ({ Logger: { warn } }));
 
-// why: `ssoEnabled` is derived from `config.disableSSO`, which reads the
-// DISABLE_SSO env var. Pinning it keeps the asserted payload deterministic
-// regardless of the local or CI environment.
-vi.mock("~/config/shelf.config", () => ({
-  config: { disableSSO: false },
+// why: `ssoEnabled` is derived from `config.disableSSO` and
+// `config.oidc.enabled`, which read the DISABLE_SSO and OIDC_PROVIDER env
+// vars. Pinning them keeps the asserted payload deterministic regardless of
+// the local or CI environment, and lets a test switch one of them.
+const ssoConfig = vi.hoisted(() => ({
+  disableSSO: false,
+  oidc: { enabled: false, buttonLabel: "Log in with SSO" },
 }));
+vi.mock("~/config/shelf.config", () => ({ config: ssoConfig }));
 
 const { loader } = await import("~/routes/api+/mobile+/config");
 
@@ -92,6 +95,29 @@ describe("GET /api/mobile/config", () => {
       ssoEnabled: true,
       passwordLoginEnabled: true,
     });
+  });
+
+  it("advertises SSO when only the custom OIDC login is on", async () => {
+    ssoConfig.disableSSO = true;
+    ssoConfig.oidc.enabled = true;
+    try {
+      const body = (await invoke().json()) as Record<string, unknown>;
+      // The app's SSO button opens /sso-login, which hosts the OIDC button.
+      expect(body.ssoEnabled).toBe(true);
+    } finally {
+      ssoConfig.disableSSO = false;
+      ssoConfig.oidc.enabled = false;
+    }
+  });
+
+  it("advertises no SSO when both methods are off", async () => {
+    ssoConfig.disableSSO = true;
+    try {
+      const body = (await invoke().json()) as Record<string, unknown>;
+      expect(body.ssoEnabled).toBe(false);
+    } finally {
+      ssoConfig.disableSSO = false;
+    }
   });
 
   it("advertises no latest version when the env var is unset", async () => {

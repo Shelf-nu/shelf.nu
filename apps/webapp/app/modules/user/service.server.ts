@@ -78,7 +78,7 @@ import {
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
-import { randomUsernameFromEmail } from "~/utils/user";
+import { randomUsernameFromEmail, resolveUserDisplayName } from "~/utils/user";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { lockMembership } from "./membership-lock.server";
 import type { UpdateUserPayload } from "./types";
@@ -803,6 +803,38 @@ async function reconcileSsoGroupMembership(
 }
 
 /**
+ * A workspace whose membership an SSO login manages, and the role the login
+ * holds in it.
+ */
+export type SsoWorkspaceRole = {
+  /** The workspace; `userId` is its owner. */
+  organization: Organization;
+  /** The role the IdP groups map to, or `null` when they map to none. */
+  role: OrganizationRoles | null;
+};
+
+/**
+ * Resolves the workspaces a SAML SSO login manages: every workspace that claims
+ * the email's domain and maps IdP groups to roles in its `SsoDetails`.
+ *
+ * @param emailDomain - The domain of the email the IdP asserted
+ * @param groups - The IdP groups of the user
+ * @returns One entry per managed workspace, with the role the groups map to
+ */
+async function getSsoDomainWorkspaceRoles(
+  emailDomain: string,
+  groups: string[]
+): Promise<SsoWorkspaceRole[]> {
+  const domainOrganizations = await getOrganizationsBySsoDomain(emailDomain);
+
+  return domainOrganizations.flatMap((organization) => {
+    const { ssoDetails } = organization;
+    if (!ssoDetails || !hasSsoGroupMappings(ssoDetails)) return [];
+    return [{ organization, role: getRoleFromGroupId(ssoDetails, groups) }];
+  });
+}
+
+/**
  * Updates an existing SSO user on subsequent logins.
  * Handles both Pure SSO and SCIM SSO scenarios for multiple domains.
  */
@@ -863,6 +895,13 @@ export async function updateUserFromSSO(
       zipPostalCode?: string;
       countryRegion?: string;
     };
+    /**
+     * The workspaces this login manages and the role it holds in each, decided
+     * by the caller. When omitted they come from the `SsoDetails` group
+     * mappings of the workspaces on the email's domain (SAML SSO). The custom
+     * OIDC login passes the roles its own mapping resolved.
+     */
+    workspaceRoles?: SsoWorkspaceRole[];
   }
 ): Promise<{
   user: Prisma.UserGetPayload<{ select: typeof USER_WITH_SSO_DETAILS_SELECT }>;
@@ -896,105 +935,99 @@ export async function updateUserFromSSO(
     }
 
     // Rest of the existing SSO organization logic...
-    const domainOrganizations = await getOrganizationsBySsoDomain(emailDomain);
+    const workspaceRoles =
+      userData.workspaceRoles ??
+      (await getSsoDomainWorkspaceRoles(emailDomain, groups));
     const existingUserOrganizations = user.userOrganizations;
 
     const transitions: UserOrgTransition[] = [];
-    let firstMatchedOrg: (typeof domainOrganizations)[number] | null = null;
+    let firstMatchedOrg: Organization | null = null;
 
-    for (const org of domainOrganizations) {
-      const { ssoDetails } = org;
-      if (!ssoDetails) continue;
+    for (const { organization: org, role: desiredRole } of workspaceRoles) {
+      const existingOrgAccess = existingUserOrganizations.find(
+        (uo) => uo.organization.id === org.id
+      );
 
-      const hasGroupMappings = hasSsoGroupMappings(ssoDetails);
-
-      if (hasGroupMappings) {
-        const desiredRole = getRoleFromGroupId(ssoDetails, groups);
-        const existingOrgAccess = existingUserOrganizations.find(
-          (uo) => uo.organization.id === org.id
+      if (existingOrgAccess) {
+        const transition = await reconcileSsoGroupMembership(
+          userId,
+          org,
+          existingOrgAccess.roles,
+          desiredRole
         );
+        transitions.push(transition);
 
-        if (existingOrgAccess) {
-          const transition = await reconcileSsoGroupMembership(
-            userId,
-            org,
-            existingOrgAccess.roles,
-            desiredRole
-          );
-          transitions.push(transition);
-
-          // Repair an account whose team-member record never got written,
-          // only while the user keeps access: a revoked transition is removing
-          // this user's access rather than restoring it. A workspace owner
-          // keeps access even when no group claim maps to a role.
-          if (transition.hasAccess) {
-            await db.$transaction(async (tx) => {
-              // `TeamMember` has no uniqueness on (userId, organizationId), so
-              // two logins arriving together would both find nothing and both
-              // insert, leaving one user with two live custodian records. The
-              // membership row does have that uniqueness and always exists on
-              // this branch, so locking it serialises the pair of repairs.
-              const membership = await tx.$queryRaw<{ id: string }[]>`
-                SELECT id FROM "UserOrganization"
-                WHERE "userId" = ${userId} AND "organizationId" = ${org.id}
-                FOR UPDATE
-              `;
-
-              // The transition committed before this transaction opened, so a
-              // concurrent callback whose group claims revoke access can delete
-              // the row in between. Creating the record anyway would leave a
-              // custodian attached to a workspace its user is no longer in.
-              if (!membership || membership.length === 0) {
-                return;
-              }
-
-              await ensureUserTeamMember(tx, {
-                userId,
-                organizationId: org.id,
-                name: `${firstName} ${lastName}`,
-              });
-            });
-          }
-
-          // The org is a landing org whenever the user keeps access,
-          // including an owner whose groups no longer map to a role.
-          if (transition.hasAccess) {
-            firstMatchedOrg ??= org;
-          }
-        } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
-          // Both writes or neither: access without a team member is a state
-          // this flow cannot reach again, because the next login would find
-          // the access and take the branch above.
+        // Repair an account whose team-member record never got written,
+        // only while the user keeps access: a revoked transition is removing
+        // this user's access rather than restoring it. A workspace owner
+        // keeps access even when no group claim maps to a role.
+        if (transition.hasAccess) {
           await db.$transaction(async (tx) => {
-            await createUserOrgAssociation(tx, {
-              userId: user.id,
-              organizationIds: [org.id],
-              roles: [desiredRole],
-            });
+            // `TeamMember` has no uniqueness on (userId, organizationId), so
+            // two logins arriving together would both find nothing and both
+            // insert, leaving one user with two live custodian records. The
+            // membership row does have that uniqueness and always exists on
+            // this branch, so locking it serialises the pair of repairs.
+            const membership = await tx.$queryRaw<{ id: string }[]>`
+              SELECT id FROM "UserOrganization"
+              WHERE "userId" = ${userId} AND "organizationId" = ${org.id}
+              FOR UPDATE
+            `;
+
+            // The transition committed before this transaction opened, so a
+            // concurrent callback whose group claims revoke access can delete
+            // the row in between. Creating the record anyway would leave a
+            // custodian attached to a workspace its user is no longer in.
+            if (!membership || membership.length === 0) {
+              return;
+            }
 
             await ensureUserTeamMember(tx, {
               userId,
               organizationId: org.id,
-              name: `${firstName} ${lastName}`,
+              name: resolveUserDisplayName(user),
             });
           });
+        }
 
-          transitions.push({
-            userId,
-            organizationId: org.id,
-            previousRoles: [],
-            newRole: desiredRole,
-            transitionType: "ACCESS_GRANTED",
-            hasAccess: true,
-          });
-
-          // Access was just granted, so this org is a valid landing org.
+        // The org is a landing org whenever the user keeps access,
+        // including an owner whose groups no longer map to a role.
+        if (transition.hasAccess) {
           firstMatchedOrg ??= org;
         }
-        // Deliberately no `firstMatchedOrg` assignment when the grant is blocked
-        // (SCIM-deactivated user): returning an org the user cannot access sends
-        // the SSO callback to a 403 instead of /sso-pending-assignment.
+      } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
+        // Both writes or neither: access without a team member is a state
+        // this flow cannot reach again, because the next login would find
+        // the access and take the branch above.
+        await db.$transaction(async (tx) => {
+          await createUserOrgAssociation(tx, {
+            userId: user.id,
+            organizationIds: [org.id],
+            roles: [desiredRole],
+          });
+
+          await ensureUserTeamMember(tx, {
+            userId,
+            organizationId: org.id,
+            name: resolveUserDisplayName(user),
+          });
+        });
+
+        transitions.push({
+          userId,
+          organizationId: org.id,
+          previousRoles: [],
+          newRole: desiredRole,
+          transitionType: "ACCESS_GRANTED",
+          hasAccess: true,
+        });
+
+        // Access was just granted, so this org is a valid landing org.
+        firstMatchedOrg ??= org;
       }
+      // Deliberately no `firstMatchedOrg` assignment when the grant is blocked
+      // (SCIM-deactivated user): returning an org the user cannot access sends
+      // the SSO callback to a 403 instead of /sso-pending-assignment.
     }
 
     return {

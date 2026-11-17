@@ -20,7 +20,8 @@
  * @see {@link file://./sso-enforcement.server.ts} the decision itself
  */
 import { AuthApiError } from "@supabase/supabase-js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ShelfConfigModule from "~/config/shelf.config";
 import {
   INVALID_CREDENTIALS_MESSAGE,
   INVALID_OTP_MESSAGE,
@@ -47,6 +48,22 @@ vi.mock("./sso-enforcement.server", async (importOriginal) => {
     createSsoRequiredError: actual.createSsoRequiredError,
     getLegacyLoginDecision: vi.fn(),
     getLegacyLoginDecisionForUser: vi.fn(),
+  };
+});
+
+// why: DISABLE_EMAIL_LOGIN is read from the environment when the config module
+// loads; the getter lets one suite switch it per test while every other value
+// stays real.
+const emailLogin = vi.hoisted(() => ({ disabled: false }));
+vi.mock("~/config/shelf.config", async (importOriginal) => {
+  const original = await importOriginal<typeof ShelfConfigModule>();
+  return {
+    config: {
+      ...original.config,
+      get disableEmailLogin() {
+        return emailLogin.disabled;
+      },
+    },
   };
 });
 
@@ -257,6 +274,33 @@ describe("sendResetPasswordLink", () => {
 
     expect(getLegacyLoginDecision).toHaveBeenCalledWith(EMAIL);
     expect(supabaseMocks.resetPasswordForEmail).toHaveBeenCalledWith(EMAIL);
+  });
+});
+
+describe("with email login switched off", () => {
+  beforeEach(() => {
+    emailLogin.disabled = true;
+  });
+  afterEach(() => {
+    emailLogin.disabled = false;
+  });
+
+  it("sends no code and says so, since the answer is the same for every address", async () => {
+    await expect(sendOTP(EMAIL)).rejects.toMatchObject({
+      status: 403,
+      title: "Email login is disabled",
+      shouldBeCaptured: false,
+    });
+    expect(getLegacyLoginDecision).not.toHaveBeenCalled();
+    expect(supabaseMocks.signInWithOtp).not.toHaveBeenCalled();
+  });
+
+  it("redeems no code, so one sent earlier opens no session", async () => {
+    await expect(verifyOtpAndSignin(EMAIL, "123456")).rejects.toMatchObject({
+      status: 403,
+      title: "Email login is disabled",
+    });
+    expect(supabaseMocks.verifyOtp).not.toHaveBeenCalled();
   });
 });
 

@@ -52,6 +52,12 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
+      DISABLE_EMAIL_LOGIN: string;
+      OIDC_PROVIDER: string;
+      OIDC_BUTTON_LABEL: string;
+      OIDC_SCOPES: string;
+      OIDC_GROUPS_CLAIM: string;
+      OIDC_WORKSPACE_MAPPINGS: string;
       ENABLE_SCIM: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
@@ -540,6 +546,70 @@ export const ENABLE_SCIM =
 export const DEFAULT_SSO_DOMAIN =
   getEnv("DEFAULT_SSO_DOMAIN", {
     isSecret: false,
+    isRequired: false,
+  }) || "";
+
+/**
+ * Turns off signing in with an email address: the password form, the one-time
+ * code and the password reset. For deployments where everyone signs in through
+ * single sign-on. It only takes effect while a single sign-on method is
+ * available (see `config.disableEmailLogin`), so it cannot lock everyone out.
+ */
+export const DISABLE_EMAIL_LOGIN =
+  getEnv("DISABLE_EMAIL_LOGIN", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+/**
+ * Identifier of the custom OAuth/OIDC provider registered in Supabase Auth that
+ * the "Log in with ..." button signs in with, e.g. `custom:my-idp`. Setting it
+ * turns the custom OIDC login on; empty leaves it off. Only an identifier: the
+ * client id, client secret and issuer live in Supabase.
+ *
+ * @see {@link file://./../modules/auth/oidc.server.ts}
+ */
+export const OIDC_PROVIDER =
+  getEnv("OIDC_PROVIDER", {
+    isSecret: false,
+    isRequired: false,
+  })?.trim() || "";
+
+/** Label of the custom OIDC login button. Empty falls back to a generic label. */
+export const OIDC_BUTTON_LABEL =
+  getEnv("OIDC_BUTTON_LABEL", {
+    isSecret: false,
+    isRequired: false,
+  })?.trim() || "";
+
+/**
+ * Space-separated scopes requested from the custom OIDC provider, e.g.
+ * `openid profile email groups`. Empty requests the scopes stored on the
+ * provider in Supabase.
+ */
+export const OIDC_SCOPES =
+  getEnv("OIDC_SCOPES", {
+    isSecret: false,
+    isRequired: false,
+  })?.trim() || "";
+
+/**
+ * Name of the claim that carries the user's groups, as listed in the
+ * provider's `custom_claims_allowlist` in Supabase. Defaults to `groups`.
+ */
+export const OIDC_GROUPS_CLAIM =
+  getEnv("OIDC_GROUPS_CLAIM", {
+    isSecret: false,
+    isRequired: false,
+  })?.trim() || "groups";
+
+/**
+ * JSON array that maps the groups of the custom OIDC provider to workspace
+ * roles. Server-side only: parsed and validated by
+ * `~/modules/auth/oidc-workspace-mappings.server`.
+ */
+export const OIDC_WORKSPACE_MAPPINGS =
+  getEnv("OIDC_WORKSPACE_MAPPINGS", {
     isRequired: false,
   }) || "";
 

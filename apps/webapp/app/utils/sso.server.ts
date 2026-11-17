@@ -221,10 +221,17 @@ function createEmailAccountExistsError() {
  * The `amr` method GoTrue records for a sign-in completed through a SAML IdP.
  * It is carried by every access token refreshed from that session.
  *
- * Only SAML SSO is supported today. Supporting OIDC SSO means accepting its
- * `amr` method here too, or every OIDC sign-in is refused at the callback.
+ * A sign-in through the custom OIDC provider records a different method and is
+ * recognised by `isOidcAuthenticatedSession`; the callback routes tell the two
+ * apart in `completeSsoCallback`.
  */
 const SSO_SAML_AMR_METHOD = "sso/saml";
+
+/**
+ * The `amr` method GoTrue records for a sign-in completed through an OAuth or
+ * OIDC provider, custom providers included.
+ */
+export const OAUTH_AMR_METHOD = "oauth";
 
 /**
  * Reads the authentication methods from an access token's `amr` claim. GoTrue
@@ -237,7 +244,7 @@ const SSO_SAML_AMR_METHOD = "sso/saml";
  * @param accessToken - a JWT issued by GoTrue
  * @returns the method names, or an empty list when the token cannot be read
  */
-function readAmrMethods(accessToken: string): string[] {
+export function readAmrMethods(accessToken: string): string[] {
   const [, payloadSegment] = accessToken.split(".");
   if (!payloadSegment) return [];
   try {
@@ -267,6 +274,26 @@ function readAmrMethods(accessToken: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Whether a session was obtained through single sign-on (SAML SSO or an OAuth
+ * or OIDC provider) rather than with an email address (password, one-time
+ * code, magic link). A token whose methods cannot be read counts as not single
+ * sign-on.
+ *
+ * SECURITY: the `amr` claim is read WITHOUT verifying the signature. Pass only
+ * a token GoTrue has just vouched for: one returned by `refreshAccessToken`,
+ * or one accepted by `auth.getUser` in the same request.
+ *
+ * @param accessToken - a JWT issued by GoTrue
+ * @returns true when the session's sign-in went through an identity provider
+ */
+export function isSingleSignOnSession(accessToken: string): boolean {
+  const methods = readAmrMethods(accessToken);
+  return (
+    methods.includes(SSO_SAML_AMR_METHOD) || methods.includes(OAUTH_AMR_METHOD)
+  );
 }
 
 /**

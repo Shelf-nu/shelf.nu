@@ -91,6 +91,8 @@ Keeping SSO and standard (password) users side by side on the same domain for go
 
 If you are self-hosting shelf and want to setup SSO, please refer to the supabase documentation for adding providers: [https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml](https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml)
 
+If your identity provider speaks OpenID Connect instead of SAML, or you want a single login button without a company domain, see [Custom OIDC Login](./custom-oidc.md).
+
 ### Attribute mapping [#](#attribute-mapping)
 
 For SSO users to be able to login to shelf, you will need to do some attribute mapping as per [Supabase documentation](https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml?queryGroups=language&language=js#understanding-attribute-mappings). We already provide a file for mapping attributes which you can find inside the project root [./sso/attributes.json](../../sso/attributes.json)

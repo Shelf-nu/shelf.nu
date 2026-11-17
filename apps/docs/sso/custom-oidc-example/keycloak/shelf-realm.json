@@ -1,0 +1,117 @@
+{
+  "realm": "shelf",
+  "displayName": "Shelf OIDC test",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "groups": [
+    { "name": "shelf-admins" },
+    { "name": "shelf-managers" },
+    { "name": "shelf-staff" },
+    { "name": "warehouse-admins" }
+  ],
+  "clients": [
+    {
+      "clientId": "shelf",
+      "name": "Shelf (through Supabase Auth)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "d32afecfd27887beb89b879a8995b4aea069e90a83bdb546",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:8000/auth/v1/callback"],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email",
+        "roles",
+        "web-origins",
+        "acr"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "credentials": [
+        { "type": "password", "value": "test", "temporary": false }
+      ],
+      "groups": ["/shelf-admins"]
+    },
+    {
+      "username": "mona",
+      "enabled": true,
+      "email": "mona@example.com",
+      "emailVerified": true,
+      "firstName": "Mona",
+      "lastName": "Manager",
+      "credentials": [
+        { "type": "password", "value": "test", "temporary": false }
+      ],
+      "groups": ["/shelf-managers"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Staff",
+      "credentials": [
+        { "type": "password", "value": "test", "temporary": false }
+      ],
+      "groups": ["/shelf-staff"]
+    },
+    {
+      "username": "wendy",
+      "enabled": true,
+      "email": "wendy@example.com",
+      "emailVerified": true,
+      "firstName": "Wendy",
+      "lastName": "Warehouse",
+      "credentials": [
+        { "type": "password", "value": "test", "temporary": false }
+      ],
+      "groups": ["/warehouse-admins"]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@example.com",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Nogroups",
+      "credentials": [
+        { "type": "password", "value": "test", "temporary": false }
+      ],
+      "groups": []
+    }
+  ]
+}

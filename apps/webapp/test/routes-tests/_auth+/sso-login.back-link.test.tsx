@@ -20,13 +20,30 @@ import SSOLogin from "~/routes/_auth+/sso-login";
 // loader is replaced by the stub below.
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
-/** Renders the SSO page at the given URL inside a router stub. */
-function renderAt(url: string) {
+/**
+ * Renders the SSO page at the given URL inside a router stub.
+ *
+ * @param url - the URL to open
+ * @param methods - which SSO methods the stubbed loader reports; SAML SSO
+ *   only by default
+ */
+function renderAt(
+  url: string,
+  methods: { disableSSO?: boolean; oidcEnabled?: boolean } = {}
+) {
   const Stub = createRoutesStub([
     {
       path: "/sso-login",
       Component: SSOLogin,
-      loader: () => ({ title: "Log in with SSO", subHeading: "" }),
+      loader: () => ({
+        title: "Log in with SSO",
+        subHeading: "",
+        disableSSO: methods.disableSSO ?? false,
+        oidc: {
+          enabled: methods.oidcEnabled ?? false,
+          buttonLabel: "Log in with Acme",
+        },
+      }),
     },
   ]);
   render(<Stub initialEntries={[url]} />);
@@ -47,6 +64,36 @@ describe("SSO login page", () => {
     await screen.findByRole("button", { name: "Log In" });
     expect(
       screen.queryByRole("link", { name: "Back to login" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows no custom OIDC button unless that login is on", async () => {
+    renderAt("/sso-login");
+
+    await screen.findByRole("button", { name: "Log In" });
+    expect(
+      screen.queryByRole("link", { name: "Log in with Acme" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the custom OIDC login next to the domain form", async () => {
+    renderAt("/sso-login", { oidcEnabled: true });
+
+    const link = await screen.findByRole("link", { name: "Log in with Acme" });
+    expect(link).toHaveAttribute("href", "/oidc-login");
+    expect(screen.getByRole("button", { name: "Log In" })).toBeInTheDocument();
+  });
+
+  it("keeps the native-app flow on the custom OIDC button and hides the domain form without SAML SSO", async () => {
+    renderAt("/sso-login?platform=mobile", {
+      oidcEnabled: true,
+      disableSSO: true,
+    });
+
+    const link = await screen.findByRole("link", { name: "Log in with Acme" });
+    expect(link).toHaveAttribute("href", "/oidc-login?platform=mobile");
+    expect(
+      screen.queryByRole("button", { name: "Log In" })
     ).not.toBeInTheDocument();
   });
 });

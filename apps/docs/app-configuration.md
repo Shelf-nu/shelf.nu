@@ -114,7 +114,9 @@ disableSignup: true;
 
 ### disableSSO
 
-Disables Single Sign-On functionality even if SSO providers are configured.
+Disables the domain-based SAML Single Sign-On, even if SSO providers are
+configured. The custom OIDC login (`oidc`, below) is configured on its own and
+stays enabled while `OIDC_PROVIDER` is set.
 
 **Default value:** `false`  
 **Environment variable:** `DISABLE_SSO`
@@ -123,6 +125,40 @@ Disables Single Sign-On functionality even if SSO providers are configured.
 // Disable SSO login
 disableSSO: true;
 ```
+
+### oidc
+
+Custom OIDC login: a single "Log in with ..." button that signs users in
+through a custom OAuth/OIDC provider registered in Supabase Auth. Enabled by
+setting `OIDC_PROVIDER`. See [Custom OIDC Login](./sso/custom-oidc.md) for the
+setup and the group to workspace mapping.
+
+**Default value:** disabled  
+**Environment variables:** `OIDC_PROVIDER`, `OIDC_BUTTON_LABEL`, `OIDC_SCOPES`,
+`OIDC_GROUPS_CLAIM`, `OIDC_WORKSPACE_MAPPINGS`
+
+### disableEmailLogin
+
+Hides password and one-time code login and refuses them, which leaves single
+sign-on as the only way in. Password reset and signing up with an email
+address are refused as well, because both end in an email login.
+
+It only takes effect while a single sign-on method is switched on: SAML SSO
+(`DISABLE_SSO` is not `true`) or the custom OIDC login (`OIDC_PROVIDER` is
+set). With neither, the setting is ignored and email login stays available.
+Shelf does not check that the method works, so set up and test your SAML or
+OIDC provider before you turn email login off.
+
+Invitation links follow the same rule: someone who is not signed in is asked
+to log in with single sign-on first and then open the link again, instead of
+getting an email account created for them.
+
+The companion app is covered too: its API accepts only sessions that were
+obtained through single sign-on, and signs out a session obtained with a
+password or a one-time code.
+
+**Default value:** `false`  
+**Environment variable:** `DISABLE_EMAIL_LOGIN`
 
 ### enableScim
 
