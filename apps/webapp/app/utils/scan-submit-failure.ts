@@ -196,6 +196,14 @@ export async function keepScanListOnSubmitFailure({
 }
 
 /**
+ * What a bulk scanner's result dialog says when a save got no answer: the
+ * request failed, or the answer was not the app's. The server may have saved
+ * it anyway, so it never says "try again" without saying to check first.
+ */
+export const BULK_SAVE_NO_ANSWER_MESSAGE =
+  "The save got no answer. It may have gone through, so check before you try again.";
+
+/**
  * Reads the answer to a bulk scanner save sent with a plain `fetch` (the bulk
  * actions save in place, outside a route action).
  *

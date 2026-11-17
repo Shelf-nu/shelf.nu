@@ -36,7 +36,10 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
-import { readBulkSaveAnswer } from "~/utils/scan-submit-failure";
+import {
+  BULK_SAVE_NO_ANSWER_MESSAGE,
+  readBulkSaveAnswer,
+} from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -214,7 +217,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             errorMessage:
               error instanceof ShelfError
                 ? error.message
-                : "Something went wrong while adding assets/kit to location. Please try again.",
+                : BULK_SAVE_NO_ANSWER_MESSAGE,
           },
           parts: {
             assets: parts.assets === "processing" ? "error" : parts.assets,

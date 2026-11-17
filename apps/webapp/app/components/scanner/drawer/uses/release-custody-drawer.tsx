@@ -42,7 +42,10 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
-import { readBulkSaveAnswer } from "~/utils/scan-submit-failure";
+import {
+  BULK_SAVE_NO_ANSWER_MESSAGE,
+  readBulkSaveAnswer,
+} from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import {
   assetLabelPresets,
@@ -237,7 +240,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               assetErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while releasing custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
@@ -282,7 +285,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               kitErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while releasing custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {

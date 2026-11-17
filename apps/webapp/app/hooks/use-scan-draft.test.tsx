@@ -810,7 +810,7 @@ describe("inPlaceSaveAnswer", () => {
 
 /**
  * The bulk actions save in place, so their drawers mark the list themselves:
- * on when the save is sent, off again only for a refusal.
+ * on when the save is sent, off again for a refusal or a full save.
  */
 describe("useInPlaceSaveMark", () => {
   function renderMark(store: ReturnType<typeof createStore>) {
@@ -852,6 +852,21 @@ describe("useInPlaceSaveMark", () => {
     act(() => second.result.current.start());
     act(() => second.result.current.settle("refused"));
     expect(retried.get(unconfirmedScanSaveAtom)).toBe(true);
+  });
+
+  /**
+   * A full save confirms the whole list, so a warning left by an earlier
+   * unanswered attempt must not stay beside the success.
+   */
+  it("takes the mark off once the whole list saved, even an earlier one", () => {
+    const store = createStore();
+    store.set(unconfirmedScanSaveAtom, true);
+    const { result } = renderMark(store);
+    act(() => result.current.start());
+
+    act(() => result.current.settle("saved"));
+
+    expect(store.get(unconfirmedScanSaveAtom)).toBe(false);
   });
 });
 

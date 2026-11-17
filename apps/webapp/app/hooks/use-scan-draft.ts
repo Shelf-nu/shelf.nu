@@ -168,8 +168,9 @@ export function inPlaceSaveAnswer(
  *
  * `start` puts the mark on as the save is sent, so a reload while it waits
  * keeps the warning with the list. `settle` reads the answer: a refusal takes
- * back only what this attempt added, no answer keeps the mark, and a save
- * leaves the draft to the save signal ({@link useClearScanDraftOnSave}).
+ * back only what this attempt added, no answer keeps the mark, and a full
+ * save takes it off (the whole list is confirmed, whatever an earlier attempt
+ * did) and leaves the draft to the save signal ({@link useClearScanDraftOnSave}).
  *
  * @returns `start` and `settle`, stable across renders
  */
@@ -190,6 +191,8 @@ export function useInPlaceSaveMark(): {
     (answer: InPlaceSaveAnswer) => {
       if (answer === "refused") {
         setUnconfirmedSave(earlierMarkRef.current);
+      } else if (answer === "saved") {
+        setUnconfirmedSave(false);
       }
     },
     [setUnconfirmedSave]

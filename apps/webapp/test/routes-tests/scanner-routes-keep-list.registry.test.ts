@@ -199,6 +199,19 @@ describe("scanner routes keep a draft of their list", () => {
     expect(source).not.toMatch(/response\.json\(\)|Response\.json\(\)/);
   });
 
+  /**
+   * A save with no answer may have gone through, so the result dialog says to
+   * check first, never only "try again". One message, shared with every drawer.
+   */
+  it.each(BULK_DRAWERS)(
+    "%s tells a save with no answer to check first",
+    (file) => {
+      const source = read(file);
+      expect(source).toMatch(/BULK_SAVE_NO_ANSWER_MESSAGE/);
+      expect(source).not.toMatch(/Please try again/);
+    }
+  );
+
   it.each([
     ["../../hooks/use-booking-assign-session-initialization.ts", '"assign"'],
     ["../../hooks/use-booking-fulfil-session-initialization.ts", '"fulfil"'],

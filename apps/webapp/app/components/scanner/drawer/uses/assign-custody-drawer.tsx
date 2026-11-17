@@ -52,7 +52,10 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
-import { readBulkSaveAnswer } from "~/utils/scan-submit-failure";
+import {
+  BULK_SAVE_NO_ANSWER_MESSAGE,
+  readBulkSaveAnswer,
+} from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -278,7 +281,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               assetErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while assigning custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
@@ -326,7 +329,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               kitErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while assigning custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
