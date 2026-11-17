@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
+import type * as LocationNoteService from "~/modules/location-note/service.server";
 import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -52,7 +53,9 @@ vi.mock("~/database/db.server", () => ({
 
 // why: the location activity lines have their own tests; here only which
 // moves the writer hands over matters.
-vi.mock("~/modules/location-note/service.server", () => ({
+vi.mock("~/modules/location-note/service.server", async (importOriginal) => ({
+  // The move builder is pure, so the real one shapes what the notes receive.
+  ...(await importOriginal<typeof LocationNoteService>()),
   createAssetLocationMoveNotes: vi.fn(),
 }));
 

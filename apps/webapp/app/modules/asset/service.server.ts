@@ -272,6 +272,7 @@ import type { AssetLocationMove } from "../location-note/service.server";
 import {
   createAssetLocationMoveNotes,
   createSystemLocationNote,
+  firstPlacementMove,
   placementChangeMoves,
 } from "../location-note/service.server";
 import {
@@ -1001,16 +1002,7 @@ function firstPlacementNotes(
   const moves = assets.flatMap((asset): AssetLocationMove[] => {
     const placement = asset.assetLocations?.[0];
     if (!placement?.location) return [];
-    return [
-      {
-        asset,
-        from: null,
-        to: placement.location,
-        // Units placed, for a pool only; an individual asset is just named.
-        quantity:
-          asset.type === AssetType.QUANTITY_TRACKED ? placement.quantity : null,
-      },
-    ];
+    return [firstPlacementMove(asset, placement.location, placement.quantity)];
   });
   // Every asset of a batch is created by the same user.
   const actor = assets.find((asset) => asset.user)?.user;

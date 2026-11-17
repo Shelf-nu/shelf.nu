@@ -44,7 +44,10 @@ import { resolveImportedAssetModel } from "~/modules/asset-model/service.server"
 import { BARCODE_IMPORT_COLUMNS } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import type { AssetLocationMove } from "~/modules/location-note/service.server";
-import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  firstPlacementMove,
+} from "~/modules/location-note/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import {
@@ -85,8 +88,8 @@ export type ImportedImage = { mainImage: string; mainImageExpiration: Date };
 type ChunkArrival = {
   asset: AssetLocationMove["asset"];
   locationId: string;
-  /** Units placed, for a quantity-tracked pool only. */
-  quantity: number | null;
+  /** Units on the new placement: the pool for a quantity-tracked row, else 1. */
+  placedUnits: number;
 };
 
 /**
@@ -975,8 +978,7 @@ export async function writeImportChunk({
             unitOfMeasure: p.unitOfMeasure ?? null,
           },
           locationId: p.locationId!,
-          quantity:
-            p.type === AssetType.QUANTITY_TRACKED ? poolQuantity(p) : null,
+          placedUnits: poolQuantity(p),
         }));
         await recordEvents(
           arrivals.map((arrival) => ({
@@ -992,7 +994,9 @@ export async function writeImportChunk({
             toValue: arrival.locationId,
             // Qty-tracked: the units placed.
             meta:
-              arrival.quantity === null ? {} : { quantity: arrival.quantity },
+              arrival.asset.type === AssetType.QUANTITY_TRACKED
+                ? { quantity: arrival.placedUnits }
+                : {},
           })),
           tx
         );
@@ -1015,14 +1019,7 @@ export async function writeImportChunk({
           moves: arrivals.flatMap((arrival): AssetLocationMove[] => {
             const to = context.locations.get(arrival.locationId);
             return to
-              ? [
-                  {
-                    asset: arrival.asset,
-                    from: null,
-                    to,
-                    quantity: arrival.quantity,
-                  },
-                ]
+              ? [firstPlacementMove(arrival.asset, to, arrival.placedUnits)]
               : [];
           }),
           actor: context.actor,
