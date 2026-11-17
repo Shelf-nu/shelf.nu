@@ -139,6 +139,8 @@ function AuditDrawerFooter({
         disabled={disabled}
         auditName={auditName}
         portalContainer={portalContainer}
+        // The scan route's client action reads the intent from the URL.
+        intentInActionUrl
         stats={stats}
         units={units}
       />

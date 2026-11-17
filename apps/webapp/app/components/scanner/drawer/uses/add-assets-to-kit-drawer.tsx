@@ -145,6 +145,7 @@ export default function AddAssetsToKitDrawer({
 
   return (
     <ConfigurableDrawer
+      savedCheck={{ to: `/kits/${kit.id}`, label: "Open the kit" }}
       schema={addScannedAssetsToKitSchema}
       /**
        * Only the scanned assets. The route adds them to whatever the kit holds
