@@ -24,9 +24,10 @@ If the release is wrong without a data change, the change is a **migration**.
 self-hoster's.** A normal self-hosted upgrade stops the old container before
 the new one migrates, so its migration sees every row. Only our production
 runs migrations ahead of the deploy while the old version keeps serving.
-Before shipping code to repair that window, query production: if nothing is
-left over, there is nothing to ship. If something is, fix our rows once, by
-hand, and say so in the PR.
+Before shipping code to repair that window, query production once the old
+version has stopped serving: if nothing is left over, there is nothing to
+ship. If something is, fix our rows once, by hand, run the query again to
+confirm it returns nothing, and say so in the PR.
 
 Deploy notes may still say what a release changes and in what order our own
 manual migrations run. They never carry a step another instance needs.
