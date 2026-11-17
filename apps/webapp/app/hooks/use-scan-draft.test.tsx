@@ -9,8 +9,8 @@
  * @see {@link file://./use-scan-draft.ts}
  */
 import type { ReactNode } from "react";
-import { StrictMode } from "react";
-import { act, renderHook } from "@testing-library/react";
+import { Activity, StrictMode } from "react";
+import { act, render as renderTree, renderHook } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -852,5 +852,65 @@ describe("useInPlaceSaveMark", () => {
     act(() => second.result.current.start());
     act(() => second.result.current.settle("refused"));
     expect(retried.get(unconfirmedScanSaveAtom)).toBe(true);
+  });
+});
+
+/**
+ * React can disconnect a scanner's effects and connect them again without
+ * unmounting it (a hidden subtree shown again; the development double-mount in
+ * the browser). The restore runs once per target, so a mark lowered by the
+ * disconnect would never come back, and the next mirror would write the draft
+ * without it: the reload after a save that got no answer showed no warning.
+ */
+describe("a scanner whose effects reconnect", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    mockNavigation.mockReturnValue({ state: "idle" });
+    mockActionData.mockReturnValue(undefined);
+    mockLocation.mockReturnValue({ pathname: "/kits/kit-1/scan-assets" });
+    mockUser.mockReturnValue({ id: USER_ID });
+  });
+
+  it("keeps the restored unconfirmed mark, and its draft keeps it too", () => {
+    const draftKey = scanDraftKey("kit", USER_ID, "kit-1");
+    saveScanDraft(draftKey, { "qr-1": scanned() }, { unconfirmedSave: true });
+    const store = createStore();
+    function Scanner() {
+      useScanDraftOnEntry({ scope: "kit", targetId: "kit-1" });
+      return null;
+    }
+    const page = (mode: "visible" | "hidden") => (
+      <Provider store={store}>
+        <Activity mode={mode}>
+          <Scanner />
+        </Activity>
+      </Provider>
+    );
+
+    vi.useFakeTimers();
+    try {
+      const view = renderTree(page("visible"));
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+
+      // Hidden and shown again: its effects disconnect and reconnect.
+      act(() => view.rerender(page("hidden")));
+      act(() => view.rerender(page("visible")));
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
+
+      // Leaving the scanner for good still lowers it.
+      view.unmount();
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

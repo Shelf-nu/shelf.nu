@@ -351,7 +351,22 @@ export function useScanDraft({
   }, [actionData, submitFailure, setUnconfirmedSave]);
 
   // The mark belongs to this scanner's list: the next scanner starts clean.
-  useEffect(() => () => setUnconfirmedSave(false), [setUnconfirmedSave]);
+  // React can disconnect and reconnect effects without unmounting (the
+  // development double-mount, a hidden subtree shown again), and the restore
+  // runs once per target, so a reconnect does not put a lowered mark back.
+  // Only a scanner that is still gone a tick later lowers it.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      setTimeout(() => {
+        if (!mountedRef.current) {
+          setUnconfirmedSave(false);
+        }
+      }, 0);
+    };
+  }, [setUnconfirmedSave]);
 
   const restoreDraft = useCallback(() => {
     // A newly seeded target is a new list to keep. The flag stays set for
