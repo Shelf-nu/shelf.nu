@@ -175,6 +175,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetId,
       bookingId,
       organizationId,
+      actorUserId: user.id,
       window:
         bookingAsset.booking.from && bookingAsset.booking.to
           ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }

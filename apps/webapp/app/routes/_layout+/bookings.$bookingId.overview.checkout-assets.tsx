@@ -30,6 +30,7 @@ import {
   getBooking,
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
+  assertRequestMayBeCheckedOut,
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -139,6 +140,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // A pending request is approved first, never checked out: the scanner is
+    // not opened for it. Its check-out is refused in the service too.
+    await assertRequestMayBeCheckedOut({
+      bookingId: booking.id,
+      organizationId,
+    });
+
     // Always fetch partial check-out data for scanner validation. We need this
     // to detect blockers for already-checked-out assets/kits and to feed the
     // drawer's asset-scoped "remaining to check out" count.
@@ -184,7 +192,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * kit-driven-first, so per-slice and per-asset agree on the pool size.
      *
      * Calling `computeBookingAssetSliceRemainingToCheckOut` (and NOT
-     * `computeBookingAssetSliceRemaining`, which is the check-IN equivalent)
+     * `computeBookingCheckinRemaining`, which is the check-IN equivalent)
      * is load-bearing — using the wrong helper silently shows check-IN
      * remaining counts on the checkout drawer.
      */

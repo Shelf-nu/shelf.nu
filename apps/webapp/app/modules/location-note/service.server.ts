@@ -116,6 +116,29 @@ export type AssetLocationMove = {
   quantity?: number | null;
 };
 
+/**
+ * The move for an asset's first placement: from no location to where it was
+ * created or imported. The units are named only for a QUANTITY_TRACKED pool;
+ * an individual asset is just named.
+ *
+ * @param asset - The just-created asset
+ * @param to - The location it was placed at
+ * @param placedUnits - Units on the new placement (`AssetLocation.quantity`)
+ * @returns The move to pass to {@link createAssetLocationMoveNotes}
+ */
+export function firstPlacementMove(
+  asset: AssetLocationMove["asset"],
+  to: Pick<Location, "id" | "name">,
+  placedUnits: number
+): AssetLocationMove {
+  return {
+    asset,
+    from: null,
+    to,
+    quantity: asset.type === "QUANTITY_TRACKED" ? placedUnits : null,
+  };
+}
+
 /** One location's amount of an asset, for {@link placementChangeMoves}. */
 type PlacementAmount = {
   location: Pick<Location, "id" | "name">;

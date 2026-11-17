@@ -47,6 +47,8 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
+import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
+import { touchBookingVersion } from "~/modules/booking/utils.server";
 import {
   canEditModelReservations,
   getReservationCeiling,
@@ -2852,6 +2854,17 @@ export async function writeBookingModelRequestInTx(
     );
   }
 
+  // A model reservation added or raised asks for more than an approval
+  // covered.
+  // Decided on the quantity read under the row lock: none before, or less.
+  if (previousQuantity == null || quantity > previousQuantity) {
+    await applyRequestGrowthRule(tx, {
+      bookingId,
+      organizationId,
+      actorUserId: userId,
+    });
+  }
+
   return { request, booking, assetModel, previousQuantity, wasCreated };
 }
 
@@ -2896,16 +2909,17 @@ export async function upsertBookingModelRequest({
     // Serves both the in-tx event and the post-tx note.
     const actor = await loadActorBestEffort(userId);
 
-    const result = await db.$transaction((tx) =>
-      writeBookingModelRequestInTx(tx, {
+    const result = await db.$transaction(async (tx) => {
+      await touchBookingVersion(tx, { bookingId, organizationId });
+      return writeBookingModelRequestInTx(tx, {
         bookingId,
         assetModelId,
         quantity,
         organizationId,
         userId,
         actor,
-      })
-    );
+      });
+    });
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
     // can't roll back the upsert. Phrasing depends on whether this was
@@ -3079,6 +3093,7 @@ export async function upsertBookingModelRequests({
   try {
     return await db.$transaction(
       async (tx) => {
+        await touchBookingVersion(tx, { bookingId, organizationId });
         /**
          * Locks first, then the read they protect.
          *
@@ -3258,6 +3273,7 @@ export async function reserveModelsUpToAvailability({
     try {
       const batchReduced = await db.$transaction(
         async (tx) => {
+          await touchBookingVersion(tx, { bookingId, organizationId });
           const booking = await tx.booking.findUnique({
             where: { id: bookingId, organizationId },
             select: { from: true, to: true },
@@ -3386,6 +3402,7 @@ export async function removeBookingModelRequest({
      * the concrete-asset side — cancellation was the one outlier.
      */
     const cancelled = await db.$transaction(async (tx) => {
+      await touchBookingVersion(tx, { bookingId, organizationId });
       const booking = await tx.booking.findUnique({
         where: { id: bookingId, organizationId },
         select: { id: true, status: true },

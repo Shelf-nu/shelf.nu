@@ -287,6 +287,34 @@ describe("what the cards say", () => {
 });
 
 describe("both cards on one page", () => {
+  it("gives each card its own anchor, so a link can open the page at either one", () => {
+    const { container } = render(
+      <>
+        <ExplicitCheckinSettings
+          header={{ title: EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE }}
+          defaultValues={{
+            requireExplicitCheckinForAdmin: false,
+            requireExplicitCheckinForSelfService: false,
+          }}
+        />
+        <ExplicitCheckoutSettings
+          header={checkoutHeader}
+          defaultValues={{
+            requireExplicitCheckoutForAdmin: false,
+            requireExplicitCheckoutForSelfService: false,
+          }}
+        />
+      </>
+    );
+
+    expect(container.querySelector("#explicit-check-in")).toHaveTextContent(
+      EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE
+    );
+    expect(container.querySelector("#explicit-check-out")).toHaveTextContent(
+      EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.TITLE
+    );
+  });
+
   it("tells the check-in switch from the check-out switch of the same role", () => {
     // Settings > Bookings renders both cards, so two switches are named
     // "Admins and Managers". Each one's description names the direction, which is what a
