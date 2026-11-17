@@ -3729,7 +3729,7 @@ describe("updateAsset location activity", () => {
   });
 });
 
-describe("updateAsset multi-placement location guard (issue #3345)", () => {
+describe("updateAsset multi-placement location guard", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
     // `clearAllMocks` only resets call history, not queued `*Once`
@@ -3744,7 +3744,7 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
       assetLocations: [],
     });
     // The post-transaction re-read feeds the location-change notes, which
-    // render the asset's title — a bare `{}` would crash the markdoc
+    // render the asset's title: a bare `{}` would crash the markdoc
     // wrappers instead of exercising the placement path.
     (
       db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -3809,7 +3809,7 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
 
   it("refuses a quantity-less location change for a pool placed at multiple locations", async () => {
     // The asset edit form (and the companion edit screen) submit only
-    // `newLocationId` / `currentLocationId` — no per-location quantity
+    // `newLocationId` / `currentLocationId`, with no per-location quantity
     // and no warning. The placement rewrite would delete every manual
     // placement and put all 14 units at the new location.
     mockMultiPlacedPool();
@@ -3818,6 +3818,20 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
       status: 400,
       title: "Asset is placed at multiple locations",
     });
+
+    // Only manual placements count toward the guard: the guard fetch
+    // scopes `assetLocations` to `assetKitId: null`, so kit-driven rows
+    // are never counted.
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          assetLocations: {
+            where: { assetKitId: null },
+            select: { id: true },
+          },
+        }),
+      })
+    );
 
     // The refusal fires before the transaction, so nothing is written.
     expect(db.asset.update).not.toHaveBeenCalled();
@@ -3880,6 +3894,54 @@ describe("updateAsset multi-placement location guard (issue #3345)", () => {
     vi.mocked(readStockState).mockResolvedValueOnce(
       poolStockState([["loc-a", 14]])
     );
+
+    await updateAsset(poolLocationPayload());
+
+    expect(db.asset.update).toHaveBeenCalled();
+    // The guard fetch counts manual placements only, same as in the
+    // refusal case above.
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          assetLocations: {
+            where: { assetKitId: null },
+            select: { id: true },
+          },
+        }),
+      })
+    );
+  });
+
+  it("allows a quantity-less location change for an individual asset placed at several locations", async () => {
+    // The guard counts placements only for QUANTITY_TRACKED pools. An
+    // INDIVIDUAL asset has a single location by definition, so several
+    // placement rows in its fetch result must not refuse the change.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      {
+        type: "INDIVIDUAL",
+        quantity: null,
+        assetKits: [],
+        assetLocations: [
+          { id: "placement-a" },
+          { id: "placement-b" },
+          { id: "placement-c" },
+        ],
+      }
+    );
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-d",
+      name: "Storage D",
+    });
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "pool-1",
+      organizationId: "org-A",
+      type: "INDIVIDUAL",
+      quantity: null,
+      title: "Pool",
+      unitOfMeasure: null,
+    });
 
     await updateAsset(poolLocationPayload());
 
