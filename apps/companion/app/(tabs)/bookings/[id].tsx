@@ -2493,9 +2493,12 @@ function BookingDetailScreen({ id }: { id: string }) {
                 items past DRAFT, like the add/browse affordances above: a
                 member who may not add items to a RESERVED booking cannot
                 complete the assign and check-out flow, so showing the CTA
-                would only lead to a rejected submit. */}
+                would only lead to a rejected submit. Hidden while the request
+                waits for approval too: it is approved first, then checked
+                out. */}
             {booking.status === "RESERVED" &&
               canAddItems &&
+              approvalView.mayCheckOutNow &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}
