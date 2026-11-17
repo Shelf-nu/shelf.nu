@@ -68,6 +68,14 @@ const SIGN_IN_PATH = "/login";
 export const unconfirmedScanSaveAtom = atom(false);
 
 /**
+ * The scanner that last mounted and so owns the unconfirmed mark: one token
+ * per mount. A scanner leaving lowers the mark only while it still owns it,
+ * so a scanner that replaced it (and may have restored a marked list) keeps
+ * its warning.
+ */
+const unconfirmedScanSaveOwnerAtom = atom<object | null>(null);
+
+/**
  * The save failure whose list has since been emptied. React Router keeps the
  * last action answer until the next submission, so without this a new list
  * scanned on the same page would show the old failure's notice although it
@@ -357,19 +365,26 @@ export function useScanDraft({
   // React can disconnect and reconnect effects without unmounting (the
   // development double-mount, a hidden subtree shown again), and the restore
   // runs once per target, so a reconnect does not put a lowered mark back.
-  // Only a scanner that is still gone a tick later lowers it.
+  // Only a scanner that is still gone a tick later lowers it, and only while
+  // no other scanner has mounted since: that one owns the mark now.
   const mountedRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
+    const owner = {};
+    store.set(unconfirmedScanSaveOwnerAtom, owner);
     return () => {
       mountedRef.current = false;
       setTimeout(() => {
-        if (!mountedRef.current) {
+        if (
+          !mountedRef.current &&
+          store.get(unconfirmedScanSaveOwnerAtom) === owner
+        ) {
+          store.set(unconfirmedScanSaveOwnerAtom, null);
           setUnconfirmedSave(false);
         }
       }, 0);
     };
-  }, [setUnconfirmedSave]);
+  }, [store, setUnconfirmedSave]);
 
   const restoreDraft = useCallback(() => {
     // A newly seeded target is a new list to keep. The flag stays set for

@@ -928,4 +928,41 @@ describe("a scanner whose effects reconnect", () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * Going straight from one scanner to another: the one that left must not
+   * lower the mark the next one restored with its list.
+   */
+  it("leaves the mark of the scanner that replaced it", () => {
+    const locationKey = scanDraftKey("location", USER_ID, "location-1");
+    saveScanDraft(
+      locationKey,
+      { "qr-1": scanned() },
+      { unconfirmedSave: true }
+    );
+    const store = createStore();
+    function Scanner({ scope, targetId }: { scope: string; targetId: string }) {
+      useScanDraftOnEntry({ scope, targetId });
+      return null;
+    }
+    const page = (scope: string, targetId: string) => (
+      <Provider store={store}>
+        <Scanner key={scope} scope={scope} targetId={targetId} />
+      </Provider>
+    );
+
+    vi.useFakeTimers();
+    try {
+      const view = renderTree(page("kit", "kit-1"));
+      act(() => view.rerender(page("location", "location-1")));
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+      expect(readScanDraftUnconfirmedSave(locationKey)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
