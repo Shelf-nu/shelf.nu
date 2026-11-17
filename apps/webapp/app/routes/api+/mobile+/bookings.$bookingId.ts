@@ -52,6 +52,7 @@ import {
   isExtendableStatus,
 } from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetsRemainingToCheckOut,
@@ -69,6 +70,11 @@ import {
   canWriteBooking,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
+import {
+  isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+} from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -109,6 +115,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       z.object({ bookingId: z.string().min(1) })
     );
 
+    /**
+     * The version an approver approves, read BEFORE the booking and its
+     * contents below, so a change that commits while this loads makes the
+     * version older than what the screen shows, never newer: Approve then
+     * refuses instead of approving what the approver did not see. Read only
+     * for someone who may approve; sent only with `canApprove`.
+     */
+    // Resolved once: it gates both this version read and `canApprove` below.
+    const canApprovePerm = await hasPermission({
+      userId: user.id,
+      organizationId,
+      roles,
+      workspace: access.workspaceGrants,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.approve,
+    });
+    const reviewableVersion = canApprovePerm
+      ? await readBookingRequestVersion(db, {
+          bookingId,
+          organizationId,
+          pendingOnly: true,
+        })
+      : null;
+
     const booking = await db.booking.findFirst({
       where: {
         id: bookingId,
@@ -137,6 +167,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        // Feeds the derived pending-approval flag exposed in the response.
+        approvedAt: true,
         archivedWithoutCheckin: true,
         from: true,
         to: true,
@@ -794,6 +826,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
+    // Approval gate: a pending reservation request is never checked out, by
+    // anyone; it is approved first. The service refuses the check-out
+    // whatever the app version, and this flag keeps every app version from
+    // drawing a button the server would refuse. Derived with the same shared
+    // helper the web and the service use.
+    const isPendingApproval = isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
+    });
     // Seeing a booking (the workspace see-toggles) never grants writing it:
     // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
     // this caller may only read offers no actions.
@@ -805,7 +847,33 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: user.id,
       access,
     });
-    const canCheckout = writesBooking && canCheckoutByState && canCheckoutPerm;
+    const canCheckout =
+      writesBooking &&
+      canCheckoutByState &&
+      canCheckoutPerm &&
+      !isPendingApproval;
+    // Who may decide the request: the same `booking:approve` answer the web
+    // Approve button and the `approve-booking` intent resolve, so the phone
+    // never draws (or withholds) a decision the server would answer otherwise.
+    // Only with the version this screen shows: without it an approval could
+    // not be checked against what the approver saw, so the app offers none
+    // until the booking is reloaded.
+    const canApprove =
+      isPendingApproval && canApprovePerm && reviewableVersion !== null;
+    // Sent back with Approve so a request that changed since this screen
+    // loaded is refused.
+    const requestVersion = canApprove ? reviewableVersion : null;
+    // Told BEFORE the reservation: whether this caller's Reserve would land as
+    // a request waiting for a decision. The same rule `reserveBooking` applies
+    // (workspace requires approval, and the caller's role is one whose
+    // reservations alert the workspace), so the app can word its prompt and
+    // its success message as a request instead of a done reservation.
+    const reservationNeedsApproval =
+      booking.status === BookingStatus.DRAFT &&
+      roleReservesAsRequest({
+        approvalSetting: access.policy.bookings.approvalSetting,
+        settings: bookingSettings,
+      });
     const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
@@ -1072,6 +1140,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
+        // True while this reservation request awaits a decision: the app
+        // renders a "Pending approval" badge and hides checkout.
+        isPendingApproval,
+        canApprove,
+        requestVersion,
+        reservationNeedsApproval,
       },
       checkedInAssetIds,
       // Which assets this booking actually sent out, from the slice markers.

@@ -40,6 +40,8 @@ import { db } from "~/database/db.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestApprovedWithinTx,
+  assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
@@ -102,6 +104,15 @@ export async function fulfilAndCheckOut({
   // them are resolved here rather than trusted from the client, so every
   // surface — web drawer, mobile endpoint, companion — books a kit the same
   // org-scoped way. See `.claude/rules/kit-members-via-kit-slices.md`.
+  // Before anything is written: the scanned-only path below commits the
+  // assignment of scanned units before its check-out, so a pending request
+  // must be refused here, not after. A pending request is never checked out,
+  // by anyone: it is approved first.
+  await assertRequestMayBeCheckedOut({
+    bookingId: args.bookingId,
+    organizationId: args.organizationId,
+  });
+
   const scannedKits = await resolveScannedKits(args);
   await assertScannedUnitsAreNotKitMembers({
     bookingId: args.bookingId,
@@ -368,6 +379,9 @@ async function checkOutScannedUnits(
       // The route authorized this flow under the check-out rule, which lets a
       // caller fulfil a RESERVED booking; the add-items rule would refuse it.
       access: null,
+      // A scanned extra that asks for more than was approved is refused here,
+      // with the add rolled back, rather than left as a pending request.
+      atCheckout: true,
       hints: args.hints,
       seesAllBookings: args.seesAllBookings,
     });
@@ -400,6 +414,14 @@ async function checkOutScannedUnits(
   if (assetIdsAlreadyOnBooking.length > 0) {
     await db.$transaction(async (tx) => {
       await lockBookingForStatusCheck(tx, bookingId, organizationId);
+      // The preflight ran before this transaction: a request that is pending
+      // again since (a requester's change cleared its approval) is refused
+      // under the lock, before the claim stamps or fulfils anything.
+      await assertRequestApprovedWithinTx(tx, {
+        bookingId,
+        organizationId,
+        actorUserId: userId,
+      });
       await claimUnstampedBookingRows(
         {
           bookingId,

@@ -7,6 +7,7 @@
  */
 import type { OrganizationRoles } from "@prisma/client";
 import { renderHook } from "@testing-library/react";
+import { useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useOrganizationRoles } from "./use-organization-roles";
 import type { NavItem } from "./use-sidebar-nav-items";
@@ -116,5 +117,35 @@ describe("useSidebarNavItems", () => {
 
   it("a membership holding ADMIN beside SELF_SERVICE sees what ADMIN sees", () => {
     expect(sidebarFor(["SELF_SERVICE", "ADMIN"])).toEqual(ADMIN_VIEW);
+  });
+});
+
+describe("useSidebarNavItems pending approval badge", () => {
+  /** The "View Bookings" child's badge for a layout payload. */
+  function viewBookingsBadge(pendingApprovalCount: number | undefined) {
+    vi.mocked(useOrganizationRoles).mockReturnValue(["ADMIN"]);
+    vi.mocked(useLoaderData).mockReturnValue({
+      isAdmin: false,
+      canUseBookings: true,
+      subscription: null,
+      unreadUpdatesCount: 0,
+      pendingApprovalCount,
+    });
+    const bookings = renderHook(() =>
+      useSidebarNavItems()
+    ).result.current.topMenuItems.find((item) => item.title === "Bookings");
+    if (bookings?.type !== "parent")
+      throw new Error("Bookings has no children");
+    return bookings.children.find((child) => child.title === "View Bookings")
+      ?.badge;
+  }
+
+  it("counts the requests the layout loader found", () => {
+    expect(viewBookingsBadge(3)).toEqual({ show: true, count: 3 });
+  });
+
+  it("shows nothing at zero or when the loader sends no count", () => {
+    expect(viewBookingsBadge(0)?.show).toBe(false);
+    expect(viewBookingsBadge(undefined)?.show).toBe(false);
   });
 });
