@@ -10,6 +10,7 @@ import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { applyRequestGrowthRule } from "./request-change.server";
+import { touchBookingVersion } from "./utils.server";
 
 /**
  * Booked Quantity Service
@@ -150,10 +151,7 @@ export async function setStandaloneBookedQuantitiesWithinTx(
   // the asset locks, so the booking row is locked first, the same order a
   // check-out takes them in.
   if (changes.length > 0) {
-    await tx.booking.updateMany({
-      where: { id: bookingId, organizationId },
-      data: { updatedAt: new Date() },
-    });
+    await touchBookingVersion(tx, { bookingId, organizationId });
   }
   const ordered = [...changes].sort((a, b) =>
     a.assetId.localeCompare(b.assetId)

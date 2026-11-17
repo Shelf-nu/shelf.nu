@@ -1110,3 +1110,37 @@ export async function lockBookingForStatusCheck(
 
   return rows[0].status;
 }
+
+/**
+ * Moves a booking's version (`updatedAt`) inside a transaction that changes
+ * what the booking holds: its slices, booked amounts or model reservations.
+ * An approver approves the version they saw (`readBookingRequestVersion`), so
+ * a request that changed since must not match it.
+ *
+ * The write also takes the booking row lock, so call it first in the
+ * transaction: the booking row is then locked before any asset, model or
+ * reservation row, the order a check-out takes them in.
+ *
+ * Org-scoped like {@link lockBookingForStatusCheck}: a foreign booking id
+ * matches no row and moves nothing.
+ *
+ * @param tx - The transaction changing the booking's contents
+ * @param args.bookingId - The booking
+ * @param args.organizationId - Its workspace
+ */
+export async function touchBookingVersion(
+  tx: {
+    booking: {
+      updateMany: (args: {
+        where: { id: string; organizationId: string };
+        data: { updatedAt: Date };
+      }) => Promise<unknown>;
+    };
+  },
+  { bookingId, organizationId }: { bookingId: string; organizationId: string }
+): Promise<void> {
+  await tx.booking.updateMany({
+    where: { id: bookingId, organizationId },
+    data: { updatedAt: new Date() },
+  });
+}

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { bookingApprovalView } from "./booking-approval-view";
+import {
+  approveBookingBody,
+  bookingApprovalView,
+} from "./booking-approval-view";
 
 /**
  * The approval fields of `GET /api/mobile/bookings/:id`, shaped as the webapp
@@ -64,5 +67,24 @@ describe("bookingApprovalView", () => {
     };
     assert.deepEqual(bookingApprovalView({}), plain);
     assert.deepEqual(bookingApprovalView(null), plain);
+  });
+});
+
+describe("approveBookingBody", () => {
+  it("sends the request version the screen showed", () => {
+    // The shape `POST /api/mobile/bookings/approve` parses, as its webapp
+    // route test (`bookings.approve.test.ts`) sends it.
+    assert.deepEqual(
+      approveBookingBody({ id: "booking-1", requestVersion: "abc123" }),
+      { bookingId: "booking-1", requestVersion: "abc123" }
+    );
+  });
+
+  it("sends nothing without a version: the route would refuse it", () => {
+    assert.equal(approveBookingBody({ id: "booking-1" }), null);
+    assert.equal(
+      approveBookingBody({ id: "booking-1", requestVersion: null }),
+      null
+    );
   });
 });

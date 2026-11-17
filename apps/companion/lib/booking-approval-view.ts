@@ -51,3 +51,25 @@ export function bookingApprovalView(
     mayCheckOutNow: !isPending,
   };
 }
+
+/** The body of `POST /api/mobile/bookings/approve`. */
+export type ApproveBookingBody = {
+  bookingId: string;
+  /** The request version the screen showed; the server refuses a mismatch. */
+  requestVersion: string;
+};
+
+/**
+ * The approve request for the booking on screen. An approval is checked
+ * against the request version the approver saw, and the route requires it,
+ * so without a version there is nothing to send.
+ *
+ * @param booking - The booking detail payload on screen
+ * @returns The request body, or `null` when the payload carries no version
+ */
+export function approveBookingBody(
+  booking: Pick<BookingDetail, "id" | "requestVersion">
+): ApproveBookingBody | null {
+  if (!booking.requestVersion) return null;
+  return { bookingId: booking.id, requestVersion: booking.requestVersion };
+}

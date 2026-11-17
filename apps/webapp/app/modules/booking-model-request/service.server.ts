@@ -48,6 +48,7 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
 import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
+import { touchBookingVersion } from "~/modules/booking/utils.server";
 import {
   canEditModelReservations,
   getReservationCeiling,
@@ -2542,28 +2543,6 @@ type UpsertBookingModelRequestArgs = {
   organizationId: string;
   userId: string;
 };
-
-/**
- * Moves the booking's version (`updatedAt`) in a transaction that changes its
- * model reservations. An approver approves the version they saw, so a request
- * whose reservations changed since must not match it.
- *
- * Called first in the transaction, so the booking row is locked before any
- * model or reservation row, the order a check-out takes them in.
- *
- * @param tx - The transaction changing the reservations
- * @param args.bookingId - The booking
- * @param args.organizationId - Its workspace
- */
-async function touchBookingVersion(
-  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
-  { bookingId, organizationId }: { bookingId: string; organizationId: string }
-) {
-  await tx.booking.updateMany({
-    where: { id: bookingId, organizationId },
-    data: { updatedAt: new Date() },
-  });
-}
 
 /**
  * Validates and writes one model reservation inside a caller's transaction.

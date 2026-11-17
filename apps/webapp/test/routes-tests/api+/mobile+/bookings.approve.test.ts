@@ -119,17 +119,10 @@ describe("POST /api/mobile/bookings/approve", () => {
       mobileUserContext({ roles: [OrganizationRoles.MANAGER] }) as never
     );
 
-    await post({
-      bookingId: "booking-1",
-      updatedAt: "2026-11-16T10:00:00.000Z",
-      requestVersion: "abc123",
-    });
+    await post({ bookingId: "booking-1", requestVersion: "abc123" });
 
     expect(approveBooking).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
-        reviewedVersion: "abc123",
-      })
+      expect.objectContaining({ reviewedVersion: "abc123" })
     );
   });
 

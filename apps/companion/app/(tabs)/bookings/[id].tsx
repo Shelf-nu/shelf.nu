@@ -24,7 +24,10 @@ import {
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
-import { bookingApprovalView } from "@/lib/booking-approval-view";
+import {
+  approveBookingBody,
+  bookingApprovalView,
+} from "@/lib/booking-approval-view";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatPersonName } from "@/lib/person-name";
 import { TagChip } from "@/components/tag-chip";
@@ -902,12 +905,20 @@ function BookingDetailScreen({ id }: { id: string }) {
         {
           text: "Approve",
           onPress: async () => {
+            const body = approveBookingBody(booking);
+            if (!body) {
+              // Approve is only offered with a version; reload to get one.
+              Alert.alert(
+                "Couldn't approve",
+                "Reload the booking and try again."
+              );
+              fetchBooking();
+              return;
+            }
             setIsActioning(true);
             const { error: err } = await api.approveBooking(
               currentOrg.id,
-              booking.id,
-              booking.updatedAt,
-              booking.requestVersion
+              body
             );
             setIsActioning(false);
             if (err) {

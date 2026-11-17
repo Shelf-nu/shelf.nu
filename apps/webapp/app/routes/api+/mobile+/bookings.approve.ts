@@ -34,11 +34,6 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z.object({
   bookingId: z.string().min(1),
   /**
-   * The booking's `updatedAt` as the screen showed it, checked as well as the
-   * request version. Optional: the version is the check that matters.
-   */
-  updatedAt: z.coerce.date().optional(),
-  /**
    * The request version the screen showed (the booking plus everything it
    * holds). Required: an approval is checked against what the approver saw,
    * and the screen is only offered Approve together with a version.
@@ -67,7 +62,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, updatedAt, requestVersion } = await parseMobileBody(
+    const { bookingId, requestVersion } = await parseMobileBody(
       BodySchema,
       request,
       "Booking"
@@ -97,7 +92,6 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       userId: user.id,
       hints,
-      reviewedUpdatedAt: updatedAt,
       reviewedVersion: requestVersion,
     });
 

@@ -318,6 +318,7 @@ import {
   assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
   lockBookingForStatusCheck,
+  touchBookingVersion,
   getBookingOwnershipScope,
   isBookingExpired,
 } from "./utils.server";
@@ -3308,8 +3309,12 @@ async function readFullCheckoutDepartures(
  * the flows that commit other writes first, such as assigning scanned units
  * before checking them out, so a refused request leaves nothing changed.
  *
+ * It is the same gate as `assertRequestApprovedWithinTx`, read through `db`
+ * with no acting user, so the two can never disagree about what is pending.
+ *
  * @param args.bookingId - The booking about to be checked out
  * @param args.organizationId - Its workspace
+ * @throws {ShelfError} 404 when the booking is not in the workspace
  * @throws {ShelfError} 400 when the booking is a pending request
  */
 export async function assertRequestMayBeCheckedOut({
@@ -3319,21 +3324,10 @@ export async function assertRequestMayBeCheckedOut({
   bookingId: Booking["id"];
   organizationId: Organization["id"];
 }): Promise<void> {
-  const booking = await db.booking.findFirst({
-    where: { id: bookingId, organizationId },
-    select: { status: true, approvedAt: true },
-  });
-  if (!booking) return;
-  if (booking.status !== BookingStatus.RESERVED || booking.approvedAt) return;
-  const switches = await db.bookingSettings.findUnique({
-    where: { organizationId },
-    select: BOOKING_APPROVAL_SWITCHES_SELECT,
-  });
-  assertBookingIsApproved({
-    status: booking.status,
-    approvedAt: booking.approvedAt,
-    requireBookingApproval: isBookingApprovalEnabled(switches),
+  await assertRequestApprovedWithinTx(db, {
     bookingId,
+    organizationId,
+    actorUserId: null,
   });
 }
 
@@ -10983,6 +10977,17 @@ export async function partialCheckoutBooking({
             additionalData: { bookingId: id },
           });
         }
+        // The first scan moves a RESERVED booking out, so the approval gate
+        // runs here, before any unit is locked or claimed: a pending request
+        // is refused with nothing written. This is the phone scanner's way
+        // into ONGOING too, not only the web dialog's.
+        if (lockedStatus === BookingStatus.RESERVED) {
+          await assertRequestApprovedWithinTx(tx, {
+            bookingId: id,
+            organizationId,
+            actorUserId: userId,
+          });
+        }
 
         /**
          * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
@@ -11853,14 +11858,8 @@ export async function partialCheckoutBooking({
         // have moved it on.
         let bookingStatusChanged = false;
         if (lockedStatus === BookingStatus.RESERVED) {
-          // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
-          // The approval gate lives here, not only in the web dialog, because
-          // this is the phone scanner's way into ONGOING.
-          await assertRequestApprovedWithinTx(tx, {
-            bookingId: id,
-            organizationId,
-            actorUserId: userId,
-          });
+          // `isExpired` was settled up front by `resolveExpiredCheckoutState`;
+          // the approval gate ran right after the booking lock.
           const transitionData: Prisma.BookingUpdateInput = {
             status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
           };
@@ -13717,24 +13716,17 @@ export async function approveBooking({
   organizationId,
   userId,
   hints,
-  reviewedUpdatedAt,
   reviewedVersion,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId: User["id"];
   hints: ClientHint;
   /**
-   * The booking's `updatedAt` as the approver saw it. A request sent back,
-   * edited and submitted again is RESERVED and unapproved once more, so the
-   * status alone cannot tell it from the one the approver reviewed; this can.
-   * Optional; both callers send the request version below as well.
-   */
-  reviewedUpdatedAt?: Date | null;
-  /**
    * The request version the approver saw (`readBookingRequestVersion`): the
-   * booking with every slice and model reservation, so a change to what the
-   * request holds is caught whichever write made it. Checked under the
-   * booking row lock. Approve is the only way a request is approved, and
-   * always carries it.
+   * booking's `updatedAt` with every slice and model reservation, so any
+   * change to the request is caught whichever write made it, including a
+   * request sent back, edited and submitted again. Checked under the booking
+   * row lock. Approve is the only way a request is approved, and always
+   * carries it.
    */
   reviewedVersion: string;
 }) {
@@ -13752,7 +13744,6 @@ export async function approveBooking({
             status: true,
             approvedAt: true,
             to: true,
-            updatedAt: true,
           },
         })
         .catch((cause) => {
@@ -13795,21 +13786,6 @@ export async function approveBooking({
         status: 400,
         shouldBeCaptured: false,
         message: "This booking request has already been approved.",
-        additionalData: { bookingId: id },
-      });
-    }
-
-    if (
-      reviewedUpdatedAt &&
-      bookingFound.updatedAt.getTime() !== reviewedUpdatedAt.getTime()
-    ) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-        message:
-          "This booking request changed since you opened it. Reload it and review it again before approving.",
         additionalData: { bookingId: id },
       });
     }
@@ -13860,7 +13836,7 @@ export async function approveBooking({
           bookingId: bookingFound.id,
           organizationId,
         });
-        if (!reviewedVersion || currentVersion !== reviewedVersion) {
+        if (currentVersion !== reviewedVersion) {
           throw new ShelfError({
             cause: null,
             label,
@@ -13877,9 +13853,6 @@ export async function approveBooking({
             id: bookingFound.id,
             status: BookingStatus.RESERVED,
             approvedAt: null,
-            // The version the approver reviewed, when known: a resubmission
-            // that lands between the read above and this write is refused.
-            ...(reviewedUpdatedAt ? { updatedAt: reviewedUpdatedAt } : {}),
           },
           data: {
             approvedAt: new Date(),
@@ -15814,10 +15787,7 @@ export async function removeAssets({
       // looking at the request from before cannot approve it unseen. First in
       // the transaction, so the booking row is locked before any slice, the
       // same order a check-out takes them in.
-      await tx.booking.updateMany({
-        where: { id, organizationId },
-        data: { updatedAt: new Date() },
-      });
+      await touchBookingVersion(tx, { bookingId: id, organizationId });
 
       // Read the source booking's status under the SAME tx snapshot used by
       // `bookingAsset.deleteMany` below. Doing it inside the tx removes the

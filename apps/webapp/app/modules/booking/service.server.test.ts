@@ -12073,14 +12073,12 @@ describe("approveBooking", () => {
 
   it("refuses a request that changed since the approver opened it", async () => {
     // why: a request sent back, edited and resubmitted is RESERVED and
-    // unapproved again; only its version tells it from the one reviewed.
+    // unapproved again; only its version (which folds in `updatedAt`) tells
+    // it from the one reviewed.
     mockApprovalContext({});
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue({
-      id: "booking-1",
-      status: BookingStatus.RESERVED,
-      approvedAt: null,
-      to: new Date("2099-01-01T00:00:00.000Z"),
+    db.booking.findFirst.mockResolvedValueOnce({
+      ...PENDING_REQUEST_ROW,
       updatedAt: new Date("2026-11-16T10:05:00.000Z"),
     });
 
@@ -12091,7 +12089,6 @@ describe("approveBooking", () => {
         userId: "user-1",
         hints: mockClientHints,
         reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
-        reviewedUpdatedAt: new Date("2026-11-16T10:00:00.000Z"),
       })
     ).rejects.toThrow(/changed since you opened it/);
     expect(db.booking.update).not.toHaveBeenCalled();
@@ -12152,34 +12149,6 @@ describe("approveBooking", () => {
     });
 
     expect(db.booking.update).toHaveBeenCalled();
-  });
-
-  it("approves only the version reviewed", async () => {
-    const reviewed = new Date("2026-11-16T10:00:00.000Z");
-    mockApprovalContext({});
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue({
-      id: "booking-1",
-      status: BookingStatus.RESERVED,
-      approvedAt: null,
-      to: new Date("2099-01-01T00:00:00.000Z"),
-      updatedAt: reviewed,
-    });
-
-    await approveBooking({
-      id: "booking-1",
-      organizationId: "org-1",
-      userId: "user-1",
-      hints: mockClientHints,
-      reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
-      reviewedUpdatedAt: reviewed,
-    });
-
-    expect(db.booking.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ updatedAt: reviewed }),
-      })
-    );
   });
 
   it("refuses a request whose end date has passed", async () => {
@@ -27493,7 +27462,7 @@ describe("assertRequestMayBeCheckedOut", () => {
     //@ts-expect-error missing vitest type
     db.bookingSettings.findUnique.mockResolvedValue(null);
     //@ts-expect-error missing vitest type
-    db.booking.findFirst.mockResolvedValue(null);
+    db.booking.findUnique.mockResolvedValue(null);
   });
 
   it.each([true, false])(
@@ -27506,7 +27475,7 @@ describe("assertRequestMayBeCheckedOut", () => {
       );
       vitest.mocked(hasPermission).mockResolvedValue(mayApprove);
       //@ts-expect-error missing vitest type
-      db.booking.findFirst.mockResolvedValue({
+      db.booking.findUnique.mockResolvedValue({
         status: BookingStatus.RESERVED,
         approvedAt: null,
       });
@@ -27524,7 +27493,7 @@ describe("assertRequestMayBeCheckedOut", () => {
 
   it("lets an approved request through, and anything while approval is off", async () => {
     //@ts-expect-error missing vitest type
-    db.booking.findFirst.mockResolvedValue({
+    db.booking.findUnique.mockResolvedValue({
       status: BookingStatus.RESERVED,
       approvedAt: new Date(),
     });
@@ -27537,7 +27506,7 @@ describe("assertRequestMayBeCheckedOut", () => {
 
     // Both switches off: nothing is pending, whatever the stamp says.
     //@ts-expect-error missing vitest type
-    db.booking.findFirst.mockResolvedValue({
+    db.booking.findUnique.mockResolvedValue({
       status: BookingStatus.RESERVED,
       approvedAt: null,
     });

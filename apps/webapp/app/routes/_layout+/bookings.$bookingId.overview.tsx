@@ -200,6 +200,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       (await hasPermission({
         userId: authSession.userId,
         organizationId,
+        // The membership requirePermission already read: no second lookup.
+        roles: userOrganizations.find(
+          (o) => o.organization.id === organizationId
+        )?.roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.approve,
       }))
@@ -2290,11 +2295,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "approve-booking": {
-        const { reviewedUpdatedAt, reviewedVersion } = parseData(
-          formData,
-          ApproveBookingSchema,
-          { additionalData: { userId, id, organizationId } }
-        );
+        const { reviewedVersion } = parseData(formData, ApproveBookingSchema, {
+          additionalData: { userId, id, organizationId },
+        });
         // The page always renders the version it shows; a post without one
         // is from a page that never had it (loaded before the request was
         // pending), so the approver reloads and reviews the request first.
@@ -2313,7 +2316,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           userId,
           hints: getClientHint(request),
-          reviewedUpdatedAt,
           reviewedVersion,
         });
 

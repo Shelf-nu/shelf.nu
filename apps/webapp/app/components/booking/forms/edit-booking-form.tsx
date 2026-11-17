@@ -617,7 +617,6 @@ function EditBookingFormInner({
                 booking={{
                   name: name ?? "",
                   status,
-                  updatedAt: loaderBooking.updatedAt,
                   requestVersion,
                 }}
               />

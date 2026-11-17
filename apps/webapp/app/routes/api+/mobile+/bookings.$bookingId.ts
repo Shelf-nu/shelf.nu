@@ -122,14 +122,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * refuses instead of approving what the approver did not see. Read only
      * for someone who may approve; sent only with `canApprove`.
      */
-    const reviewableVersion = (await hasPermission({
+    // Resolved once: it gates both this version read and `canApprove` below.
+    const canApprovePerm = await hasPermission({
       userId: user.id,
       organizationId,
       roles,
       workspace: access.workspaceGrants,
       entity: PermissionEntity.booking,
       action: PermissionAction.approve,
-    }))
+    });
+    const reviewableVersion = canApprovePerm
       ? await readBookingRequestVersion(db, {
           bookingId,
           organizationId,
@@ -756,7 +758,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckoutPerm,
       canCheckinPerm,
       canExtendPerm,
-      canApprovePerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
@@ -813,14 +814,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.extend,
-      }),
-      hasPermission({
-        userId: user.id,
-        organizationId,
-        roles,
-        workspace: access.workspaceGrants,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.approve,
       }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether

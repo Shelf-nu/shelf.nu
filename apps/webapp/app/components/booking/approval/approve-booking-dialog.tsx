@@ -19,15 +19,15 @@ import { Button } from "../../shared/button";
  * which the server compares before approving.
  */
 export const ApproveBookingSchema = z.object({
-  reviewedUpdatedAt: z.coerce.date().optional(),
   reviewedVersion: z.string().min(1).optional(),
 });
 
 type ApproveBookingDialogProps = {
-  /** `updatedAt` is the version on screen, sent so a changed request is refused. */
   booking: Pick<Booking, "name" | "status"> & {
-    updatedAt: Date | string;
-    /** The request version on screen (booking plus everything it holds). */
+    /**
+     * The request version on screen (booking plus everything it holds), sent
+     * so a request that changed since is refused.
+     */
     requestVersion?: string | null;
   };
   /** Render prop for the trigger so callers control its look (header button
@@ -145,11 +145,6 @@ export default function ApproveBookingDialog({
               onSubmit={() => dispatch({ type: "submit" })}
             >
               <input type="hidden" name="intent" value="approve-booking" />
-              <input
-                type="hidden"
-                name="reviewedUpdatedAt"
-                value={new Date(booking.updatedAt).toISOString()}
-              />
               {booking.requestVersion ? (
                 <input
                   type="hidden"
