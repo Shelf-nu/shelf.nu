@@ -10,7 +10,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
+import type * as LocationNoteService from "~/modules/location-note/service.server";
+import { createAssetLocationMoveNotes } from "~/modules/location-note/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { assertCategoriesBelongToOrg } from "~/utils/org-validation.server";
 import type { WriteImportChunkArgs } from "./chunk-writer.server";
 import { appendImportWarnings, writeImportChunk } from "./chunk-writer.server";
@@ -39,7 +42,21 @@ const tx = vi.hoisted(() => ({
 // why: the chunk is written in one interactive transaction; the callback runs
 // against the fake client above so every statement inside it can be asserted.
 vi.mock("~/database/db.server", () => ({
-  db: { $transaction: vi.fn() },
+  db: {
+    $transaction: vi.fn(),
+    // why: after the commit the writer reads the importer's name and the
+    // destination names for the location activity lines.
+    user: { findUnique: vi.fn() },
+    location: { findMany: vi.fn() },
+  },
+}));
+
+// why: the location activity lines have their own tests; here only which
+// moves the writer hands over matters.
+vi.mock("~/modules/location-note/service.server", async (importOriginal) => ({
+  // The move builder is pure, so the real one shapes what the notes receive.
+  ...(await importOriginal<typeof LocationNoteService>()),
+  createAssetLocationMoveNotes: vi.fn(),
 }));
 
 // why: activity events have their own tests, and their actor lookup would need
@@ -132,6 +149,15 @@ describe("writeImportChunk", () => {
     tx.barcode.updateMany.mockResolvedValue({ count: 1 });
     tx.qr.updateMany.mockResolvedValue({ count: 1 });
     vi.mocked(getAssetModelsDefaults).mockResolvedValue(new Map());
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      id: "user",
+      firstName: "Sam",
+      lastName: "Lee",
+      displayName: "Sam Lee",
+    } as never);
+    vi.mocked(db.location.findMany).mockResolvedValue([
+      { id: "loc-store", name: "Store" },
+    ] as never);
   });
 
   it("writes one createMany per table for a plain chunk", async () => {
@@ -360,6 +386,173 @@ describe("writeImportChunk", () => {
     expect(tx.custody.createMany.mock.calls[0][0].data).toEqual([
       { assetId: "i1", teamMemberId: "tm-sam" },
     ]);
+  });
+
+  it("records each placed row's location as a move from nowhere", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    await writeImportChunk(
+      args({
+        rows: [
+          row("i1", { location: "Store" }),
+          row("q1", {
+            type: "QUANTITY_TRACKED",
+            quantity: "40",
+            consumptionType: "TWO_WAY",
+            location: "Store",
+          }),
+          row("n1"),
+        ],
+      })
+    );
+
+    const calls = vi.mocked(recordEvents).mock.calls;
+    expect(calls.map(([events]) => events.map((e) => e.action))).toEqual([
+      ["ASSET_CREATED", "ASSET_CREATED", "ASSET_CREATED"],
+      ["ASSET_LOCATION_CHANGED", "ASSET_LOCATION_CHANGED"],
+    ]);
+    expect(calls[1]).toEqual([
+      [
+        {
+          organizationId: "org",
+          actorUserId: "user",
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: "i1",
+          assetId: "i1",
+          locationId: "loc-store",
+          field: "locationId",
+          fromValue: null,
+          toValue: "loc-store",
+          meta: {},
+        },
+        expect.objectContaining({
+          assetId: "q1",
+          fromValue: null,
+          toValue: "loc-store",
+          meta: { quantity: 40 },
+        }),
+      ],
+      tx,
+    ]);
+  });
+
+  it("adds each placed row to its location's Activity tab after the commit", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    await writeImportChunk(
+      args({
+        rows: [
+          row("i1", { location: "Store" }),
+          row("q1", {
+            type: "QUANTITY_TRACKED",
+            quantity: "40",
+            consumptionType: "TWO_WAY",
+            location: "Store",
+          }),
+          row("n1"),
+        ],
+      })
+    );
+
+    expect(db.location.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["loc-store"] }, organizationId: "org" },
+      select: { id: true, name: true },
+    });
+    expect(createAssetLocationMoveNotes).toHaveBeenCalledWith({
+      moves: [
+        {
+          asset: expect.objectContaining({ id: "i1", type: "INDIVIDUAL" }),
+          from: null,
+          to: { id: "loc-store", name: "Store" },
+          quantity: null,
+        },
+        {
+          asset: expect.objectContaining({
+            id: "q1",
+            type: "QUANTITY_TRACKED",
+          }),
+          from: null,
+          to: { id: "loc-store", name: "Store" },
+          quantity: 40,
+        },
+      ],
+      actor: expect.objectContaining({ id: "user", displayName: "Sam Lee" }),
+    });
+  });
+
+  it("keeps a committed chunk when the names for its location lines cannot be read", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    // why: the skipped lines must leave a trace in the logs.
+    const logError = vi.spyOn(Logger, "error").mockImplementation(() => {});
+    vi.mocked(db.location.findMany).mockRejectedValueOnce(
+      new Error("connection lost")
+    );
+
+    const result = await writeImportChunk(
+      args({ rows: [row("i1", { location: "Store" })] })
+    );
+
+    expect(result).toMatchObject({ applied: true });
+    expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalData: { userId: "user", organizationId: "org" },
+      })
+    );
+  });
+
+  it("writes no location lines when the importing user is gone", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    // why: the skipped lines must leave a trace in the logs.
+    const logError = vi.spyOn(Logger, "error").mockImplementation(() => {});
+    vi.mocked(db.user.findUnique).mockResolvedValueOnce(null);
+
+    const result = await writeImportChunk(
+      args({ rows: [row("i1", { location: "Store" })] })
+    );
+
+    expect(result).toMatchObject({ applied: true });
+    expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalData: { userId: "user", organizationId: "org" },
+      })
+    );
+  });
+
+  it("leaves out a row whose location was deleted after the commit", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(db.location.findMany).mockResolvedValueOnce([
+      { id: "loc-store", name: "Store" },
+    ] as never);
+
+    await writeImportChunk(
+      args({
+        rows: [
+          row("i1", { location: "Store" }),
+          row("i2", { location: "Depot" }),
+        ],
+        resolved: {
+          ...resolvedFixture,
+          locations: { Store: "loc-store", Depot: "loc-depot" },
+        },
+      })
+    );
+
+    expect(createAssetLocationMoveNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moves: [
+          expect.objectContaining({
+            asset: expect.objectContaining({ id: "i1" }),
+          }),
+        ],
+      })
+    );
+  });
+
+  it("writes no location activity lines for a chunk already committed", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 0 });
+    await writeImportChunk(args({ rows: [row("i1", { location: "Store" })] }));
+    expect(createAssetLocationMoveNotes).not.toHaveBeenCalled();
   });
 
   it("kit rows get the kit pivot and no direct custody", async () => {
