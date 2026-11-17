@@ -8532,7 +8532,7 @@ describe("checkinBooking", () => {
   });
 
   it("emits an ASSET_QUANTITY_CHANGED event for a QUANTITY_TRACKED pool decrement on check-in", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     // Single QT asset (Pens) booked 10 units on a pool of 100. An explicit
     // LOSS of 4 units decrements the pool 100 → 96 — the audit event must
@@ -8622,6 +8622,12 @@ describe("checkinBooking", () => {
       )
     );
     expect(emittedQuantityChange).toBe(true);
+    // No other booking holds the pens, so reconciliation brings them back
+    // AVAILABLE (the INDIVIDUAL-only reset carries a `type` filter).
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-pens"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.AVAILABLE },
+    });
   });
 });
 
@@ -15326,9 +15332,20 @@ function mockCheckinSlices(
     | ((args: unknown) => Promise<unknown>)
     | undefined;
   findMany.mockImplementation(
-    (args: { where?: { assetId?: string | { in?: string[] } } }) => {
+    (args: {
+      where?: {
+        assetId?: string | { in?: string[] };
+        bookingId?: string | { notIn?: string[] };
+      };
+    }) => {
       const assetFilter = args?.where?.assetId;
-      if (assetFilter && typeof assetFilter === "object") {
+      // The batched read names one booking; the status reconciliation names
+      // the bookings to exclude (`bookingId.notIn`) and keeps its own answer.
+      if (
+        assetFilter &&
+        typeof assetFilter === "object" &&
+        typeof args?.where?.bookingId === "string"
+      ) {
         const ids = assetFilter.in ?? [];
         return Promise.resolve(
           slices.filter((slice) => ids.includes(slice.assetId))
@@ -15504,11 +15521,20 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockImplementation(
-        (args: { where: { assetId?: string | { in?: string[] } } }) => {
+        (args: {
+          where: {
+            assetId?: string | { in?: string[] };
+            bookingId?: string | { notIn?: string[] };
+          };
+        }) => {
           const assetFilter = args.where?.assetId;
-          // The batched check-in read asks for several assets at once and
-          // needs each slice's id and asset back.
-          if (assetFilter && typeof assetFilter === "object") {
+          // The batched check-in read names one booking and asks for several
+          // assets at once; it needs each slice's id and asset back.
+          if (
+            assetFilter &&
+            typeof assetFilter === "object" &&
+            typeof args.where?.bookingId === "string"
+          ) {
             return Promise.resolve(
               (assetFilter.in ?? []).map((assetId) => ({
                 id: `ba-${assetId}`,
