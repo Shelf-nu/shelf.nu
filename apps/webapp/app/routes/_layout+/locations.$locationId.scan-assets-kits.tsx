@@ -32,6 +32,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { scanSaveError } from "~/utils/scan-save-error.server";
 import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export type LoaderData = typeof loader;
@@ -157,7 +158,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
 

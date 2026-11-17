@@ -78,6 +78,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
+import { scanSaveError } from "~/utils/scan-save-error.server";
 import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export const links: LinksFunction = () => [
@@ -368,7 +369,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `error()` also sends the refusal to this user as an error notification.
     // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
 

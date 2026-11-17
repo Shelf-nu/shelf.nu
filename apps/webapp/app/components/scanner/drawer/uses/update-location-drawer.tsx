@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
@@ -26,11 +26,9 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
+import type { BulkPartStatuses } from "~/hooks/use-bulk-save-settle";
+import { useBulkSaveSettle } from "~/hooks/use-bulk-save-settle";
 import { useDisabled } from "~/hooks/use-disabled";
-import {
-  useClearScanDraftOnSave,
-  useInPlaceSaveMark,
-} from "~/hooks/use-scan-draft";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
@@ -125,47 +123,58 @@ export default function UpdateLocationDrawer({
   );
 }
 
+/** The result the dialog shows, and where each part of the save stands. */
+type LocationSave = { result: LocationState; parts: BulkPartStatuses };
+
+/** Before a save, and after its dialog is closed. */
+const PENDING_LOCATION_SAVE: LocationSave = {
+  result: { status: "processing" },
+  parts: { assets: "processing", kits: "processing" },
+};
+
 function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   const { assetIds, idsTotalCount, kitIds } = useAtomValue(scannedItemIdsAtom);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [locationState, setLocationState] = useState<LocationState>({
-    status: "processing",
-  });
+  const [save, setSave] = useState<LocationSave>(PENDING_LOCATION_SAVE);
   const disabled = useDisabled();
-  // Identifies the save the result dialog is showing. Closing the dialog
-  // moves it on, so an answer that arrives after "Done" (when the list may
-  // already hold new scans) cannot set the result, and through it clear the
-  // new list's scan draft.
-  const submissionRef = useRef(0);
-  // The list is marked unconfirmed from the moment it is sent; see
-  // `useInPlaceSaveMark`.
-  const saveMark = useInPlaceSaveMark();
+  // What the list keeps once the save answers, and the draft's mark.
+  const bulkSave = useBulkSaveSettle({ statuses: save.parts, dialogOpen });
 
   const zo = useZorm("AddToLocation", BulkLocationUpdateSchema, {
     onValidSubmit: async (e) => {
       e.preventDefault();
-      const submission = ++submissionRef.current;
-      const setResult = (result: LocationState) => {
-        if (submission === submissionRef.current) {
-          setLocationState(result);
-        }
-      };
       setDialogOpen(true);
       const { assetIds, newLocationId, kitIds } = e.data;
 
       // Skip if no assets or no kitIds to process
       if (assetIds.length === 0 && kitIds.length === 0) {
-        setResult({
-          status: "error",
-          errorMessage: "No assets or kits selected to update location",
+        setSave({
+          ...PENDING_LOCATION_SAVE,
+          result: {
+            status: "error",
+            errorMessage: "No assets or kits selected to update location",
+          },
         });
         return;
       }
 
-      saveMark.start();
-      try {
-        let locationState: LocationState = { status: "processing" };
+      const attempt = bulkSave.begin({ assetIds, kitIds });
+      const show = (next: LocationSave) => {
+        if (attempt.isCurrent()) {
+          setSave(next);
+        }
+      };
+      // The result is shown once every part has answered. Each part's status
+      // is shown as soon as it answers, so Done pressed while the kits are
+      // still waiting takes the saved assets out of the list.
+      let result: LocationState = { status: "processing" };
+      let parts: BulkPartStatuses = {
+        assets: assetIds.length ? "processing" : "skipped",
+        kits: kitIds.length ? "processing" : "skipped",
+      };
+      show({ result, parts });
 
+      try {
         if (assetIds.length) {
           const formData = objectToFormData({
             assetIds,
@@ -181,7 +190,11 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
           const assetsData = await readBulkSaveAnswer<{
             error?: { message: string };
           }>(assetsResponse);
-          locationState = foldLocationPart(locationState, assetsData);
+          result = foldLocationPart(result, assetsData);
+          parts = { ...parts, assets: assetsData.error ? "error" : "success" };
+          if (kitIds.length) {
+            show({ result: { status: "processing" }, parts });
+          }
         }
 
         if (kitIds.length) {
@@ -198,49 +211,36 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
           const kitsData = await readBulkSaveAnswer<{
             error?: { message: string };
           }>(kitsResponse);
-          locationState = foldLocationPart(locationState, kitsData);
+          result = foldLocationPart(result, kitsData);
+          parts = { ...parts, kits: kitsData.error ? "error" : "success" };
         }
 
-        if (submission === submissionRef.current) {
-          saveMark.settle(
-            locationState.status === "success" ? "saved" : "refused"
-          );
-        }
-        setResult(locationState);
+        show({ result, parts });
       } catch (error) {
         // No answer: the server may have saved it anyway, so the mark stays.
-        if (submission === submissionRef.current) {
-          saveMark.settle("unanswered");
-        }
-        setResult({
-          status: "error",
-          errorMessage:
-            error instanceof ShelfError
-              ? error.message
-              : "Something went wrong while adding assets/kit to location. Please try again.",
+        // A part that was never sent is not saved either.
+        attempt.markUnanswered();
+        show({
+          result: {
+            status: "error",
+            errorMessage:
+              error instanceof ShelfError
+                ? error.message
+                : "Something went wrong while adding assets/kit to location. Please try again.",
+          },
+          parts: {
+            assets: parts.assets === "processing" ? "error" : parts.assets,
+            kits: parts.kits === "processing" ? "error" : parts.kits,
+          },
         });
       }
     },
   });
 
-  const clearItems = useSetAtom(clearScannedItemsAtom);
-
-  // The list stays on screen under the result until the dialog is closed.
-  // Once the whole list has saved its draft goes, so a reload before then
-  // does not bring back scans that are already saved.
-  useClearScanDraftOnSave(locationState.status === "success");
-
   function cleanupState() {
-    submissionRef.current += 1;
-    // A parked list is cleared only on a confirmed answer. A list that was
-    // refused, got no answer, or is still waiting (Done pressed mid-save)
-    // stays, with its draft and its unconfirmed mark.
-    if (locationState.status === "success") {
-      clearItems();
-    }
-    setLocationState({
-      status: "processing",
-    });
+    // Empties the list only when the whole of it saved; see `dismissBulkSave`.
+    bulkSave.dismiss();
+    setSave(PENDING_LOCATION_SAVE);
   }
 
   return (
@@ -248,7 +248,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
       <SubmittingDialog
         open={dialogOpen}
         setOpen={setDialogOpen}
-        locationState={locationState}
+        locationState={save.result}
         cleanupState={cleanupState}
       />
       <Form ref={zo.ref}>

@@ -3,11 +3,11 @@
  *
  * Seeds the booking partial-checkin drawer's Jotai atoms from loader
  * data on mount and tears them down on unmount. Mirrors the
- * equivalent audit hook (`use-audit-session-initialization.ts`),
- * minus the audit-specific scan restoration — partial check-in has
- * no cross-session scan persistence, so `scannedItemsAtom` is left
- * alone (it's cleared as a side effect of
- * `startBookingCheckinSessionAtom`).
+ * equivalent audit hook (`use-audit-session-initialization.ts`), but
+ * where an audit restores its scans from the server, partial check-in
+ * restores a list parked in a local scan draft (`useScanDraft`): seeding
+ * clears `scannedItemsAtom` (`startBookingCheckinSessionAtom`), then the
+ * draft for this booking and user is put back.
  *
  * Mounted from the route component in
  * `bookings.$bookingId.overview.checkin-assets.tsx`, which provides
@@ -82,8 +82,9 @@ type UseBookingCheckinSessionInitializationArgs = {
  * partial session and the drawer stays mounted — re-syncs the atoms
  * without thrashing on every render).
  *
- * Intentionally does NOT hydrate `scannedItemsAtom`: partial check-in
- * has no cross-session scan persistence, unlike audits.
+ * Fills `scannedItemsAtom` only from this booking's scan draft, right
+ * after the session is seeded, so a reload or an error page brings the
+ * operator's list back.
  *
  * @param args.session - Booking-level session metadata for the atom.
  * @param args.expectedAssets - Full expected-asset list for the drawer.

@@ -58,6 +58,20 @@ describe("scanner routes keep their list when a save gets no answer", () => {
       /export const clientAction = keepScanListOnSubmitFailure;|export async function clientAction\b[\s\S]*keepScanListOnSubmitFailure\(/
     );
   });
+
+  /**
+   * The browser cannot read the status of an action answer, so a 5xx the app
+   * answers after a save committed would read as a refusal and take the
+   * "may have gone through" mark off. `scanSaveError` marks it in the body.
+   */
+  it.each(scannerRoutesWithAction)(
+    "%s marks a 5xx answer as unconfirmed",
+    (file) => {
+      const source = readFileSync(path.join(ROUTES_DIR, file), "utf8");
+
+      expect(source).toMatch(/return scanSaveError\(reason\);/);
+    }
+  );
 });
 
 /**
@@ -122,59 +136,50 @@ describe("scanner routes keep a draft of their list", () => {
 
   /**
    * The bulk actions save in place and keep the list on screen under their
-   * result dialog. Each must tell the draft once the whole save succeeded, or
-   * a reload before the dialog is closed brings back scans already saved. The
-   * drawers are impractical to mount, so their wiring is pinned by source.
+   * result dialog. What the list and its draft keep once a save answers, or
+   * when the dialog is closed, is decided by `useBulkSaveSettle` (tested in
+   * use-bulk-save-settle.test.tsx). The drawers are impractical to mount, so
+   * this pins by source that each one hands its save to it.
    */
-  it.each([
-    [
-      "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
-      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
-    ],
-    [
-      "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
-      /useClearScanDraftOnSave\(\s*allPartsSaved\(\[custodyState\.assetStatus, custodyState\.kitStatus\]\)\s*\)/,
-    ],
-    [
-      "../../components/scanner/drawer/uses/update-location-drawer.tsx",
-      /useClearScanDraftOnSave\(locationState\.status === "success"\)/,
-    ],
-  ])("%s clears the bulk draft once its save succeeds", (file, wiring) => {
-    expect(read(file)).toMatch(wiring);
-  });
-
-  /**
-   * Closing a bulk result dialog with "Done" while the save is still running
-   * lets the operator scan a new list. The old save's late answer must not
-   * set the result, or it would clear the new list's draft.
-   */
-  it.each([
+  const BULK_DRAWERS = [
     "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
     "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
     "../../components/scanner/drawer/uses/update-location-drawer.tsx",
-  ])("%s ignores a save answered after its dialog closed", (file) => {
-    const source = read(file);
-    expect(source).toMatch(/const submission = \+\+submissionRef\.current;/);
-    expect(source).toMatch(/if \(submission === submissionRef\.current\)/);
-    expect(source).toMatch(
-      /function cleanupState\(\) \{\s*submissionRef\.current \+= 1;/
-    );
-  });
+  ];
 
-  /**
-   * The bulk drawers save with plain requests, outside the route's action. A
-   * request that gets no answer may still have been saved, so it marks the
-   * list, and a copy restored after a reload warns before it is sent again.
-   */
+  it.each(BULK_DRAWERS)(
+    "%s settles its save through the shared hook",
+    (file) => {
+      const source = read(file);
+      expect(source).toMatch(/const bulkSave = useBulkSaveSettle\(\{/);
+      // The list is marked as it is sent, and each save is told apart so a late
+      // answer cannot set the result of the next one.
+      expect(source).toMatch(/const attempt = bulkSave\.begin\(\{/);
+      expect(source).toMatch(/if \(attempt\.isCurrent\(\)\) \{/);
+      // Closing the dialog empties the list only when all of it saved.
+      expect(source).toMatch(
+        /function cleanupState\(\) \{[\s\S]*?bulkSave\.dismiss\(\);/
+      );
+    }
+  );
+
   it.each([
     "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
     "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
-  ])("%s marks a save that got no answer", (file) => {
-    const marks = read(file).match(
+  ])("%s marks a request that got no answer", (file) => {
+    const source = read(file);
+    expect(source).toMatch(/const markUnconfirmed = attempt\.markUnanswered;/);
+    const marks = source.match(
       /\.catch\(\(error\) => \{\s*markUnconfirmed\(\);/g
     );
     // One for the assets request, one for the kits request.
     expect(marks).toHaveLength(2);
+  });
+
+  it("update location marks a save that got no answer", () => {
+    expect(
+      read("../../components/scanner/drawer/uses/update-location-drawer.tsx")
+    ).toMatch(/\} catch \(error\) \{[\s\S]*?attempt\.markUnanswered\(\);/);
   });
 
   /**
@@ -189,55 +194,6 @@ describe("scanner routes keep a draft of their list", () => {
     const source = read(file);
     expect(source.match(/readBulkSaveAnswer</g)).toHaveLength(requests);
     expect(source).not.toMatch(/response\.json\(\)|Response\.json\(\)/);
-  });
-
-  /**
-   * When only part of a custody save went through, its rows leave the list
-   * and the rest stays with the draft until it gets a confirmed answer.
-   */
-  it.each([
-    "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
-    "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
-  ])("%s takes only the saved part out of the list", (file) => {
-    const source = read(file);
-    expect(source).toMatch(
-      /if \(answer !== "saved"\) \{\s*const confirmed = savedPartRows\(/
-    );
-    // Also when Done is pressed while the other part is still waiting.
-    expect(source).toMatch(
-      /clearItems\(\);\s*return;\s*\}\s*const confirmed = savedPartRows\(/
-    );
-  });
-
-  it("update location marks a save that got no answer", () => {
-    expect(
-      read("../../components/scanner/drawer/uses/update-location-drawer.tsx")
-    ).toMatch(/\} catch \(error\) \{[\s\S]*?saveMark\.settle\("unanswered"\);/);
-  });
-
-  /**
-   * A parked list is cleared only on a confirmed answer. Each bulk drawer
-   * marks it as it is sent, and closing the result dialog empties it only
-   * when the save succeeded: a refused, unanswered or still waiting save
-   * keeps the list, its draft and its mark.
-   */
-  it.each([
-    [
-      "../../components/scanner/drawer/uses/assign-custody-drawer.tsx",
-      /if \(saved\) \{\s*clearItems\(\);/,
-    ],
-    [
-      "../../components/scanner/drawer/uses/release-custody-drawer.tsx",
-      /if \(saved\) \{\s*clearItems\(\);/,
-    ],
-    [
-      "../../components/scanner/drawer/uses/update-location-drawer.tsx",
-      /if \(locationState\.status === "success"\) \{\s*clearItems\(\);/,
-    ],
-  ])("%s clears its list only on a confirmed save", (file, clearing) => {
-    const source = read(file);
-    expect(source).toMatch(/saveMark\.start\(\);/);
-    expect(source).toMatch(clearing);
   });
 
   it.each([

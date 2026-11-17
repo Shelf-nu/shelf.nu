@@ -324,6 +324,34 @@ describe.each(SCANNERS)(
       expect(Object.keys(readScanDraft(draftKey) ?? {})).toEqual(["qr-1"]);
     });
 
+    /**
+     * A 5xx the app answers itself can follow a save that committed (a later
+     * step failed), so it is no refusal. `scanSaveError` adds a `server`
+     * failure to that answer, and the mark stays.
+     */
+    it("keeps the mark when the app answers the save with a 5xx", () => {
+      const store = createStore();
+      const { rerender } = render(store, { scope, targetId });
+      act(() => store.set(scannedItemsAtom, { "qr-1": scanned() }));
+      mockNavigation.mockReturnValue({
+        state: "submitting",
+        formMethod: "POST",
+        location: { pathname: path },
+      });
+      rerender();
+
+      mockNavigation.mockReturnValue({ state: "idle" });
+      mockActionData.mockReturnValue({
+        error: { message: "Could not schedule the check-in reminder" },
+        scanSubmitFailure: { kind: "server", status: 500 },
+      });
+      rerender();
+
+      expect(store.get(unconfirmedScanSaveAtom)).toBe(true);
+      expect(readScanDraftUnconfirmedSave(draftKey)).toBe(true);
+      expect(Object.keys(readScanDraft(draftKey) ?? {})).toEqual(["qr-1"]);
+    });
+
     it("keeps an earlier attempt's mark when a retry is refused", () => {
       const store = createStore();
       const { rerender } = render(store, { scope, targetId });

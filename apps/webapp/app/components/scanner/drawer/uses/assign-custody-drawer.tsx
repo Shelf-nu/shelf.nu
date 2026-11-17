@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -40,16 +40,9 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
+import { useBulkSaveSettle } from "~/hooks/use-bulk-save-settle";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import type { SubmittedParts } from "~/hooks/use-scan-draft";
-import {
-  allPartsSaved,
-  inPlaceSaveAnswer,
-  savedPartRows,
-  useClearScanDraftOnSave,
-  useInPlaceSaveMark,
-} from "~/hooks/use-scan-draft";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
@@ -198,44 +191,29 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
-  // Identifies the save the result dialog is showing. Closing the dialog
-  // moves it on, so an answer that arrives after "Done" (when the list may
-  // already hold new scans) cannot set the result, and through it clear the
-  // new list's scan draft.
-  const submissionRef = useRef(0);
-  // The list is marked unconfirmed from the moment it is sent; see
-  // `useInPlaceSaveMark`. `noAnswerRef` records whether any part of the
-  // current save got no answer, and `settledRef` which save was settled.
-  const saveMark = useInPlaceSaveMark();
-  const noAnswerRef = useRef(false);
-  const settledRef = useRef(0);
-  // What the current save sent, so the rows of a part that saved can leave
-  // the list when another part did not.
-  const submittedRef = useRef<SubmittedParts>({ assetIds: [], kitIds: [] });
-  const scanList = useAtomValue(scannedItemsAtom);
-  const removeRows = useSetAtom(removeMultipleScannedItemsAtom);
+  // What the list keeps once the save answers, and the draft's mark.
+  const bulkSave = useBulkSaveSettle({
+    statuses: {
+      assets: custodyState.assetStatus,
+      kits: custodyState.kitStatus,
+    },
+    dialogOpen,
+  });
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
-      const submission = ++submissionRef.current;
+      const attempt = bulkSave.begin({
+        assetIds: e.data.assetIds ?? [],
+        kitIds: e.data.kitIds ?? [],
+      });
       const setResult: typeof setCustodyState = (update) => {
-        if (submission === submissionRef.current) {
+        if (attempt.isCurrent()) {
           setCustodyState(update);
         }
       };
       // No answer (the request failed, or the answer was a gateway's page):
       // the server may have saved it anyway, so the mark must stay.
-      const markUnconfirmed = () => {
-        if (submission === submissionRef.current) {
-          noAnswerRef.current = true;
-        }
-      };
-      noAnswerRef.current = false;
-      submittedRef.current = {
-        assetIds: e.data.assetIds ?? [],
-        kitIds: e.data.kitIds ?? [],
-      };
-      saveMark.start();
+      const markUnconfirmed = attempt.markUnanswered;
       setDialogOpen(true);
       const { custodian, assetIds, kitIds } = e.data;
       setResult((state) => ({
@@ -363,78 +341,14 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
   const { assetIds, kitIds, idsTotalCount } = useAtomValue(scannedItemIdsAtom);
 
-  const clearItems = useSetAtom(clearScannedItemsAtom);
-
-  // The list stays on screen under the result until the dialog is closed.
-  // Once the whole list has saved its draft goes, so a reload before then
-  // does not bring back scans that are already saved.
-  useClearScanDraftOnSave(
-    allPartsSaved([custodyState.assetStatus, custodyState.kitStatus])
-  );
-
-  // Once every part has answered, the mark is settled: a refusal takes it
-  // back off, no answer keeps it, and a full save leaves the draft to the
-  // save signal above. When only part of the list saved, that part's rows
-  // leave the list now (a retry must not send them again), and the rest stays
-  // with the draft and the mark until it gets a confirmed answer.
-  useEffect(() => {
-    if (!dialogOpen || settledRef.current === submissionRef.current) {
-      return;
-    }
-    const answer = inPlaceSaveAnswer(
-      [custodyState.assetStatus, custodyState.kitStatus],
-      noAnswerRef.current
-    );
-    if (answer) {
-      settledRef.current = submissionRef.current;
-      if (answer !== "saved") {
-        const confirmed = savedPartRows(scanList, submittedRef.current, {
-          assets: custodyState.assetStatus === "success",
-          kits: custodyState.kitStatus === "success",
-        });
-        if (confirmed.length > 0) {
-          removeRows(confirmed);
-        }
-      }
-      saveMark.settle(answer);
-    }
-  }, [
-    custodyState.assetStatus,
-    custodyState.kitStatus,
-    dialogOpen,
-    saveMark,
-    scanList,
-    removeRows,
-  ]);
-
   function cleanupState() {
-    submissionRef.current += 1;
-    const saved = allPartsSaved([
-      custodyState.assetStatus,
-      custodyState.kitStatus,
-    ]);
+    // Empties the list only when the whole of it saved; see `dismissBulkSave`.
+    bulkSave.dismiss();
     setCustodyState({
       assetStatus: "processing",
       kitStatus: "processing",
       custodianName: "",
     });
-    // A parked list is cleared only on a confirmed answer. A list that was
-    // refused, got no answer, or is still waiting (Done pressed mid-save)
-    // stays, with its draft and its unconfirmed mark. A part that already
-    // saved leaves it now, even when the other part is still waiting: its
-    // late answer is ignored from here on, and a retry must not send the
-    // saved rows again.
-    if (saved) {
-      clearItems();
-      return;
-    }
-    const confirmed = savedPartRows(scanList, submittedRef.current, {
-      assets: custodyState.assetStatus === "success",
-      kits: custodyState.kitStatus === "success",
-    });
-    if (confirmed.length > 0) {
-      removeRows(confirmed);
-    }
   }
 
   return (

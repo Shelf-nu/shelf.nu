@@ -337,7 +337,8 @@ export function useScanDraft({
     const awaited = awaitingAnswerRef.current;
     awaitingAnswerRef.current = false;
     if (submitFailure && submitFailure.kind !== "rejected") {
-      // No answer: the save may have gone through.
+      // No answer, or a 5xx the app answered (`scanSaveError` marks it): the
+      // save may have gone through.
       setUnconfirmedSave(true);
     } else if (awaited) {
       // A definite answer that stayed on the page: the server refused the

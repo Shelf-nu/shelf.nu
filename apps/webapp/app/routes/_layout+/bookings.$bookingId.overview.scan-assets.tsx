@@ -49,6 +49,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
+import { scanSaveError } from "~/utils/scan-save-error.server";
 import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export const links: LinksFunction = () => [
@@ -379,7 +380,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
 
