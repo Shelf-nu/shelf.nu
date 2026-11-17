@@ -4,12 +4,15 @@
  * Makes a page's linkable sections behave like anchors, in both directions:
  *
  * - **Arriving.** When the page opens at a section's hash, scrolls it into
- *   view and moves keyboard focus to it. React Router's `ScrollRestoration`
- *   also scrolls to the hash, but only once, when the location changes, and on
- *   a full page load the app layout renders a spinner until hydration, so the
- *   section is not there yet. This hook mounts with the page content, so the
- *   section exists when it runs. Moving focus makes Tab continue from the
- *   section instead of the top of the page.
+ *   view and moves keyboard focus to it, so Tab continues from the section
+ *   instead of the top of the page. React Router's `ScrollRestoration` cannot
+ *   do this here: it only scrolls the window, while the app scrolls inside
+ *   `main#main-content`, and on a full page load the app layout renders a
+ *   spinner until hydration, so the section is not there when it looks. This
+ *   hook mounts with the page content, so the section exists when it runs.
+ *   Back and Forward bring the entry's section into view too, without moving
+ *   focus: the reading half below keeps each entry's hash on the section that
+ *   was in view when the reader left it, so that puts them back in place.
  * - **Reading.** Keeps the URL hash on the section the reader is looking at,
  *   so the address bar is always a link to the current spot: scroll to the
  *   Automation card on `/settings/bookings` and the URL becomes
@@ -42,16 +45,21 @@ const BOTTOM_SLACK = 2;
 const SECTION_SELECTOR = `[${SECTION_ANCHOR_ATTRIBUTE}][id]`;
 
 /**
- * Brings the section named by the router's hash into view and gives it
- * keyboard focus. Does nothing when the hash names no section.
+ * Brings the section named by the router's hash into view and, unless told
+ * otherwise, gives it keyboard focus. Does nothing when the hash names no
+ * section.
+ *
+ * @param hash - The router location's hash, `#` included
+ * @param options.focus - Whether to move keyboard focus to the section
  */
-function arriveAtSection(hash: string) {
+function arriveAtSection(hash: string, { focus }: { focus: boolean }) {
   const id = hash.slice(1);
   if (!id) return;
   const section = document.getElementById(id);
   if (!section?.hasAttribute(SECTION_ANCHOR_ATTRIBUTE)) return;
 
   section.scrollIntoView({ block: "start" });
+  if (!focus) return;
   // A card is not focusable by itself; -1 lets a script focus it without
   // adding it to the Tab order.
   if (!section.hasAttribute("tabindex")) section.tabIndex = -1;
@@ -68,14 +76,14 @@ export function useSectionHashSync() {
   const navigationType = useNavigationType();
   const hasArrived = useRef(false);
 
-  // Arriving: the first render of the page, and every in-app link to it
-  // after that. Back and forward (POP) are left to ScrollRestoration, which
-  // puts the reader back where they were rather than at the section's top.
+  // Arriving: the first render of the page and every in-app link move focus
+  // to the section. Back and Forward only bring it into view: the reader did
+  // not ask to go to it, they are returning to where they were.
   useEffect(() => {
     const isFirstArrival = !hasArrived.current;
     hasArrived.current = true;
-    if (!isFirstArrival && navigationType === "POP") return;
-    arriveAtSection(hash);
+    const isHistoryStep = !isFirstArrival && navigationType === "POP";
+    arriveAtSection(hash, { focus: !isHistoryStep });
   }, [key, hash, navigationType]);
 
   // Reading: follow the scroll.

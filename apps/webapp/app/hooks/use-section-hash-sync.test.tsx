@@ -174,17 +174,30 @@ describe("arriving at a section", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  it("follows an in-app link to a section, and leaves Back to scroll restoration", async () => {
+  it("follows an in-app link to a section", async () => {
     const { router } = await openPage("/settings/bookings", undefined, false);
 
     await act(() => router.navigate("/settings/bookings#automation"));
     expect(scrolledTo).toEqual(["automation"]);
+    expect(document.activeElement).toBe(document.getElementById("automation"));
 
     await act(() => router.navigate("/settings/bookings#notifications"));
     expect(scrolledTo).toEqual(["automation", "notifications"]);
+  });
+
+  it("brings Back's section into view without taking focus", async () => {
+    // ScrollRestoration only restores the window's scroll, and the page
+    // scrolls inside main#main-content, so Back must put the section back
+    // itself.
+    const { router } = await openPage("/settings/bookings", undefined, false);
+    await act(() => router.navigate("/settings/bookings#automation"));
+    await act(() => router.navigate("/settings/bookings#notifications"));
+    const focusedBeforeBack = document.activeElement;
 
     await act(() => router.navigate(-1));
-    expect(scrolledTo).toEqual(["automation", "notifications"]);
+
+    expect(scrolledTo).toEqual(["automation", "notifications", "automation"]);
+    expect(document.activeElement).toBe(focusedBeforeBack);
   });
 });
 
