@@ -76,6 +76,22 @@ describe("resolveSectionInView", () => {
     ).toBe("pdf-templates");
   });
 
+  it("moves the hash down on a fast jump to the bottom, past a section still in view", () => {
+    // The hash was on notifications; one frame later the page is at the
+    // bottom with automation at the top and notifications still peeking in.
+    expect(
+      resolveSectionInView({
+        sections: [
+          { id: "notifications", top: -150, bottom: 50 },
+          { id: "automation", top: 10, bottom: 400 },
+        ],
+        currentId: "notifications",
+        atBottom: true,
+        viewportHeight,
+      })
+    ).toBe("automation");
+  });
+
   it("moves on at the bottom once the linked section has left the view", () => {
     expect(
       resolveSectionInView({

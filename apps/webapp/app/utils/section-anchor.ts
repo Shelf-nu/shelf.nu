@@ -28,9 +28,10 @@ type SectionPosition = { id: string; top: number; bottom: number };
  *
  * It is the last section whose top has scrolled up to the active line. Above
  * the first section, it is none. At the bottom of the page, the sections
- * below the active line can never reach it, so a section that is already in
+ * below the active line can never reach it, so one of them that is already in
  * the hash keeps it while it is in view: a link to one of them stays as
- * opened.
+ * opened. A section above the active line's pick never keeps it, so a fast
+ * jump to the bottom still moves the hash down.
  *
  * @param args.sections - Linkable sections in document order
  * @param args.currentId - The anchor currently in the URL hash, if any
@@ -49,17 +50,22 @@ export function resolveSectionInView({
   atBottom: boolean;
   viewportHeight: number;
 }): string | null {
-  if (atBottom && currentId) {
-    const current = sections.find((section) => section.id === currentId);
-    if (current && current.top < viewportHeight && current.bottom > 0) {
-      return currentId;
-    }
-  }
-
   let inView: string | null = null;
   for (const section of sections) {
     if (section.top <= SECTION_ACTIVE_LINE) inView = section.id;
   }
+
+  if (atBottom && currentId) {
+    const currentIndex = sections.findIndex((s) => s.id === currentId);
+    const current = sections[currentIndex];
+    const pickIndex = sections.findIndex((s) => s.id === inView);
+    const isVisible =
+      current !== undefined &&
+      current.top < viewportHeight &&
+      current.bottom > 0;
+    if (isVisible && currentIndex > pickIndex) return currentId;
+  }
+
   return inView;
 }
 

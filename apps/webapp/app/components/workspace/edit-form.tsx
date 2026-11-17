@@ -139,8 +139,9 @@ const WorkspaceGeneralEditForms = ({
 
   // Focus the Name input on mount, except when the field is disabled
   // (personal workspaces cannot be renamed) or the page opened at a linked
-  // card (/settings/general#permissions): the browser starts keyboard
-  // navigation at that card, and focusing the name would send Tab back to the
+  // card (/settings/general#permissions): keyboard focus belongs on that card
+  // (`useSectionHashSync` moves it there, and so does the browser on a
+  // native fragment load), and focusing the name would send Tab back to the
   // top. React Router's `location.hash` is the hash the page opened with;
   // the scroll-synced hash is written past the router, so it never flips this.
   const { hash } = useLocation();
@@ -664,9 +665,7 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
       <Card id={GENERAL_SETTINGS_ANCHORS.sso} className={tw("my-0", className)}>
         <div className=" border-b pb-5">
-          <CardTitle as="h2" className="text-[18px]">
-            SSO details
-          </CardTitle>
+          <CardTitle as="h2">SSO details</CardTitle>
           <p>
             This workspace has SSO enabled so you can see your SSO settings.
           </p>
@@ -884,9 +883,7 @@ const WorkspaceScimTokensSection = ({
         className={tw("my-0", className)}
       >
         <div className="border-b pb-5">
-          <CardTitle as="h2" className="text-[18px]">
-            SCIM provisioning
-          </CardTitle>
+          <CardTitle as="h2">SCIM provisioning</CardTitle>
           <p className="text-sm text-gray-600">
             Manage bearer tokens for SCIM user provisioning (e.g. Microsoft
             Entra ID).

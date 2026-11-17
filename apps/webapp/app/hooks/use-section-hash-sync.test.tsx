@@ -1,13 +1,23 @@
 /**
- * Tests for useSectionHashSync: the URL hash follows the section being read.
+ * Tests for useSectionHashSync: opening a page at a section brings that
+ * section into view and focus, and the URL hash follows the section being
+ * read.
  *
  * happy-dom does no layout, so each section's position is set by hand
- * through `getBoundingClientRect`, the one layout read the hook makes.
+ * through `getBoundingClientRect`, the one layout read the hook makes, and
+ * the scroll area's size through `clientHeight` / `scrollHeight` /
+ * `scrollTop`.
  *
  * @see {@link file://./use-section-hash-sync.ts}
  */
-import type { ReactElement } from "react";
+import { useEffect, useState } from "react";
 import { act, render } from "@testing-library/react";
+import {
+  createMemoryRouter,
+  Outlet,
+  RouterProvider,
+  ScrollRestoration,
+} from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Card } from "~/components/shared/card";
 import { useSectionHashSync } from "./use-section-hash-sync";
@@ -15,28 +25,101 @@ import { useSectionHashSync } from "./use-section-hash-sync";
 /** Top of each section relative to the scroll area, set per test. */
 const tops: Record<string, number> = {};
 
-function Page({ withSections = true }: { withSections?: boolean }) {
+/** Ids of the elements `scrollIntoView` was called on, in order. */
+const scrolledTo: string[] = [];
+
+/** The settings layout: the hook, then the page. */
+function SettingsLayout() {
   useSectionHashSync();
-  return withSections ? (
+  return <Outlet />;
+}
+
+function BookingsPage() {
+  return (
     <>
       <Card id="notifications">Notifications</Card>
       <Card id="automation">Automation</Card>
+      <div id="faq">A heading some other feature links to</div>
     </>
-  ) : (
-    <p>Team list</p>
   );
 }
 
-/** Renders the page inside the app's scroll area, as the layout does. */
-function renderInScrollArea(ui: ReactElement) {
+function TeamPage() {
+  return <p>Team list</p>;
+}
+
+/**
+ * The app layout: like the real one, it shows a spinner on the first render
+ * and the page one pass later, so nothing a link names exists when React
+ * Router's ScrollRestoration first looks for it.
+ */
+function AppLayout() {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return hydrated ? <Outlet /> : <p>Activating workspace...</p>;
+}
+
+function Root({ restoreScroll }: { restoreScroll: boolean }) {
+  return (
+    <>
+      {restoreScroll ? <ScrollRestoration /> : null}
+      <Outlet />
+    </>
+  );
+}
+
+/**
+ * Renders the app at `url` inside the app's scroll area.
+ *
+ * @param url - Where the page opens, hash included
+ * @param size - The scroll area's measurements; by default a tall page in a
+ *   normal window, so the reader is never at the bottom
+ * @param restoreScroll - Whether React Router's ScrollRestoration runs too, as
+ *   in the app. Off when a test counts only the hook's own scrolls.
+ */
+async function openPage(
+  url: string,
+  size = { clientHeight: 800, scrollHeight: 5000, scrollTop: 0 },
+  restoreScroll = true
+) {
+  window.history.replaceState(null, "", url);
   const main = document.createElement("main");
   main.id = "main-content";
-  // A tall page in a normal window, so the reader is never at the bottom.
-  Object.defineProperty(main, "clientHeight", { value: 800 });
-  Object.defineProperty(main, "scrollHeight", { value: 5000 });
+  for (const [name, value] of Object.entries(size)) {
+    Object.defineProperty(main, name, { value, configurable: true });
+  }
   document.body.appendChild(main);
-  const result = render(ui, { container: main });
-  return { main, ...result };
+
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/",
+        element: <Root restoreScroll={restoreScroll} />,
+        children: [
+          {
+            element: <AppLayout />,
+            children: [
+              {
+                path: "settings",
+                element: <SettingsLayout />,
+                children: [
+                  { path: "bookings", element: <BookingsPage /> },
+                  { path: "team", element: <TeamPage /> },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    { initialEntries: [url] }
+  );
+
+  render(<RouterProvider router={router} />, { container: main });
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+  return { main, router };
 }
 
 /** Places the sections, scrolls, and lets the hook's frame run. */
@@ -49,7 +132,6 @@ async function scrollTo(main: HTMLElement, positions: Record<string, number>) {
 }
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/settings/bookings");
   // why: happy-dom has no layout engine; this is how a test puts a section
   // at a given scroll position.
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
@@ -58,17 +140,57 @@ beforeEach(() => {
       return { top, bottom: top + 300 } as DOMRect;
     }
   );
+  // why: happy-dom does not scroll; recording the call is how a test sees
+  // which section was brought into view.
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+    this: Element
+  ) {
+    scrolledTo.push(this.id);
+  });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.replaceChildren();
+  scrolledTo.length = 0;
   for (const id of Object.keys(tops)) delete tops[id];
 });
 
-describe("useSectionHashSync", () => {
+describe("arriving at a section", () => {
+  it("scrolls to and focuses the linked section once the page has rendered", async () => {
+    await openPage("/settings/bookings#automation");
+
+    const automation = document.getElementById("automation");
+    expect(scrolledTo).toContain("automation");
+    expect(document.activeElement).toBe(automation);
+    // Focusable by script only, not added to the Tab order.
+    expect(automation).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("does nothing for a hash that names no section", async () => {
+    await openPage("/settings/bookings#faq");
+
+    expect(scrolledTo).not.toContain("faq");
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("follows an in-app link to a section, and leaves Back to scroll restoration", async () => {
+    const { router } = await openPage("/settings/bookings", undefined, false);
+
+    await act(() => router.navigate("/settings/bookings#automation"));
+    expect(scrolledTo).toEqual(["automation"]);
+
+    await act(() => router.navigate("/settings/bookings#notifications"));
+    expect(scrolledTo).toEqual(["automation", "notifications"]);
+
+    await act(() => router.navigate(-1));
+    expect(scrolledTo).toEqual(["automation", "notifications"]);
+  });
+});
+
+describe("following the scroll", () => {
   it("puts the section being read in the URL, and drops it above the first one", async () => {
-    const { main } = renderInScrollArea(<Page />);
+    const { main } = await openPage("/settings/bookings");
 
     await scrollTo(main, { notifications: -400, automation: 0 });
     expect(window.location.hash).toBe("#automation");
@@ -82,21 +204,31 @@ describe("useSectionHashSync", () => {
   });
 
   it("leaves the hash of a page opened from a link alone until the reader scrolls", async () => {
-    window.history.replaceState(null, "", "/settings/bookings#automation");
     Object.assign(tops, { notifications: 200, automation: 500 });
+    await openPage("/settings/bookings#automation");
 
-    renderInScrollArea(<Page />);
-    await act(async () => {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(window.location.hash).toBe("#automation");
+  });
+
+  it("keeps a linked section near the bottom while the page cannot scroll further", async () => {
+    // At the bottom: scrollTop + clientHeight reaches scrollHeight.
+    const { main } = await openPage("/settings/bookings#automation", {
+      clientHeight: 800,
+      scrollHeight: 2000,
+      scrollTop: 1200,
     });
+
+    // notifications has crossed the active line; automation sits lower and
+    // can never reach it.
+    await scrollTo(main, { notifications: 0, automation: 400 });
 
     expect(window.location.hash).toBe("#automation");
   });
 
   it("keeps React Router's history state when it rewrites the hash", async () => {
+    const { main } = await openPage("/settings/bookings");
     const routerState = { usr: null, key: "abc123", idx: 3 };
     window.history.replaceState(routerState, "", "/settings/bookings");
-    const { main } = renderInScrollArea(<Page />);
 
     await scrollTo(main, { notifications: 0, automation: 300 });
 
@@ -105,20 +237,28 @@ describe("useSectionHashSync", () => {
   });
 
   it("never touches the URL on a page without sections", async () => {
-    window.history.replaceState(null, "", "/settings/team#members");
-    const { main } = renderInScrollArea(<Page withSections={false} />);
+    const { main } = await openPage("/settings/team#members");
 
     await scrollTo(main, {});
 
     expect(window.location.hash).toBe("#members");
   });
 
-  it("leaves a hash that names something other than a section", async () => {
-    window.history.replaceState(null, "", "/settings/bookings#not-a-card");
-    const { main } = renderInScrollArea(<Page />);
+  it("leaves a hash that names something else on the page", async () => {
+    const { main } = await openPage("/settings/bookings#faq");
 
     await scrollTo(main, { notifications: -400, automation: 0 });
 
-    expect(window.location.hash).toBe("#not-a-card");
+    expect(window.location.hash).toBe("#faq");
+  });
+
+  it("takes over again after the skip link points the URL at the scroll area", async () => {
+    const { main } = await openPage("/settings/bookings");
+    // "Skip to content" links to the scroll area itself.
+    window.history.replaceState(null, "", "/settings/bookings#main-content");
+
+    await scrollTo(main, { notifications: -400, automation: 0 });
+
+    expect(window.location.hash).toBe("#automation");
   });
 });
