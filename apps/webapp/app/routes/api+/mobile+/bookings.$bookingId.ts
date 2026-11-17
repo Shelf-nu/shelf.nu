@@ -54,8 +54,8 @@ import {
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
-  computeBookingAssetRemaining,
-  computeBookingAssetRemainingToCheckOut,
+  computeBookingAssetsRemainingToCheckOut,
+  computeBookingCheckinRemaining,
   getBookingFlags,
   getDetailedPartialCheckinData,
 } from "~/modules/booking/service.server";
@@ -627,19 +627,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ];
 
     // Per-QUANTITY_TRACKED-asset remaining, computed up-front so the capability
-    // flags below can reason about UNITS, not the asset's global status.
-    const qtRemaining = await Promise.all(
-      assets
-        .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
-        .map(async (a) => {
-          const [remainingToCheckIn, remainingToCheckOut] = await Promise.all([
-            computeBookingAssetRemaining(db, booking.id, a.id),
-            computeBookingAssetRemainingToCheckOut(db, booking.id, a.id),
-          ]);
-          return { assetId: a.id, remainingToCheckIn, remainingToCheckOut };
-        })
+    // flags below can reason about UNITS, not the asset's global status. One
+    // batched read each way covers every asset on the booking.
+    const qtAssetIds = assets
+      .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
+      .map((a) => a.id);
+    const [checkinRemaining, checkoutRemaining] = await Promise.all([
+      computeBookingCheckinRemaining(db, booking.id, qtAssetIds),
+      computeBookingAssetsRemainingToCheckOut(db, booking.id, qtAssetIds),
+    ]);
+    const remainingByAsset = new Map(
+      qtAssetIds.map((assetId) => [
+        assetId,
+        {
+          assetId,
+          remainingToCheckIn: checkinRemaining.byAsset.get(assetId) ?? 0,
+          remainingToCheckOut: checkoutRemaining.get(assetId) ?? 0,
+        },
+      ])
     );
-    const remainingByAsset = new Map(qtRemaining.map((r) => [r.assetId, r]));
 
     /**
      * Units of a quantity-tracked asset that are out, not yet back, and that

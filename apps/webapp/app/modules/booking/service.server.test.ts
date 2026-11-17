@@ -107,7 +107,6 @@ import {
   bulkDeleteBookings,
   // Phase 3c helpers
   computeBookingAssetRemaining,
-  computeBookingAssetSliceRemaining,
   computeBookingCheckinRemaining,
   attributeDispositionsByBookingAsset,
   attributeCategorizedDispositionsByBookingAsset,
@@ -492,15 +491,32 @@ vitest.mock("~/modules/user/service.server", () => ({
 // why: quantity-lock relies on $queryRaw (FOR UPDATE) which the db mock
 // can't express cleanly. The single-asset lock resolves a minimal asset stub
 // (tests override the return per-asset as needed); the batch lock returns
-// nothing, so it resolves once every asset is locked.
-vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
-  lockAssetForQuantityUpdate: vitest.fn().mockResolvedValue({
+// nothing, so it resolves once every asset is locked. The batch lock that
+// returns rows builds each row from the single-asset stub, so a test sets up
+// a locked asset the same way whichever lock the code under test takes.
+vitest.mock("~/modules/consumption-log/quantity-lock.server", () => {
+  const lockAssetForQuantityUpdate = vitest.fn().mockResolvedValue({
     id: "asset-qty-default",
     title: "Default Asset",
     quantity: 0,
-  }),
-  lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
-}));
+  });
+  return {
+    lockAssetForQuantityUpdate,
+    lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
+    lockAssetRowsForQuantityUpdate: vitest.fn(
+      async (tx: unknown, assetIds: string[], organizationId: string) => {
+        const rows = new Map<string, unknown>();
+        for (const assetId of [...new Set(assetIds)].sort()) {
+          rows.set(
+            assetId,
+            await lockAssetForQuantityUpdate(tx, assetId, organizationId)
+          );
+        }
+        return rows;
+      }
+    ),
+  };
+});
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
 // friends) keep their behavior, but ConsumptionLog writes are stubbed so
@@ -8576,10 +8592,6 @@ describe("checkinBooking", () => {
         ? Promise.resolve([{ quantity: 10 }])
         : Promise.resolve([])
     );
-    // computeBookingAssetSliceRemaining reads findUnique → booked 10.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 10 });
     // No logs yet → full 10 remaining; no custody held.
     (
       db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
@@ -8587,6 +8599,9 @@ describe("checkinBooking", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
       _sum: { quantity: 0 },
     });
+    // why: the batched check-in read takes the one slice, nothing logged.
+    mockCheckinSlices(mockBooking.bookingAssets);
+    mockCheckinLogged([]);
 
     await checkinBooking({
       ...mockCheckinParams,
@@ -14394,18 +14409,21 @@ describe("computeBookingAssetRemaining", () => {
     vitest.clearAllMocks();
   });
 
-  it("returns booked minus logged sum across disposition categories", async () => {
-    expect.assertions(1);
+  it("answers one asset's units still to check in from the batched read", async () => {
+    expect.assertions(2);
 
-    // why: pivot row exists for this (booking, asset) pair with 10 booked.
-    // why: `computeBookingAssetRemaining` switched from `findUnique` to
-    // `findMany` once BookingAsset gained multi-row support — the helper
-    // sums quantities across all rows for the (booking, asset) pair.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
-    // why: aggregate of RETURN+CONSUME+LOSS+DAMAGE logs totals 3 units.
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+    // why: two slices book 10 pens between them and 3 units are logged.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      { id: "ba-1", assetId: "asset-1", quantity: 6 },
+      { id: "ba-2", assetId: "asset-1", quantity: 4 },
+    ]);
+    (
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      { assetId: "asset-1", bookingAssetId: null, _sum: { quantity: 3 } },
+    ]);
 
     const remaining = await computeBookingAssetRemaining(
       db,
@@ -14414,105 +14432,23 @@ describe("computeBookingAssetRemaining", () => {
     );
 
     expect(remaining).toBe(7);
+    expect(db.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
   });
 
-  it("clamps to zero when logs exceed booked quantity", async () => {
+  it("returns zero for an asset that is not on the booking", async () => {
     expect.assertions(1);
 
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 5 }]);
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 8 } });
-
-    const remaining = await computeBookingAssetRemaining(
-      db,
-      "booking-1",
-      "asset-1"
-    );
-
-    expect(remaining).toBe(0);
-  });
-
-  it("returns booked quantity when no disposition logs exist", async () => {
-    expect.assertions(1);
-
-    // why: `computeBookingAssetRemaining` switched from `findUnique` to
-    // `findMany` once BookingAsset gained multi-row support — the helper
-    // sums quantities across all rows for the (booking, asset) pair.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
-    // why: Prisma _sum returns null when the aggregated set is empty.
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: null } });
-
-    const remaining = await computeBookingAssetRemaining(
-      db,
-      "booking-1",
-      "asset-1"
-    );
-
-    expect(remaining).toBe(10);
-  });
-
-  it("returns zero when the bookingAsset pivot row is missing", async () => {
-    expect.assertions(1);
-
-    // why: defends against asset removed from booking between read+write.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([]);
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-
-    const remaining = await computeBookingAssetRemaining(
-      db,
-      "booking-1",
-      "asset-1"
-    );
-
-    expect(remaining).toBe(0);
-  });
-});
-
-describe("computeBookingAssetSliceRemaining", () => {
-  beforeEach(() => {
-    vitest.clearAllMocks();
-    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
-      .mockReset()
-      .mockResolvedValue(null);
-    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
-      .mockReset()
-      .mockResolvedValue({ _sum: { quantity: 0 } });
-  });
-
-  it("returns slice.quantity minus only the logs tagged to that slice", async () => {
-    expect.assertions(1);
-
-    // why: the slice was booked at 50; 12 units already disposed against
-    // THIS slice (tagged). Remaining = 50 − 12 = 38.
     (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 50 });
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
     (
-      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ _sum: { quantity: 12 } });
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
 
-    const remaining = await computeBookingAssetSliceRemaining(
+    const remaining = await computeBookingAssetRemaining(
       db,
       "booking-1",
-      "ba-slice-1"
-    );
-
-    expect(remaining).toBe(38);
-  });
-
-  it("clamps at zero and treats a missing slice as 0 booked", async () => {
-    expect.assertions(1);
-
-    // why: findUnique → null (slice not found) → booked 0 → remaining 0.
-    const remaining = await computeBookingAssetSliceRemaining(
-      db,
-      "booking-1",
-      "ba-missing"
+      "asset-1"
     );
 
     expect(remaining).toBe(0);
@@ -15374,6 +15310,57 @@ describe("isBookingFullyCheckedIn", () => {
   });
 });
 
+/**
+ * Gives the batched check-in read (`computeBookingCheckinRemaining`) the
+ * booking's slices, for tests whose slices carry their own ids. Every other
+ * `bookingAsset.findMany` read keeps the answer the test already wired.
+ *
+ * @param slices - The booking's slices: id, asset and booked units
+ */
+function mockCheckinSlices(
+  slices: Array<{ id: string; assetId: string; quantity: number }>
+) {
+  const findMany = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
+  // The other `bookingAsset.findMany` reads keep the answers they had.
+  const fallback = findMany.getMockImplementation() as
+    | ((args: unknown) => Promise<unknown>)
+    | undefined;
+  findMany.mockImplementation(
+    (args: { where?: { assetId?: string | { in?: string[] } } }) => {
+      const assetFilter = args?.where?.assetId;
+      if (assetFilter && typeof assetFilter === "object") {
+        const ids = assetFilter.in ?? [];
+        return Promise.resolve(
+          slices.filter((slice) => ids.includes(slice.assetId))
+        );
+      }
+      return fallback ? fallback(args) : Promise.resolve([]);
+    }
+  );
+}
+
+/**
+ * Gives the batched check-in read the units already logged on the booking,
+ * per asset and slice (`null` for an untagged log).
+ *
+ * @param logs - Units logged so far
+ */
+function mockCheckinLogged(
+  logs: Array<{
+    assetId: string;
+    bookingAssetId: string | null;
+    quantity: number;
+  }>
+) {
+  (db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>).mockResolvedValue(
+    logs.map(({ assetId, bookingAssetId, quantity }) => ({
+      assetId,
+      bookingAssetId,
+      _sum: { quantity },
+    }))
+  );
+}
+
 describe("partialCheckinBooking — qty-tracked dispositions", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -15419,6 +15406,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.custody.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
     (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
@@ -15553,64 +15543,20 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         )
       );
 
-    // why: pool-drain guard reads custody aggregate sum.
-    //@ts-expect-error missing vitest type
-    db.custody.aggregate.mockResolvedValue({
-      _sum: { quantity: custodySum },
-    });
-  }
-
-  /**
-   * Gives the batched check-in read (`computeBookingCheckinRemaining`) the
-   * booking's slices, for tests whose slices carry their own ids. Any other
-   * `bookingAsset.findMany` read answers as `setupQtyMocks` wired it.
-   *
-   * @param slices - The booking's slices: id, asset and booked units
-   */
-  function mockCheckinSlices(
-    slices: Array<{ id: string; assetId: string; quantity: number }>
-  ) {
-    const findMany = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
-    // The other `bookingAsset.findMany` reads keep the answers they had.
-    const fallback = findMany.getMockImplementation() as
-      | ((args: unknown) => Promise<unknown>)
-      | undefined;
-    findMany.mockImplementation(
-      (args: { where?: { assetId?: string | { in?: string[] } } }) => {
-        const assetFilter = args?.where?.assetId;
-        if (assetFilter && typeof assetFilter === "object") {
-          const ids = assetFilter.in ?? [];
-          return Promise.resolve(
-            slices.filter((slice) => ids.includes(slice.assetId))
-          );
-        }
-        return fallback ? fallback(args) : Promise.resolve([]);
-      }
-    );
-  }
-
-  /**
-   * Gives the batched check-in read the units already logged on the booking,
-   * per asset and slice (`null` for an untagged log).
-   *
-   * @param logs - Units logged so far
-   */
-  function mockCheckinLogged(
-    logs: Array<{
-      assetId: string;
-      bookingAssetId: string | null;
-      quantity: number;
-    }>
-  ) {
-    (
-      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue(
-      logs.map(({ assetId, bookingAssetId, quantity }) => ({
-        assetId,
-        bookingAssetId,
-        _sum: { quantity },
-      }))
-    );
+    // why: pool-drain guard reads the units in custody, grouped by asset.
+    // Like the real groupBy, an asset with nothing in custody has no group.
+    (db.custody.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((args: { where?: { assetId?: { in?: string[] } } }) =>
+        Promise.resolve(
+          custodySum > 0
+            ? (args?.where?.assetId?.in ?? []).map((assetId) => ({
+                assetId,
+                _sum: { quantity: custodySum },
+              }))
+            : []
+        )
+      );
   }
 
   it("locks the session's assets in sorted id order before handling any of them", async () => {
@@ -15657,11 +15603,11 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
-  it("reads a batch's remaining units and holds in a fixed number of queries, however many assets it returns", async () => {
+  it("locks and reads a batch in a fixed number of queries, however many assets it checks in", async () => {
     // why: every query runs in turn on the transaction's one connection, so a
     // per-asset read multiplies the transaction's time by the batch size and
     // a large return outruns the 5s interactive-transaction limit.
-    expect.assertions(6);
+    expect.assertions(7);
 
     setupQtyMocks();
     const booking = makeQtyBooking();
@@ -15678,18 +15624,25 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
 
     await partialCheckinBooking({
       ...baseParams,
-      checkins: assetIds.map((assetId) => ({ assetId, returned: 4 })),
+      checkins: assetIds.map((assetId) => ({ assetId, lost: 1, returned: 3 })),
     });
 
-    // One lock per asset, taken once, in the up-front sorted pass.
-    expect(quantityLock.lockAssetForQuantityUpdate).toHaveBeenCalledTimes(5);
+    // Every asset locked in one statement, in sorted id order.
+    expect(quantityLock.lockAssetRowsForQuantityUpdate).toHaveBeenCalledTimes(
+      1
+    );
+    expect(
+      vitest.mocked(quantityLock.lockAssetRowsForQuantityUpdate).mock
+        .calls[0][1]
+    ).toEqual(assetIds);
     // Remaining units: one grouped read of the logs, none per asset or slice.
     expect(db.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
     expect(db.consumptionLog.aggregate).not.toHaveBeenCalled();
     expect(db.bookingAsset.findUnique).not.toHaveBeenCalled();
-    // Whether each asset is still held elsewhere: grouped, not counted per asset.
+    // Custody, for the pool-drain guard and for freeing the assets: grouped,
+    // never read or counted per asset.
+    expect(db.custody.aggregate).not.toHaveBeenCalled();
     expect(db.bookingAsset.count).not.toHaveBeenCalled();
-    expect(db.custody.count).not.toHaveBeenCalled();
   });
 
   it("writes a single RETURN log for TWO_WAY when returned equals remaining", async () => {
@@ -16511,6 +16464,126 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     expect(vitest.mocked(recordStockChanges)).toHaveBeenCalledTimes(1);
   });
 
+  it("starts each disposition of an asset from the pool the one before it left", async () => {
+    // why: the asset is locked once, up front, and its row is kept. Each pool
+    // decrement must update that kept row, or the next disposition of the
+    // same asset audits and guards against a pool that no longer exists.
+    expect.assertions(2);
+
+    setupTwoPensSlices();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens", consumed: 2 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens-kit", lost: 3 },
+      ],
+    });
+
+    const quantityChanges = vitest
+      .mocked(activityEventService.recordEvents)
+      .mock.calls.flatMap(
+        ([events]) => events as Array<Record<string, unknown>>
+      )
+      .filter((event) => event.action === "ASSET_QUANTITY_CHANGED")
+      .map((event) => [event.fromValue, event.toValue]);
+    // Pool 100: the first slice uses up 2, the second loses 3 of what is left.
+    expect(quantityChanges).toEqual([
+      [100, 98],
+      [98, 95],
+    ]);
+    expect(quantityLock.lockAssetRowsForQuantityUpdate).toHaveBeenCalledTimes(
+      1
+    );
+  });
+
+  describe("freeing the assets once they are back", () => {
+    /** Three pools out on this booking, each returning some of its units. */
+    const pools = ["asset-free", "asset-on-booking", "asset-in-custody"];
+
+    /**
+     * Arranges the three pools on the booking and says which are still held
+     * elsewhere: `asset-on-booking` by another active booking and
+     * `asset-in-custody` by a team member, unless `allFree`.
+     */
+    function arrangePools({ allFree = false } = {}) {
+      setupQtyMocks();
+      const booking = makeQtyBooking();
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: pools.map((assetId) => ({
+          ...booking.bookingAssets[0],
+          assetId,
+          asset: { ...booking.bookingAssets[0].asset, id: assetId },
+        })),
+      });
+      // why: the reset asks, in one grouped read each, which of the pools
+      // another active booking or a custody record still holds.
+      (db.bookingAsset.groupBy as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue(allFree ? [] : [{ assetId: "asset-on-booking" }]);
+      (db.custody.groupBy as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockImplementation((args: { _sum?: unknown }) =>
+          Promise.resolve(
+            args?._sum || allFree ? [] : [{ assetId: "asset-in-custody" }]
+          )
+        );
+    }
+
+    /** The status writes that freed pools, as `[ids, organizationId]`. */
+    function freedPoolWrites() {
+      return vitest
+        .mocked(db.asset.updateMany)
+        .mock.calls.map(([args]) => args as Record<string, any>)
+        .filter((args) => args?.data?.status === AssetStatus.AVAILABLE)
+        .map((args) => [args.where.id.in, args.where.organizationId]);
+    }
+
+    it("frees only the pools nothing else holds, inside the caller's workspace", async () => {
+      expect.assertions(1);
+
+      arrangePools();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: pools.map((assetId) => ({ assetId, returned: 4 })),
+      });
+
+      expect(freedPoolWrites()).toEqual([[["asset-free"], "org-1"]]);
+    });
+
+    it("frees every pool in one write when none is held elsewhere", async () => {
+      expect.assertions(1);
+
+      arrangePools({ allFree: true });
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: pools.map((assetId) => ({ assetId, returned: 4 })),
+      });
+
+      expect(freedPoolWrites()).toEqual([[pools, "org-1"]]);
+    });
+
+    it("writes no status when every pool is still held elsewhere", async () => {
+      expect.assertions(1);
+
+      arrangePools();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: ["asset-on-booking", "asset-in-custody"].map((assetId) => ({
+          assetId,
+          returned: 4,
+        })),
+      });
+
+      expect(freedPoolWrites()).toEqual([]);
+    });
+  });
+
   it("emits an ASSET_QUANTITY_CHANGED event for the pool decrement (from pool → pool − decrement)", async () => {
     expect.assertions(1);
 
@@ -16939,12 +17012,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     // units — so units that never left could be returned, consumed, lost or
     // damaged, permanently decrementing the pool.
     setupQtyMocks();
-    // why: `computeBookingAssetSliceRemaining` reads the slice's booked
-    // quantity for the per-slice cap. Giving it ample headroom proves the
-    // rejection comes from the eligibility guard and not from the cap.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 50 });
+    // why: the slice gets ample headroom, so the rejection can only come from
+    // the eligibility guard and not from the per-slice cap.
+    mockCheckinSlices([
+      { id: "ba-out", assetId: mockQtyAssetId, quantity: 50 },
+      { id: "ba-never-out", assetId: mockQtyAssetId, quantity: 50 },
+    ]);
     // why: eligibility is judged per slice, so the booking must actually hold
     // the slice the disposition names.
     (
@@ -17173,14 +17246,12 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     // sums quantities across all rows for the (booking, asset) pair.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
-    // why: the per-slice loop reads `computeBookingAssetSliceRemaining`,
-    // which queries `bookingAsset.findUnique({ select: { quantity } })`
-    // for the slice being dispositioned. The single slice here is booked
-    // for 10 units (matches the `bookingAssets[0].quantity` shell above).
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // why: the batched check-in read takes the booking's slices and finds
+    // nothing logged yet.
+    mockCheckinSlices(booking.bookingAssets);
+    mockCheckinLogged([]);
 
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
@@ -17450,6 +17521,10 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       { quantity: 10 },
       { quantity: 10 },
     ]);
+    mockCheckinSlices([
+      { id: "ba-pens-loose", assetId: mockQtyAssetId, quantity: 10 },
+      { id: "ba-pens-kit", assetId: mockQtyAssetId, quantity: 10 },
+    ]);
 
     await checkinBooking({
       ...baseParams,
@@ -17645,22 +17720,10 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       { quantity: 33 },
       { quantity: 22 },
     ]);
-    // why: per-slice remaining reads `findUnique({ where: { id } })` — return
-    // each slice's booked quantity so both slices have work to do.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockImplementation(({ where }: { where: { id: string } }) =>
-      Promise.resolve(
-        where.id === standaloneSliceId
-          ? { quantity: 33 }
-          : where.id === kitSliceId
-          ? { quantity: 22 }
-          : null
-      )
-    );
-    // why: no logs written yet on either slice or the asset.
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // why: the batched check-in read takes both slices' booked units, so
+    // both have work to do, and finds no logs yet on either.
+    mockCheckinSlices(booking.bookingAssets);
+    mockCheckinLogged([]);
 
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
@@ -22592,6 +22655,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       ...booking,
       status: BookingStatus.COMPLETE,
     });
+    // why: the batched check-in read takes the booking's slices and finds
+    // nothing logged yet.
+    mockCheckinSlices(booking.bookingAssets);
+    mockCheckinLogged([]);
   }
 
   const params = {
@@ -22927,13 +22994,8 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([{ quantity: 5 }, { quantity: 3 }]);
-    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
-      .mockReset()
-      .mockImplementation((q?: any) =>
-        Promise.resolve(
-          booking.bookingAssets.find((ba) => ba.id === q?.where?.id) ?? null
-        )
-      );
+    // why: the batched check-in read takes both slices in the order above.
+    mockCheckinSlices(booking.bookingAssets);
 
     await checkinBooking({
       ...params,

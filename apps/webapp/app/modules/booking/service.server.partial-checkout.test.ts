@@ -175,7 +175,7 @@ vitest.mock("~/database/db.server", () => {
       },
       bookingAsset: {
         findMany: vitest.fn().mockResolvedValue([{ quantity: 1 }]),
-        // why: `computeBookingAssetSliceRemaining` reads a single slice's
+        // why: `computeBookingCheckinRemaining` reads a single slice's
         // quantity via `findUnique({ where: { id: bookingAssetId } })`. The
         // default 1-unit slice keeps the legacy INDIVIDUAL slice cap healthy;
         // qty tests override.
@@ -216,7 +216,7 @@ vitest.mock("~/database/db.server", () => {
           .fn()
           .mockImplementation(() => Promise.resolve(_pbcSessions)),
       },
-      // why: `computeBookingAssetSliceRemaining` (called per qty-tracked
+      // why: `computeBookingCheckinRemaining` (called per qty-tracked
       // slice by `partialCheckoutBooking`) runs `tx.consumptionLog.aggregate`
       // to subtract already-logged check-in units from the slice cap.
       // Default to zero so the slice cap = full booked quantity and tests
@@ -1795,7 +1795,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         assetKitId: null,
       },
     ]);
-    // why: legacy per-slice cap read shape (`computeBookingAssetSliceRemaining`,
+    // why: legacy per-slice cap read shape (`computeBookingCheckinRemaining`,
     // the check-IN helper) still uses findUnique elsewhere; keep the default so
     // any check-in-adjacent path in these fixtures stays healthy.
     (
@@ -2457,7 +2457,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
           },
         ])
       );
-      // Per-slice cap reads (`computeBookingAssetSliceRemaining`) resolve each
+      // Per-slice cap reads (`computeBookingCheckinRemaining`) resolve each
       // slice's booked quantity by id; no prior consumption → full cap.
       (
         db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
@@ -4194,7 +4194,7 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
 
     // Single-slice QT asset booked for 50 units; prior session checked out 5.
     // The slice itself has never been checked IN — the previous helper choice
-    // (`computeBookingAssetSliceRemaining`, IN-side) would have returned 50
+    // (`computeBookingCheckinRemaining`, IN-side) would have returned 50
     // here and then `partialCheckoutBooking` would have rejected the batch.
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
@@ -4500,7 +4500,7 @@ describe("getRemainingCheckoutPayload", () => {
     // Repro for the "Check out remaining" regression on partially-checked-out
     // QT assets: Pencils booked for 50, a prior PartialBookingCheckout already
     // claimed 5 units. The previous helper choice
-    // (`computeBookingAssetSliceRemaining`, IN-side) returned the full 50 here
+    // (`computeBookingCheckinRemaining`, IN-side) returned the full 50 here
     // (the slice had never been checked in), so the action pushed
     // `{ quantity: 50 }` into the batch and `partialCheckoutBooking` then
     // rejected the claim with "Only 45 units left to check out for Pencils".
