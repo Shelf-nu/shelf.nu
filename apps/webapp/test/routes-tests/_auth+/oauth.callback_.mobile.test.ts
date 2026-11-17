@@ -7,14 +7,17 @@
  * user signs in once more, so the action reports a success notice, not an
  * error.
  *
- * The action also refuses a session not obtained through SSO before anything
- * is resolved, takes the IdP groups, names and contact info from the
- * server-side identity lookup, never from the posted form, and binds the
- * server-refreshed SSO session (never the posted token) to the code it mints.
+ * The action trades Supabase's code for the session with this browser's PKCE
+ * verifier cookie and accepts nothing else: tokens in the URL fragment (a
+ * sign-in the app did not start) are never taken. It also refuses a session
+ * not obtained through SSO before anything is resolved, takes the IdP groups,
+ * names and contact info from the server-side identity lookup, never from the
+ * posted form, and binds the exchanged SSO session to the code it mints.
  *
  * @see apps/webapp/app/routes/_auth+/oauth.callback_.mobile.tsx
  * @see apps/webapp/app/utils/sso.server.ts resolveUserAndOrgForSsoCallback
  */
+// @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,11 +33,16 @@ vi.mock("~/config/shelf.config", () => ({
   config: { disableSSO: false },
 }));
 
-// why: refreshAccessToken exchanges the refresh token with Supabase, and
-// revokeSession ends a refused session through Supabase Auth.
+// why: revokeSession ends a refused session through Supabase Auth.
 vi.mock("~/modules/auth/service.server", () => ({
   refreshAccessToken: vi.fn(),
   revokeSession: vi.fn(),
+}));
+
+// why: the code exchange calls Supabase Auth; its wire format is covered by
+// sso-pkce.server.test.ts.
+vi.mock("~/modules/auth/sso-pkce.server", () => ({
+  exchangeSsoCode: vi.fn(),
 }));
 
 // why: the resolver provisions users and merges auth accounts, and the claims
@@ -62,6 +70,8 @@ const { action } = await import("~/routes/_auth+/oauth.callback_.mobile");
 const { refreshAccessToken, revokeSession } = await import(
   "~/modules/auth/service.server"
 );
+const { exchangeSsoCode } = await import("~/modules/auth/sso-pkce.server");
+const { ssoCodeVerifierCookie } = await import("~/utils/cookies.server");
 const { getSsoClaimsForAuthUser, resolveUserAndOrgForSsoCallback } =
   await import("~/utils/sso.server");
 const { createMobileAuthCode } = await import(
@@ -88,19 +98,28 @@ const callbackSession = {
   expiresAt: 0,
 };
 
+/** A well-formed PKCE verifier, as `/sso-login` stores it. */
+const VERIFIER = "v".repeat(56);
+
 /**
- * Posts the callback form and runs the action.
+ * Posts the callback form, from a browser holding the verifier, and runs the
+ * action.
  *
- * @param extraFields - additional form fields, such as a forged `groups`
+ * @param fields - the form fields; Supabase's code unless given
  */
-function postCallback(extraFields: Record<string, string> = {}) {
+async function postCallback(
+  fields: Record<string, string> = { code: "auth-code" }
+) {
+  const cookie = (await ssoCodeVerifierCookie.serialize(VERIFIER)).split(
+    ";"
+  )[0];
   const request = new Request("http://localhost/oauth/callback/mobile", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refreshToken: "client-refresh-token",
-      ...extraFields,
-    }),
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Cookie: cookie,
+    },
+    body: new URLSearchParams(fields),
   });
   return action(createActionArgs({ request }));
 }
@@ -122,20 +141,47 @@ const identityClaims = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(refreshAccessToken).mockResolvedValue(callbackSession);
+  vi.mocked(exchangeSsoCode).mockResolvedValue(callbackSession);
   vi.mocked(getSsoClaimsForAuthUser).mockResolvedValue(identityClaims);
   vi.mocked(createMobileAuthCode).mockResolvedValue("plain-code");
 });
 
 describe("POST /oauth/callback/mobile", () => {
-  it("binds the server-refreshed SSO session to the code and returns the deeplink", async () => {
+  it("trades Supabase's code with this browser's verifier", async () => {
     vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
       user: { id: callbackSession.userId },
     } as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>);
 
     const result = await postCallback();
 
-    // The session the server refreshed, not the token the browser posted.
+    expect(exchangeSsoCode).toHaveBeenCalledWith({
+      code: "auth-code",
+      codeVerifier: VERIFIER,
+    });
+    // Both one-shot cookies are cleared once the code is minted.
+    assertIsDataWithResponseInit(result);
+    const cleared = new Headers(result.init?.headers).getSetCookie().join("\n");
+    expect(cleared).toMatch(/sso_code_verifier=;/);
+    expect(cleared).toMatch(/mobile_pkce_challenge=;/);
+  });
+
+  it("refuses tokens posted in place of a code", async () => {
+    const result = await postCallback({ refreshToken: "client-refresh-token" });
+
+    expect(exchangeSsoCode).not.toHaveBeenCalled();
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+    expect(createMobileAuthCode).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(400);
+  });
+
+  it("binds the exchanged SSO session to the code and returns the deeplink", async () => {
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+      user: { id: callbackSession.userId },
+    } as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>);
+
+    const result = await postCallback();
+
     expect(createMobileAuthCode).toHaveBeenCalledWith({
       userId: callbackSession.userId,
       refreshToken: callbackSession.refreshToken,
@@ -183,10 +229,10 @@ describe("POST /oauth/callback/mobile", () => {
       message:
         "Your account is now on single sign-on. Sign in again to continue.",
     });
-    // The one-shot PKCE challenge is cleared on this exit too.
-    expect(new Headers(result.init?.headers).get("set-cookie")).toContain(
-      "mobile_pkce_challenge="
-    );
+    // Both one-shot cookies are cleared on this exit too.
+    const cleared = new Headers(result.init?.headers).getSetCookie().join("\n");
+    expect(cleared).toMatch(/mobile_pkce_challenge=;/);
+    expect(cleared).toMatch(/sso_code_verifier=;/);
   });
 
   it("still reports other resolver failures as errors", async () => {
@@ -209,12 +255,15 @@ describe("POST /oauth/callback/mobile", () => {
         message: "More than one Shelf account uses this email address.",
       },
     });
+    const cleared = new Headers(result.init?.headers).getSetCookie().join("\n");
+    expect(cleared).toMatch(/mobile_pkce_challenge=;/);
+    expect(cleared).toMatch(/sso_code_verifier=;/);
   });
 
   it.each(["password", "otp", "magiclink"])(
     "refuses a session signed in by %s before resolving the user",
     async (method) => {
-      vi.mocked(refreshAccessToken).mockResolvedValue({
+      vi.mocked(exchangeSsoCode).mockResolvedValue({
         ...callbackSession,
         accessToken: accessTokenSignedInBy(method),
       });
@@ -247,6 +296,7 @@ describe("POST /oauth/callback/mobile", () => {
     );
 
     await postCallback({
+      code: "auth-code",
       groups: JSON.stringify(["Shelf-Owners"]),
       firstName: "Mallory",
       lastName: "Forged",
