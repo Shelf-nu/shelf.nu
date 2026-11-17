@@ -22,8 +22,9 @@ If the release is wrong without a data change, the release makes the change:
 3. Right after the deploy, run:
    UPDATE "Booking" SET "approvedAt" = ... WHERE "updatedAt" < '<deploy time>';
 
-<!-- ✅ Good: nothing to run. Turning approval on stamps leftover
-     reservations in the same transaction (booking-settings service). -->
+<!-- ✅ Good: nothing to run. The first time a workspace turns approval on,
+     the settings save stamps its leftover reservations in the same
+     transaction (booking-settings service). -->
 ```
 
 Deploy notes may still say what a release changes and in what order our own

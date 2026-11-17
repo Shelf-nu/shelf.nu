@@ -298,12 +298,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
             },
           });
 
-        // No sweep of existing reservations: every reservation written while
-        // a switch is off carries `approvedAt` from `reserveBooking`, and the
-        // bookings that predate the feature were stamped by migration
-        // 20261110120100 and its post-deploy re-run. Only genuine requests (made while a switch was on
-        // and never decided) have no stamp, and those are pending again the
-        // moment a switch comes back on, which is what they are.
+        // The first time a switch goes on, the save stamps the workspace's
+        // unapproved reservations approved: until then every reservation is
+        // stamped as it is made, so those are leftovers, never requests.
+        // Later switch-ons stamp nothing: genuine requests (made while a
+        // switch was on and never decided) are pending again the moment a
+        // switch comes back on, which is what they are.
         await updateBookingSettings({
           organizationId,
           requireApprovalForBase,

@@ -1,9 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
-import {
-  BOOKING_APPROVAL_SWITCHES_SELECT,
-  isBookingApprovalEnabled,
-} from "~/utils/bookings";
+import { isBookingApprovalEnabled } from "~/utils/bookings";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking Settings";
@@ -175,18 +172,40 @@ export async function getBookingSettingsForOrganization(
 }
 
 /**
+ * Whether the workspace has never turned an approval switch on, read under a
+ * lock on its settings row that holds until the transaction ends.
+ *
+ * @param tx - The settings transaction
+ * @param organizationId - The workspace
+ * @returns True while `approvalFirstEnabledAt` is still empty
+ */
+async function approvalNeverEnabledLocked(
+  tx: Pick<typeof db, "$queryRaw">,
+  organizationId: string
+): Promise<boolean> {
+  // Raw SQL for `FOR UPDATE`; the column carries no `@map`.
+  const rows = await tx.$queryRaw<{ approvalFirstEnabledAt: Date | null }[]>`
+    SELECT "approvalFirstEnabledAt" FROM "BookingSettings"
+    WHERE "organizationId" = ${organizationId}
+    FOR UPDATE
+  `;
+  return rows.length > 0 && rows[0].approvalFirstEnabledAt === null;
+}
+
+/**
  * Stamps every unapproved reservation of a workspace as approved, in the save
- * that turns its first approval switch on.
+ * that turns approval on for the first time.
  *
- * While both switches are off, `reserveBooking` stamps every reservation
- * approved as it is made, so a RESERVED booking with no stamp in that state
- * is never a request: it predates approval, or was made by a server version
- * that did not know the column (the overlap between running the migrations
- * and the new version taking over). Without the stamp, turning a switch on
- * would show those reservations as pending and refuse their check-out.
+ * Until then every reservation is stamped approved as it is made
+ * (`reserveBooking`), so a RESERVED booking with no stamp is never a request:
+ * it predates approval, or the previous server version made it after the
+ * migrations ran and before the new version took over. Without the stamp,
+ * turning a switch on would show those reservations as pending and refuse
+ * their check-out.
  *
- * It runs inside the settings transaction, so it covers exactly the
- * reservations made while approval was off, with no deploy-time step. The
+ * Only the first switch-on stamps: afterwards an unstamped reservation can be
+ * a real request, which stays pending when approval is turned on again. It
+ * runs inside the settings transaction, so no deploy-time step is needed. The
  * stamp is the booking's last update, as the backfill migration
  * (`20261110120100_backfill_booking_approval`) sets it.
  *
@@ -215,8 +234,8 @@ async function stampLeftoverReservationsApproved(
  * `undefined` keeps its stored value, so each settings card can save its own
  * fields without resending the others.
  *
- * A save that turns the workspace's first approval switch on also stamps its
- * unapproved reservations approved, in the same transaction (see
+ * The save that turns approval on for the first time in the workspace also
+ * stamps its unapproved reservations approved, in the same transaction (see
  * {@link stampLeftoverReservationsApproved}).
  *
  * @param args - The organization id plus the settings fields to change
@@ -300,17 +319,15 @@ export async function updateBookingSettings({
     if (notifyAdminsOnNewBooking !== undefined)
       updateData.notifyAdminsOnNewBooking = notifyAdminsOnNewBooking;
 
-    // Only a save that turns a switch on can start approval.
+    // Only a save that turns a switch on can be the workspace's first.
     const mayTurnApprovalOn =
       requireApprovalForBase === true || requireApprovalForSelfService === true;
 
     const bookingSettings = await db.$transaction(async (tx) => {
-      const before = mayTurnApprovalOn
-        ? await tx.bookingSettings.findUnique({
-            where: { organizationId },
-            select: BOOKING_APPROVAL_SWITCHES_SELECT,
-          })
-        : null;
+      // Locked, so two saves at once cannot both read "never enabled".
+      const neverEnabled = mayTurnApprovalOn
+        ? await approvalNeverEnabledLocked(tx, organizationId)
+        : false;
 
       const updated = await tx.bookingSettings.update({
         where: { organizationId },
@@ -318,12 +335,13 @@ export async function updateBookingSettings({
         select: BOOKING_SETTINGS_SELECT,
       });
 
-      if (
-        mayTurnApprovalOn &&
-        !isBookingApprovalEnabled(before) &&
-        isBookingApprovalEnabled(updated)
-      ) {
+      if (neverEnabled && isBookingApprovalEnabled(updated)) {
         await stampLeftoverReservationsApproved(tx, organizationId);
+        await tx.bookingSettings.update({
+          where: { organizationId },
+          data: { approvalFirstEnabledAt: new Date() },
+          select: { id: true },
+        });
       }
 
       return updated;

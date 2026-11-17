@@ -2098,6 +2098,13 @@ model BookingSettings {
   // workspace that never turns a switch on sees no change.
   requireApprovalForBase        Boolean @default(false)
   requireApprovalForSelfService Boolean @default(false)
+  // When the workspace first turned an approval switch on; null while it never
+  // has. That first save stamps the workspace's unapproved reservations
+  // approved: before it, every reservation is stamped as it is made, so an
+  // unstamped one is a leftover (made before the feature, or by the previous
+  // server version during a deploy), never a request. Later switch-ons stamp
+  // nothing, so a request left pending while approval was off is pending again.
+  approvalFirstEnabledAt        DateTime? @db.Timestamptz(3)
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
