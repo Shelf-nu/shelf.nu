@@ -334,8 +334,14 @@ function BookingDetailScreen({ id }: { id: string }) {
     setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
     setSourceQuestions(data.checkoutSourceQuestions ?? []);
-    // Clear stale selections — checked-in assets are no longer selectable
+    // Clear stale selections: checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
+    // A booking that can no longer be checked out (a request pending approval
+    // again, or a status change) leaves check-out selection, whose cancel
+    // toggle the screen no longer shows.
+    if (!data.canCheckout) {
+      setSelectMode((mode) => (mode === "checkout" ? null : mode));
+    }
     lastFetchedAt.current = Date.now();
   }, [id, currentOrg]);
 
