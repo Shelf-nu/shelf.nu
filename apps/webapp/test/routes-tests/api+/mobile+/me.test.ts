@@ -11,13 +11,19 @@
  * actually select them, or the field is always `undefined` however correct
  * the route's mapping is.
  *
+ * It also pins the additive workspace state (`inactive`, `inactiveReason`,
+ * `inactiveMessage`): worked out from the same membership read, kept apart
+ * from the gate's own columns, and reported active when it cannot be worked
+ * out, so `/me` never fails for it.
+ *
  * @see apps/webapp/app/routes/api+/mobile+/me.ts
  * @see apps/webapp/app/modules/api/mobile-auth.server.ts (getUserOrganizations)
  */
 import { createLoaderArgs } from "@mocks/remix";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
+import { Logger } from "~/utils/logger";
 
 // why: React Router v7's single-fetch `data()` returns a DataWithResponseInit,
 // not a Response. Mapping it to a real Response matches the rest of this suite.
@@ -74,18 +80,28 @@ vi.mock("~/database/db.server", () => ({
   db: { userOrganization: { findMany: vi.fn() } },
 }));
 
+// why: the state-read fallback logs; one test asserts that it does, and no
+// other test may reach it.
+vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
+
 const findMany = vi.mocked(db.userOrganization.findMany);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const { loader } = await import("~/routes/api+/mobile+/me");
 
 /** A findMany row in the shape `getUserOrganizations` selects. */
-function row(
-  organizationOverrides: Partial<Record<string, boolean | string>> = {}
-) {
+function row(organizationOverrides: Record<string, unknown> = {}) {
   return {
     roles: ["BASE"],
-    user: { sso: false, lastSelectedOrganizationId: null },
+    user: { sso: false, lastSelectedOrganizationId: null, roles: [] },
     organization: {
+      // What the workspace gate reads: an active Team workspace.
+      userId: "owner-1",
+      workspaceDisabled: false,
+      owner: { tier: { tierLimitId: "tier_2" } },
       id: "org-1",
       name: "Org One",
       type: "TEAM",
@@ -267,5 +283,60 @@ describe("GET /api/mobile/me", () => {
     ] as const) {
       expect(typeof org[toggle]).toBe("boolean");
     }
+  });
+
+  it("adds each workspace's state from the same read, without the gate's own columns", async () => {
+    findMany.mockResolvedValue([
+      row(),
+      row({ id: "org-2", name: "Org Two", workspaceDisabled: true }),
+    ] as never);
+
+    const response = await invoke();
+    const body = (await response.json()) as {
+      organizations: Array<Record<string, unknown>>;
+    };
+
+    expect(
+      body.organizations.map((org) => [
+        org.id,
+        org.inactive,
+        org.inactiveReason,
+        org.inactiveMessage,
+        org.currency,
+      ])
+    ).toEqual([
+      ["org-1", false, null, null, "EUR"],
+      [
+        "org-2",
+        true,
+        "disabled",
+        "This workspace has been disabled. Contact Shelf support for more information.",
+        "EUR",
+      ],
+    ]);
+    for (const org of body.organizations) {
+      expect(org).not.toHaveProperty("userId");
+      expect(org).not.toHaveProperty("workspaceDisabled");
+      expect(org).not.toHaveProperty("owner");
+    }
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("still answers when a workspace's state cannot be worked out, reporting it active", async () => {
+    // why: cast, an owner row without its tier is the failure under test.
+    findMany.mockResolvedValue([row({ owner: null })] as never);
+
+    const response = await invoke();
+    const body = (await response.json()) as {
+      organizations: Array<Record<string, unknown>>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.organizations[0]).toMatchObject({
+      id: "org-1",
+      inactive: false,
+    });
+    expect(Logger.error).toHaveBeenCalledTimes(1);
   });
 });

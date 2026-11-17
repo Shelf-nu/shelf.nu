@@ -93,6 +93,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
+  releaseUnattachedBarcodes,
   importDataHasBarcodes,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
@@ -1300,6 +1301,13 @@ export async function createAsset({
        */
       const reusedBarcodeIdsByType = new Map<BarcodeType, string[]>();
 
+      /**
+       * Barcodes this create writes as new rows. Their values are freed from
+       * unattached rows inside the create transaction, so a value left behind
+       * by a deleted asset or kit can be used again.
+       */
+      const newBarcodes: { type: BarcodeType; value: string }[] = [];
+
       /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
       if (barcodes && barcodes.length > 0) {
         const barcodesToAdd = barcodes.filter(
@@ -1319,13 +1327,13 @@ export async function createAsset({
             id: b.existingId!,
           }));
 
-          const barcodesToCreate = barcodesToAdd
-            .filter((b) => !b.existingId)
-            .map(({ type, value }) => ({
-              type,
-              value: normalizeBarcodeValue(type, value),
-              organizationId,
-            }));
+          newBarcodes.push(...barcodesToAdd.filter((b) => !b.existingId));
+
+          const barcodesToCreate = newBarcodes.map(({ type, value }) => ({
+            type,
+            value: normalizeBarcodeValue(type, value),
+            organizationId,
+          }));
 
           // Build barcodes relation data
           const barcodeRelationData: any = {};
@@ -1400,6 +1408,17 @@ export async function createAsset({
           await tx.barcode.updateMany({
             where: { id: { in: ids }, organizationId },
             data: { type },
+          });
+        }
+
+        if (newBarcodes.length > 0) {
+          await releaseUnattachedBarcodes(tx, {
+            barcodes: newBarcodes,
+            organizationId,
+            // The release matches values ignoring case, so a new value can
+            // match a reused row (ExternalQR `zz-code` vs `ZZ-CODE`). The
+            // create connects those rows by id, so they must survive.
+            keepIds: [...reusedBarcodeIdsByType.values()].flat(),
           });
         }
 

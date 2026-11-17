@@ -27,6 +27,7 @@ import {
   CommandPaletteButton,
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
+import { NewVersionPrompt } from "~/components/layout/new-version-prompt";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
@@ -443,6 +444,7 @@ export default function App() {
         <AtomsResetHandler />
         <AppSidebar id="navigation" />
         <SidebarInset id="main-content" tabIndex={-1}>
+          <NewVersionPrompt />
           {warnForNoPaymentMethod ? <MissingPaymentMethodBanner /> : null}
           {hasUnpaidInvoice ? <UnpaidInvoiceBanner /> : null}
           {disabledTeamOrg ? (

@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { before, beforeEach, describe, it, mock } from "node:test";
 import { act, createElement } from "react";
 import { create } from "react-test-renderer";
+import { bookingScanGuard } from "../lib/booking-scan-route";
 import type { LeaveDecision } from "./use-discard-guard";
 
 type StoppedLeave = { data: { action: unknown }; repeat: () => void };
@@ -20,6 +21,8 @@ type GuardOptions = {
   decide: () => LeaveDecision;
   title: string;
   message: string;
+  holdNotice?: { title: string; message: string };
+  guardedActions?: readonly string[];
 };
 
 /** What the guard last passed to `usePreventRemove`. */
@@ -99,11 +102,11 @@ function renderGuard(options: GuardOptions) {
 }
 
 /** Plays a leave that the guard stopped; returns how often `repeat` ran. */
-function stopLeave(): { repeats: () => number } {
+function stopLeave(actionType = "GO_BACK"): { repeats: () => number } {
   let count = 0;
   act(() => {
     preventRemove.onStopped?.({
-      data: { action: { type: "GO_BACK" } },
+      data: { action: { type: actionType } },
       repeat: () => {
         count += 1;
       },
@@ -191,5 +194,56 @@ describe("useDiscardGuard", () => {
     guard.rerender({ ...options, active: true });
 
     assert.equal(preventRemove.active, true);
+  });
+
+  it("tells the user why a held leave does nothing, and stays", () => {
+    // The booking scanner's own guard, with a booking request still pending.
+    const pending = bookingScanGuard(() => ({
+      submitting: true,
+      itemCount: 2,
+    }));
+    renderGuard({ ...pending, active: true });
+
+    const leave = stopLeave("GO_BACK");
+
+    assert.equal(leave.repeats(), 0);
+    assert.equal(preventRemove.active, true);
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0].title, pending.holdNotice.title);
+    assert.equal(alerts[0].message, pending.holdNotice.message);
+  });
+
+  it("lets a removal it does not guard through without deciding", () => {
+    // A sign-in redirect resets the tree: no one is there to answer a prompt.
+    let decided = 0;
+    renderGuard({
+      ...copy,
+      active: true,
+      decide: () => {
+        decided += 1;
+        return "prompt";
+      },
+      guardedActions: ["GO_BACK", "POP", "POP_TO_TOP"],
+    });
+
+    const reset = stopLeave("RESET");
+
+    assert.equal(reset.repeats(), 1);
+    assert.equal(decided, 0);
+    assert.equal(alerts.length, 0);
+  });
+
+  it("still decides on a guarded back when the action list is set", () => {
+    renderGuard({
+      ...copy,
+      active: true,
+      decide: () => "prompt",
+      guardedActions: ["GO_BACK", "POP", "POP_TO_TOP"],
+    });
+
+    const swipe = stopLeave("POP");
+
+    assert.equal(swipe.repeats(), 0);
+    assert.equal(alerts.length, 1);
   });
 });

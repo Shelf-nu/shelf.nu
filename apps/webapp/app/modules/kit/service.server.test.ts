@@ -38,6 +38,7 @@ import {
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
+import { releaseUnattachedBarcodes } from "../barcode/service.server";
 import {
   createSystemBookingNote,
   createSystemBookingNotes,
@@ -249,6 +250,7 @@ vitest.mock("~/modules/qr/service.server", () => ({
 
 // why: testing kit barcode operations without triggering barcode validation and updates
 vitest.mock("~/modules/barcode/service.server", () => ({
+  releaseUnattachedBarcodes: vitest.fn(),
   updateBarcodes: vitest.fn(),
   validateBarcodeUniqueness: vitest.fn(),
 }));
@@ -414,6 +416,36 @@ describe("createKit", () => {
         category: undefined,
       },
     });
+  });
+
+  it("frees unattached barcodes holding the submitted values before creating the kit", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.kit.create.mockResolvedValue(mockKitData);
+    const release = vitest.mocked(releaseUnattachedBarcodes);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "TEST123" }];
+    await createKit({ ...mockCreateParams, barcodes, locationId: null });
+
+    // `db` doubles as the transaction client in this suite.
+    expect(release).toHaveBeenCalledWith(db, {
+      barcodes,
+      organizationId: "org-1",
+    });
+    expect(release.mock.invocationCallOrder[0]).toBeLessThan(
+      //@ts-expect-error missing vitest type
+      db.kit.create.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("frees nothing when the kit is created without barcodes", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.kit.create.mockResolvedValue(mockKitData);
+
+    await createKit({ ...mockCreateParams, locationId: null });
+
+    expect(releaseUnattachedBarcodes).not.toHaveBeenCalled();
   });
 
   it("should create a kit with barcodes", async () => {

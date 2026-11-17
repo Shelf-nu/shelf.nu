@@ -726,6 +726,23 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
 }
 
 /**
+ * Whether a TEAM workspace whose owner holds this tier limit has lost its paid
+ * Team plan. The one rule behind both the web's `disabledTeamOrg` and the
+ * mobile API's workspace gate, so the two cannot disagree about which tiers
+ * lapse. Always false when premium features are off (self-hosted).
+ *
+ * @param tierLimitId - The owner's tier limit id (`Tier.tierLimitId`, or the
+ *   resolved limit's id). A custom tier limit never lapses here.
+ */
+export function teamTierLimitHasLapsed(
+  tierLimitId: string | null | undefined
+): boolean {
+  return (
+    premiumIsEnabled && (tierLimitId === "free" || tierLimitId === "tier_1")
+  );
+}
+
+/**
  * Whether a URL points at the account-details pages, which stay reachable
  * while a team workspace is disabled so the user can fix their billing.
  *
@@ -780,8 +797,7 @@ export const disabledTeamOrg = async ({
   });
 
   return (
-    currentOrganization.type === "TEAM" &&
-    ["free", "tier_1"].includes(tierLimit?.id)
+    currentOrganization.type === "TEAM" && teamTierLimitHasLapsed(tierLimit?.id)
   );
 };
 
