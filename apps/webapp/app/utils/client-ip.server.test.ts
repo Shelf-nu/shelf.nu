@@ -13,6 +13,7 @@ import {
   isCloudflareEdgeIp,
   PROXY_SECRET_HEADER,
 } from "./client-ip.server";
+import { UNLOGGED_HEADERS } from "./logger";
 
 /** An address inside Cloudflare's published 104.16.0.0/13 range. */
 const CLOUDFLARE_V4 = "104.16.1.1";
@@ -165,5 +166,11 @@ describe("getClientIpFromHeaders self-hosted", () => {
     vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
     const headers = new Headers({ "X-Forwarded-For": "10.0.0.5, <script>" });
     expect(getClientIpFromHeaders(headers)).toBeNull();
+  });
+});
+
+describe("the proxy secret header", () => {
+  it("is never written to logs or Sentry", () => {
+    expect(UNLOGGED_HEADERS).toContain(PROXY_SECRET_HEADER);
   });
 });
