@@ -237,3 +237,28 @@ it("the location scanner marks a kits failure after its assets saved", () => {
     /return scanSaveError\(reason, \{ partlySaved: assetsSaved \}\);/
   );
 });
+
+/**
+ * Removing an audit scan is sent in the background after the row is gone. A
+ * removal the server refused rolled back, so the drawer puts the scan back
+ * and the route marks it saved again, or it would be sent a second time. The
+ * decision is tested in audit-remove-scan.test.ts; this pins the wiring.
+ */
+it("the audit scanner puts back a scan whose removal was refused", () => {
+  const drawer = readFileSync(
+    path.resolve(__dirname, "../../app/components/audit/audit-drawer.tsx"),
+    "utf8"
+  );
+  expect(drawer).toMatch(
+    /refusedScanRemoval\(pendingRemovalRef\.current, answer\)/
+  );
+  expect(drawer).toMatch(/onScanRemoveRefused\?\.\(refused\.assetId\)/);
+
+  const route = readFileSync(
+    path.join(ROUTES_DIR, "audits.$auditId.scan.tsx"),
+    "utf8"
+  );
+  expect(route).toMatch(
+    /onScanRemoveRefused=\{\(assetId\) => \{[\s\S]*?persistedItemsRef\.current\.add\(assetId\);/
+  );
+});

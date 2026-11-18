@@ -77,8 +77,8 @@ export const links: LinksFunction = () => [
  * background and nothing reads its result, so a remove request that gets no
  * answer keeps reaching the error boundary: turning it into action data would
  * hide a removal the server may never have made. A remove the server answers
- * with an error comes back as fetcher data, which the audit drawer does not
- * read yet.
+ * with an error comes back as fetcher data, and the audit drawer puts the scan
+ * back on the list (`refusedScanRemoval`).
  */
 export async function clientAction(args: ClientActionFunctionArgs) {
   // Read from the URL, not the body: the completion form is multipart and
@@ -622,6 +622,10 @@ export default function AuditSessionRoute() {
         onScanRemoved={(assetId) => {
           persistedItemsRef.current.delete(assetId);
           pendingPersistsRef.current.delete(assetId);
+        }}
+        onScanRemoveRefused={(assetId) => {
+          // The scan is still saved: putting it back must not send it again.
+          persistedItemsRef.current.add(assetId);
         }}
       />
 

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -34,6 +35,8 @@ import {
   renderAuditPendingRows,
   renderAuditScannedRows,
 } from "~/components/audit/audit-item-row";
+import type { PendingScanRemoval } from "~/components/audit/audit-remove-scan";
+import { refusedScanRemoval } from "~/components/audit/audit-remove-scan";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import {
   createBlockers,
@@ -87,6 +90,8 @@ type AuditDrawerProps = {
   headerContent?: React.ReactNode;
   portalContainer?: HTMLElement;
   onScanRemoved?: (assetId: string) => void;
+  /** Called when the server refused a removal and the scan is back on the list. */
+  onScanRemoveRefused?: (assetId: string) => void;
   getAdditionalBlockers?: (
     args: AdditionalBlockerFactoryArgs
   ) => BlockerConfig[];
@@ -297,6 +302,8 @@ function AuditDrawerEmptyState({
  * @param props.expectedAssets - Assets expected to be found in this audit.
  * @param props.pendingScanCount - Count of scans still being processed.
  * @param props.onScanRemoved - Called when a scanned item is removed from the list.
+ * @param props.onScanRemoveRefused - Called when the server refused a removal,
+ *   so the scan is still on the audit and back on the list.
  * @param props.getAdditionalBlockers - Supplies extra "cannot complete" blockers.
  * @param props.emptyStateContent - Overrides the default empty-state render.
  * @returns The audit scan drawer.
@@ -327,6 +334,7 @@ export default function AuditDrawer({
   headerContent,
   portalContainer,
   onScanRemoved,
+  onScanRemoveRefused,
   getAdditionalBlockers,
   emptyStateContent,
 }: AuditDrawerProps) {
@@ -376,6 +384,11 @@ export default function AuditDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
   const removeScanFetcher = useFetcher();
+  const setScannedItems = useSetAtom(scannedItemsAtom);
+  // The removal waiting for its answer, and the last answer read, so each
+  // answer is acted on once. See `refusedScanRemoval`.
+  const pendingRemovalRef = useRef<PendingScanRemoval | null>(null);
+  const readRemovalAnswerRef = useRef<unknown>(undefined);
 
   // Show location when the audit is not already scoped to a specific location
   const showLocation = contextLabel.toLowerCase() !== "location";
@@ -591,6 +604,12 @@ export default function AuditDrawer({
         scannedItem?.type === "asset" &&
         scannedItem.data?.id
       ) {
+        pendingRemovalRef.current = {
+          qrId,
+          assetId: scannedItem.data.id,
+          item: scannedItem,
+          count: auditCounts[scannedItem.data.id],
+        };
         const formData = new FormData();
         formData.append("intent", "remove-scan");
         formData.append("assetId", scannedItem.data.id);
@@ -628,6 +647,41 @@ export default function AuditDrawer({
       removeScanFetcher,
     ]
   );
+
+  // A removal the server refused rolled back: the scan is still on the audit,
+  // so it goes back on the list with its count, and the route is told it is
+  // still saved. The server's message reaches the operator as a notification.
+  useEffect(() => {
+    const answer = removeScanFetcher.data;
+    if (
+      removeScanFetcher.state !== "idle" ||
+      answer === undefined ||
+      answer === readRemovalAnswerRef.current
+    ) {
+      return;
+    }
+    readRemovalAnswerRef.current = answer;
+    const refused = refusedScanRemoval(pendingRemovalRef.current, answer);
+    pendingRemovalRef.current = null;
+    if (!refused) {
+      return;
+    }
+    onScanRemoveRefused?.(refused.assetId);
+    setScannedItems((current) =>
+      current[refused.qrId]
+        ? current
+        : { ...current, [refused.qrId]: refused.item }
+    );
+    if (refused.count) {
+      mergeAuditCounts({ [refused.assetId]: refused.count });
+    }
+  }, [
+    removeScanFetcher.state,
+    removeScanFetcher.data,
+    onScanRemoveRefused,
+    setScannedItems,
+    mergeAuditCounts,
+  ]);
 
   /**
    * Renders the list as two foldable groups, the same as the booking scan
