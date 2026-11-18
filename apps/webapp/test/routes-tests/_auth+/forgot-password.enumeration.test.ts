@@ -140,7 +140,9 @@ describe("forgot-password enumeration", () => {
 
     await requestReset("real@example.com");
 
-    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com");
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com", {
+      clientIp: null,
+    });
   });
 
   it("finds an account stored with different letter case", async () => {
@@ -156,7 +158,9 @@ describe("forgot-password enumeration", () => {
         where: { email: expect.objectContaining({ mode: "insensitive" }) },
       })
     );
-    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("jane@acme.com");
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("jane@acme.com", {
+      clientIp: null,
+    });
   });
 
   it("sends NOTHING for an unknown address", async () => {
@@ -187,7 +191,9 @@ describe("forgot-password enumeration", () => {
 
     const res = observable(await requestReset("real@example.com"));
 
-    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com");
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com", {
+      clientIp: null,
+    });
     expect(res.status).toBe(302);
   });
 
@@ -227,7 +233,8 @@ describe("forgot-password enumeration", () => {
     await requestReset("old-timer@sso-corp.com");
 
     expect(mockSendResetPasswordLink).toHaveBeenCalledWith(
-      "old-timer@sso-corp.com"
+      "old-timer@sso-corp.com",
+      { clientIp: null }
     );
     expect(mockGetLegacyLoginDecision).not.toHaveBeenCalled();
   });

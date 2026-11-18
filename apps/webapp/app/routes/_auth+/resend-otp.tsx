@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { sendOTP } from "~/modules/auth/service.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 
 import {
@@ -31,7 +32,9 @@ export async function action({ request }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        await sendOTP(email);
+        await sendOTP(email, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
         return payload({ success: true });
       }
     }

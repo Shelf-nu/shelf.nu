@@ -24,7 +24,7 @@ docker run -d \
   -e "DATABASE_URL=postgres://USER:PASSWORD@HOST:6543/DB_NAME?pgbouncer=true" \
   -e "DIRECT_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME" \
   -e 'SUPABASE_ANON_PUBLIC=your-anon-public-key' \
-  -e 'SUPABASE_SERVICE_ROLE=your-service-role-key' \
+  -e 'SUPABASE_SECRET_KEY=sb_secret_your-secret-key' \
   -e 'SUPABASE_URL=https://your-instance-name.supabase.co' \
   -e 'SESSION_SECRET=generate-with-openssl-rand-hex-32' \
   -e 'SERVER_URL=http://localhost:3000' \

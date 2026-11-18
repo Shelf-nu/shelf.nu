@@ -110,7 +110,7 @@ fly secrets set FINGERPRINT=$(openssl rand -hex 32)
 
 # Supabase configuration
 fly secrets set SUPABASE_URL="https://your-production-project.supabase.co"
-fly secrets set SUPABASE_SERVICE_ROLE="your-production-service-role-key"
+fly secrets set SUPABASE_SECRET_KEY="sb_secret_your-production-secret-key"
 fly secrets set SUPABASE_ANON_PUBLIC="your-production-anon-key"
 fly secrets set DATABASE_URL="postgres://user:pass@host:6543/db?pgbouncer=true&connection_limit=1"
 fly secrets set DIRECT_URL="postgres://user:pass@host:5432/db"  # migrations + toasts across machines

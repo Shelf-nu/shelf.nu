@@ -36,6 +36,7 @@ import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -112,7 +113,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
           shouldBeCaptured: false,
         });
 
-        const authSession = await verifyOtpAndSignin(email, otp);
+        const authSession = await verifyOtpAndSignin(email, otp, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
         // Whether this person already has an account is decided by the
         // authenticated id, never by the address typed: the same person can
         // type it with different capitals, and each spelling must reach the

@@ -31,6 +31,7 @@ vi.mock("~/utils/sso.server", () => ({
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
 const EMAIL = "new.person@example.com";
+const VISITOR_IP = "203.0.113.7";
 const INTENT = { plan: "team" as const, trial: true, utmSource: "website" };
 
 function sendOtpArgs({
@@ -42,6 +43,8 @@ function sendOtpArgs({
 }) {
   const headers = new Headers({
     "Content-Type": "application/x-www-form-urlencoded",
+    // The visitor's address as a self-hosted proxy reports it.
+    "X-Forwarded-For": VISITOR_IP,
   });
   if (cookie) {
     headers.set("Cookie", cookie);
@@ -91,7 +94,8 @@ describe("send-otp action — signup by one-time code", () => {
     );
     await expect(signupIntentSetBy(response)).resolves.toEqual(INTENT);
     expect(validateNonSSOSignup).toHaveBeenCalledWith(EMAIL);
-    expect(sendOTP).toHaveBeenCalledWith(EMAIL);
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(sendOTP).toHaveBeenCalledWith(EMAIL, { clientIp: VISITOR_IP });
   });
 
   it("redirects exactly as before when no intent is being carried", async () => {

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   findWeakSigningSecrets,
   getEnv,
+  SUPABASE_SERVICE_ROLE_SUPPORT_ENDS,
+  warnAboutLegacySupabaseKey,
   warnAboutWeakSigningSecrets,
 } from "./env";
 import { ShelfError } from "./error";
@@ -283,6 +285,27 @@ describe("signing secrets in production", () => {
       log
     );
 
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
+describe("warnAboutLegacySupabaseKey", () => {
+  it("warns, with the end date, when only the legacy service_role key is set", () => {
+    const log = vi.fn();
+
+    expect(warnAboutLegacySupabaseKey({}, log)).toBe(true);
+
+    const message = log.mock.calls[0][0] as string;
+    expect(message).toMatch(/SUPABASE_SECRET_KEY/);
+    expect(message).toContain(SUPABASE_SERVICE_ROLE_SUPPORT_ENDS);
+  });
+
+  it("stays quiet when a secret key is set", () => {
+    const log = vi.fn();
+
+    expect(
+      warnAboutLegacySupabaseKey({ SUPABASE_SECRET_KEY: "sb_secret_x" }, log)
+    ).toBe(false);
     expect(log).not.toHaveBeenCalled();
   });
 });

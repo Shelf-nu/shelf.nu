@@ -47,13 +47,40 @@ DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/post
 ### API Keys
 
 1. **Go to Project Settings** → **API keys**
-2. **Copy the API keys** and update your `.env`:
+2. **Create a secret key** (it starts with `sb_secret_`) and copy it, plus the anon public key
+3. **Update your `.env`:**
 
 ```bash
 SUPABASE_URL="https://your-project-ref.supabase.co"
 SUPABASE_ANON_PUBLIC="your-anon-public-key"
-SUPABASE_SERVICE_ROLE="your-service-role-key"
+SUPABASE_SECRET_KEY="sb_secret_..."
 ```
+
+> ⚠️ **`SUPABASE_SERVICE_ROLE` is deprecated.** Shelf still accepts the legacy
+> `service_role` key when `SUPABASE_SECRET_KEY` is not set, and logs a warning at
+> startup. Releases after **2027-02-18** require `SUPABASE_SECRET_KEY`. Supabase
+> is retiring the legacy keys too.
+
+### Sign-in Rate Limits
+
+Shelf signs people in from its server, so without extra setup Supabase Auth sees
+every sign-in attempt as coming from your server's IP. Its per-IP limits then
+count everyone together instead of each visitor. To have them count each
+visitor:
+
+1. Set `SUPABASE_SECRET_KEY` (above). Supabase ignores the visitor IP on
+   requests made with the legacy keys.
+2. **Go to Authentication** → **Rate Limits** and turn on **IP Address
+   Forwarding** (the `security_sb_forwarded_for_enabled` auth setting).
+3. Make sure Shelf receives the visitor's IP. Behind your own reverse proxy,
+   the proxy must set `X-Forwarded-For`. On Fly.io, Shelf reads
+   `Fly-Client-IP`, and `CF-Connecting-IP` when the request comes from
+   Cloudflare's network.
+
+Shelf then sends each visitor's IP to Supabase (`Sb-Forwarded-For`) on
+password sign-in, sign-up, one-time codes, password reset and email change.
+Review the limits on the same page: people signing in from one office share an
+IP.
 
 ---
 
@@ -211,7 +238,7 @@ DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/post
 # Supabase API
 SUPABASE_URL="https://your-project-ref.supabase.co"
 SUPABASE_ANON_PUBLIC="your-anon-public-key"
-SUPABASE_SERVICE_ROLE="your-service-role-key"
+SUPABASE_SECRET_KEY="sb_secret_..."
 
 # App configuration
 SESSION_SECRET="generate-with-openssl-rand-hex-32"  # openssl rand -hex 32

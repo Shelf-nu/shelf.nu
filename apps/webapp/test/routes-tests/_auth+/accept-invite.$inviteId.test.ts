@@ -192,7 +192,8 @@ describe("accept-invite action", () => {
 
     expect(signInWithEmail).toHaveBeenCalledWith(
       "invitee@example.com",
-      expect.any(String)
+      expect.any(String),
+      { clientIp: null }
     );
   });
 
