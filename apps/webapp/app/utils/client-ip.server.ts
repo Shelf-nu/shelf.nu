@@ -11,19 +11,30 @@
  * - **On Fly** (`FLY_APP_NAME` set): `Fly-Client-IP` is set by the Fly edge and
  *   cannot be forged. When the domain is proxied through Cloudflare, that
  *   address is a Cloudflare server, and the visitor's address is in
- *   `CF-Connecting-IP`. `CF-Connecting-IP` is trusted only when `Fly-Client-IP`
- *   is inside Cloudflare's published ranges: anyone can reach the Fly app
- *   directly and send a made-up `CF-Connecting-IP`, which would let them pick a
- *   fresh rate-limit key on every request.
- * - **Off Fly** (self-hosted behind a reverse proxy, or local dev): the leftmost
- *   `X-Forwarded-For`. The operator's proxy is responsible for setting it.
- *   `Fly-Client-IP` and `CF-Connecting-IP` are never read here, because without
- *   the Fly edge either one is just a header the client chose.
+ *   `CF-Connecting-IP`. That header is trusted only when both hold:
+ *   `Fly-Client-IP` is inside Cloudflare's published ranges, and the request
+ *   carries `X-Shelf-Proxy-Secret` equal to `CLOUDFLARE_PROXY_SECRET`, which a
+ *   Transform Rule on Shelf's own Cloudflare zone adds. The range alone proves
+ *   only that some Cloudflare account sent the request; anyone can put their own
+ *   zone or Worker in front of the Fly app. Without that proof a caller could
+ *   pick a fresh rate-limit key on every request.
+ * - **Off Fly** (self-hosted behind a reverse proxy, or local dev): only when
+ *   the operator sets `TRUSTED_PROXY_HOPS`, the number of proxies in front of
+ *   Shelf that append to `X-Forwarded-For`. The visitor's address is then the
+ *   entry that many places from the right, the one the operator's outermost
+ *   proxy added. Entries further left came from the client and can say
+ *   anything. Without the setting there is no trustworthy answer, so the result
+ *   is null. `Fly-Client-IP` and `CF-Connecting-IP` are never read here,
+ *   because without the Fly edge either one is just a header the client chose.
  *
  * @see {@link file://./../../server/client-ip.ts}
  * @see {@link file://./../integrations/supabase/client.ts}
  */
+import { createHash, timingSafeEqual } from "node:crypto";
 import { BlockList, isIP } from "node:net";
+
+/** The header Shelf's Cloudflare Transform Rule adds to every proxied request. */
+export const PROXY_SECRET_HEADER = "x-shelf-proxy-secret";
 
 /**
  * Cloudflare's published edge ranges (https://www.cloudflare.com/ips/).
@@ -86,6 +97,21 @@ export function isCloudflareEdgeIp(ip: string): boolean {
 }
 
 /**
+ * Whether the request carries the secret only Shelf's own Cloudflare zone adds.
+ * False when `CLOUDFLARE_PROXY_SECRET` is not configured.
+ *
+ * @param headers - The incoming request's headers
+ */
+function cameThroughOwnZone(headers: Headers): boolean {
+  const expected = process.env.CLOUDFLARE_PROXY_SECRET;
+  const received = headers.get(PROXY_SECRET_HEADER);
+  if (!expected || !received) return false;
+  // Hash both sides so the comparison is constant-time whatever their lengths.
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(received), digest(expected));
+}
+
+/**
  * The visitor's IP address, read from the headers trusted where the app runs
  * (see the file header).
  *
@@ -97,13 +123,32 @@ export function getClientIpFromHeaders(headers: Headers): string | null {
 
   if (onFly) {
     const edgeIp = asIp(headers.get("fly-client-ip"));
-    if (edgeIp && isCloudflareEdgeIp(edgeIp)) {
-      // The request came through Cloudflare, which overwrites any
+    if (edgeIp && isCloudflareEdgeIp(edgeIp) && cameThroughOwnZone(headers)) {
+      // The request came through Shelf's zone, whose edge overwrites any
       // client-sent CF-Connecting-IP with the visitor's address.
       return asIp(headers.get("cf-connecting-ip")) ?? edgeIp;
     }
     return edgeIp;
   }
 
+  const hops = Number(process.env.TRUSTED_PROXY_HOPS);
+  if (!Number.isInteger(hops) || hops < 1) return null;
+  const entries = headers.get("x-forwarded-for")?.split(",") ?? [];
+  return asIp(entries[entries.length - hops]);
+}
+
+/**
+ * The leftmost `X-Forwarded-For` entry, for in-memory rate-limit buckets on
+ * instances that do not set `TRUSTED_PROXY_HOPS`.
+ *
+ * A caller can put any value there, so it can choose a fresh bucket per
+ * request. Never send it to another service or use it where that matters: it
+ * only spreads ordinary visitors across buckets instead of throttling every
+ * visitor of a self-hosted instance together.
+ *
+ * @param headers - The incoming request's headers
+ * @returns A valid IP address, or null
+ */
+export function getUnverifiedForwardedIp(headers: Headers): string | null {
   return asIp(headers.get("x-forwarded-for")?.split(",")[0]);
 }

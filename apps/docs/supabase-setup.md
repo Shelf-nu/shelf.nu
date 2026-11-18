@@ -72,10 +72,19 @@ visitor:
    requests made with the legacy keys.
 2. **Go to Authentication** → **Rate Limits** and turn on **IP Address
    Forwarding** (the `security_sb_forwarded_for_enabled` auth setting).
-3. Make sure Shelf receives the visitor's IP. Behind your own reverse proxy,
-   the proxy must set `X-Forwarded-For`. On Fly.io, Shelf reads
-   `Fly-Client-IP`, and `CF-Connecting-IP` when the request comes from
-   Cloudflare's network.
+3. Tell Shelf where the visitor's IP comes from. On Fly.io, Shelf reads
+   `Fly-Client-IP`. If your domain is proxied through Cloudflare, that is a
+   Cloudflare address, so also add a Transform Rule (**Rules** → **Transform
+   Rules** → **Modify Request Header**) that sets `X-Shelf-Proxy-Secret` to a
+   random value on every request, and set the same value as
+   `CLOUDFLARE_PROXY_SECRET`. Shelf then trusts `CF-Connecting-IP` only on
+   requests that carry it. Anywhere else, set `TRUSTED_PROXY_HOPS` to the
+   number of reverse proxies in front of Shelf that append to
+   `X-Forwarded-For` (usually `1`, for example nginx with
+   `$proxy_add_x_forwarded_for`). Shelf then reads the entry your outermost
+   proxy added. Without it, Shelf sends no IP, because the rest of that header
+   is written by the visitor and a script could put a new address in it on
+   every attempt.
 
 Shelf then sends each visitor's IP to Supabase (`Sb-Forwarded-For`) on
 password sign-in, sign-up, one-time codes, password reset and email change.

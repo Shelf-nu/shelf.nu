@@ -8,7 +8,7 @@
  * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
  */
 import type { ActionFunctionArgs } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sendOTP } from "~/modules/auth/service.server";
 import {
@@ -81,7 +81,15 @@ describe("send-otp action — signup by one-time code", () => {
     vi.mocked(validateNonSSOSignup).mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("hands the intent on to the code step with a fresh window", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
     const cookie = (await serializeSignupIntent(INTENT)).split(";")[0];
 
     const response = (await action(
