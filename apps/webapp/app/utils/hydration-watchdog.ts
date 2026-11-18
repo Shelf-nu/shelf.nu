@@ -529,9 +529,9 @@ export function timedOutEarly(report: HydrationFailureReport): boolean {
  * automatic reload, after a manual one, or late, past the timeout. A
  * recovered reload ({@link isRecoveredReload}) goes to Sentry Logs, which keep
  * its rate visible without raising an issue for each flaky download. A timeout
- * that fired early ({@link timedOutEarly}) goes to Sentry Logs too: no person
- * waited on it, so the warning issues, one per reason, count only pages
- * someone did.
+ * that fired early ({@link timedOutEarly}), before its 20 seconds had passed on
+ * the page clock, goes to Sentry Logs too and never counts toward the warning
+ * issues, one per reason.
  */
 export function markHydrated(): void {
   window[WATCHDOG_GLOBAL]?.done();
