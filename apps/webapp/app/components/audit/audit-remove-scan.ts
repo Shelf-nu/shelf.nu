@@ -6,8 +6,8 @@
  * so an answer carrying an error means nothing was removed: the scan is still
  * on the audit while the list no longer shows it. The drawer does not try to
  * rebuild the row (the audit's scans and counts belong to the server, and
- * other saves may be in flight); it says the list is out of date and offers a
- * reload, which shows the audit as the server holds it.
+ * other saves may be in flight); it says the list may be out of date and
+ * offers a reload, which shows the audit as the server holds it.
  *
  * @see {@link file://./audit-drawer.tsx}
  */
@@ -44,7 +44,7 @@ export function refusedRemovalMessage(answer: unknown): string | null {
  * Whether reloading the scanner would lose work the server does not hold yet:
  * a code still being looked up, a scan still saving, a count entered and not
  * saved, or a quantity-tracked scan still waiting for its count. The reload
- * offered after a refused removal waits until there is none.
+ * offered after a refused removal warns while there is any.
  *
  * @param args.pendingScanCount - Scans not saved yet (see `countScansToSave`)
  * @param args.items - The scanned list

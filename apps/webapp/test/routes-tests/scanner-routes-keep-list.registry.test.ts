@@ -249,13 +249,15 @@ it("the audit scanner says when a removal was refused", () => {
     path.resolve(__dirname, "../../app/components/audit/audit-drawer.tsx"),
     "utf8"
   );
-  // Shown only on the audit the refusal came from, with the reload held
-  // while unsaved scans or counts would be lost.
+  expect(drawer).toMatch(/refusedRemovalMessage\(removeAnswer\)/);
+  // Shown only on the audit whose removal was refused, read once, and
+  // cleared when the audit changes.
   expect(drawer).toMatch(
-    /removeRefusal\.auditSessionId === auditSession\?\.id/
+    /if \(message && removalAuditIdRef\.current === auditSession\?\.id\)/
   );
-  expect(drawer).toMatch(/reloadBlocked=\{reloadWouldLoseWork\(\{/);
-  // A refusal is labelled with the audit its removal was sent for.
-  expect(drawer).toMatch(/auditSessionId: removalAuditIdRef\.current/);
   expect(drawer).toMatch(/removalAuditIdRef\.current = auditSession\.id;/);
+  // Reload warns about unsaved work instead of being disabled.
+  expect(drawer).toMatch(
+    /unsavedWork=\{\s*removeScanFetcher\.state !== "idle" \|\|\s*reloadWouldLoseWork\(\{/
+  );
 });

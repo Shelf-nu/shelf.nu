@@ -381,29 +381,34 @@ export default function AuditDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
   const removeScanFetcher = useFetcher();
-  // Set when the server refused a removal: the scan is still on the audit,
-  // so the list is out of date until the page is reloaded.
-  // Kept with the audit it came from, so it never shows on another one.
-  const [removeRefusal, setRemoveRefusal] = useState<{
-    auditSessionId: string | undefined;
-    message: string;
-  } | null>(null);
-  // The audit the last removal was sent for: its answer belongs to that
-  // audit, whichever one is on screen when the answer arrives.
+  // The server's reason when it refused a removal: the list may be out of
+  // date until the page is reloaded. It belongs to the list on screen, so a
+  // change of audit (which rebuilds the list from the server) clears it.
+  const [removeRefusal, setRemoveRefusal] = useState<string | null>(null);
+  useEffect(() => {
+    setRemoveRefusal(null);
+  }, [auditSession?.id]);
+  // The audit the last removal was sent for, and the last answer read, so an
+  // answer is read once and only shown on the audit that sent the removal. A
+  // new removal replaces the fetcher's request, so the answer read here is
+  // always the last removal's.
   const removalAuditIdRef = useRef<string | undefined>(undefined);
+  const readRemoveAnswerRef = useRef<unknown>(undefined);
   const removeAnswer = removeScanFetcher.data;
   useEffect(() => {
-    if (removeScanFetcher.state !== "idle") {
+    if (
+      removeScanFetcher.state !== "idle" ||
+      removeAnswer === undefined ||
+      removeAnswer === readRemoveAnswerRef.current
+    ) {
       return;
     }
+    readRemoveAnswerRef.current = removeAnswer;
     const message = refusedRemovalMessage(removeAnswer);
-    if (message) {
-      setRemoveRefusal({
-        auditSessionId: removalAuditIdRef.current,
-        message,
-      });
+    if (message && removalAuditIdRef.current === auditSession?.id) {
+      setRemoveRefusal(message);
     }
-  }, [removeScanFetcher.state, removeAnswer]);
+  }, [removeScanFetcher.state, removeAnswer, auditSession?.id]);
 
   // Show location when the audit is not already scoped to a specific location
   const showLocation = contextLabel.toLowerCase() !== "location";
@@ -747,16 +752,18 @@ export default function AuditDrawer({
       collapsedHeight={193}
       form={(expanded) => (
         <>
-          {removeRefusal &&
-          removeRefusal.auditSessionId === auditSession?.id ? (
+          {removeRefusal ? (
             <RemoveRefusalNotice
-              message={removeRefusal.message}
-              reloadBlocked={reloadWouldLoseWork({
-                pendingScanCount,
-                items,
-                auditCounts,
-                listedAssetIds: scannedAssetIds,
-              })}
+              message={removeRefusal}
+              unsavedWork={
+                removeScanFetcher.state !== "idle" ||
+                reloadWouldLoseWork({
+                  pendingScanCount,
+                  items,
+                  auditCounts,
+                  listedAssetIds: scannedAssetIds,
+                })
+              }
             />
           ) : null}
           <AuditDrawerFooter
@@ -779,35 +786,36 @@ export default function AuditDrawer({
 }
 
 /**
- * Says a scan the operator removed is still on the audit, because the server
- * refused the removal, and offers a reload to show the audit as it is.
+ * Says the server refused a removal, so the list may be out of date, and
+ * offers a reload to show the audit as the server holds it. Reload is never
+ * disabled: when work is still on its way to the server, the notice says a
+ * reload now drops it, and the operator decides.
  *
  * @param props.message - The server's reason
- * @param props.reloadBlocked - Whether a reload would lose unsaved scans or
- *   counts; the reload then waits, and the notice says what for
+ * @param props.unsavedWork - Whether a reload now would drop work not saved
+ *   yet (a lookup, a scan, a count, or a removal still waiting)
  */
 function RemoveRefusalNotice({
   message,
-  reloadBlocked,
+  unsavedWork,
 }: {
   message: string;
-  reloadBlocked: boolean;
+  unsavedWork: boolean;
 }) {
   return (
     <div
       role="alert"
       className="mx-3 mt-2 rounded border border-warning-300 bg-warning-25 px-3 py-2 text-[13px] text-warning-800"
     >
-      <p className="font-semibold">A scan you removed is still on the audit.</p>
+      <p className="font-semibold">The server refused to remove a scan.</p>
       <p>
-        {message} The list is out of date until you reload.
-        {reloadBlocked
-          ? " Finish the counts still open and let the scans save first."
+        {message} The list may be out of date until you reload.
+        {unsavedWork
+          ? " Some scans or counts are not saved yet: wait for them, or a reload now drops them."
           : null}{" "}
         <Button
           type="button"
           variant="link"
-          disabled={reloadBlocked}
           onClick={() => window.location.reload()}
           className="inline text-[13px] font-semibold text-warning-800 underline"
         >
