@@ -240,33 +240,15 @@ it("the location scanner marks a kits failure after its assets saved", () => {
 
 /**
  * Removing an audit scan is sent in the background after the row is gone. A
- * removal the server refused rolled back, so the drawer puts the scan back
- * and the route marks it saved again, or it would be sent a second time. The
- * decision is tested in audit-remove-scan.test.ts; this pins the wiring.
+ * removal the server refused rolled back, so the drawer must say the scan is
+ * still on the audit. The decision is tested in audit-remove-scan.test.ts;
+ * this pins that the drawer reads the removal's answer and shows the notice.
  */
-it("the audit scanner puts back a scan whose removal was refused", () => {
+it("the audit scanner says when a removal was refused", () => {
   const drawer = readFileSync(
     path.resolve(__dirname, "../../app/components/audit/audit-drawer.tsx"),
     "utf8"
   );
-  expect(drawer).toMatch(
-    /refusedScanRemoval\(\s*pendingRemovalRef\.current,\s*answer,\s*auditSession\?\.id\s*\)/
-  );
-  // One removal at a time, or a refused first one could not be put back.
-  expect(drawer).toMatch(
-    /if \(auditSession && removeScanFetcher\.state !== "idle"\) \{\s*return;/
-  );
-  expect(drawer).toMatch(/onScanRemoveRefused\?\.\(refused\.assetId\)/);
-
-  const route = readFileSync(
-    path.join(ROUTES_DIR, "audits.$auditId.scan.tsx"),
-    "utf8"
-  );
-  // Only a scan that was saved when it was removed goes back as saved.
-  expect(route).toMatch(
-    /savedAtRemovalRef\.current\.set\(\s*assetId,\s*wasScanSaved\(/
-  );
-  expect(route).toMatch(
-    /onScanRemoveRefused=\{\(assetId\) => \{[\s\S]*?if \(savedAtRemovalRef\.current\.get\(assetId\)\) \{\s*persistedItemsRef\.current\.add\(assetId\);/
-  );
+  expect(drawer).toMatch(/refusedRemovalMessage\(removeAnswer\)/);
+  expect(drawer).toMatch(/<RemoveRefusalNotice message=\{removeRefusal\} \/>/);
 });

@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -35,8 +34,7 @@ import {
   renderAuditPendingRows,
   renderAuditScannedRows,
 } from "~/components/audit/audit-item-row";
-import type { PendingScanRemoval } from "~/components/audit/audit-remove-scan";
-import { refusedScanRemoval } from "~/components/audit/audit-remove-scan";
+import { refusedRemovalMessage } from "~/components/audit/audit-remove-scan";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import {
   createBlockers,
@@ -90,8 +88,6 @@ type AuditDrawerProps = {
   headerContent?: React.ReactNode;
   portalContainer?: HTMLElement;
   onScanRemoved?: (assetId: string) => void;
-  /** Called when the server refused a removal and the scan is back on the list. */
-  onScanRemoveRefused?: (assetId: string) => void;
   getAdditionalBlockers?: (
     args: AdditionalBlockerFactoryArgs
   ) => BlockerConfig[];
@@ -302,8 +298,6 @@ function AuditDrawerEmptyState({
  * @param props.expectedAssets - Assets expected to be found in this audit.
  * @param props.pendingScanCount - Count of scans still being processed.
  * @param props.onScanRemoved - Called when a scanned item is removed from the list.
- * @param props.onScanRemoveRefused - Called when the server refused a removal,
- *   so the scan is still on the audit and back on the list.
  * @param props.getAdditionalBlockers - Supplies extra "cannot complete" blockers.
  * @param props.emptyStateContent - Overrides the default empty-state render.
  * @returns The audit scan drawer.
@@ -334,7 +328,6 @@ export default function AuditDrawer({
   headerContent,
   portalContainer,
   onScanRemoved,
-  onScanRemoveRefused,
   getAdditionalBlockers,
   emptyStateContent,
 }: AuditDrawerProps) {
@@ -384,11 +377,19 @@ export default function AuditDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
   const removeScanFetcher = useFetcher();
-  const setScannedItems = useSetAtom(scannedItemsAtom);
-  // The removal waiting for its answer, and the last answer read, so each
-  // answer is acted on once. See `refusedScanRemoval`.
-  const pendingRemovalRef = useRef<PendingScanRemoval | null>(null);
-  const readRemovalAnswerRef = useRef<unknown>(undefined);
+  // Set when the server refused a removal: the scan is still on the audit,
+  // so the list is out of date until the page is reloaded.
+  const [removeRefusal, setRemoveRefusal] = useState<string | null>(null);
+  const removeAnswer = removeScanFetcher.data;
+  useEffect(() => {
+    if (removeScanFetcher.state !== "idle") {
+      return;
+    }
+    const message = refusedRemovalMessage(removeAnswer);
+    if (message) {
+      setRemoveRefusal(message);
+    }
+  }, [removeScanFetcher.state, removeAnswer]);
 
   // Show location when the audit is not already scoped to a specific location
   const showLocation = contextLabel.toLowerCase() !== "location";
@@ -598,25 +599,12 @@ export default function AuditDrawer({
    */
   const handleRemove = useCallback(
     (qrId: string) => {
-      // One removal at a time: the fetcher answers only the last request, so
-      // a second one sent before the first answers would lose the first's
-      // answer, and a refused first removal could not be put back.
-      if (auditSession && removeScanFetcher.state !== "idle") {
-        return;
-      }
       const scannedItem = items[qrId];
       if (
         auditSession &&
         scannedItem?.type === "asset" &&
         scannedItem.data?.id
       ) {
-        pendingRemovalRef.current = {
-          auditSessionId: auditSession.id,
-          qrId,
-          assetId: scannedItem.data.id,
-          item: scannedItem,
-          count: auditCounts[scannedItem.data.id],
-        };
         const formData = new FormData();
         formData.append("intent", "remove-scan");
         formData.append("assetId", scannedItem.data.id);
@@ -654,46 +642,6 @@ export default function AuditDrawer({
       removeScanFetcher,
     ]
   );
-
-  // A removal the server refused rolled back: the scan is still on the audit,
-  // so it goes back on the list with its count, and the route is told it is
-  // still saved. The server's message reaches the operator as a notification.
-  useEffect(() => {
-    const answer = removeScanFetcher.data;
-    if (
-      removeScanFetcher.state !== "idle" ||
-      answer === undefined ||
-      answer === readRemovalAnswerRef.current
-    ) {
-      return;
-    }
-    readRemovalAnswerRef.current = answer;
-    const refused = refusedScanRemoval(
-      pendingRemovalRef.current,
-      answer,
-      auditSession?.id
-    );
-    pendingRemovalRef.current = null;
-    if (!refused) {
-      return;
-    }
-    onScanRemoveRefused?.(refused.assetId);
-    setScannedItems((current) =>
-      current[refused.qrId]
-        ? current
-        : { ...current, [refused.qrId]: refused.item }
-    );
-    if (refused.count) {
-      mergeAuditCounts({ [refused.assetId]: refused.count });
-    }
-  }, [
-    removeScanFetcher.state,
-    removeScanFetcher.data,
-    auditSession?.id,
-    onScanRemoveRefused,
-    setScannedItems,
-    mergeAuditCounts,
-  ]);
 
   /**
    * Renders the list as two foldable groups, the same as the booking scan
@@ -783,20 +731,53 @@ export default function AuditDrawer({
       // Larger collapsed height to fit first item with larger header
       collapsedHeight={193}
       form={(expanded) => (
-        <AuditDrawerFooter
-          disabled={shouldDisableSubmit}
-          auditName={auditSession?.name || ""}
-          portalContainer={portalContainer}
-          stats={{
-            expectedCount: stats.totalExpected,
-            foundCount: stats.foundCount,
-            missingCount: stats.missingCount,
-            unexpectedCount: stats.unexpectedCount,
-          }}
-          units={units}
-          expanded={expanded}
-        />
+        <>
+          {removeRefusal ? (
+            <RemoveRefusalNotice message={removeRefusal} />
+          ) : null}
+          <AuditDrawerFooter
+            disabled={shouldDisableSubmit}
+            auditName={auditSession?.name || ""}
+            portalContainer={portalContainer}
+            stats={{
+              expectedCount: stats.totalExpected,
+              foundCount: stats.foundCount,
+              missingCount: stats.missingCount,
+              unexpectedCount: stats.unexpectedCount,
+            }}
+            units={units}
+            expanded={expanded}
+          />
+        </>
       )}
     />
+  );
+}
+
+/**
+ * Says a scan the operator removed is still on the audit, because the server
+ * refused the removal, and offers a reload to show the audit as it is.
+ *
+ * @param props.message - The server's reason
+ */
+function RemoveRefusalNotice({ message }: { message: string }) {
+  return (
+    <div
+      role="alert"
+      className="mx-3 mt-2 rounded border border-warning-300 bg-warning-25 px-3 py-2 text-[13px] text-warning-800"
+    >
+      <p className="font-semibold">A scan you removed is still on the audit.</p>
+      <p>
+        {message} The list is out of date until you reload.{" "}
+        <Button
+          type="button"
+          variant="link"
+          onClick={() => window.location.reload()}
+          className="inline text-[13px] font-semibold text-warning-800 underline"
+        >
+          Reload
+        </Button>
+      </p>
+    </div>
   );
 }
