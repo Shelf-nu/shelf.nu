@@ -61,15 +61,20 @@ type SentryExceptionValue = NonNullable<
  * An error message that is only an HTTP gateway status, optionally followed by
  * its reason phrase: 502, 503 and 504, plus Cloudflare's 520 to 524 (the origin
  * did not answer properly). React Router throws exactly this shape,
- * `${status} ${statusText}`, when a route manifest or data request gets a
- * gateway error, and `statusText` is empty over HTTP/2.
+ * `${status} ${statusText}`, when its route manifest request (`/__manifest`)
+ * gets a gateway error, and `statusText` is empty over HTTP/2.
  */
 const GATEWAY_STATUS_PATTERN = /^5(?:0[234]|2[0-4])(?: [A-Za-z ]+)?$/;
 
 /**
- * Whether an event is a gateway status error: an `Error` whose whole message
- * is a gateway status (see {@link GATEWAY_STATUS_PATTERN}). These are
- * transient deploy and gateway blips with nothing to fix in the app.
+ * Whether an event is a gateway status error: its main exception is an
+ * `Error` whose whole message is a gateway status (see
+ * {@link GATEWAY_STATUS_PATTERN}). These are transient deploy and gateway
+ * blips with nothing to fix in the app.
+ *
+ * Only the main exception counts. Sentry lists chained exceptions oldest
+ * first, so it is the last entry; an error that merely has a gateway status
+ * as its `cause` was raised by code that may have a bug of its own.
  *
  * Stack frames are not consulted: React Router is part of the client bundle,
  * so its throw carries bundle frames just like our own code would. No Shelf
@@ -79,12 +84,10 @@ const GATEWAY_STATUS_PATTERN = /^5(?:0[234]|2[0-4])(?: [A-Za-z ]+)?$/;
  * @returns `true` when the event is a gateway status error
  */
 function isGatewayStatusError(event: ErrorEvent): boolean {
+  const main = event.exception?.values?.at(-1);
   return (
-    event.exception?.values?.some(
-      (v) =>
-        v.type === "Error" &&
-        GATEWAY_STATUS_PATTERN.test((v.value ?? "").trim())
-    ) ?? false
+    main?.type === "Error" &&
+    GATEWAY_STATUS_PATTERN.test((main.value ?? "").trim())
   );
 }
 

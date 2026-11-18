@@ -138,6 +138,29 @@ describe("handleClientBeforeSend: gateway status errors", () => {
     expect(handleClientBeforeSend(event)).toBeNull();
   });
 
+  it("keeps an error whose linked cause is a gateway status", () => {
+    // Sentry lists chained exceptions oldest first: the cause, then the error
+    // that wrapped it
+    const event = {
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value: "502",
+            stacktrace: { frames: [{ filename: BUNDLE_FRAME, in_app: true }] },
+          },
+          {
+            type: "Error",
+            value: "Could not restore the booking draft",
+            stacktrace: { frames: [{ filename: BUNDLE_FRAME, in_app: true }] },
+          },
+        ],
+      },
+      tags: { source: "error-boundary" },
+    } as ErrorEvent;
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+
   it("drops one that carries a reason phrase", () => {
     expect(
       handleClientBeforeSend(makeEvent({ value: "502 Bad Gateway" }))
