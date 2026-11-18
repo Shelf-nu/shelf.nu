@@ -32,8 +32,9 @@
  * next page that does hydrate sends it ({@link markHydrated}). A load whose
  * automatic reload worked at once is sent as an info log, since the user only
  * saw a reload; anything that showed the recovery screen is a warning issue,
- * except a timeout that fired before its clock ran out, which is an info issue
- * of its own ({@link timedOutEarly}).
+ * except a timeout that fired before its clock ran out, which only a client
+ * running timers early produces and which is logged as well
+ * ({@link timedOutEarly}).
  *
  * @see {@link file://./browser-support.ts} - the same inline gate pattern for unsupported browsers
  * @see {@link file://./../root.tsx} - renders the screen and calls markHydrated
@@ -528,8 +529,9 @@ export function timedOutEarly(report: HydrationFailureReport): boolean {
  * automatic reload, after a manual one, or late, past the timeout. A
  * recovered reload ({@link isRecoveredReload}) goes to Sentry Logs, which keep
  * its rate visible without raising an issue for each flaky download. A timeout
- * that fired early ({@link timedOutEarly}) is an info issue of its own, so the
- * warning issues, one per reason, count only pages someone waited on.
+ * that fired early ({@link timedOutEarly}) goes to Sentry Logs too: no person
+ * waited on it, so the warning issues, one per reason, count only pages
+ * someone did.
  */
 export function markHydrated(): void {
   window[WATCHDOG_GLOBAL]?.done();
@@ -556,22 +558,22 @@ export function markHydrated(): void {
     return;
   }
 
+  if (timedOutEarly(report)) {
+    Sentry.logger.info("Hydration timeout fired before its clock ran out", {
+      label: "Hydration",
+      path: report.path,
+      failedAfterMs: report.failedAfterMs,
+      hydratedAfterMs,
+    });
+    return;
+  }
+
   const tags = {
     hydration_failure: report.reason,
     hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
     hydration_tab_hidden: report.hidden ? "yes" : "no",
     hydration_clock_gap: hasClockGap(report) ? "yes" : "no",
   };
-
-  if (timedOutEarly(report)) {
-    Sentry.captureMessage("Hydration timeout fired before its clock ran out", {
-      level: "info",
-      fingerprint: ["hydration-failure", "timeout-early"],
-      tags,
-      extra: { ...report, hydratedAfterMs },
-    });
-    return;
-  }
 
   Sentry.captureMessage("App bundle failed to load before hydration", {
     level: "warning",
