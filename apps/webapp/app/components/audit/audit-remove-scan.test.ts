@@ -88,4 +88,31 @@ describe("reloadWouldLoseWork", () => {
       })
     ).toBe(true);
   });
+
+  it("holds it while a scanned code is still being looked up", () => {
+    const resolving = { codeType: "qr" } as unknown as ScanListItem;
+    expect(
+      reloadWouldLoseWork({
+        pendingScanCount: 0,
+        items: { "qr-1": camera, "qr-2": resolving },
+        auditCounts: {},
+        listedAssetIds: listed,
+      })
+    ).toBe(true);
+  });
+
+  it("does not wait on a code whose lookup failed", () => {
+    const failed = {
+      codeType: "qr",
+      error: "Not found",
+    } as unknown as ScanListItem;
+    expect(
+      reloadWouldLoseWork({
+        pendingScanCount: 0,
+        items: { "qr-1": camera, "qr-2": failed },
+        auditCounts: {},
+        listedAssetIds: listed,
+      })
+    ).toBe(false);
+  });
 });

@@ -255,4 +255,7 @@ it("the audit scanner says when a removal was refused", () => {
     /removeRefusal\.auditSessionId === auditSession\?\.id/
   );
   expect(drawer).toMatch(/reloadBlocked=\{reloadWouldLoseWork\(\{/);
+  // A refusal is labelled with the audit its removal was sent for.
+  expect(drawer).toMatch(/auditSessionId: removalAuditIdRef\.current/);
+  expect(drawer).toMatch(/removalAuditIdRef\.current = auditSession\.id;/);
 });

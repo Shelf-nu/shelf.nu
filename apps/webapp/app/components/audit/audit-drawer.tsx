@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -387,6 +388,9 @@ export default function AuditDrawer({
     auditSessionId: string | undefined;
     message: string;
   } | null>(null);
+  // The audit the last removal was sent for: its answer belongs to that
+  // audit, whichever one is on screen when the answer arrives.
+  const removalAuditIdRef = useRef<string | undefined>(undefined);
   const removeAnswer = removeScanFetcher.data;
   useEffect(() => {
     if (removeScanFetcher.state !== "idle") {
@@ -394,9 +398,12 @@ export default function AuditDrawer({
     }
     const message = refusedRemovalMessage(removeAnswer);
     if (message) {
-      setRemoveRefusal({ auditSessionId: auditSession?.id, message });
+      setRemoveRefusal({
+        auditSessionId: removalAuditIdRef.current,
+        message,
+      });
     }
-  }, [removeScanFetcher.state, removeAnswer, auditSession?.id]);
+  }, [removeScanFetcher.state, removeAnswer]);
 
   // Show location when the audit is not already scoped to a specific location
   const showLocation = contextLabel.toLowerCase() !== "location";
@@ -617,6 +624,7 @@ export default function AuditDrawer({
         formData.append("assetId", scannedItem.data.id);
         formData.append("qrId", qrId);
 
+        removalAuditIdRef.current = auditSession.id;
         void removeScanFetcher.submit(formData, {
           method: "post",
           action: `/audits/${auditSession.id}/scan`,

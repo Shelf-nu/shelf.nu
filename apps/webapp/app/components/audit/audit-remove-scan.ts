@@ -42,9 +42,9 @@ export function refusedRemovalMessage(answer: unknown): string | null {
 
 /**
  * Whether reloading the scanner would lose work the server does not hold yet:
- * a scan still saving, a count entered and not saved, or a quantity-tracked
- * scan still waiting for its count. The reload offered after a refused
- * removal waits until there is none.
+ * a code still being looked up, a scan still saving, a count entered and not
+ * saved, or a quantity-tracked scan still waiting for its count. The reload
+ * offered after a refused removal waits until there is none.
  *
  * @param args.pendingScanCount - Scans not saved yet (see `countScansToSave`)
  * @param args.items - The scanned list
@@ -66,6 +66,11 @@ export function reloadWouldLoseWork({
   return (
     pendingScanCount > 0 ||
     hasUnsavedCounts(auditCounts, listedAssetIds) ||
-    Object.values(items).some((item) => isWaitingForCount(item, auditCounts))
+    Object.values(items).some(
+      (item) =>
+        // Still being looked up: neither resolved nor failed yet.
+        (item !== undefined && !item.data && !item.error) ||
+        isWaitingForCount(item, auditCounts)
+    )
   );
 }
