@@ -142,6 +142,7 @@ describe("handleClientBeforeSend: gateway status errors", () => {
     // Sentry lists chained exceptions oldest first: the cause, then the error
     // that wrapped it
     const event = {
+      type: undefined,
       exception: {
         values: [
           {
