@@ -715,10 +715,13 @@ export default function AuditDrawer({
   // outcome before anything is committed, so the button itself stays enabled.
   //
   // A count the auditor entered but the server has not saved yet also holds
-  // completion: completing first would print the previous count.
+  // completion: completing first would print the previous count. So does a
+  // refused removal: the list may be out of date, and the completion would
+  // confirm its totals. A reload clears it.
   const shouldDisableSubmit =
     hasBlockers ||
     !auditSession ||
+    removeRefusal !== null ||
     hasUnsavedCounts(auditCounts, scannedAssetIds);
 
   return (

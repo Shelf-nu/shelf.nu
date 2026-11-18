@@ -77,8 +77,8 @@ export const links: LinksFunction = () => [
  * background, so a remove request that gets no answer keeps reaching the error
  * boundary: turning it into action data would hide a removal the server may
  * never have made. A removal the server refuses comes back as fetcher data,
- * and the audit drawer says the scan is still on the audit and offers a
- * reload (`refusedRemovalMessage`).
+ * and the audit drawer reports it, says the list may be out of date, and
+ * offers a reload (`refusedRemovalMessage`).
  */
 export async function clientAction(args: ClientActionFunctionArgs) {
   // Read from the URL, not the body: the completion form is multipart and

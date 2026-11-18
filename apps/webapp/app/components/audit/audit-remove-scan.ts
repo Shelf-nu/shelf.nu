@@ -3,8 +3,8 @@
  *
  * The audit drawer drops a removed scan from its list at once and sends the
  * removal in the background. The server removes a scan in one transaction,
- * so an answer carrying an error means nothing was removed: the scan is still
- * on the audit while the list no longer shows it. The drawer does not try to
+ * so an answer carrying an error means this removal changed nothing, and the
+ * list may no longer match the audit. The drawer does not try to
  * rebuild the row (the audit's scans and counts belong to the server, and
  * other saves may be in flight); it says the list may be out of date and
  * offers a reload, which shows the audit as the server holds it.
