@@ -4,7 +4,11 @@
  * @see {@link file://./audit-remove-scan.ts}
  */
 import { describe, expect, it } from "vitest";
-import { refusedRemovalMessage } from "./audit-remove-scan";
+import type { ScanListItem } from "~/atoms/qr-scanner";
+import {
+  refusedRemovalMessage,
+  reloadWouldLoseWork,
+} from "./audit-remove-scan";
 
 describe("refusedRemovalMessage", () => {
   it("gives the server's message when the removal was refused", () => {
@@ -34,5 +38,54 @@ describe("refusedRemovalMessage", () => {
     expect(refusedRemovalMessage({ success: true, error: null })).toBe(null);
     expect(refusedRemovalMessage({ success: true })).toBe(null);
     expect(refusedRemovalMessage(undefined)).toBe(null);
+  });
+});
+
+describe("reloadWouldLoseWork", () => {
+  const camera = {
+    data: { id: "asset-1", title: "Camera", type: "INDIVIDUAL" },
+    type: "asset",
+    codeType: "qr",
+  } as unknown as ScanListItem;
+  const listed = new Set(["asset-1"]);
+
+  it("lets a reload through when everything is saved", () => {
+    expect(
+      reloadWouldLoseWork({
+        pendingScanCount: 0,
+        items: { "qr-1": camera },
+        auditCounts: {},
+        listedAssetIds: listed,
+      })
+    ).toBe(false);
+  });
+
+  it("holds it while a scan is still saving", () => {
+    expect(
+      reloadWouldLoseWork({
+        pendingScanCount: 1,
+        items: { "qr-1": camera },
+        auditCounts: {},
+        listedAssetIds: listed,
+      })
+    ).toBe(true);
+  });
+
+  it("holds it while a count is entered and not saved", () => {
+    expect(
+      reloadWouldLoseWork({
+        pendingScanCount: 0,
+        items: { "qr-1": camera },
+        auditCounts: {
+          "asset-1": {
+            expectedQuantity: 3,
+            foundQuantity: 5,
+            unitOfMeasure: null,
+            unsaved: true,
+          },
+        },
+        listedAssetIds: listed,
+      })
+    ).toBe(true);
   });
 });

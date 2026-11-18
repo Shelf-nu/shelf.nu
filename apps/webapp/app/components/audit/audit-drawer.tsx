@@ -34,7 +34,10 @@ import {
   renderAuditPendingRows,
   renderAuditScannedRows,
 } from "~/components/audit/audit-item-row";
-import { refusedRemovalMessage } from "~/components/audit/audit-remove-scan";
+import {
+  refusedRemovalMessage,
+  reloadWouldLoseWork,
+} from "~/components/audit/audit-remove-scan";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import {
   createBlockers,
@@ -379,7 +382,11 @@ export default function AuditDrawer({
   const removeScanFetcher = useFetcher();
   // Set when the server refused a removal: the scan is still on the audit,
   // so the list is out of date until the page is reloaded.
-  const [removeRefusal, setRemoveRefusal] = useState<string | null>(null);
+  // Kept with the audit it came from, so it never shows on another one.
+  const [removeRefusal, setRemoveRefusal] = useState<{
+    auditSessionId: string | undefined;
+    message: string;
+  } | null>(null);
   const removeAnswer = removeScanFetcher.data;
   useEffect(() => {
     if (removeScanFetcher.state !== "idle") {
@@ -387,9 +394,9 @@ export default function AuditDrawer({
     }
     const message = refusedRemovalMessage(removeAnswer);
     if (message) {
-      setRemoveRefusal(message);
+      setRemoveRefusal({ auditSessionId: auditSession?.id, message });
     }
-  }, [removeScanFetcher.state, removeAnswer]);
+  }, [removeScanFetcher.state, removeAnswer, auditSession?.id]);
 
   // Show location when the audit is not already scoped to a specific location
   const showLocation = contextLabel.toLowerCase() !== "location";
@@ -732,8 +739,17 @@ export default function AuditDrawer({
       collapsedHeight={193}
       form={(expanded) => (
         <>
-          {removeRefusal ? (
-            <RemoveRefusalNotice message={removeRefusal} />
+          {removeRefusal &&
+          removeRefusal.auditSessionId === auditSession?.id ? (
+            <RemoveRefusalNotice
+              message={removeRefusal.message}
+              reloadBlocked={reloadWouldLoseWork({
+                pendingScanCount,
+                items,
+                auditCounts,
+                listedAssetIds: scannedAssetIds,
+              })}
+            />
           ) : null}
           <AuditDrawerFooter
             disabled={shouldDisableSubmit}
@@ -759,8 +775,16 @@ export default function AuditDrawer({
  * refused the removal, and offers a reload to show the audit as it is.
  *
  * @param props.message - The server's reason
+ * @param props.reloadBlocked - Whether a reload would lose unsaved scans or
+ *   counts; the reload then waits, and the notice says what for
  */
-function RemoveRefusalNotice({ message }: { message: string }) {
+function RemoveRefusalNotice({
+  message,
+  reloadBlocked,
+}: {
+  message: string;
+  reloadBlocked: boolean;
+}) {
   return (
     <div
       role="alert"
@@ -768,10 +792,14 @@ function RemoveRefusalNotice({ message }: { message: string }) {
     >
       <p className="font-semibold">A scan you removed is still on the audit.</p>
       <p>
-        {message} The list is out of date until you reload.{" "}
+        {message} The list is out of date until you reload.
+        {reloadBlocked
+          ? " Finish the counts still open and let the scans save first."
+          : null}{" "}
         <Button
           type="button"
           variant="link"
+          disabled={reloadBlocked}
           onClick={() => window.location.reload()}
           className="inline text-[13px] font-semibold text-warning-800 underline"
         >

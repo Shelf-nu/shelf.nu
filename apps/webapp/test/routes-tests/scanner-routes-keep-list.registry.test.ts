@@ -249,6 +249,10 @@ it("the audit scanner says when a removal was refused", () => {
     path.resolve(__dirname, "../../app/components/audit/audit-drawer.tsx"),
     "utf8"
   );
-  expect(drawer).toMatch(/refusedRemovalMessage\(removeAnswer\)/);
-  expect(drawer).toMatch(/<RemoveRefusalNotice message=\{removeRefusal\} \/>/);
+  // Shown only on the audit the refusal came from, with the reload held
+  // while unsaved scans or counts would be lost.
+  expect(drawer).toMatch(
+    /removeRefusal\.auditSessionId === auditSession\?\.id/
+  );
+  expect(drawer).toMatch(/reloadBlocked=\{reloadWouldLoseWork\(\{/);
 });
