@@ -21,6 +21,11 @@ import { describeAuditUnits } from "~/modules/audit/quantity";
 type CompleteAuditDialogProps = {
   /** Whether the button should be disabled */
   disabled?: boolean;
+  /**
+   * Why completion is disabled, shown inside the open dialog: the reason
+   * elsewhere on the page sits behind its overlay.
+   */
+  disabledReason?: string | null;
   /** Audit session name for display */
   auditName: string;
   /** Container for portal rendering */
@@ -57,6 +62,7 @@ type CompleteAuditDialogProps = {
  */
 export default function CompleteAuditDialog({
   disabled,
+  disabledReason = null,
   auditName,
   portalContainer,
   intentInActionUrl = false,
@@ -187,6 +193,15 @@ export default function CompleteAuditDialog({
               completion that got no answer has to say so here, before the
               operator confirms again. */}
           <ScanSubmitFailureAlert />
+
+          {disabled && disabledReason ? (
+            <p
+              role="alert"
+              className="mt-2 rounded border border-warning-300 bg-warning-25 px-3 py-2 text-[13px] text-warning-800"
+            >
+              {disabledReason}
+            </p>
+          ) : null}
 
           <AlertDialogFooter className="mt-4">
             <AlertDialogCancel asChild>

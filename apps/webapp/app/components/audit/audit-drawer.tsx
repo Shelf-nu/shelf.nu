@@ -109,6 +109,7 @@ type AuditDrawerProps = {
  */
 function AuditDrawerFooter({
   disabled,
+  disabledReason,
   auditName,
   portalContainer,
   stats,
@@ -116,6 +117,8 @@ function AuditDrawerFooter({
   expanded,
 }: {
   disabled: boolean;
+  /** Why completion is disabled, for the open dialog to show. */
+  disabledReason: string | null;
   auditName: string;
   portalContainer?: HTMLElement;
   stats: {
@@ -142,6 +145,7 @@ function AuditDrawerFooter({
       {/* Complete Audit dialog trigger */}
       <CompleteAuditDialog
         disabled={disabled}
+        disabledReason={disabledReason}
         auditName={auditName}
         portalContainer={portalContainer}
         // The scan route's client action reads the intent from the URL.
@@ -771,6 +775,11 @@ export default function AuditDrawer({
           ) : null}
           <AuditDrawerFooter
             disabled={shouldDisableSubmit}
+            disabledReason={
+              removeRefusal
+                ? `The server refused to remove a scan: ${removeRefusal} Reload to see the audit as it is before you complete it.`
+                : null
+            }
             auditName={auditSession?.name || ""}
             portalContainer={portalContainer}
             stats={{

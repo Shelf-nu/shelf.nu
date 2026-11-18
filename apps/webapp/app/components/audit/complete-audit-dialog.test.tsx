@@ -127,9 +127,16 @@ describe("CompleteAuditDialog", () => {
     expect(submit()?.hasAttribute("disabled")).toBe(false);
 
     rerender(
-      <CompleteAuditDialog auditName="ZZ Test Audit" stats={STATS} disabled />
+      <CompleteAuditDialog
+        auditName="ZZ Test Audit"
+        stats={STATS}
+        disabled
+        disabledReason="Reload to see the audit as it is."
+      />
     );
 
     expect(submit()?.hasAttribute("disabled")).toBe(true);
+    // The reason shows inside the dialog, not only behind its overlay.
+    expect(dialog.textContent).toContain("Reload to see the audit as it is.");
   });
 });
