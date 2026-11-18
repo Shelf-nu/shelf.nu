@@ -598,6 +598,12 @@ export default function AuditDrawer({
    */
   const handleRemove = useCallback(
     (qrId: string) => {
+      // One removal at a time: the fetcher answers only the last request, so
+      // a second one sent before the first answers would lose the first's
+      // answer, and a refused first removal could not be put back.
+      if (auditSession && removeScanFetcher.state !== "idle") {
+        return;
+      }
       const scannedItem = items[qrId];
       if (
         auditSession &&
@@ -605,6 +611,7 @@ export default function AuditDrawer({
         scannedItem.data?.id
       ) {
         pendingRemovalRef.current = {
+          auditSessionId: auditSession.id,
           qrId,
           assetId: scannedItem.data.id,
           item: scannedItem,
@@ -661,7 +668,11 @@ export default function AuditDrawer({
       return;
     }
     readRemovalAnswerRef.current = answer;
-    const refused = refusedScanRemoval(pendingRemovalRef.current, answer);
+    const refused = refusedScanRemoval(
+      pendingRemovalRef.current,
+      answer,
+      auditSession?.id
+    );
     pendingRemovalRef.current = null;
     if (!refused) {
       return;
@@ -678,6 +689,7 @@ export default function AuditDrawer({
   }, [
     removeScanFetcher.state,
     removeScanFetcher.data,
+    auditSession?.id,
     onScanRemoveRefused,
     setScannedItems,
     mergeAuditCounts,

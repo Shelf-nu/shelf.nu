@@ -250,7 +250,11 @@ it("the audit scanner puts back a scan whose removal was refused", () => {
     "utf8"
   );
   expect(drawer).toMatch(
-    /refusedScanRemoval\(pendingRemovalRef\.current, answer\)/
+    /refusedScanRemoval\(\s*pendingRemovalRef\.current,\s*answer,\s*auditSession\?\.id\s*\)/
+  );
+  // One removal at a time, or a refused first one could not be put back.
+  expect(drawer).toMatch(
+    /if \(auditSession && removeScanFetcher\.state !== "idle"\) \{\s*return;/
   );
   expect(drawer).toMatch(/onScanRemoveRefused\?\.\(refused\.assetId\)/);
 
@@ -258,7 +262,11 @@ it("the audit scanner puts back a scan whose removal was refused", () => {
     path.join(ROUTES_DIR, "audits.$auditId.scan.tsx"),
     "utf8"
   );
+  // Only a scan that was saved when it was removed goes back as saved.
   expect(route).toMatch(
-    /onScanRemoveRefused=\{\(assetId\) => \{[\s\S]*?persistedItemsRef\.current\.add\(assetId\);/
+    /savedAtRemovalRef\.current\.set\(\s*assetId,\s*wasScanSaved\(/
+  );
+  expect(route).toMatch(
+    /onScanRemoveRefused=\{\(assetId\) => \{[\s\S]*?if \(savedAtRemovalRef\.current\.get\(assetId\)\) \{\s*persistedItemsRef\.current\.add\(assetId\);/
   );
 });

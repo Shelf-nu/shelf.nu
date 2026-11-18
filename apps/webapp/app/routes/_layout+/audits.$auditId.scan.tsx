@@ -32,6 +32,7 @@ import {
   recountPromptFor,
 } from "~/components/audit/audit-count-flow";
 import AuditDrawer from "~/components/audit/audit-drawer";
+import { wasScanSaved } from "~/components/audit/audit-remove-scan";
 import { ErrorContent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
@@ -298,6 +299,9 @@ export default function AuditSessionRoute() {
   const persistedItemsRef = useRef<Set<string>>(new Set());
   const isRestoringRef = useRef(true); // Start true, set false after initialization
   const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
+  // Whether each removed scan was saved when it was removed, for a removal
+  // the server refuses. See `wasScanSaved`.
+  const savedAtRemovalRef = useRef<Map<string, boolean>>(new Map());
 
   // Fills the screen below wherever the layout's chrome ends, measured rather
   // than subtracted, so the page itself never scrolls behind the drawer.
@@ -620,12 +624,24 @@ export default function AuditSessionRoute() {
         }
         defaultExpanded
         onScanRemoved={(assetId) => {
+          savedAtRemovalRef.current.set(
+            assetId,
+            wasScanSaved(
+              assetId,
+              persistedItemsRef.current,
+              pendingPersistsRef.current
+            )
+          );
           persistedItemsRef.current.delete(assetId);
           pendingPersistsRef.current.delete(assetId);
         }}
         onScanRemoveRefused={(assetId) => {
-          // The scan is still saved: putting it back must not send it again.
-          persistedItemsRef.current.add(assetId);
+          // A scan that was saved goes back as saved, so it is not sent
+          // again. One still saving goes back to the save queue.
+          if (savedAtRemovalRef.current.get(assetId)) {
+            persistedItemsRef.current.add(assetId);
+          }
+          savedAtRemovalRef.current.delete(assetId);
         }}
       />
 
