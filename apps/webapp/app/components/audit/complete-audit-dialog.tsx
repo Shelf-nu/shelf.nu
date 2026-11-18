@@ -194,7 +194,14 @@ export default function CompleteAuditDialog({
                 Cancel
               </Button>
             </AlertDialogCancel>
-            <Button type="submit" variant="primary" disabled={formDisabled}>
+            {/* The gate applies inside an open dialog too: it can close while
+                the dialog is open (a refused scan removal makes the list
+                stale), and a completion cannot be undone. */}
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={disabled || formDisabled}
+            >
               {formDisabled ? "Completing..." : "Complete Audit"}
             </Button>
           </AlertDialogFooter>
