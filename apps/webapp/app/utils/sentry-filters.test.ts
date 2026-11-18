@@ -3,10 +3,9 @@
  * ({@link handleClientBeforeSend}) and the expected-status helper
  * ({@link isExpectedErrorBoundaryStatus}).
  *
- * Focus: the two Sentry-hygiene behaviors added on top of the existing
- * hard-filters —
- *  - unactionable client noise (DataCloneError, bare gateway-status blips) is
- *    dropped, while
+ * Focus: the Sentry-hygiene behaviors on top of the plain hard-filters:
+ *  - unactionable client noise (DataCloneError from outside the client bundle,
+ *    gateway status errors) is dropped, while
  *  - expected error-boundary terminal states (403/404/429) are dropped but
  *    every other boundary status (incl. 5xx) still passes through.
  *
@@ -66,45 +65,125 @@ describe("isExpectedErrorBoundaryStatus", () => {
   });
 });
 
-describe("handleClientBeforeSend — noise filters", () => {
-  it("drops a DataCloneError with no first-party frames (browser/extension noise)", () => {
-    const event = makeEvent({
-      type: "DataCloneError",
-      value: "The object can not be cloned.",
+/**
+ * An exception with one stack frame at `filename`, marked `in_app` like every
+ * frame the browser SDK parses.
+ */
+function eventWithFrame(opts: {
+  type: string;
+  value: string;
+  filename: string;
+  tags?: Record<string, string>;
+}): ErrorEvent {
+  return {
+    exception: {
+      values: [
+        {
+          type: opts.type,
+          value: opts.value,
+          stacktrace: {
+            frames: [{ filename: opts.filename, in_app: true }],
+          },
+        },
+      ],
+    },
+    ...(opts.tags ? { tags: opts.tags } : {}),
+  } as ErrorEvent;
+}
+
+const BUNDLE_FRAME = "https://app.shelf.nu/file-assets/abc123/chunk-X1.js";
+const EXTENSION_FRAME = "chrome-extension://abcdefgh/content.js";
+
+describe("handleClientBeforeSend: DataCloneError", () => {
+  const DATA_CLONE = {
+    type: "DataCloneError",
+    value: "The object can not be cloned.",
+  };
+
+  it("drops one with no stack", () => {
+    expect(handleClientBeforeSend(makeEvent(DATA_CLONE))).toBeNull();
+  });
+
+  it("drops one thrown by an extension script, even though the SDK marks its frame in_app", () => {
+    expect(
+      handleClientBeforeSend(
+        eventWithFrame({ ...DATA_CLONE, filename: EXTENSION_FRAME })
+      )
+    ).toBeNull();
+  });
+
+  it("keeps one thrown from the client bundle (a fixable app bug)", () => {
+    const event = eventWithFrame({ ...DATA_CLONE, filename: BUNDLE_FRAME });
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+});
+
+describe("handleClientBeforeSend: gateway status errors", () => {
+  it.each(["502", "503", "504", "520 ", "521", "522", "523", "524"])(
+    "drops a bare %s with no stack",
+    (value) => {
+      expect(handleClientBeforeSend(makeEvent({ value }))).toBeNull();
+    }
+  );
+
+  it("drops the route manifest fetch failing with a gateway status, though its frames are in the bundle", () => {
+    // React Router throws `${status} ${statusText}` from the client bundle
+    // when /__manifest answers with an error; statusText is empty over HTTP/2
+    const event = eventWithFrame({
+      type: "Error",
+      value: "520 ",
+      filename: BUNDLE_FRAME,
+      tags: { source: "error-boundary" },
     });
     expect(handleClientBeforeSend(event)).toBeNull();
   });
 
-  it("keeps a DataCloneError that carries first-party frames (fixable app bug)", () => {
-    // A DataCloneError thrown by OUR code (structuredClone/postMessage of a
-    // non-cloneable value) has in_app frames → it flags a fixable bug and must
-    // stay capturable so its on-screen Error ID resolves in Sentry.
-    const event = makeEvent({
-      type: "DataCloneError",
-      value: "The object can not be cloned.",
-      inApp: true,
-    });
+  it("keeps an error whose linked cause is a gateway status", () => {
+    // Sentry lists chained exceptions oldest first: the cause, then the error
+    // that wrapped it
+    const event = {
+      type: undefined,
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value: "502",
+            stacktrace: { frames: [{ filename: BUNDLE_FRAME, in_app: true }] },
+          },
+          {
+            type: "Error",
+            value: "Could not restore the booking draft",
+            stacktrace: { frames: [{ filename: BUNDLE_FRAME, in_app: true }] },
+          },
+        ],
+      },
+      tags: { source: "error-boundary" },
+    } as ErrorEvent;
     expect(handleClientBeforeSend(event)).toBe(event);
   });
 
-  it("drops a bare gateway-status blip (Error: 502 with no first-party frames)", () => {
-    for (const code of ["502", "503", "504"]) {
-      expect(handleClientBeforeSend(makeEvent({ value: code }))).toBeNull();
+  it("drops one that carries a reason phrase", () => {
+    expect(
+      handleClientBeforeSend(makeEvent({ value: "502 Bad Gateway" }))
+    ).toBeNull();
+  });
+
+  it.each(["500", "501", "404", "5020", "502 then something broke: x"])(
+    "keeps %s",
+    (value) => {
+      const event = makeEvent({ value });
+      expect(handleClientBeforeSend(event)).toBe(event);
     }
-  });
+  );
 
-  it("keeps a genuine Error('502') that carries first-party frames", () => {
-    // A real throw from our own code has in_app frames → must stay capturable
-    const event = makeEvent({ value: "502", inApp: true });
+  it("keeps a TypeError that happens to read 502", () => {
+    const event = makeEvent({ type: "TypeError", value: "502" });
     expect(handleClientBeforeSend(event)).toBe(event);
   });
+});
 
-  it("keeps a non-gateway numeric message (e.g. 404 as text) — pattern is 5xx-only", () => {
-    const event = makeEvent({ value: "404" });
-    expect(handleClientBeforeSend(event)).toBe(event);
-  });
-
-  it("still drops pre-existing hard-filtered noise (AbortError, <unknown>)", () => {
+describe("handleClientBeforeSend: hard-filtered noise", () => {
+  it("still drops AbortError and <unknown>", () => {
     expect(
       handleClientBeforeSend(
         makeEvent({ type: "AbortError", value: "The operation was aborted" })
