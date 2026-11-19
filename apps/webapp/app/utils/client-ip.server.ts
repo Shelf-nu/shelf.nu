@@ -141,33 +141,61 @@ export function getTrustedProxyHops(): number | null {
 }
 
 /**
- * Expands an IPv6 address to its eight full groups.
+ * Expands an IPv6 address to its eight full, lowercase groups. A dotted IPv4
+ * tail (`::ffff:203.0.113.7`) becomes its two hex groups first.
  *
- * @param ip - A valid IPv6 address without an embedded IPv4 part
+ * @param ip - A valid IPv6 address
  */
 function expandIPv6(ip: string): string[] {
-  const [head, tail = ""] = ip.split("::");
+  let text = ip.toLowerCase();
+  const dotted = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted[2].split(".").map(Number);
+    text = `${dotted[1]}${((a << 8) | b).toString(16)}:${(
+      (c << 8) |
+      d
+    ).toString(16)}`;
+  }
+  const [head, tail = ""] = text.split("::");
   const left = head ? head.split(":") : [];
   const right = tail ? tail.split(":") : [];
-  const missing = ip.includes("::") ? 8 - left.length - right.length : 0;
+  const missing = text.includes("::") ? 8 - left.length - right.length : 0;
   return [...left, ...Array<string>(missing).fill("0"), ...right].map((group) =>
     group.padStart(4, "0")
   );
 }
 
 /**
+ * The IPv4 address inside an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`, in
+ * dotted or hex form), or null for any other IPv6 address.
+ *
+ * @param groups - The address's eight expanded groups
+ */
+function mappedIPv4(groups: string[]): string | null {
+  const isMapped =
+    groups.slice(0, 5).every((group) => group === "0000") &&
+    groups[5] === "ffff";
+  if (!isMapped) return null;
+  const high = parseInt(groups[6], 16);
+  const low = parseInt(groups[7], 16);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
+}
+
+/**
  * The key an in-memory rate limiter counts an address under.
  *
  * One IPv6 visitor usually holds a whole /64 and can pick a new address in it
- * for every request, so IPv6 addresses count by their /64. IPv4 addresses, and
- * IPv6 addresses carrying an IPv4 part, count as themselves.
+ * for every request, so IPv6 addresses count by their /64, whatever their
+ * letter case. An IPv4-mapped IPv6 address counts as the IPv4 address it
+ * carries, and IPv4 addresses count as themselves.
  *
  * @param ip - A valid IP address
  * @returns The rate-limit key for that address
  */
 export function rateLimitKeyForIp(ip: string): string {
-  if (isIP(ip) !== 6 || ip.includes(".")) return ip;
-  return `${expandIPv6(ip).slice(0, 4).join(":")}::/64`;
+  if (isIP(ip) !== 6) return ip;
+  const groups = expandIPv6(ip);
+  return mappedIPv4(groups) ?? `${groups.slice(0, 4).join(":")}::/64`;
 }
 
 /**

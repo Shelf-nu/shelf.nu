@@ -210,6 +210,25 @@ describe("rateLimitKeyForIp", () => {
     expect(rateLimitKeyForIp("2001:db8:1:3::1")).not.toBe(a);
   });
 
+  it("ignores letter case", () => {
+    expect(rateLimitKeyForIp("2001:DB8:ABCD:EF01::1")).toBe(
+      rateLimitKeyForIp("2001:db8:abcd:ef01::2")
+    );
+  });
+
+  it.each(["::ffff:203.0.113.7", "::ffff:cb00:7107", "::FFFF:CB00:7107"])(
+    "counts the IPv4-mapped %s as the IPv4 address it carries",
+    (ip) => {
+      expect(rateLimitKeyForIp(ip)).toBe(VISITOR);
+    }
+  );
+
+  it("keeps two different IPv4-mapped visitors apart", () => {
+    expect(rateLimitKeyForIp("::ffff:cb00:7107")).not.toBe(
+      rateLimitKeyForIp("::ffff:c633:6408")
+    );
+  });
+
   it("handles a compressed address that starts with ::", () => {
     expect(rateLimitKeyForIp("::1")).toBe("0000:0000:0000:0000::/64");
   });
