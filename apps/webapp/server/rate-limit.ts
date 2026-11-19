@@ -3,7 +3,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { getClientIp } from "./client-ip";
+import { getClientIp, getVerifiedClientIp } from "./client-ip";
 import {
   getContactOwnerQrId,
   normalizeRequestPath,
@@ -233,10 +233,10 @@ const bucketKeys = {
   // The guard only runs on the contact-owner route, so the QR id is always
   // present; the fallback keeps the key total if it is ever mounted wider.
   contactOwnerQr: (c: Context) =>
-    `contact-owner:ip:${getClientIp(c)}:qr:${
+    `contact-owner:ip:${getVerifiedClientIp(c)}:qr:${
       getContactOwnerQrId(normalizeRoutePath(c.req.path)) ?? "none"
     }`,
-  contactOwnerIp: (c: Context) => `contact-owner:ip:${getClientIp(c)}`,
+  contactOwnerIp: (c: Context) => `contact-owner:ip:${getVerifiedClientIp(c)}`,
 };
 
 /**
@@ -496,9 +496,12 @@ function contactOwnerLimitHandler(
  *   QR ids are printed on labels and anyone can claim QRs in a free workspace,
  *   so without this a caller would rotate QR ids to keep mailing one address.
  *
- * Keyed by `getClientIp`, so the buckets are per visitor wherever that helper
- * can resolve one and coarser where it cannot; the ceilings are set high
- * enough that visitors sharing an address are not throttled by a real finder.
+ * Keyed by `getVerifiedClientIp`, never by a client-written
+ * `X-Forwarded-For`: a caller able to choose its own key would get a fresh
+ * budget per request. The buckets are per visitor wherever a trusted source
+ * names the address. Where none does (a self-hosted instance without
+ * `TRUSTED_PROXY_HOPS`), every visitor shares the `unknown` bucket, which is
+ * coarse but cannot be escaped.
  * Counters are per machine (in-memory store, as {@link mobileIpRateLimit}),
  * and a caller with many addresses is not bounded here: the Cloudflare edge
  * rule on `POST /qr/<qrId>/contact-owner` is the cross-machine ceiling.

@@ -344,6 +344,30 @@ describe("contactOwnerGuard", () => {
     ).toBe(200);
   });
 
+  it("off Fly without trusted proxies, a rotated X-Forwarded-For buys no fresh budget", async () => {
+    // why: self-hosted with no TRUSTED_PROXY_HOPS. X-Forwarded-For is written
+    // by the caller there, so the contact-owner buckets must not key on it.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      const res = await app.request(`/qr/qr-x${i}/contact-owner`, {
+        method: "POST",
+        headers: { "X-Forwarded-For": `7.7.7.${i}` },
+        body: "content=found",
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await app.request("/qr/qr-x9/contact-owner", {
+      method: "POST",
+      headers: { "X-Forwarded-For": "7.7.7.99" },
+      body: "content=found",
+    });
+    expect(blocked.status).toBe(429);
+  });
+
   it("leaves the QR's other public pages alone", async () => {
     const app = buildApp();
 
