@@ -267,6 +267,7 @@ export function warnAboutLegacySupabaseKey(
       "and set it as SUPABASE_SECRET_KEY. Until then, sign-in rate limits count this server",
       "instead of each visitor.",
       `Releases after ${SUPABASE_SERVICE_ROLE_SUPPORT_ENDS} require SUPABASE_SECRET_KEY.`,
+      "Upgrade guide: https://docs.shelf.nu/upgrading/supabase-api-keys",
     ].join("\n")
   );
   return true;

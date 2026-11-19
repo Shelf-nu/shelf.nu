@@ -23,7 +23,7 @@ docker run -d \
   --name "shelf" \
   -e "DATABASE_URL=postgres://USER:PASSWORD@HOST:6543/DB_NAME?pgbouncer=true" \
   -e "DIRECT_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME" \
-  -e 'SUPABASE_ANON_PUBLIC=your-anon-public-key' \
+  -e 'SUPABASE_ANON_PUBLIC=sb_publishable_your-publishable-key' \
   -e 'SUPABASE_SECRET_KEY=sb_secret_your-secret-key' \
   -e 'SUPABASE_URL=https://your-instance-name.supabase.co' \
   -e 'SESSION_SECRET=generate-with-openssl-rand-hex-32' \
@@ -39,6 +39,9 @@ docker run -d \
   --restart unless-stopped \
   ghcr.io/shelf-nu/shelf.nu:latest
 ```
+
+> Upgrading from `SUPABASE_SERVICE_ROLE` and the legacy `anon` key? See
+> [Upgrade to Supabase's new API keys](./upgrading/supabase-api-keys.md).
 
 > [!NOTE]
 > Replace the placeholder values with your actual configuration:

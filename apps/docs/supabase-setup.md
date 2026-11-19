@@ -59,7 +59,8 @@ SUPABASE_SECRET_KEY="sb_secret_..."
 > ⚠️ **`SUPABASE_SERVICE_ROLE` is deprecated.** Shelf still accepts the legacy
 > `service_role` key when `SUPABASE_SECRET_KEY` is not set, and logs a warning at
 > startup. Releases after **2027-02-18** require `SUPABASE_SECRET_KEY`. Supabase
-> is retiring the legacy keys too.
+> is retiring the legacy keys too. Upgrading an existing instance? Follow
+> [Upgrade to Supabase's new API keys](./upgrading/supabase-api-keys.md).
 
 ### Sign-in Rate Limits
 
