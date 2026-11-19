@@ -19,8 +19,18 @@ import When from "../when/when";
 
 type EventCardProps = EventContentArg;
 
+/**
+ * Popover period format: weekday, date and time, e.g. "Mon, 16 Nov 2026, 12:50".
+ *
+ * The date fields are named on purpose. The formatter renders only the fields
+ * it is given, so a weekday and a time alone cannot tell two Mondays apart on
+ * a booking that runs for more than a week.
+ */
 export const DATE_FORMAT_OPTIONS = {
   weekday: "short",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
   hour: "2-digit",
   minute: "2-digit",
 } as const;

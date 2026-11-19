@@ -25,7 +25,11 @@ import type {
   CalendarExtendedProps,
 } from "~/routes/_layout+/calendar";
 import { bookingStatusColorMap } from "~/utils/bookings";
-import renderEventCard, { EventCardContent } from "./event-card";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
+import renderEventCard, {
+  DATE_FORMAT_OPTIONS,
+  EventCardContent,
+} from "./event-card";
 
 // why: DateS reads client hints from Remix context unavailable in the test;
 // stub to a plain node since date formatting is orthogonal to slice gating.
@@ -249,6 +253,45 @@ describe("EventCardContent — returned asset", () => {
     render(<EventCardContent booking={makeBooking()} />);
 
     expect(screen.queryByTestId("event-card-returned")).toBeNull();
+  });
+});
+
+describe("DATE_FORMAT_OPTIONS — popover period", () => {
+  /** Prefs for a viewer in UTC; only the date order and clock vary per case. */
+  const prefs = (
+    overrides: Partial<ResolvedFormatPrefs> = {}
+  ): ResolvedFormatPrefs => ({
+    dateFormat: "DD_MM_YYYY",
+    timeFormat: "H24",
+    weekStartsOn: 1,
+    timeZone: "UTC",
+    ...overrides,
+  });
+
+  it("names the day, month and year so two Mondays a week apart differ", () => {
+    const start = formatDate(
+      "2026-11-16T12:50:00.000Z",
+      prefs(),
+      DATE_FORMAT_OPTIONS
+    );
+    const end = formatDate(
+      "2026-11-23T18:00:00.000Z",
+      prefs(),
+      DATE_FORMAT_OPTIONS
+    );
+
+    expect(start).toBe("Mon, 16 Nov 2026, 12:50");
+    expect(end).toBe("Mon, 23 Nov 2026, 18:00");
+  });
+
+  it("follows a month-first, 12-hour preference", () => {
+    expect(
+      formatDate(
+        "2026-11-16T12:50:00.000Z",
+        prefs({ dateFormat: "MM_DD_YYYY", timeFormat: "H12" }),
+        DATE_FORMAT_OPTIONS
+      )
+    ).toBe("Mon, Nov 16, 2026, 12:50 PM");
   });
 });
 
