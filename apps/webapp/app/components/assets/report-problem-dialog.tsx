@@ -37,6 +37,11 @@ export type ReportProblemDialogProps = {
   assetTitle: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Where focus goes when the dialog closes: the menu row that opened it
+   * unmounts with the menu, so the opener passes its visible trigger.
+   */
+  returnFocusTo?: () => HTMLElement | null;
 };
 
 /** What the action answers on success. */
@@ -68,6 +73,7 @@ export function ReportProblemDialog({
   assetTitle,
   open,
   onOpenChange,
+  returnFocusTo,
 }: ReportProblemDialogProps) {
   const fetcher = useFetcher<ReportProblemResponse>({
     key: `report-problem-${assetId}`,
@@ -111,7 +117,15 @@ export function ReportProblemDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent onEscapeKeyDown={() => onOpenChange(false)}>
+      <AlertDialogContent
+        onEscapeKeyDown={() => onOpenChange(false)}
+        onCloseAutoFocus={(event) => {
+          const target = returnFocusTo?.();
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>
             {sent ? "Report sent" : "Report a problem"}

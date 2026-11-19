@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -42,6 +42,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { firstDisplayedElement } from "~/utils/sheet-viewport";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { QuantityCustodyDialog } from "./quantity-custody-dialog";
@@ -75,6 +76,9 @@ const ConditionalActionsDropdown = () => {
     useState(false);
   const [isReportProblemDialogOpen, setIsReportProblemDialogOpen] =
     useState(false);
+  /** The two Actions triggers (desktop and phone); one is hidden by CSS. */
+  const desktopTriggerRef = useRef<HTMLElement>(null);
+  const mobileTriggerRef = useRef<HTMLElement>(null);
 
   const isQtyTracked = isQuantityTracked(asset);
   const assetCanBeReleased = hasCustody(asset.custody);
@@ -225,6 +229,7 @@ const ConditionalActionsDropdown = () => {
           <Button
             type="button"
             variant="secondary"
+            ref={desktopTriggerRef}
             data-test-id="assetActionsButton"
             className="asset-actions hidden md:flex"
           >
@@ -238,6 +243,7 @@ const ConditionalActionsDropdown = () => {
         <Button
           type="button"
           variant="secondary"
+          ref={mobileTriggerRef}
           data-test-id="assetActionsButton"
           className="asset-actions md:hidden"
           onClick={() => setOpen(true)}
@@ -686,6 +692,12 @@ const ConditionalActionsDropdown = () => {
           assetTitle={asset.title}
           open={isReportProblemDialogOpen}
           onOpenChange={setIsReportProblemDialogOpen}
+          returnFocusTo={() =>
+            firstDisplayedElement(
+              desktopTriggerRef.current,
+              mobileTriggerRef.current
+            )
+          }
         />
       </When>
       <When truthy={isAdjustQuantityDialogOpen}>

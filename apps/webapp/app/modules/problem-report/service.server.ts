@@ -64,8 +64,8 @@ export function buildProblemReportNote(
  * Refuses exactly when the asset page would refuse to open the asset (the
  * same `getAsset` lookup), and refuses an archived asset with the reason every
  * other action on an archived asset gives. The note is written before any
- * email is sent; a failed email is logged and never undoes the note or fails
- * the request.
+ * email is sent; a failed audience lookup or email is logged and never undoes
+ * the note or fails the request.
  *
  * @param args.assetId - The asset the report is about, from the request
  * @param args.organizationId - The reporter's current workspace
@@ -126,11 +126,27 @@ export async function reportAssetProblem({
     organizationId,
   });
 
-  const audience = await getOrganizationNotificationAudience({
-    organizationId,
-    audience: "problemReports",
-  });
-  const recipients = audience.filter((member) => member.id !== userId);
+  // From here on the report is saved: a failure only costs the email, never
+  // the request, or a retry would write the report twice.
+  let recipients: Awaited<
+    ReturnType<typeof getOrganizationNotificationAudience>
+  > = [];
+  try {
+    const audience = await getOrganizationNotificationAudience({
+      organizationId,
+      audience: "problemReports",
+    });
+    recipients = audience.filter((member) => member.id !== userId);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Could not load who receives a problem report",
+        additionalData: { assetId: asset.id, organizationId },
+        label,
+      })
+    );
+  }
 
   const reporterName = resolveUserDisplayName(reporter) || reporter.email;
 
