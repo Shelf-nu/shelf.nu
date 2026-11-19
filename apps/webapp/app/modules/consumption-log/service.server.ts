@@ -638,6 +638,16 @@ export async function applyQuantityAdjustment(
     locationId,
   }: AdjustQuantityArgs
 ): Promise<QuantityAdjustmentResult> {
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "Quantity must be a whole number greater than zero.",
+      label,
+      status: 400,
+      additionalData: { assetId, quantity },
+    });
+  }
+
   /** Step 1: Acquire row-level lock to prevent concurrent modifications */
   const asset = await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 

@@ -409,6 +409,13 @@ async function convertInTransaction(
 const IMAGE_COPY_CONCURRENCY = 5;
 
 /**
+ * How long the request waits for image copies, well inside the platform's
+ * request limit (100 s behind Cloudflare). Later copies finish after the
+ * response; each one logs its own failure.
+ */
+const IMAGE_COPY_WAIT_MS = 20_000;
+
+/**
  * Everything after the commit, best effort: the location timelines, the
  * copied main image and the low-stock check. The assets and the lower total
  * are saved; none of this can undo them.
@@ -491,11 +498,23 @@ async function afterCommit({
         );
       }
     };
-    for (let i = 0; i < created.length; i += IMAGE_COPY_CONCURRENCY) {
-      await Promise.all(
-        created.slice(i, i + IMAGE_COPY_CONCURRENCY).map(copyImage)
-      );
-    }
+    const copies = (async () => {
+      for (let i = 0; i < created.length; i += IMAGE_COPY_CONCURRENCY) {
+        await Promise.all(
+          created.slice(i, i + IMAGE_COPY_CONCURRENCY).map(copyImage)
+        );
+      }
+    })();
+    // The conversion is saved, so the response never waits past the
+    // deadline for pictures: copies still running finish on their own.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      copies,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, IMAGE_COPY_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
   }
 
   await checkAndNotifyLowStock({
