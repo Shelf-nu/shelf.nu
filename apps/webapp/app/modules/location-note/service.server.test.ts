@@ -571,6 +571,10 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
       "logs its own 'placed N units at L' line",
     "app/modules/location/service.server.ts#updateLocationAssets":
       "writes its lines through createBulkLocationChangeNotes",
+    "app/modules/consumption-log/service.server.ts#applyQuantityAdjustment":
+      "the locked half; writeAdjustmentLocationNotes writes the line after the commit",
+    "app/modules/asset/create-from-stock.server.ts#convertInTransaction":
+      "the locked half; afterCommit writes the line after the commit",
   };
 
   const RECORDS_THE_EVENT =
