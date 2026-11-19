@@ -13,7 +13,7 @@ import {
   isCloudflareEdgeIp,
   PROXY_SECRET_HEADER,
 } from "./client-ip.server";
-import { UNLOGGED_HEADERS } from "./logger";
+import { UNLOGGED_HEADERS } from "./unlogged-headers";
 
 /** An address inside Cloudflare's published 104.16.0.0/13 range. */
 const CLOUDFLARE_V4 = "104.16.1.1";
