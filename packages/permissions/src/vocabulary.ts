@@ -71,4 +71,6 @@ export enum PermissionEntity {
   userData = "user-data", // This is for the user to load their own data.
   update = "update",
   commandPaletteSearch = "command-palette-search",
+  /** "Report a problem" on an asset: a history line plus an email to the people who run the workspace. */
+  problemReport = "problemReport",
 }

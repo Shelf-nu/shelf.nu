@@ -15,6 +15,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowUpDownIcon,
+  MessageSquareWarningIcon,
 } from "lucide-react";
 import { useFetcher, useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -46,6 +47,7 @@ import { DeleteAsset } from "./delete-asset";
 import { QuantityCustodyDialog } from "./quantity-custody-dialog";
 import { QuickAdjustDialog } from "./quick-adjust-dialog";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
+import { ReportProblemDialog } from "./report-problem-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
 import Icon from "../icons/icon";
@@ -70,6 +72,8 @@ const ConditionalActionsDropdown = () => {
   const [isQuantityCustodyDialogOpen, setIsQuantityCustodyDialogOpen] =
     useState(false);
   const [isAdjustQuantityDialogOpen, setIsAdjustQuantityDialogOpen] =
+    useState(false);
+  const [isReportProblemDialogOpen, setIsReportProblemDialogOpen] =
     useState(false);
 
   const isQtyTracked = isQuantityTracked(asset);
@@ -102,6 +106,17 @@ const ConditionalActionsDropdown = () => {
   const canSetReminder = userHasPermission({
     roles,
     entity: PermissionEntity.assetReminders,
+    action: PermissionAction.create,
+  });
+  const canAssignCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.custody,
+  });
+  /** Every role holds it; checked like any other grant. */
+  const canReportProblem = userHasPermission({
+    roles,
+    entity: PermissionEntity.problemReport,
     action: PermissionAction.create,
   });
   /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
@@ -266,13 +281,7 @@ const ConditionalActionsDropdown = () => {
                   </Button>
                 </div>
               </When>
-              <When
-                truthy={userHasPermission({
-                  roles,
-                  entity: PermissionEntity.asset,
-                  action: PermissionAction.custody,
-                })}
-              >
+              <When truthy={canAssignCustody}>
                 <div
                   className="border-b px-0 py-1 md:p-0"
                   aria-disabled={custodyActionDisabled}
@@ -547,6 +556,27 @@ const ConditionalActionsDropdown = () => {
                   </div>
                 </When>
               </When>
+              <When truthy={canReportProblem}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    role="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    disabled={archivedActionDisabled}
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsReportProblemDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <MessageSquareWarningIcon className="size-5" />
+                      Report a problem
+                    </span>
+                  </Button>
+                </div>
+              </When>
               {/* Outside the update group: everyone who can open this menu
                   (custody-only members included) can close it on mobile and
                   sees why an action is disabled. */}
@@ -562,12 +592,13 @@ const ConditionalActionsDropdown = () => {
                   Close
                 </Button>
               </div>
-              {assetIsCheckedOut ? (
+              {assetIsCheckedOut && (canUpdateAsset || canAssignCustody) ? (
                 <div className=" border-t p-2 text-left text-xs">
                   Some actions are disabled due to the asset being checked out.
                 </div>
               ) : null}
-              {assetIsPartOfUnavailableKit ? (
+              {assetIsPartOfUnavailableKit &&
+              (canUpdateAsset || canAssignCustody) ? (
                 <div className=" border-t p-2 text-left text-xs">
                   Some actions are disabled due to the asset being part of a
                   kit.
@@ -647,6 +678,14 @@ const ConditionalActionsDropdown = () => {
           sources={custodySources}
           open={isQuantityCustodyDialogOpen}
           onOpenChange={setIsQuantityCustodyDialogOpen}
+        />
+      </When>
+      <When truthy={isReportProblemDialogOpen && canReportProblem}>
+        <ReportProblemDialog
+          assetId={asset.id}
+          assetTitle={asset.title}
+          open={isReportProblemDialogOpen}
+          onOpenChange={setIsReportProblemDialogOpen}
         />
       </When>
       <When truthy={isAdjustQuantityDialogOpen}>

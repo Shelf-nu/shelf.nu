@@ -389,3 +389,37 @@ describe("MANAGER matrix row", () => {
     }
   });
 });
+
+describe("roleHasPermission — problem reports", () => {
+  test("every role may report a problem, without the general note grant", () => {
+    const roles: OrganizationRole[] = [
+      "OWNER",
+      "ADMIN",
+      "MANAGER",
+      "SELF_SERVICE",
+      "BASE",
+    ];
+    for (const role of roles) {
+      assert.equal(
+        roleHasPermission({
+          roles: [role],
+          entity: PermissionEntity.problemReport,
+          action: PermissionAction.create,
+        }),
+        true,
+        role
+      );
+    }
+    for (const role of ["SELF_SERVICE", "BASE"] as const) {
+      assert.equal(
+        roleHasPermission({
+          roles: [role],
+          entity: PermissionEntity.note,
+          action: PermissionAction.create,
+        }),
+        false,
+        role
+      );
+    }
+  });
+});

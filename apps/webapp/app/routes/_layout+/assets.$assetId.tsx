@@ -698,12 +698,21 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
+        {/* Every item in the menu checks its own grant, so the menu shows
+            for anyone who holds at least one of them. */}
         <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.asset,
-            action: [PermissionAction.update, PermissionAction.custody],
-          })}
+          truthy={
+            userHasPermission({
+              roles,
+              entity: PermissionEntity.asset,
+              action: [PermissionAction.update, PermissionAction.custody],
+            }) ||
+            userHasPermission({
+              roles,
+              entity: PermissionEntity.problemReport,
+              action: PermissionAction.create,
+            })
+          }
         >
           <ActionsDropdown />
         </When>
