@@ -305,19 +305,25 @@ export function isInvoiceBilled(subscription: Stripe.Subscription): boolean {
 
 /**
  * The metadata that links a subscription to a workspace: its current
- * metadata plus `organizationId`, with the "admin was asked" mark removed
- * (an empty value removes a key in Stripe).
+ * metadata plus `organizationId`, the `includesAuditAddon` /
+ * `includesBarcodeAddon` labels for the add-ons it carries (the same labels
+ * Checkout writes), and the "admin was asked" mark removed (an empty value
+ * removes a key in Stripe).
  *
  * @param metadata - The subscription's metadata as Stripe holds it now
  * @param organizationId - The workspace it belongs to
+ * @param addonTypes - The add-on types among its line items (`addonTypesOf`)
  */
 export function linkedMetadata(
   metadata: Stripe.Metadata | undefined,
-  organizationId: string
+  organizationId: string,
+  addonTypes: AddonType[] = []
 ): Stripe.MetadataParam {
   return {
     ...metadata,
     organizationId,
+    ...(addonTypes.includes("audits") && { includesAuditAddon: "true" }),
+    ...(addonTypes.includes("barcodes") && { includesBarcodeAddon: "true" }),
     ...(metadata?.[WORKSPACE_PICK_REQUESTED_KEY] && {
       [WORKSPACE_PICK_REQUESTED_KEY]: "",
     }),
@@ -481,7 +487,7 @@ export async function linkWaitingSubscriptionsToWorkspace({
     }
 
     await stripe.subscriptions.update(sub.id, {
-      metadata: linkedMetadata(sub.metadata, organizationId),
+      metadata: linkedMetadata(sub.metadata, organizationId, addonTypes),
     });
   }
 }

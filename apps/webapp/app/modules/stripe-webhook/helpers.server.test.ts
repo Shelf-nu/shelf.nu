@@ -586,7 +586,11 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     await linkToNewWorkspace();
 
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-      metadata: { organizationId: "org-new" },
+      metadata: {
+        organizationId: "org-new",
+        includesAuditAddon: "true",
+        includesBarcodeAddon: "true",
+      },
     });
     expect(addonsSwitchedOn()).toEqual([
       "audits:sub_1:org-new",
@@ -801,7 +805,11 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     await linkToNewWorkspace();
 
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-      metadata: { workspacePickRequestedAt: "", organizationId: "org-new" },
+      metadata: {
+        workspacePickRequestedAt: "",
+        organizationId: "org-new",
+        includesAuditAddon: "true",
+      },
     });
   });
 

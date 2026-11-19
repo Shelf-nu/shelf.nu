@@ -582,7 +582,7 @@ async function linkSubscriptionToTeamWorkspace({
   const addonTypes = addonTypesOf(current);
   const hasAuditAddon = addonTypes.includes("audits");
   const hasBarcodeAddon = addonTypes.includes("barcodes");
-  const metadata = linkedMetadata(current.metadata, workspace.id);
+  const metadata = linkedMetadata(current.metadata, workspace.id, addonTypes);
   await syncBundledAddons({
     eventType,
     subscription: {

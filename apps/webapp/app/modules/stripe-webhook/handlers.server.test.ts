@@ -414,7 +414,7 @@ describe("handleSubscriptionCreated", () => {
       );
 
       expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-        metadata: { organizationId: "org-9" },
+        metadata: { organizationId: "org-9", includesAuditAddon: "true" },
       });
       expect(mockAuditAddonWebhook).toHaveBeenCalledWith({
         eventType: "customer.subscription.created",
@@ -496,7 +496,7 @@ describe("handleSubscriptionCreated", () => {
       );
 
       expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-        metadata: { organizationId: "org-9" },
+        metadata: { organizationId: "org-9", includesAuditAddon: "true" },
       });
     });
 
@@ -759,7 +759,11 @@ describe("handleSubscriptionCreated", () => {
       );
 
       expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-        metadata: { workspacePickRequestedAt: "", organizationId: "org-9" },
+        metadata: {
+          workspacePickRequestedAt: "",
+          organizationId: "org-9",
+          includesAuditAddon: "true",
+        },
       });
     });
 
@@ -834,7 +838,11 @@ describe("handleSubscriptionCreated", () => {
       );
 
       expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-        metadata: { po_number: "PO-1", organizationId: "org-9" },
+        metadata: {
+          po_number: "PO-1",
+          organizationId: "org-9",
+          includesAuditAddon: "true",
+        },
       });
     });
 
@@ -1151,7 +1159,7 @@ describe("handleSubscriptionUpdated", () => {
     );
 
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-      metadata: { organizationId: "org-9" },
+      metadata: { organizationId: "org-9", includesBarcodeAddon: "true" },
     });
     expect(mockBarcodeAddonWebhook).toHaveBeenCalledWith(
       expect.objectContaining({
