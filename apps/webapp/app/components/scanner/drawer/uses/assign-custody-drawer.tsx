@@ -40,6 +40,7 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
+import { useBulkSaveSettle } from "~/hooks/use-bulk-save-settle";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -51,6 +52,10 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
+import {
+  BULK_SAVE_NO_ANSWER_MESSAGE,
+  readBulkSaveAnswer,
+} from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -189,12 +194,32 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
+  // What the list keeps once the save answers, and the draft's mark.
+  const bulkSave = useBulkSaveSettle({
+    statuses: {
+      assets: custodyState.assetStatus,
+      kits: custodyState.kitStatus,
+    },
+    dialogOpen,
+  });
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
+      const attempt = bulkSave.begin({
+        assetIds: e.data.assetIds ?? [],
+        kitIds: e.data.kitIds ?? [],
+      });
+      const setResult: typeof setCustodyState = (update) => {
+        if (attempt.isCurrent()) {
+          setCustodyState(update);
+        }
+      };
+      // No answer (the request failed, or the answer was a gateway's page):
+      // the server may have saved it anyway, so the mark must stay.
+      const markUnconfirmed = attempt.markUnanswered;
       setDialogOpen(true);
       const { custodian, assetIds, kitIds } = e.data;
-      setCustodyState((state) => ({
+      setResult((state) => ({
         ...state,
         custodianName: custodian.name,
       }));
@@ -238,27 +263,30 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           method: "POST",
           body: assetFormData,
         })
-          .then((response) => response.json())
+          .then((response) =>
+            readBulkSaveAnswer<{ error?: { message: string } }>(response)
+          )
           .then((data) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               assetStatus: data.error ? "error" : "success",
               ...(data.error && { assetErrorMessage: data.error.message }),
             }));
           })
           .catch((error) => {
-            setCustodyState((state) => ({
+            markUnconfirmed();
+            setResult((state) => ({
               ...state,
               assetStatus: "error",
               assetErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while assigning custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
         // No assets to process, mark as skipped
-        setCustodyState((state) => ({
+        setResult((state) => ({
           ...state,
           assetStatus: "skipped",
         }));
@@ -283,27 +311,30 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           method: "POST",
           body: kitFormData,
         })
-          .then((response) => response.json())
+          .then((response) =>
+            readBulkSaveAnswer<{ error?: { message: string } }>(response)
+          )
           .then((data) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               kitStatus: data.error ? "error" : "success",
               ...(data.error && { kitErrorMessage: data.error.message }),
             }));
           })
           .catch((error) => {
-            setCustodyState((state) => ({
+            markUnconfirmed();
+            setResult((state) => ({
               ...state,
               kitStatus: "error",
               kitErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while assigning custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
         // No kits to process, mark as skipped
-        setCustodyState((state) => ({
+        setResult((state) => ({
           ...state,
           kitStatus: "skipped",
         }));
@@ -313,15 +344,14 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
   const { assetIds, kitIds, idsTotalCount } = useAtomValue(scannedItemIdsAtom);
 
-  const clearItems = useSetAtom(clearScannedItemsAtom);
-
   function cleanupState() {
+    // Empties the list only when the whole of it saved; see `dismissBulkSave`.
+    bulkSave.dismiss();
     setCustodyState({
       assetStatus: "processing",
       kitStatus: "processing",
       custodianName: "",
     });
-    clearItems();
   }
 
   return (

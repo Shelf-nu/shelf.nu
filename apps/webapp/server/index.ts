@@ -8,7 +8,7 @@ import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
 import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
-import { initEnv } from "~/utils/env";
+import { initEnv, warnAboutLegacySupabaseKey } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { runWithTabId } from "~/utils/tab-id.server";
 
@@ -41,6 +41,7 @@ type ServerEnv = {
 
 // Server will not start if the env is not valid
 initEnv();
+warnAboutLegacySupabaseKey(process.env);
 
 export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
   c,

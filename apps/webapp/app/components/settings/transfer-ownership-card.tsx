@@ -7,6 +7,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { GENERAL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import type { UserNameFields } from "~/utils/user";
@@ -22,7 +23,7 @@ import {
 } from "../forms/select";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -150,10 +151,13 @@ export default function TransferOwnershipCard({
   /** Personal workspaces cannot be transferred — the server rejects them too */
   if (isPersonalWorkspace) {
     return (
-      <Card className={tw(className)} id="transfer-ownership">
-        <h4 className="mb-1 text-text-lg font-semibold">
+      <Card
+        className={tw(className)}
+        id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
+      >
+        <CardTitle as="h4" className="mb-1">
           Transfer workspace ownership
-        </h4>
+        </CardTitle>
         <p className="mb-2 text-sm text-gray-600">
           Personal workspaces cannot be transferred. To hand over this account
           to someone else, change the email address on your account instead.{" "}
@@ -169,10 +173,13 @@ export default function TransferOwnershipCard({
   /** Non-owners cannot transfer, but must still be able to discover who can */
   if (!canTransferOwnership) {
     return (
-      <Card className={tw(className)} id="transfer-ownership">
-        <h4 className="mb-1 text-text-lg font-semibold">
+      <Card
+        className={tw(className)}
+        id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
+      >
+        <CardTitle as="h4" className="mb-1">
           Transfer workspace ownership
-        </h4>
+        </CardTitle>
         <p className="text-sm text-gray-600">
           Only the workspace owner
           {ownerEmail ? ` (${ownerEmail})` : ""} can transfer ownership of this
@@ -183,10 +190,13 @@ export default function TransferOwnershipCard({
   }
 
   return (
-    <Card className={tw(className)} id="transfer-ownership">
-      <h4 className="mb-1 text-text-lg font-semibold">
+    <Card
+      className={tw(className)}
+      id={GENERAL_SETTINGS_ANCHORS.transferOwnership}
+    >
+      <CardTitle as="h4" className="mb-1">
         Transfer workspace ownership
-      </h4>
+      </CardTitle>
       <p className="mb-2 text-sm text-gray-600">
         Transfer workspace to another user. To transfer the workspace, the new
         owner must already be part of the workspace as an admin.{" "}

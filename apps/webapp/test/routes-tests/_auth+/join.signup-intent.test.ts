@@ -9,7 +9,7 @@
  * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import {
@@ -62,6 +62,7 @@ vi.mock("react-router", async () => {
 
 const EMAIL = "new.person@example.com";
 const PASSWORD = "correct-horse-battery";
+const VISITOR_IP = "203.0.113.7";
 const TEAM_TRIAL_INTENT = {
   plan: "team" as const,
   trial: true,
@@ -90,6 +91,8 @@ function signupActionArgs({ cookie }: { cookie?: string } = {}) {
   });
   const headers = new Headers({
     "Content-Type": "application/x-www-form-urlencoded",
+    // The visitor's address as a self-hosted proxy reports it.
+    "X-Forwarded-For": VISITOR_IP,
   });
   if (cookie) {
     headers.set("Cookie", cookie);
@@ -192,6 +195,25 @@ describe("join action — password signup", () => {
     vi.mocked(findUserByEmail).mockResolvedValue(null);
     vi.mocked(signUpWithEmailPass).mockResolvedValue({} as never);
     vi.mocked(validateNonSSOSignup).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes the visitor's address to Supabase with the signup", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+
+    const response = (await action(signupActionArgs())) as Response;
+
+    expect(response.status).toBe(302);
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(signUpWithEmailPass).toHaveBeenCalledWith(EMAIL, PASSWORD, {
+      clientIp: VISITOR_IP,
+    });
   });
 
   it("hands the intent on to the code step with a fresh window", async () => {

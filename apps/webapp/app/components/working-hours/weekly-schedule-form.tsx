@@ -8,10 +8,11 @@ import {
   WEEK_DISPLAY_ORDER,
 } from "~/modules/working-hours/constants";
 import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { Switch } from "../forms/switch";
 import { TimeSelect } from "../forms/time-select";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 
 interface WeeklyScheduleFormProps {
@@ -157,7 +158,7 @@ export const WeeklyScheduleForm = ({
   };
 
   return (
-    <Card>
+    <Card id={BOOKING_SETTINGS_ANCHORS.weeklySchedule}>
       <fetcher.Form
         method="post"
         className="flex flex-col gap-2"
@@ -166,7 +167,7 @@ export const WeeklyScheduleForm = ({
       >
         <input type="hidden" name="intent" value="updateSchedule" />
         <div className="mb-4 border-b pb-4">
-          <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
+          <CardTitle>Weekly Schedule</CardTitle>
           <p className="text-sm text-gray-600">
             Set your working hours for each day of the week. These are the{" "}
             <strong>local hours of your physical location</strong> — they are

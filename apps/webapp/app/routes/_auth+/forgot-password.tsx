@@ -24,6 +24,7 @@ import {
 import { createSsoRequiredError } from "~/modules/auth/sso-enforcement.server";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
 import {
@@ -145,7 +146,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
            * reachable for an address that exists, so surfacing it re-opens the
            * leak by another route.
            */
-          void sendResetPasswordLink(email).catch((cause: unknown) => {
+          void sendResetPasswordLink(email, {
+            clientIp: getClientIpFromHeaders(request.headers),
+          }).catch((cause: unknown) => {
             Logger.error(
               new ShelfError({
                 cause,
@@ -175,12 +178,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         // Attempt to verify the OTP
-        const { data: otpData, error: verifyError } =
-          await getSupabaseAdmin().auth.verifyOtp({
-            email,
-            token: otp,
-            type: "recovery",
-          });
+        const { data: otpData, error: verifyError } = await getSupabaseAdmin({
+          clientIp: getClientIpFromHeaders(request.headers),
+        }).auth.verifyOtp({
+          email,
+          token: otp,
+          type: "recovery",
+        });
 
         if (verifyError || !otpData.user || !otpData.session) {
           throw new ShelfError({

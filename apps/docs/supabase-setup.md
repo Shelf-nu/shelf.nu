@@ -47,13 +47,54 @@ DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/post
 ### API Keys
 
 1. **Go to Project Settings** → **API keys**
-2. **Copy the API keys** and update your `.env`:
+2. **Create a secret key** (it starts with `sb_secret_`) and copy it, plus the anon public key
+3. **Update your `.env`:**
 
 ```bash
 SUPABASE_URL="https://your-project-ref.supabase.co"
 SUPABASE_ANON_PUBLIC="your-anon-public-key"
-SUPABASE_SERVICE_ROLE="your-service-role-key"
+SUPABASE_SECRET_KEY="sb_secret_..."
 ```
+
+> ⚠️ **`SUPABASE_SERVICE_ROLE` is deprecated.** Shelf still accepts the legacy
+> `service_role` key when `SUPABASE_SECRET_KEY` is not set, and logs a warning at
+> startup. Releases after **2027-02-18** require `SUPABASE_SECRET_KEY`. Supabase
+> is retiring the legacy keys too. Upgrading an existing instance? Follow
+> [Upgrade to Supabase's new API keys](./upgrading/supabase-api-keys.md).
+
+### Sign-in Rate Limits
+
+Shelf signs people in from its server, so without extra setup Supabase Auth sees
+every sign-in attempt as coming from your server's IP. Its per-IP limits then
+count everyone together instead of each visitor. To have them count each
+visitor:
+
+1. Set `SUPABASE_SECRET_KEY` (above). Supabase ignores the visitor IP on
+   requests made with the legacy keys.
+2. **Go to Authentication** → **Rate Limits** and turn on **IP Address
+   Forwarding** (the `security_sb_forwarded_for_enabled` auth setting).
+3. Tell Shelf where the visitor's IP comes from. On Fly.io, Shelf reads
+   `Fly-Client-IP`. If your domain is proxied through Cloudflare, that is a
+   Cloudflare address, so also add a Transform Rule (**Rules** → **Transform
+   Rules** → **Modify Request Header**) that sets `X-Shelf-Proxy-Secret` to a
+   random value on every request, and set the same value as
+   `CLOUDFLARE_PROXY_SECRET`. Shelf then trusts `CF-Connecting-IP` only on
+   requests that carry it. Anywhere else, set `TRUSTED_PROXY_HOPS` to the
+   number of reverse proxies in front of Shelf that append to
+   `X-Forwarded-For` (usually `1`, for example nginx with
+   `$proxy_add_x_forwarded_for`). Shelf then reads the entry your outermost
+   proxy added. Without it, Shelf sends no IP, because the rest of that header
+   is written by the visitor and a script could put a new address in it on
+   every attempt.
+   This is only safe when every request reaches Shelf through those proxies.
+   Do not expose the app port (3000 by default) directly: bind it to localhost
+   or a private network, or firewall it. Otherwise a visitor can connect around
+   the proxies and write the entry Shelf reads.
+
+Shelf then sends each visitor's IP to Supabase (`Sb-Forwarded-For`) on
+password sign-in, sign-up, one-time codes, password reset and email change.
+Review the limits on the same page: people signing in from one office share an
+IP.
 
 ---
 
@@ -211,7 +252,7 @@ DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/post
 # Supabase API
 SUPABASE_URL="https://your-project-ref.supabase.co"
 SUPABASE_ANON_PUBLIC="your-anon-public-key"
-SUPABASE_SERVICE_ROLE="your-service-role-key"
+SUPABASE_SECRET_KEY="sb_secret_..."
 
 # App configuration
 SESSION_SECRET="generate-with-openssl-rand-hex-32"  # openssl rand -hex 32

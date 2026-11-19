@@ -1,3 +1,4 @@
+import type { ApproveBookingBody } from "../booking-approval-view";
 import type { BookingMethod } from "../booking-method";
 import { withBookingMethod } from "../booking-method";
 import { apiFetch } from "./client";
@@ -358,6 +359,24 @@ export const bookingsApi = {
           kitIds,
           standaloneAssetIds,
         }),
+      }
+    ),
+
+  /**
+   * Approve a pending reservation request. The booking stays RESERVED and
+   * becomes checkout-able; who may approve is enforced server-side.
+   */
+  approveBooking: (orgId: string, body: ApproveBookingBody) =>
+    apiFetch<BookingMutationResponse>(
+      `/api/mobile/bookings/approve?orgId=${orgId}`,
+      {
+        method: "POST",
+        // Built by `approveBookingBody`: the request version on screen, so the
+        // server refuses to approve a request that changed since it loaded.
+        body: JSON.stringify(body),
+        // A retried approval after a lost response would be refused as
+        // already approved and read as a failure.
+        retry: false,
       }
     ),
 

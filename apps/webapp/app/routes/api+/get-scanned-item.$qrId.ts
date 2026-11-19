@@ -27,6 +27,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import {
+  isRestoredLookup,
+  RESTORED_LOOKUP_PARAM,
+} from "~/utils/restored-scan-lookup";
 import { requirePermission } from "~/utils/roles.server";
 import type {
   AssetFromScanner,
@@ -142,7 +146,9 @@ async function serializeScannedAsset<
  * `source=scanner` (the scanner opens the asset), `WEB_DRAWER` without one
  * otherwise (any other `source` value counts as a drawer). A resolve carrying
  * `auditSessionId` records nothing, because the audit's own writer
- * (`recordAuditScan`) records that scan.
+ * (`recordAuditScan`) records that scan. Neither does one carrying
+ * `restored=1`: the row was put back from a scan draft, so no one scanned the
+ * code just now (see {@link RESTORED_LOOKUP_PARAM}).
  *
  * @see {@link file://./get-scanned-barcode.$value.ts} the camera-barcode twin
  */
@@ -171,10 +177,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
-    const { auditSessionId, pickerContext, source } = parseData(
+    const { auditSessionId, pickerContext, source, restored } = parseData(
       searchParams,
       z.object({
         auditSessionId: z.string().optional(),
+        /** `1` when a restored scan draft row looks the code up again. */
+        [RESTORED_LOOKUP_PARAM]: z.string().optional(),
         /** `scanner` from the web scanner's SAM "View asset"; see above. */
         source: z.string().optional(),
         /**
@@ -206,6 +214,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
       source?: string;
+      restored?: string;
     };
 
     // Allowlisted: only the exact value opens the asset and notes it; any
@@ -214,7 +223,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
     /**
      * Records this resolve as a scan, unless an audit is scanning (its writer
-     * records instead). Non-fatal: a failed record never fails the resolve.
+     * records instead) or a restored draft row is looking the code up again
+     * (nobody scanned it). Non-fatal: a failed record never fails the resolve.
      *
      * A drawer row does not wait for the record: a scanner list resolves one
      * code per scan, and the row needs only the resolved item. The scanner's
@@ -226,7 +236,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         "codeType" | "qrId" | "barcodeId" | "assetId" | "kitId"
       >
     ) => {
-      if (auditSessionId) return;
+      if (auditSessionId || isRestoredLookup(restored)) return;
       const recording = recordScanNonFatal({
         ...resolved,
         code: qrId,
@@ -346,6 +356,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { sequentialId, shouldSendNotification: false },
         label: "Scan",
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
       });
     }
 
@@ -369,6 +381,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { qrId, shouldSendNotification: false },
         label: "QR",
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
       });
     }
 
@@ -378,6 +392,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         message: "QR code is not linked to any asset or kit",
         additionalData: { qrId, shouldSendNotification: false },
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
         label: "QR",
       });
     }

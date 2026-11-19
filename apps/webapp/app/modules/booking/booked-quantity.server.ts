@@ -9,6 +9,8 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { applyRequestGrowthRule } from "./request-change.server";
+import { touchBookingVersion } from "./utils.server";
 
 /**
  * Booked Quantity Service
@@ -55,6 +57,11 @@ export type BookedQuantityChange = {
 type BookingScope = {
   bookingId: string;
   organizationId: string;
+  /**
+   * Who makes the change. Raising an amount on an approved request clears
+   * its approval unless this member may approve (`applyRequestGrowthRule`).
+   */
+  actorUserId: string | null;
   /** The booking's own window, or null for a dateless booking. */
   window: { from: Date; to: Date } | null;
 };
@@ -134,10 +141,18 @@ export async function setStandaloneBookedQuantitiesWithinTx(
   {
     bookingId,
     organizationId,
+    actorUserId,
     window,
     changes,
   }: BookingScope & { changes: BookedQuantityChange[] }
 ): Promise<AppliedBookedQuantityChange[]> {
+  // A changed amount changes the booking: move its version, so an approver
+  // looking at the request from before cannot approve it unseen. Done before
+  // the asset locks, so the booking row is locked first, the same order a
+  // check-out takes them in.
+  if (changes.length > 0) {
+    await touchBookingVersion(tx, { bookingId, organizationId });
+  }
   const ordered = [...changes].sort((a, b) =>
     a.assetId.localeCompare(b.assetId)
   );
@@ -172,6 +187,14 @@ export async function setStandaloneBookedQuantitiesWithinTx(
       quantity: change.quantity,
     });
   }
+  // A raised amount asks for more than an approval covered.
+  if (applied.some((a) => a.quantity > a.previousQuantity)) {
+    await applyRequestGrowthRule(tx, {
+      bookingId,
+      organizationId,
+      actorUserId,
+    });
+  }
   return applied;
 }
 
@@ -200,6 +223,7 @@ export async function setStandaloneBookedQuantities(
 export async function setStandaloneBookedQuantity({
   bookingId,
   organizationId,
+  actorUserId,
   window,
   ...change
 }: BookingScope & BookedQuantityChange): Promise<{
@@ -208,6 +232,7 @@ export async function setStandaloneBookedQuantity({
   const [applied] = await setStandaloneBookedQuantities({
     bookingId,
     organizationId,
+    actorUserId,
     window,
     changes: [change],
   });
