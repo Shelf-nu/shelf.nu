@@ -507,7 +507,7 @@ function contactOwnerLimitHandler(
  *
  * @param perQrLimit - Submissions per (address, QR) per 10 minutes
  * @param perIpLimit - Submissions per address per hour
- * @returns The two limiters, per-QR first, to compose with `every`
+ * @returns The per-QR and per-address limiters; the guard runs per-address first
  */
 export const contactOwnerRateLimits = (perQrLimit = 5, perIpLimit = 20) =>
   [

@@ -165,8 +165,12 @@ export function isContactOwnerSubmission(path: string, c: Context): boolean {
 }
 
 /**
- * Rate limits for the public QR "contact owner" form, per (address, QR) then
- * per address, applied to every submission its action would receive.
+ * Rate limits for the public QR "contact owner" form, per address then per
+ * (address, QR), applied to every submission its action would receive.
+ *
+ * The per-address bucket runs first so an address over its budget is refused
+ * before a per-QR key is created: otherwise a blocked caller rotating QR ids
+ * would mint a new in-memory key on every request.
  *
  * @param perQrLimit - Submissions per (address, QR) per 10 minutes; tests pass
  *   a low value, production uses the limiter's default
@@ -179,5 +183,5 @@ export function contactOwnerGuard(
   perIpLimit?: number
 ): MiddlewareHandler {
   const [perQr, perIp] = contactOwnerRateLimits(perQrLimit, perIpLimit);
-  return guardWhen(isContactOwnerSubmission, every(perQr, perIp));
+  return guardWhen(isContactOwnerSubmission, every(perIp, perQr));
 }
