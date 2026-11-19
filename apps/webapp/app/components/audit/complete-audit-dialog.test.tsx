@@ -107,4 +107,36 @@ describe("CompleteAuditDialog", () => {
 
     expect(dialog.querySelector("form")?.hasAttribute("action")).toBe(false);
   });
+
+  /**
+   * The drawer can disable completion while the dialog is already open (a
+   * scan removal was refused, so the list is stale). The open dialog's own
+   * submit must follow, or the operator confirms the stale summary.
+   */
+  it("disables its submit when completion is disabled while it is open", () => {
+    mockActionData.mockReturnValue(undefined);
+    const { rerender } = render(
+      <CompleteAuditDialog auditName="ZZ Test Audit" stats={STATS} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Complete Audit" }));
+    const dialog = screen.getByRole("alertdialog");
+    const submit = () =>
+      [...dialog.querySelectorAll("button")].find(
+        (button) => button.getAttribute("type") === "submit"
+      );
+    expect(submit()?.hasAttribute("disabled")).toBe(false);
+
+    rerender(
+      <CompleteAuditDialog
+        auditName="ZZ Test Audit"
+        stats={STATS}
+        disabled
+        disabledReason="Reload to see the audit as it is."
+      />
+    );
+
+    expect(submit()?.hasAttribute("disabled")).toBe(true);
+    // The reason shows inside the dialog, not only behind its overlay.
+    expect(dialog.textContent).toContain("Reload to see the audit as it is.");
+  });
 });
