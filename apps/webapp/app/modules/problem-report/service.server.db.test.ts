@@ -218,7 +218,7 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     const { note } = await report("BASE", assets.bookable, "Lens\ncracked");
 
     expect(note.content).toBe(
-      `{% link to="/settings/team/users/${userIds.BASE}" text="ZZ BASE Test" /%} reported a problem: *"Lens cracked"*`
+      `{% link to="/settings/team/users/${userIds.BASE}" text="ZZ BASE Test" /%} reported a problem: {% name text="Lens cracked" /%}`
     );
   });
 
@@ -232,9 +232,24 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     const tags = [...Markdoc.parse(note.content).walk()].filter(
       (node) => node.type === "tag"
     );
-    // The reporter link is the only tag.
-    expect(tags).toHaveLength(1);
+    // The reporter link and the name tag holding the text, nothing else.
+    expect(tags.map((tag) => tag.tag)).toEqual(["link", "name"]);
     expect(tags[0].attributes.to).toBe(`/settings/team/users/${userIds.BASE}`);
+  });
+
+  it("keeps Markdown in the text as literal text", async () => {
+    const { note } = await report(
+      "BASE",
+      assets.bookable,
+      "See [settings](/settings/general) ![x](/static/x.png) **now**"
+    );
+
+    const rendered = [...Markdoc.parse(note.content).walk()].map(
+      (node) => node.type
+    );
+    expect(rendered).not.toContain("link");
+    expect(rendered).not.toContain("image");
+    expect(rendered).not.toContain("strong");
   });
 
   it("emails the owner, administrator and manager, never the reporter", async () => {

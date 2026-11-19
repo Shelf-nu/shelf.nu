@@ -30,9 +30,9 @@ export const problemReportContentSchema = z
       )
       .max(
         PROBLEM_REPORT_MAX_LENGTH,
-        `Keep the description under ${PROBLEM_REPORT_MAX_LENGTH.toLocaleString(
+        `Keep the description to ${PROBLEM_REPORT_MAX_LENGTH.toLocaleString(
           "en-US"
-        )} characters.`
+        )} characters or fewer.`
       )
   );
 

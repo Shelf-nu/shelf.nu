@@ -29,10 +29,7 @@ import { getOrganizationNotificationAudience } from "~/modules/organization/serv
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import {
-  appendUserTextToNote,
-  wrapUserLinkForNote,
-} from "~/utils/markdoc-wrappers";
+import { wrapNameForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import { resolveUserDisplayName, resolveUserGreetingName } from "~/utils/user";
 
@@ -41,9 +38,11 @@ const label = "Assets";
 /**
  * The history line for a report: the reporter as a link, then their text.
  *
- * The text is put on one line (runs of whitespace, line breaks included,
- * become one space) because `appendUserTextToNote` quotes it in emphasis,
- * which Markdown ends at a line break. The email keeps the line breaks.
+ * The text goes inside a `name` tag, like every other value a person types
+ * into a system note, so it always renders as literal text: Markdown in it
+ * (a link, an image, emphasis) is never rendered. Runs of whitespace, line
+ * breaks included, become one space so the line reads as one sentence in the
+ * Activity tab, the CSV and the Companion. The email keeps the line breaks.
  *
  * @param reporter - The member who reported the problem
  * @param content - The report text, already validated by the schema
@@ -53,10 +52,9 @@ export function buildProblemReportNote(
   reporter: Parameters<typeof wrapUserLinkForNote>[0],
   content: string
 ) {
-  return appendUserTextToNote(
-    `${wrapUserLinkForNote(reporter)} reported a problem:`,
-    content.replace(/\s+/g, " ")
-  );
+  return `${wrapUserLinkForNote(
+    reporter
+  )} reported a problem: ${wrapNameForNote(content.replace(/\s+/g, " "))}`;
 }
 
 /**
@@ -77,7 +75,7 @@ export function buildProblemReportNote(
  * @param args.userOrganizations - The reporter's workspaces (web only), so an
  *   asset in another of their workspaces answers like the asset page does
  * @param args.request - The request (web only), for that same answer
- * @returns The note and how many people were emailed
+ * @returns The note and how many copies of the email went to the mailer
  * @throws {ShelfError} 404 when the reporter cannot open the asset, 400 when
  *   it is archived, or when the note cannot be written
  */
@@ -137,8 +135,9 @@ export async function reportAssetProblem({
   const reporterName = resolveUserDisplayName(reporter) || reporter.email;
 
   // One render per recipient, each in its own try: one bad address or render
-  // must not stop the others, and the report is already saved.
-  await Promise.all(
+  // must not stop the others, and the report is already saved. Only the
+  // copies handed to the mailer are counted.
+  const handedToMailer = await Promise.all(
     recipients.map(async (recipient) => {
       try {
         const props = {
@@ -158,6 +157,7 @@ export async function reportAssetProblem({
           text: problemReportEmailText(props),
           html: await problemReportEmailHtml(props),
         });
+        return true;
       } catch (cause) {
         Logger.error(
           new ShelfError({
@@ -171,9 +171,10 @@ export async function reportAssetProblem({
             label,
           })
         );
+        return false;
       }
     })
   );
 
-  return { note, notifiedCount: recipients.length };
+  return { note, notifiedCount: handedToMailer.filter(Boolean).length };
 }

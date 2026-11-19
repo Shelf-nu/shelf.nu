@@ -390,7 +390,7 @@ describe("MANAGER matrix row", () => {
   });
 });
 
-describe("roleHasPermission — problem reports", () => {
+describe("roleHasPermission: problem reports", () => {
   test("every role may report a problem, without the general note grant", () => {
     const roles: OrganizationRole[] = [
       "OWNER",

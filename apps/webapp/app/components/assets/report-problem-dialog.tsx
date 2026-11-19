@@ -75,6 +75,11 @@ export function ReportProblemDialog({
   const disabled = useDisabled(fetcher);
   const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
   const [clientError, setClientError] = useState<string | null>(null);
+  /**
+   * The server refusal the member has started editing away from. It stays
+   * hidden until the next submit, which may answer with the same message.
+   */
+  const [dismissedRefusal, setDismissedRefusal] = useState<string | null>(null);
   const textareaRef = useAutoFocus<HTMLTextAreaElement>({ when: open });
 
   useEffect(() => {
@@ -82,13 +87,20 @@ export function ReportProblemDialog({
   }, [open]);
 
   const sent = outcome.status === "accepted";
+  // Read only once this opening's report is accepted, so it is this report's.
   const notifiedCount = fetcher.data?.notifiedCount ?? 0;
+  const closeRef = useAutoFocus<HTMLElement>({ when: sent });
+  const serverError =
+    outcome.message && outcome.message !== dismissedRefusal
+      ? outcome.message
+      : null;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     const content = new FormData(event.currentTarget).get("content");
     const parsed = problemReportContentSchema.safeParse(
       typeof content === "string" ? content : ""
     );
+    setDismissedRefusal(null);
     if (!parsed.success) {
       event.preventDefault();
       setClientError(
@@ -119,6 +131,7 @@ export function ReportProblemDialog({
         {sent ? (
           <AlertDialogFooter className="mt-4">
             <Button
+              ref={closeRef}
               type="button"
               variant="primary"
               onClick={() => onOpenChange(false)}
@@ -142,8 +155,11 @@ export function ReportProblemDialog({
               required
               characterLimit={PROBLEM_REPORT_MAX_LENGTH}
               disabled={disabled}
-              error={clientError || outcome.message || undefined}
-              onChange={() => setClientError(null)}
+              error={clientError || serverError || undefined}
+              onChange={() => {
+                setClientError(null);
+                setDismissedRefusal(outcome.message);
+              }}
             />
             <AlertDialogFooter className="mt-4">
               <Button
