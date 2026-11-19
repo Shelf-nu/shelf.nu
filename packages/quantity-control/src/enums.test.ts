@@ -43,7 +43,8 @@ test("QT_CONSUMPTION_TYPES equals schema ConsumptionType", () => {
 });
 
 test("QT_CONSUMPTION_CATEGORIES equals schema ConsumptionCategory", () => {
-  // enum ConsumptionCategory { CHECKOUT, RETURN, RESTOCK, ADJUSTMENT, LOSS, CONSUME, DAMAGE }
+  // enum ConsumptionCategory { CHECKOUT, RETURN, RESTOCK, ADJUSTMENT, LOSS,
+  //   CONSUME, DAMAGE, MOVE, INITIAL, OPENING_BALANCE, CONVERTED }
   assertSameSet(QT_CONSUMPTION_CATEGORIES, [
     "CHECKOUT",
     "RETURN",
@@ -52,6 +53,10 @@ test("QT_CONSUMPTION_CATEGORIES equals schema ConsumptionCategory", () => {
     "LOSS",
     "CONSUME",
     "DAMAGE",
+    "MOVE",
+    "INITIAL",
+    "OPENING_BALANCE",
+    "CONVERTED",
   ]);
 });
 

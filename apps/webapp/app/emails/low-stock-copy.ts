@@ -126,6 +126,7 @@ const CATEGORY_ORDER: ConsumptionCategory[] = [
   "CONSUME",
   "LOSS",
   "DAMAGE",
+  "CONVERTED",
   "CHECKOUT",
   "RETURN",
   "RESTOCK",
@@ -245,6 +246,8 @@ function movementHead(
       return `${qty} reported lost`;
     case "DAMAGE":
       return `${qty} reported damaged`;
+    case "CONVERTED":
+      return `${qty} turned into individual assets`;
     case "RETURN":
       return `${qty} returned`;
     case "RESTOCK":

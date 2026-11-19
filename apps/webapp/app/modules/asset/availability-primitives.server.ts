@@ -423,14 +423,37 @@ export async function getPeakReservedUnitsByAsset({
   return peaks;
 }
 
-export async function assertAssetQuantityNotBelowReservations({
+/** What holds a pool's units, as {@link readCommittedUnits} counts it. */
+export type CommittedUnits = {
+  /** Operator custody (kit-inherited custody is counted in `inKits`). */
+  inCustody: number;
+  /** Units allocated into kits. */
+  inKits: number;
+  /** The peak of units reserved by overlapping active bookings. */
+  peakReserved: number;
+  /** All of the above: the lowest total the pool may be lowered to. */
+  committed: number;
+};
+
+/**
+ * Reads what is committed against a pool's units: operator custody, kit
+ * allocations and the peak of overlapping active booking reservations. The
+ * pool's total may not drop below `committed`; this is the number
+ * {@link assertAssetQuantityNotBelowReservations} enforces.
+ *
+ * @param args.assetId - The QUANTITY_TRACKED asset
+ * @param args.organizationId - Caller's organization, scoping every read
+ * @param args.tx - The client to read through; the caller's locked
+ *   transaction when the answer decides a write
+ */
+export async function readCommittedUnits({
   assetId,
   organizationId,
   tx,
-  newTotal,
-  assetTitle,
-  unitOfMeasure,
-}: AssertAssetQuantityNotBelowReservationsArgs): Promise<void> {
+}: Pick<
+  AssertAssetQuantityNotBelowReservationsArgs,
+  "assetId" | "organizationId" | "tx"
+>): Promise<CommittedUnits> {
   const [custodyGroups, inKitsGroups, reservedRows] = await Promise.all([
     tx.custody.groupBy({
       by: ["assetId"],
@@ -526,7 +549,24 @@ export async function assertAssetQuantityNotBelowReservations({
     peakReserved = peakConcurrent(intervals);
   }
 
-  const committed = inCustody + inKits + peakReserved;
+  return {
+    inCustody,
+    inKits,
+    peakReserved,
+    committed: inCustody + inKits + peakReserved,
+  };
+}
+
+export async function assertAssetQuantityNotBelowReservations({
+  assetId,
+  organizationId,
+  tx,
+  newTotal,
+  assetTitle,
+  unitOfMeasure,
+}: AssertAssetQuantityNotBelowReservationsArgs): Promise<void> {
+  const { inCustody, inKits, peakReserved, committed } =
+    await readCommittedUnits({ assetId, organizationId, tx });
 
   // Route only the FINAL numeric decision through the pure package verdict
   // (`newTotal < committed` ⟺ `!verdict.ok`). The thrown `ShelfError` — its

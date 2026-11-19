@@ -54,6 +54,10 @@ export const QT_CONSUMPTION_CATEGORIES = [
   "DAMAGE",
   "RESTOCK",
   "ADJUSTMENT",
+  "MOVE",
+  "INITIAL",
+  "OPENING_BALANCE",
+  "CONVERTED",
 ] as const;
 
 /** A consumption-log entry's category. Literals equal the DB `ConsumptionCategory` enum. */

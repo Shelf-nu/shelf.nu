@@ -566,7 +566,8 @@ export type CustodySourceNoteVerb =
   | "restocked"
   | "lost"
   | "added"
-  | "removed";
+  | "removed"
+  | "converted";
 
 /**
  * Writes a note on a location's timeline when units of a pool leave it into
@@ -621,6 +622,7 @@ export async function createCustodySourceLocationNote({
       lost: `${actor} recorded ${units} as lost at ${location}.`,
       added: `${actor} added ${units} at ${location} (adjustment).`,
       removed: `${actor} removed ${units} from ${location} (adjustment).`,
+      converted: `${actor} created individual assets from ${units} at ${location}.`,
     }[verb];
 
     await createSystemLocationNote({ locationId, content, userId });

@@ -1370,6 +1370,50 @@ describe("stock ledger", () => {
         .every((l) => l.stockChange === 0)
     ).toBe(true);
   });
+
+  it("records units made into assets as CONVERTED where they left", async () => {
+    seedPool({
+      total: 10,
+      placements: [
+        [CAMERA_ROOM, 6],
+        [STUDIO, 3],
+      ],
+      ledgerStarted: false,
+    });
+
+    await adjustQuantity({
+      assetId: "pool-1",
+      quantity: 2,
+      category: "CONVERTED",
+      direction: "subtract",
+      userId: "user-1",
+      organizationId: ORG,
+      locationId: STUDIO,
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 1],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["OPENING_BALANCE", STUDIO, 3],
+      ["CONVERTED", STUDIO, -2],
+    ]);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+    // The location's timeline says the units became assets, not that they were lost.
+    expect(createSystemLocationNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationId: STUDIO,
+        content: expect.stringContaining("created individual assets from"),
+      })
+    );
+  });
 });
 
 /* -------------------------------------------------------------------------- */

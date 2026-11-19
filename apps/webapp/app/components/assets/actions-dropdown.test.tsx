@@ -19,6 +19,8 @@
  * - A Manager edits the asset (Edit, Update location) only while "Managers can
  *   edit assets" is on, and never sees Delete: the switch adds `asset:update`,
  *   not `asset:delete`.
+ * - "Create assets from stock" shows on a quantity-tracked asset only, and only
+ *   to a caller who may both create and update assets.
  *
  * @see {@link file://./actions-dropdown.tsx}
  * @see {@link file://./../../modules/asset/utils.ts} isIndividualKitMember
@@ -296,5 +298,43 @@ describe('ActionsDropdown: a Manager under "Managers can edit assets"', () => {
     renderMenu();
 
     expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
+  });
+});
+
+describe("ActionsDropdown: create assets from stock", () => {
+  const pool = { type: "QUANTITY_TRACKED", quantity: 10 };
+
+  beforeEach(() => {
+    caller.assign = "anyone";
+  });
+
+  it("links an Administrator to the dialog on a quantity-tracked asset", () => {
+    caller.roles = [OrganizationRoles.ADMIN];
+
+    renderMenu(pool);
+
+    expect(
+      screen.getByRole("link", { name: "Create assets from stock" })
+    ).toHaveAttribute("href", "/overview/create-from-stock");
+  });
+
+  it("is not offered on an individually tracked asset", () => {
+    caller.roles = [OrganizationRoles.ADMIN];
+
+    renderMenu();
+
+    expect(
+      screen.queryByRole("link", { name: "Create assets from stock" })
+    ).toBeNull();
+  });
+
+  it("is not offered to a member who may not create assets", () => {
+    caller.roles = [OrganizationRoles.BASE];
+
+    renderMenu(pool);
+
+    expect(
+      screen.queryByRole("link", { name: "Create assets from stock" })
+    ).toBeNull();
   });
 });

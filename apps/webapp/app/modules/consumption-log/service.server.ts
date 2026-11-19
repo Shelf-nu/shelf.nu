@@ -18,11 +18,12 @@
  * @see {@link file://../../../packages/database/prisma/schema.prisma} ConsumptionLog model
  */
 
-import type { ConsumptionCategory, Prisma } from "@prisma/client";
+import type { Asset, ConsumptionCategory, Prisma } from "@prisma/client";
 import {
   BookingStatus,
   ConsumptionCategory as ConsumptionCategoryEnum,
 } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 // `recordEvent` writes the structured activity-event audit row alongside the
@@ -45,6 +46,7 @@ import {
   unitsLeftAtSource,
 } from "~/modules/asset/custody-source";
 import type { CustodySourceState } from "~/modules/asset/custody-source";
+import type { CustodySourceNoteVerb } from "~/modules/asset/custody-source.server";
 import {
   createCustodySourceLocationNote,
   loadCustodySources,
@@ -550,445 +552,26 @@ export async function adjustQuantity({
       });
     }
 
-    const result = await db.$transaction(async (tx) => {
-      /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(
-        tx,
+    const result = await db.$transaction((tx) =>
+      applyQuantityAdjustment(tx, {
         assetId,
-        organizationId
-      );
-
-      /**
-       * Step 2: Validate asset belongs to the caller's organization.
-       * Prevents cross-tenant IDOR: without this guard, any authenticated
-       * user with `asset:update` in any org could mutate another org's
-       * qty-tracked asset by passing its id. Mirrors the pattern used in
-       * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
-       *
-       * Now defense-in-depth: `lockAssetForQuantityUpdate` is org-scoped, so a
-       * foreign-org id already 404'd at Step 1 (no lock taken) and never reaches
-       * here. We keep this belt-and-braces check to document the invariant.
-       */
-      if (asset.organizationId !== organizationId) {
-        throw new ShelfError({
-          cause: null,
-          message: "Asset does not belong to this organization.",
-          label,
-          status: 403,
-          additionalData: { assetId, organizationId },
-        });
-      }
-
-      /** Step 3: Validate the asset is quantity-tracked */
-      if (asset.type !== "QUANTITY_TRACKED") {
-        throw new ShelfError({
-          cause: null,
-          message: "Only quantity-tracked assets support quantity adjustments.",
-          label,
-          status: 400,
-          additionalData: { assetId, assetType: asset.type },
-        });
-      }
-
-      const currentQuantity = asset.quantity ?? 0;
-
-      /**
-       * Step 3a: Resolve the location, read under the lock. `""` / `null`
-       * means the unplaced units (total only). A location must belong to
-       * this workspace; a removal must also come from an existing manual
-       * placement of this asset, capped at what that location has left.
-       */
-      const atLocationId =
-        locationId === undefined || isUnplacedSource(locationId)
-          ? null
-          : locationId;
-
-      /** Refuses a loss larger than what the named source has left. */
-      const assertSourceHasRoom = ({
-        state,
-        locationId: sourceId,
-        sourceName,
-      }: {
-        state: CustodySourceState;
-        locationId: string | null;
-        sourceName: string | null;
-      }) => {
-        const left = unitsLeftAtSource(state, sourceId);
-        if (quantity <= left) return;
-        throw new ShelfError({
-          cause: null,
-          ...sourceShortfall({
-            sourceName,
-            placedCount:
-              formatUnitCount(asset, placedAtSource(state, sourceId)) ??
-              "0 units",
-            inCustody: custodyFromSource(state, sourceId),
-            onBooking: bookedOutFromSource(state, sourceId),
-          }),
-          label,
-          status: 400,
-          additionalData: { assetId, locationId: sourceId, quantity, left },
-          shouldBeCaptured: false,
-        });
-      };
-      /** Read only when a location was named; the default path is total-only. */
-      const sources =
-        locationId === undefined
-          ? null
-          : await loadCustodySources(tx, { assetId, total: currentQuantity });
-      const multiSource = sources ? hasMultipleSources(sources.state) : false;
-      let atLocationName: string | null = null;
-      let existingPlacement: { id: string; quantity: number } | null = null;
-      /**
-       * Whether the write created or deleted the placement at `atLocationId`,
-       * i.e. whether it recorded an `ASSET_LOCATION_CHANGED` event.
-       */
-      let placementChange: "arrived" | "left" | null = null;
-
-      if (atLocationId) {
-        const location = await tx.location.findFirst({
-          where: { id: atLocationId, organizationId },
-          select: { name: true },
-        });
-        if (!location) {
-          throw new ShelfError({
-            cause: null,
-            message: "The selected location does not exist in this workspace.",
-            label,
-            status: 404,
-            additionalData: { assetId, locationId: atLocationId },
-            shouldBeCaptured: false,
-          });
-        }
-        atLocationName = location.name;
-
-        existingPlacement = await tx.assetLocation.findFirst({
-          where: {
-            assetId,
-            locationId: atLocationId,
-            assetKitId: null,
-            organizationId,
-          },
-          select: { id: true, quantity: true },
-        });
-
-        if (direction === "subtract" && sources) {
-          if (!existingPlacement) {
-            throw new ShelfError({
-              cause: null,
-              message: `${location.name} has no units of this asset.`,
-              label,
-              status: 400,
-              additionalData: { assetId, locationId: atLocationId },
-              shouldBeCaptured: false,
-            });
-          }
-
-          assertSourceHasRoom({
-            state: sources.state,
-            locationId: atLocationId,
-            sourceName: location.name,
-          });
-        }
-      } else if (sources && direction === "subtract") {
-        /**
-         * The unplaced units, named on purpose: capped the same way, at the
-         * unplaced units minus custody recorded against them, so custody
-         * never claims more unplaced units than exist. An Adjust that names
-         * nothing (`sources` NULL) stays total-only.
-         */
-        assertSourceHasRoom({
-          state: sources.state,
-          locationId: null,
-          sourceName: null,
-        });
-      }
-
-      /** Step 4: For subtraction, ensure the new total doesn't drop below in-custody */
-      if (direction === "subtract") {
-        const custodySum = await tx.custody.aggregate({
-          where: { assetId },
-          _sum: { quantity: true },
-        });
-        const inCustody = custodySum._sum.quantity ?? 0;
-        const maxRemovable = currentQuantity - inCustody;
-
-        if (quantity > maxRemovable) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              inCustody > 0
-                ? `Cannot remove ${quantity} units. Only ${maxRemovable} available (${inCustody} currently in custody).`
-                : `Cannot remove ${quantity} units. The asset only has ${currentQuantity} total units.`,
-            label,
-            status: 400,
-            additionalData: { assetId, quantity, currentQuantity, inCustody },
-          });
-        }
-
-        /**
-         * Reservations guard. The in-custody check above only protects units
-         * held by custodians right now; this also blocks lowering the total
-         * below what active bookings have RESERVED (their peak-concurrent
-         * booked footprint) or what's allocated into kits. This is the shared
-         * stock-lowering guard used by `updateAsset` too, so the `adjust
-         * quantity` endpoint can't strand a reservation the asset-edit path
-         * would reject. Runs inside this same tx with the asset already
-         * row-locked above, so the read-then-decide is race-safe.
-         */
-        await assertAssetQuantityNotBelowReservations({
-          assetId,
-          organizationId,
-          tx,
-          newTotal: currentQuantity - quantity,
-          assetTitle: asset.title,
-          unitOfMeasure: asset.unitOfMeasure,
-        });
-
-        /**
-         * Placement guard, the orthogonal axis the reservations guard does not
-         * cover, for a removal that names no location. Lowering only the
-         * total would leave locations claiming more units than the asset
-         * owns, so it is refused rather than trimming a location on the
-         * operator's behalf. A removal AT a location lowers that placement by
-         * the same amount below, which keeps the sum where it was relative to
-         * the total, so it needs no such guard.
-         */
-        if (!atLocationId) {
-          await assertStockNotBelowManualPlacements({
-            assetId,
-            organizationId,
-            tx,
-            newTotal: currentQuantity - quantity,
-            assetTitle: asset.title,
-            unitOfMeasure: asset.unitOfMeasure,
-          });
-        }
-      }
-
-      /** Step 5: Compute the new total quantity */
-      const newQuantity =
-        direction === "add"
-          ? currentQuantity + quantity
-          : currentQuantity - quantity;
-
-      /** The stock before any write, for the ledger rows in step 7. */
-      const stockBefore = await readStockState(tx, {
-        assetId,
-        organizationId,
-      });
-
-      /** Step 6: Update the asset's quantity */
-      const updatedAsset = await tx.asset.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier in this transaction via the locked asset's organizationId guard
-        where: { id: assetId },
-        data: { quantity: newQuantity },
-      });
-
-      /**
-       * Step 6a: Move the placement with the total. Added units land at the
-       * location (creating the manual placement when the pool is not there
-       * yet); removed units come off it, and a row that reaches zero is
-       * deleted, like a move that drains its source. Placement rows that
-       * appear or disappear get an `ASSET_LOCATION_CHANGED` event, the same
-       * events the placement editor emits.
-       */
-      if (atLocationId) {
-        if (direction === "add") {
-          if (existingPlacement) {
-            await tx.assetLocation.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `existingPlacement.id` came from the org-scoped findFirst above, inside this locked tx
-              where: { id: existingPlacement.id },
-              data: { quantity: existingPlacement.quantity + quantity },
-            });
-          } else {
-            await tx.assetLocation.create({
-              data: {
-                assetId,
-                locationId: atLocationId,
-                organizationId,
-                quantity,
-              },
-            });
-            await recordEvent(
-              {
-                organizationId,
-                actorUserId: userId,
-                action: "ASSET_LOCATION_CHANGED",
-                entityType: "ASSET",
-                entityId: assetId,
-                assetId,
-                locationId: atLocationId,
-                field: "locationId",
-                fromValue: null,
-                toValue: atLocationId,
-                meta: { quantity },
-              },
-              tx
-            );
-            placementChange = "arrived";
-          }
-        } else if (existingPlacement) {
-          const remaining = existingPlacement.quantity - quantity;
-          if (remaining <= 0) {
-            await tx.assetLocation.delete({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `existingPlacement.id` came from the org-scoped findFirst above, inside this locked tx
-              where: { id: existingPlacement.id },
-            });
-            await recordEvent(
-              {
-                organizationId,
-                actorUserId: userId,
-                action: "ASSET_LOCATION_CHANGED",
-                entityType: "ASSET",
-                entityId: assetId,
-                assetId,
-                locationId: atLocationId,
-                field: "locationId",
-                fromValue: atLocationId,
-                toValue: null,
-                meta: { quantity },
-              },
-              tx
-            );
-            placementChange = "left";
-          } else {
-            await tx.assetLocation.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
-              where: { id: existingPlacement.id },
-              data: { quantity: remaining },
-            });
-          }
-        }
-      }
-
-      /**
-       * Step 7: Ledger rows, where the units actually arrived or left: the
-       * location when one was named, otherwise the unplaced units.
-       */
-      await recordStockChanges(tx, {
-        organizationId,
-        userId,
-        changes: [
-          {
-            assetId,
-            before: stockBefore,
-            events: [
-              {
-                category,
-                change: direction === "add" ? quantity : -quantity,
-                locationId: atLocationId,
-                note,
-              },
-            ],
-          },
-        ],
-      });
-
-      /**
-       * Step 8: Structured activity event for the reporting pipeline — one
-       * `ASSET_QUANTITY_CHANGED` per total-quantity change, emitted inside the
-       * SAME tx so it commits atomically with the asset update + log (see
-       * `.claude/rules/use-record-event.md`). `fromValue`/`toValue` capture the
-       * true direction the direction-agnostic ConsumptionLog cannot.
-       */
-      await recordEvent(
-        {
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_QUANTITY_CHANGED",
-          entityType: "ASSET",
-          entityId: assetId,
-          assetId,
-          field: "quantity",
-          fromValue: currentQuantity,
-          toValue: newQuantity,
-        },
-        tx
-      );
-
-      return {
-        asset: updatedAsset,
-        location: {
-          locationId: atLocationId,
-          locationName: atLocationName,
-          multiSource,
-        } satisfies AdjustmentLocationOutcome,
-        placementChange,
-      };
-    });
-
-    /**
-     * A placement the adjustment created or emptied is a move onto or off the
-     * location, so the location's activity log records it like any other
-     * `ASSET_LOCATION_CHANGED`. A pool at two or more locations already gets
-     * the "restocked / lost at L" line below, which names the same units, so
-     * it does not get a second one. Written after the commit; never throws.
-     */
-    if (
-      result.placementChange &&
-      result.location.locationId &&
-      !result.location.multiSource
-    ) {
-      // The adjustment is already saved: a failed lookup only loses the line.
-      const actor = await db.user
-        .findUnique({
-          where: { id: userId },
-          select: { id: true, ...USER_NAME_SELECT },
-        })
-        .catch((cause: unknown) => {
-          Logger.error(
-            new ShelfError({
-              cause,
-              message:
-                "Could not load the user for the location activity line.",
-              additionalData: { assetId, userId },
-              label,
-            })
-          );
-          return null;
-        });
-      const at = {
-        id: result.location.locationId,
-        name: result.location.locationName ?? "",
-      };
-      if (actor) {
-        await createAssetLocationMoveNotes({
-          moves: [
-            {
-              asset: result.asset,
-              from: result.placementChange === "left" ? at : null,
-              to: result.placementChange === "arrived" ? at : null,
-              quantity,
-            },
-          ],
-          actor,
-        });
-      }
-    }
-
-    /**
-     * The location's timeline records the restock or loss, for pools
-     * placed at two or more locations only (a pool at one location reads as
-     * it always has). Written after the commit, best-effort.
-     */
-    if (result.location.multiSource && result.location.locationId) {
-      await createCustodySourceLocationNote({
-        userId,
-        asset: result.asset,
-        locationId: result.location.locationId,
-        locationName: result.location.locationName,
         quantity,
-        verb:
-          category === "RESTOCK"
-            ? "restocked"
-            : category === "LOSS"
-            ? "lost"
-            : direction === "add"
-            ? "added"
-            : "removed",
-      });
-    }
+        category,
+        direction,
+        userId,
+        organizationId,
+        note,
+        locationId,
+      })
+    );
+
+    await writeAdjustmentLocationNotes({
+      result,
+      userId,
+      quantity,
+      category,
+      direction,
+    });
 
     return result;
   } catch (cause) {
@@ -1009,6 +592,510 @@ export async function adjustQuantity({
         organizationId,
       },
       label,
+    });
+  }
+}
+
+/** Transaction client {@link applyQuantityAdjustment} writes through. */
+export type QuantityAdjustmentTxClient = Omit<
+  ExtendedPrismaClient,
+  ITXClientDenyList
+>;
+
+/** What {@link applyQuantityAdjustment} changed, for the post-commit notes. */
+export type QuantityAdjustmentResult = {
+  asset: Asset;
+  location: AdjustmentLocationOutcome;
+  /** Whether the write created ("arrived") or emptied ("left") the placement. */
+  placementChange: "arrived" | "left" | null;
+};
+
+/**
+ * The locked half of {@link adjustQuantity}: takes the pool's row lock,
+ * checks the request against every hold on the units (the named source's
+ * units left, custody, reservations, kits and manual placements), and writes
+ * the new total, the placement, the stock ledger rows and the
+ * `ASSET_QUANTITY_CHANGED` event.
+ *
+ * Runs inside the caller's transaction so a caller can make more writes that
+ * commit or roll back with the adjustment. Call
+ * {@link writeAdjustmentLocationNotes} after the commit.
+ *
+ * @param tx - The caller's interactive transaction
+ * @param args - The adjustment details, as for {@link adjustQuantity}
+ * @throws {ShelfError} As {@link adjustQuantity}
+ */
+export async function applyQuantityAdjustment(
+  tx: QuantityAdjustmentTxClient,
+  {
+    assetId,
+    quantity,
+    category,
+    direction,
+    userId,
+    organizationId,
+    note,
+    locationId,
+  }: AdjustQuantityArgs
+): Promise<QuantityAdjustmentResult> {
+  /** Step 1: Acquire row-level lock to prevent concurrent modifications */
+  const asset = await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+
+  /**
+   * Step 2: Validate asset belongs to the caller's organization.
+   * Prevents cross-tenant IDOR: without this guard, any authenticated
+   * user with `asset:update` in any org could mutate another org's
+   * qty-tracked asset by passing its id. Mirrors the pattern used in
+   * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
+   *
+   * Now defense-in-depth: `lockAssetForQuantityUpdate` is org-scoped, so a
+   * foreign-org id already 404'd at Step 1 (no lock taken) and never reaches
+   * here. We keep this belt-and-braces check to document the invariant.
+   */
+  if (asset.organizationId !== organizationId) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset does not belong to this organization.",
+      label,
+      status: 403,
+      additionalData: { assetId, organizationId },
+    });
+  }
+
+  /** Step 3: Validate the asset is quantity-tracked */
+  if (asset.type !== "QUANTITY_TRACKED") {
+    throw new ShelfError({
+      cause: null,
+      message: "Only quantity-tracked assets support quantity adjustments.",
+      label,
+      status: 400,
+      additionalData: { assetId, assetType: asset.type },
+    });
+  }
+
+  const currentQuantity = asset.quantity ?? 0;
+
+  /**
+   * Step 3a: Resolve the location, read under the lock. `""` / `null`
+   * means the unplaced units (total only). A location must belong to
+   * this workspace; a removal must also come from an existing manual
+   * placement of this asset, capped at what that location has left.
+   */
+  const atLocationId =
+    locationId === undefined || isUnplacedSource(locationId)
+      ? null
+      : locationId;
+
+  /** Refuses a loss larger than what the named source has left. */
+  const assertSourceHasRoom = ({
+    state,
+    locationId: sourceId,
+    sourceName,
+  }: {
+    state: CustodySourceState;
+    locationId: string | null;
+    sourceName: string | null;
+  }) => {
+    const left = unitsLeftAtSource(state, sourceId);
+    if (quantity <= left) return;
+    throw new ShelfError({
+      cause: null,
+      ...sourceShortfall({
+        sourceName,
+        placedCount:
+          formatUnitCount(asset, placedAtSource(state, sourceId)) ?? "0 units",
+        inCustody: custodyFromSource(state, sourceId),
+        onBooking: bookedOutFromSource(state, sourceId),
+      }),
+      label,
+      status: 400,
+      additionalData: { assetId, locationId: sourceId, quantity, left },
+      shouldBeCaptured: false,
+    });
+  };
+  /** Read only when a location was named; the default path is total-only. */
+  const sources =
+    locationId === undefined
+      ? null
+      : await loadCustodySources(tx, { assetId, total: currentQuantity });
+  const multiSource = sources ? hasMultipleSources(sources.state) : false;
+  let atLocationName: string | null = null;
+  let existingPlacement: { id: string; quantity: number } | null = null;
+  /**
+   * Whether the write created or deleted the placement at `atLocationId`,
+   * i.e. whether it recorded an `ASSET_LOCATION_CHANGED` event.
+   */
+  let placementChange: "arrived" | "left" | null = null;
+
+  if (atLocationId) {
+    const location = await tx.location.findFirst({
+      where: { id: atLocationId, organizationId },
+      select: { name: true },
+    });
+    if (!location) {
+      throw new ShelfError({
+        cause: null,
+        message: "The selected location does not exist in this workspace.",
+        label,
+        status: 404,
+        additionalData: { assetId, locationId: atLocationId },
+        shouldBeCaptured: false,
+      });
+    }
+    atLocationName = location.name;
+
+    existingPlacement = await tx.assetLocation.findFirst({
+      where: {
+        assetId,
+        locationId: atLocationId,
+        assetKitId: null,
+        organizationId,
+      },
+      select: { id: true, quantity: true },
+    });
+
+    if (direction === "subtract" && sources) {
+      if (!existingPlacement) {
+        throw new ShelfError({
+          cause: null,
+          message: `${location.name} has no units of this asset.`,
+          label,
+          status: 400,
+          additionalData: { assetId, locationId: atLocationId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      assertSourceHasRoom({
+        state: sources.state,
+        locationId: atLocationId,
+        sourceName: location.name,
+      });
+    }
+  } else if (sources && direction === "subtract") {
+    /**
+     * The unplaced units, named on purpose: capped the same way, at the
+     * unplaced units minus custody recorded against them, so custody
+     * never claims more unplaced units than exist. An Adjust that names
+     * nothing (`sources` NULL) stays total-only.
+     */
+    assertSourceHasRoom({
+      state: sources.state,
+      locationId: null,
+      sourceName: null,
+    });
+  }
+
+  /** Step 4: For subtraction, ensure the new total doesn't drop below in-custody */
+  if (direction === "subtract") {
+    const custodySum = await tx.custody.aggregate({
+      where: { assetId },
+      _sum: { quantity: true },
+    });
+    const inCustody = custodySum._sum.quantity ?? 0;
+    const maxRemovable = currentQuantity - inCustody;
+
+    if (quantity > maxRemovable) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          inCustody > 0
+            ? `Cannot remove ${quantity} units. Only ${maxRemovable} available (${inCustody} currently in custody).`
+            : `Cannot remove ${quantity} units. The asset only has ${currentQuantity} total units.`,
+        label,
+        status: 400,
+        additionalData: { assetId, quantity, currentQuantity, inCustody },
+      });
+    }
+
+    /**
+     * Reservations guard. The in-custody check above only protects units
+     * held by custodians right now; this also blocks lowering the total
+     * below what active bookings have RESERVED (their peak-concurrent
+     * booked footprint) or what's allocated into kits. This is the shared
+     * stock-lowering guard used by `updateAsset` too, so the `adjust
+     * quantity` endpoint can't strand a reservation the asset-edit path
+     * would reject. Runs inside this same tx with the asset already
+     * row-locked above, so the read-then-decide is race-safe.
+     */
+    await assertAssetQuantityNotBelowReservations({
+      assetId,
+      organizationId,
+      tx,
+      newTotal: currentQuantity - quantity,
+      assetTitle: asset.title,
+      unitOfMeasure: asset.unitOfMeasure,
+    });
+
+    /**
+     * Placement guard, the orthogonal axis the reservations guard does not
+     * cover, for a removal that names no location. Lowering only the
+     * total would leave locations claiming more units than the asset
+     * owns, so it is refused rather than trimming a location on the
+     * operator's behalf. A removal AT a location lowers that placement by
+     * the same amount below, which keeps the sum where it was relative to
+     * the total, so it needs no such guard.
+     */
+    if (!atLocationId) {
+      await assertStockNotBelowManualPlacements({
+        assetId,
+        organizationId,
+        tx,
+        newTotal: currentQuantity - quantity,
+        assetTitle: asset.title,
+        unitOfMeasure: asset.unitOfMeasure,
+      });
+    }
+  }
+
+  /** Step 5: Compute the new total quantity */
+  const newQuantity =
+    direction === "add"
+      ? currentQuantity + quantity
+      : currentQuantity - quantity;
+
+  /** The stock before any write, for the ledger rows in step 7. */
+  const stockBefore = await readStockState(tx, {
+    assetId,
+    organizationId,
+  });
+
+  /** Step 6: Update the asset's quantity */
+  const updatedAsset = await tx.asset.update({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier in this transaction via the locked asset's organizationId guard
+    where: { id: assetId },
+    data: { quantity: newQuantity },
+  });
+
+  /**
+   * Step 6a: Move the placement with the total. Added units land at the
+   * location (creating the manual placement when the pool is not there
+   * yet); removed units come off it, and a row that reaches zero is
+   * deleted, like a move that drains its source. Placement rows that
+   * appear or disappear get an `ASSET_LOCATION_CHANGED` event, the same
+   * events the placement editor emits.
+   */
+  if (atLocationId) {
+    if (direction === "add") {
+      if (existingPlacement) {
+        await tx.assetLocation.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `existingPlacement.id` came from the org-scoped findFirst above, inside this locked tx
+          where: { id: existingPlacement.id },
+          data: { quantity: existingPlacement.quantity + quantity },
+        });
+      } else {
+        await tx.assetLocation.create({
+          data: {
+            assetId,
+            locationId: atLocationId,
+            organizationId,
+            quantity,
+          },
+        });
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            locationId: atLocationId,
+            field: "locationId",
+            fromValue: null,
+            toValue: atLocationId,
+            meta: { quantity },
+          },
+          tx
+        );
+        placementChange = "arrived";
+      }
+    } else if (existingPlacement) {
+      const remaining = existingPlacement.quantity - quantity;
+      if (remaining <= 0) {
+        await tx.assetLocation.delete({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `existingPlacement.id` came from the org-scoped findFirst above, inside this locked tx
+          where: { id: existingPlacement.id },
+        });
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            locationId: atLocationId,
+            field: "locationId",
+            fromValue: atLocationId,
+            toValue: null,
+            meta: { quantity },
+          },
+          tx
+        );
+        placementChange = "left";
+      } else {
+        await tx.assetLocation.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
+          where: { id: existingPlacement.id },
+          data: { quantity: remaining },
+        });
+      }
+    }
+  }
+
+  /**
+   * Step 7: Ledger rows, where the units actually arrived or left: the
+   * location when one was named, otherwise the unplaced units.
+   */
+  await recordStockChanges(tx, {
+    organizationId,
+    userId,
+    changes: [
+      {
+        assetId,
+        before: stockBefore,
+        events: [
+          {
+            category,
+            change: direction === "add" ? quantity : -quantity,
+            locationId: atLocationId,
+            note,
+          },
+        ],
+      },
+    ],
+  });
+
+  /**
+   * Step 8: Structured activity event for the reporting pipeline: one
+   * `ASSET_QUANTITY_CHANGED` per total-quantity change, emitted inside the
+   * SAME tx so it commits atomically with the asset update + log (see
+   * `.claude/rules/use-record-event.md`). `fromValue`/`toValue` capture the
+   * true direction the direction-agnostic ConsumptionLog cannot.
+   */
+  await recordEvent(
+    {
+      organizationId,
+      actorUserId: userId,
+      action: "ASSET_QUANTITY_CHANGED",
+      entityType: "ASSET",
+      entityId: assetId,
+      assetId,
+      field: "quantity",
+      fromValue: currentQuantity,
+      toValue: newQuantity,
+    },
+    tx
+  );
+
+  return {
+    asset: updatedAsset,
+    location: {
+      locationId: atLocationId,
+      locationName: atLocationName,
+      multiSource,
+    } satisfies AdjustmentLocationOutcome,
+    placementChange,
+  };
+}
+
+/** The location timeline verb for each category that changes the total. */
+const ADJUSTMENT_NOTE_VERBS: Partial<
+  Record<ConsumptionCategory, CustodySourceNoteVerb>
+> = {
+  RESTOCK: "restocked",
+  LOSS: "lost",
+  CONVERTED: "converted",
+};
+
+/**
+ * The post-commit half of {@link adjustQuantity}: the location timeline
+ * lines for an adjustment {@link applyQuantityAdjustment} committed. Never
+ * throws.
+ *
+ * @param args.result - What the adjustment changed
+ * @param args.userId - The acting user
+ * @param args.quantity - The units added or removed
+ * @param args.category - The adjustment's category
+ * @param args.direction - Whether units were added or removed
+ */
+export async function writeAdjustmentLocationNotes({
+  result,
+  userId,
+  quantity,
+  category,
+  direction,
+}: {
+  result: QuantityAdjustmentResult;
+  userId: string;
+  quantity: number;
+  category: ConsumptionCategory;
+  direction: "add" | "subtract";
+}): Promise<void> {
+  /**
+   * A placement the adjustment created or emptied is a move onto or off the
+   * location, so the location's activity log records it like any other
+   * `ASSET_LOCATION_CHANGED`. A pool at two or more locations already gets
+   * the "restocked / lost at L" line below, which names the same units, so
+   * it does not get a second one. Written after the commit; never throws.
+   */
+  if (
+    result.placementChange &&
+    result.location.locationId &&
+    !result.location.multiSource
+  ) {
+    // The adjustment is already saved: a failed lookup only loses the line.
+    const actor = await db.user
+      .findUnique({
+        where: { id: userId },
+        select: { id: true, ...USER_NAME_SELECT },
+      })
+      .catch((cause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Could not load the user for the location activity line.",
+            additionalData: { assetId: result.asset.id, userId },
+            label,
+          })
+        );
+        return null;
+      });
+    const at = {
+      id: result.location.locationId,
+      name: result.location.locationName ?? "",
+    };
+    if (actor) {
+      await createAssetLocationMoveNotes({
+        moves: [
+          {
+            asset: result.asset,
+            from: result.placementChange === "left" ? at : null,
+            to: result.placementChange === "arrived" ? at : null,
+            quantity,
+          },
+        ],
+        actor,
+      });
+    }
+  }
+
+  /**
+   * The location's timeline records the restock or loss, for pools
+   * placed at two or more locations only (a pool at one location reads as
+   * it always has). Written after the commit, best-effort.
+   */
+  if (result.location.multiSource && result.location.locationId) {
+    await createCustodySourceLocationNote({
+      userId,
+      asset: result.asset,
+      locationId: result.location.locationId,
+      locationName: result.location.locationName,
+      quantity,
+      verb:
+        ADJUSTMENT_NOTE_VERBS[category] ??
+        (direction === "add" ? "added" : "removed"),
     });
   }
 }

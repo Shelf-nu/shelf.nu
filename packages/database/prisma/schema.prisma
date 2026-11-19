@@ -371,6 +371,7 @@ enum ConsumptionCategory {
   MOVE // Units moved between locations, or between a location and the unplaced units. One row per side; the total does not change
   INITIAL // Stock the asset was created with (create form, import)
   OPENING_BALANCE // Stock held at each location when the ledger started for a pool that existed before it
+  CONVERTED // Units taken out of the pool and made into individually tracked assets
 }
 
 model AssetFilterPreset {
