@@ -15,6 +15,14 @@ export type ScanListItem =
   | {
       data?: KitFromQr | AssetFromQr;
       error?: string;
+      /**
+       * The code is still owed a lookup that answers: it was put back from a
+       * scan draft, or its last lookup got no answer (no connection, a gateway
+       * page). Nothing is known to be wrong with it, so a scan draft keeps it
+       * until a lookup succeeds or the server refuses the code. Such an entry
+       * has no `type` and no `data`, like a code that has just been scanned.
+       */
+      pendingLookup?: boolean;
       type?: "asset" | "kit";
       codeType?: "qr" | "barcode" | "samId"; // Track whether this came from QR, barcode, or SAM ID
     }

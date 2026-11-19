@@ -19,6 +19,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { startSsoSignIn } from "~/modules/auth/sso-pkce.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import {
   mobilePkceChallengeCookie,
   setSsoCodeVerifier,
@@ -116,7 +117,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // (PKCE) requests are handled above and must complete their own handoff,
     // so they should not be short-circuited into the web SSO redirect.
     if (DEFAULT_SSO_DOMAIN && !isMobile) {
-      const { url, codeVerifier } = await startSsoSignIn(DEFAULT_SSO_DOMAIN);
+      const { url, codeVerifier } = await startSsoSignIn(DEFAULT_SSO_DOMAIN, {
+        clientIp: getClientIpFromHeaders(request.headers),
+      });
       return redirect(url, {
         headers: { "Set-Cookie": await setSsoCodeVerifier(codeVerifier) },
       });
@@ -142,6 +145,7 @@ export async function action({ request }: ActionFunctionArgs) {
         );
         const { url, codeVerifier } = await startSsoSignIn(domain, {
           platform,
+          clientIp: getClientIpFromHeaders(request.headers),
         });
 
         // The callback can only trade Supabase's code for a session with this

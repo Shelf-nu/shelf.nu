@@ -1,6 +1,5 @@
 import type React from "react";
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { Crisp } from "crisp-sdk-web";
 import {
   AlertCircleIcon,
   ImageIcon,
@@ -24,6 +23,7 @@ import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
+import { isCrispEnabled, openCrispChat } from "../marketing/crisp";
 import { Button } from "../shared/button";
 
 type FeedbackModalProps = {
@@ -502,18 +502,27 @@ export default function FeedbackModal({
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between border-t px-6 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  Crisp.chat.open();
-                  handleClose();
-                }}
-                className="flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-700"
-              >
-                <MessageCircleIcon className="size-4" />
-                Chat with us
-              </button>
+            {/* Live chat exists only where Crisp is configured; self-hosted
+                installs usually have no CRISP_WEBSITE_ID. */}
+            <div
+              className={tw(
+                "flex items-center border-t px-6 py-4",
+                isCrispEnabled() ? "justify-between" : "justify-end"
+              )}
+            >
+              {isCrispEnabled() ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    openCrispChat();
+                    handleClose();
+                  }}
+                  className="flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-700"
+                >
+                  <MessageCircleIcon className="size-4" />
+                  Chat with us
+                </button>
+              ) : null}
 
               <Button type="submit" disabled={disabled}>
                 {disabled ? "Sending..." : "Send feedback"}

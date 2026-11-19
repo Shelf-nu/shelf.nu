@@ -725,7 +725,7 @@ describe("markHydrated", () => {
     );
   });
 
-  it("raises a separate info issue for a timeout that fired before its clock ran out", () => {
+  it("logs a timeout that fired before its clock ran out, without raising an issue", () => {
     // A link scanner opening emailed links runs timers early: the 20-second
     // visible-time timeout fires with only a few seconds on the page clock.
     // Both clocks read 6 seconds when it fires, so the device did not sleep.
@@ -736,14 +736,14 @@ describe("markHydrated", () => {
 
     markHydrated();
 
-    expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
-    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    expect(Sentry.logger.info).toHaveBeenCalledWith(
       "Hydration timeout fired before its clock ran out",
       expect.objectContaining({
-        level: "info",
-        fingerprint: ["hydration-failure", "timeout-early"],
-        tags: expect.objectContaining({ hydration_failure: "timeout" }),
-        extra: expect.objectContaining({ failedAfterMs: 6_000 }),
+        label: "Hydration",
+        path: "/assets",
+        failedAfterMs: 6_000,
       })
     );
   });

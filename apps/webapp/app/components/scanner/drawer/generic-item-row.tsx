@@ -6,6 +6,7 @@ import type { ScanListItem } from "~/atoms/qr-scanner";
 import { updateScannedItemAtom } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
+import type { ApiQueryResponseMeta } from "~/hooks/use-api-query";
 import useApiQuery from "~/hooks/use-api-query";
 import type {
   AssetFromBarcode,
@@ -15,6 +16,10 @@ import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
+import {
+  RESTORED_LOOKUP_PARAM,
+  RESTORED_LOOKUP_VALUE,
+} from "~/utils/restored-scan-lookup";
 import { tw } from "~/utils/tw";
 
 // Type for the QR API response
@@ -108,6 +113,13 @@ export function GenericItemRow<T>({
       searchParams.append(key, value);
     });
   }
+  // A row that fetches while still owed a lookup was put back from a scan
+  // draft: a fresh scan never carries `pendingLookup`, and a lookup that got
+  // no answer stores an `error`, which stops the fetch. Nobody scanned this
+  // code just now, so the endpoint is told not to record a scan.
+  if (item?.pendingLookup) {
+    searchParams.set(RESTORED_LOOKUP_PARAM, RESTORED_LOOKUP_VALUE);
+  }
 
   // Determine which API to call based on codeType
   const isBarcode = item?.codeType === "barcode";
@@ -124,11 +136,23 @@ export function GenericItemRow<T>({
    * callback instead of a useEffect so it fires exactly once per fetch.
    */
   const handleApiSuccess = useCallback(
-    (apiResponse: ApiResponse) => {
+    (apiResponse: ApiResponse, { status }: ApiQueryResponseMeta) => {
       if (apiResponse.error) {
         setItem({
           qrId,
-          item: { error: apiResponse.error.message },
+          // A 4xx refuses the code itself (unknown, unlinked, not allowed),
+          // and asking again would only be refused again. A 5xx is the
+          // server failing, which says nothing about the code: like a
+          // request with no answer, it stays owed a lookup so a scan draft
+          // keeps it.
+          item:
+            status >= 500
+              ? {
+                  error: apiResponse.error.message,
+                  pendingLookup: true,
+                  codeType: codeTypeRef.current,
+                }
+              : { error: apiResponse.error.message },
         });
         return;
       }
@@ -184,7 +208,14 @@ export function GenericItemRow<T>({
   const handleApiError = useCallback(() => {
     setItem({
       qrId,
-      item: { error: "Failed to fetch item" },
+      // The request got no answer, which says nothing about the code. Marking
+      // it as still owed a lookup lets a scan draft hold on to it and try
+      // again on the next visit, instead of dropping a good scan.
+      item: {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: codeTypeRef.current,
+      },
     });
   }, [qrId, setItem]);
 

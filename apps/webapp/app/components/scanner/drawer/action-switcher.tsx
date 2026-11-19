@@ -51,17 +51,18 @@ const ACTION_CONFIGS = [
 // Create a type from the array values
 export type ActionType = (typeof ACTION_CONFIGS)[number]["id"];
 
-export function ActionSwitcher() {
-  const [open, setOpen] = useState(false);
-  const [action, setAction] = useAtom(scannerActionAtom);
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const isLoading = useDisabled();
+/**
+ * The scanner actions the signed-in user's role may use, in menu order.
+ *
+ * Shared by the switcher's menu and by the scanner route, which only returns
+ * to a remembered action when it is still one the user may use.
+ *
+ * @returns The ids of the permitted actions
+ */
+export function useAvailableScannerActions(): ActionType[] {
   const roles = useOrganizationRoles();
 
-  // Filter actions based on user permissions
-  const availableActions = useMemo(
+  return useMemo(
     () =>
       ACTION_CONFIGS.filter(({ permissionEntity, permissionAction }) =>
         userHasPermission({
@@ -72,6 +73,18 @@ export function ActionSwitcher() {
       ).map((config) => config.id),
     [roles]
   );
+}
+
+export function ActionSwitcher() {
+  const [open, setOpen] = useState(false);
+  const [action, setAction] = useAtom(scannerActionAtom);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const isLoading = useDisabled();
+
+  // Filter actions based on user permissions
+  const availableActions = useAvailableScannerActions();
 
   const filteredActions = useMemo(() => {
     if (!searchQuery) return availableActions;

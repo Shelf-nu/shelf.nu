@@ -115,4 +115,39 @@ describe("GET /api/get-scanned-barcode/:value records the scan", () => {
 
     expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
   });
+
+  it("answers an unknown barcode with a 4xx, so a scan draft lets it go", async () => {
+    mockGetBarcodeByValue.mockResolvedValue(null);
+
+    expect(await resolve("NOPE")).toBe(404);
+  });
+
+  it("answers a barcode linked to nothing with a 4xx", async () => {
+    mockGetBarcodeByValue.mockResolvedValue({
+      id: "barcode-1",
+      value: "BC-0042",
+      assetId: null,
+      kitId: null,
+      asset: null,
+      kit: null,
+    });
+
+    expect(await resolve("BC-0042")).toBe(404);
+  });
+
+  /**
+   * A row put back from a scan draft looks its code up again. Nobody scanned
+   * it just now, so scan history must not say they did.
+   */
+  it("records nothing for a lookup restored from a scan draft", async () => {
+    expect(await resolve("BC-0042", "?restored=1")).toBe(200);
+
+    expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
+  });
+
+  it("still records a fresh scan when the param carries anything else", async () => {
+    expect(await resolve("BC-0042", "?restored=0")).toBe(200);
+
+    expect(mockRecordScanNonFatal).toHaveBeenCalledTimes(1);
+  });
 });

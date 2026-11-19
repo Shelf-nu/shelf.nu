@@ -103,11 +103,23 @@ function tokenFor(inviteId: string, secret: string = INVITE_TOKEN_SECRET) {
   return jwt.sign({ id: inviteId }, secret, { expiresIn: "7d" });
 }
 
-/** Invokes the action for `/accept-invite/:inviteId` with a token in the body. */
-function accept({ inviteId, token }: { inviteId: string; token: string }) {
+/**
+ * Invokes the action for `/accept-invite/:inviteId` with a token in the body,
+ * and any extra request headers.
+ */
+function accept({
+  inviteId,
+  token,
+  headers = {},
+}: {
+  inviteId: string;
+  token: string;
+  headers?: Record<string, string>;
+}) {
   return action({
     request: new Request(`https://app.shelf.nu/accept-invite/${inviteId}`, {
       method: "POST",
+      headers,
       body: new URLSearchParams({ token }),
     }),
     params: { inviteId },
@@ -131,6 +143,10 @@ describe("accept-invite action", () => {
       organizationId: "org-1",
       inviteeEmail: "invitee@example.com",
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("refuses a token naming a different invite than the URL", async () => {
@@ -192,7 +208,28 @@ describe("accept-invite action", () => {
 
     expect(signInWithEmail).toHaveBeenCalledWith(
       "invitee@example.com",
-      expect.any(String)
+      expect.any(String),
+      { clientIp: null }
+    );
+  });
+
+  it("passes the visitor's address to Supabase when it signs the invitee in", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+
+    await accept({
+      inviteId: "real-invite",
+      token: tokenFor("real-invite"),
+      headers: { "X-Forwarded-For": "203.0.113.7" },
+    });
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(signInWithEmail).toHaveBeenCalledWith(
+      "invitee@example.com",
+      expect.any(String),
+      { clientIp: "203.0.113.7" }
     );
   });
 

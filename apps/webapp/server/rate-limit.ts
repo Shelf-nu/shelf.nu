@@ -391,16 +391,14 @@ export const appLoaderRateLimit = (limit = 60) =>
  * many addresses; a Cloudflare edge rule is the hard ceiling, as with
  * {@link mobileIpRateLimit}.
  *
- * **The bucket is coarser than one caller.** `getClientIp` trusts the edge
- * header, which behind Cloudflare is the Cloudflare address rather than the end
- * user's, so in production one bucket covers everyone arriving through the same
- * edge. `client-ip.ts` calls that acceptable because IP is only a fallback
- * behind a signed-session key, and this limiter has no session to fall back
- * from, so the coarseness is load-bearing here: a tight ceiling would throttle
- * unrelated visitors. Self-hosted, where the proxy sets `X-Forwarded-For`, the
- * bucket is per client.
+ * **The bucket can be coarser than one caller.** `getClientIp` keys by the
+ * visitor's address when the request is from Cloudflare's edge or a trusted
+ * proxy, but falls back to the edge address it was given otherwise, and many
+ * visitors (an office, a mobile carrier) share one address anyway. This
+ * limiter has no session to key by instead, so a tight ceiling would throttle
+ * unrelated visitors.
  *
- * So the ceiling is set at "clearly abnormal for one edge address" rather than
+ * So the ceiling is set at "clearly abnormal for one address" rather than
  * tight, and the body bound
  * ({@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES}) is what protects memory. Clipping
  * during a genuine error storm costs duplicates rather than the signal, since

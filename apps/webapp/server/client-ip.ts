@@ -1,43 +1,52 @@
 import type { Context } from "hono";
 
+import {
+  getClientIpFromHeaders,
+  getTrustedProxyHops,
+  getUnverifiedForwardedIp,
+  rateLimitKeyForIp,
+} from "~/utils/client-ip.server";
+
 /**
  * Returns the client IP for a request, for use as a rate-limit bucket key.
  *
- * The trusted header depends on where we run, so we branch on the `FLY_APP_NAME`
- * runtime marker FIRST and trust only that environment's header — never the
- * other, which would be client-spoofable:
+ * Which header is trusted (Fly edge, Cloudflare behind Fly, or a self-hosted
+ * proxy's `X-Forwarded-For`) is decided by `getClientIpFromHeaders`; see that
+ * file for the rules.
  *
- * - **On Fly** (`FLY_APP_NAME` set): trust only `Fly-Client-IP`, which the Fly
- *   edge sets on every request and strips from client input, so it cannot be
- *   forged. `X-Forwarded-For` is ignored entirely.
- * - **Off Fly** (self-hosted behind a trusted reverse proxy — Docker, etc. — or
- *   local dev): there is no Fly edge, so `Fly-Client-IP` would itself be just a
- *   client-supplied header and must NOT be trusted (an attacker could rotate it
- *   to mint a fresh rate-limit bucket per request). Fall back to the leftmost
- *   `X-Forwarded-For`; the operator's proxy is responsible for setting a
- *   trustworthy value.
+ * Off Fly without `TRUSTED_PROXY_HOPS`, it falls back to the leftmost
+ * `X-Forwarded-For` (see `getUnverifiedForwardedIp`): good enough to keep
+ * ordinary visitors in separate in-memory buckets, never forwarded anywhere.
+ * With `TRUSTED_PROXY_HOPS` set there is no fallback: a request whose chain
+ * cannot be resolved gets `"unknown"`.
+ *
+ * IPv6 addresses count by their /64 (see `rateLimitKeyForIp`), since one
+ * visitor usually holds the whole range.
  *
  * `"unknown"` is the last-resort key; it collapses to a single shared bucket,
  * which fail-closes (misconfigured infra still gets throttled rather than waved
  * through).
  *
- * NOTE: behind Cloudflare, the trusted header is the CF/edge IP rather than the
- * end user's, so IP buckets are coarse. That is acceptable here because the
- * primary rate-limit key is the signed-session `userId` (see `appLoaderRateLimit`
- * in `./rate-limit`); IP is only a fallback. True per-user IP precision would
- * mean trusting `CF-Connecting-IP` gated by a Cloudflare-range check or origin
- * lock — deliberately out of scope.
+ * @see {@link file://./../app/utils/client-ip.server.ts}
  */
 export function getClientIp(c: Context): string {
-  // On Fly the edge sets (and sanitizes) `Fly-Client-IP`; it is the only trusted
-  // source there, and a client-supplied `X-Forwarded-For` is ignored.
-  const onFly = Boolean(process.env.FLY_APP_NAME);
-  if (onFly) {
-    return c.req.header("fly-client-ip")?.trim() || "unknown";
-  }
+  const ip = resolveBucketIp(c.req.raw.headers);
+  return ip ? rateLimitKeyForIp(ip) : "unknown";
+}
 
-  // Off Fly, `Fly-Client-IP` would be client-spoofable, so it is NOT consulted.
-  // Trust only the proxy-set leftmost `X-Forwarded-For` (self-host/local dev).
-  const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || "unknown";
+/**
+ * The address a request's rate-limit bucket is keyed by, before IPv6
+ * addresses are grouped by their /64.
+ *
+ * @param headers - The incoming request's headers
+ */
+function resolveBucketIp(headers: Headers): string | null {
+  const verified = getClientIpFromHeaders(headers);
+  if (verified) return verified;
+  // On Fly the edge headers are the only trusted source; never fall back.
+  if (process.env.FLY_APP_NAME) return null;
+  // An operator who set TRUSTED_PROXY_HOPS named the only trusted entry; a
+  // chain too short to hold it gets the shared bucket, never a client value.
+  if (getTrustedProxyHops() !== null) return null;
+  return getUnverifiedForwardedIp(headers);
 }

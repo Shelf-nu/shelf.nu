@@ -41,6 +41,7 @@ import {
 import { exchangeSsoCode } from "~/modules/auth/sso-pkce.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import {
   clearSsoCodeVerifier,
   mobilePkceChallengeCookie,
@@ -117,6 +118,7 @@ export async function action({ request }: ActionFunctionArgs) {
           codeVerifier: await ssoCodeVerifierCookie.parse(
             request.headers.get("Cookie")
           ),
+          clientIp: getClientIpFromHeaders(request.headers),
         });
         // Any Supabase session would pass the steps below, so refuse one that
         // was not obtained through SSO before anything is provisioned or synced.

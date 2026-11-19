@@ -160,6 +160,10 @@ export default function AddAssetsKitsToLocationDrawer({
 
   return (
     <ConfigurableDrawer
+      savedCheck={{
+        to: `/locations/${location.id}`,
+        label: "Open the location",
+      }}
       schema={addScannedAssetsOrKitsToLocationSchema}
       /**
        * Add-only submission: the scanned asset ids, scanned kit ids and
