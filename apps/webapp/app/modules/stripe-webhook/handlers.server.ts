@@ -101,6 +101,57 @@ async function syncBundledAddons({
 }
 
 /**
+ * Switches a subscription's add-ons off in the workspace it was linked to
+ * before this update, when the update moved it to another workspace or
+ * unlinked it (its `metadata.organizationId` changed).
+ *
+ * An admin links a subscription by editing `metadata.organizationId` in
+ * Stripe, and may correct a wrong pick the same way. The new workspace gets
+ * the add-ons through the usual update path; the old one has to lose them
+ * here, or both workspaces keep a paid add-on. The add-on handlers keep the
+ * flag on while another live subscription of the customer still carries the
+ * add-on for the old workspace.
+ *
+ * @param args.event - The `customer.subscription.updated` event
+ * @param args.subscription - The subscription from the event
+ * @param args.hasAuditAddon - Whether the subscription carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the subscription carries a Barcodes item
+ */
+async function disableAddonsInPreviousWorkspace({
+  event,
+  subscription,
+  hasAuditAddon,
+  hasBarcodeAddon,
+}: {
+  event: Stripe.Event;
+  subscription: Stripe.Subscription;
+  hasAuditAddon: boolean;
+  hasBarcodeAddon: boolean;
+}) {
+  // Stripe lists only the changed metadata keys here, with their old values.
+  const previous = event.data.previous_attributes as
+    | { metadata?: Stripe.Metadata }
+    | undefined;
+  const organizationId = previous?.metadata?.organizationId;
+  if (!organizationId) return;
+  if (organizationId === subscription.metadata?.organizationId) return;
+
+  // The cancellation event type: it switches the flag off unless another
+  // live subscription still covers that workspace.
+  const eventType = "customer.subscription.deleted";
+  if (hasAuditAddon) {
+    await handleAuditAddonWebhook({ eventType, subscription, organizationId });
+  }
+  if (hasBarcodeAddon) {
+    await handleBarcodeAddonWebhook({
+      eventType,
+      subscription,
+      organizationId,
+    });
+  }
+}
+
+/**
  * Switches off the add-ons carried by a subscription whose invoice went
  * overdue.
  *
@@ -968,6 +1019,13 @@ export async function handleSubscriptionUpdated(
     hasAuditAddon,
     hasBarcodeAddon,
   } = await getDataFromStripeEvent(event);
+
+  await disableAddonsInPreviousWorkspace({
+    event,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
 
   if (
     isAddonSubscription({

@@ -1185,6 +1185,110 @@ describe("handleSubscriptionUpdated", () => {
     expect(organizationIdsWritten()).toEqual(["org-9"]);
   });
 
+  describe("when an admin moves the subscription to another workspace", () => {
+    /** The calls that switch an add-on off, as [handler, workspace] pairs. */
+    function switchedOff() {
+      return [
+        ...mockAuditAddonWebhook.mock.calls.map((c) => ["audits", c[0]]),
+        ...mockBarcodeAddonWebhook.mock.calls.map((c) => ["barcodes", c[0]]),
+      ]
+        .filter(
+          ([, args]) => args.eventType === "customer.subscription.deleted"
+        )
+        .map(([type, args]) => [type, args.organizationId]);
+    }
+
+    it("switches the bundled add-ons off in the workspace it left", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
+            metadata: { organizationId: "org-2" },
+          }),
+          { metadata: { organizationId: "org-1" } }
+        ),
+        user
+      );
+
+      expect(switchedOff()).toEqual([
+        ["audits", "org-1"],
+        ["barcodes", "org-1"],
+      ]);
+      // The workspace it moved to gets them through the usual update path.
+      expect(mockAuditAddonWebhook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "customer.subscription.updated",
+          organizationId: "org-2",
+        })
+      );
+    });
+
+    it("switches a standalone add-on off in the workspace it left", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [AUDITS_PRODUCT],
+            metadata: { organizationId: "org-2" },
+          }),
+          { metadata: { organizationId: "org-1" } }
+        ),
+        user
+      );
+
+      expect(switchedOff()).toEqual([["audits", "org-1"]]);
+    });
+
+    it("switches the add-ons off when the workspace is removed", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            metadata: {},
+          }),
+          { metadata: { organizationId: "org-1" } }
+        ),
+        user
+      );
+
+      expect(switchedOff()).toEqual([["audits", "org-1"]]);
+    });
+
+    it("leaves other workspaces alone when the first workspace is set", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            metadata: { organizationId: "org-2" },
+          }),
+          { metadata: { organizationId: "" } }
+        ),
+        user
+      );
+
+      expect(switchedOff()).toEqual([]);
+    });
+
+    it("leaves the workspace alone when other metadata changes", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            metadata: { organizationId: "org-1", po_number: "PO-2" },
+          }),
+          { metadata: { po_number: "PO-1" } }
+        ),
+        user
+      );
+
+      expect(switchedOff()).toEqual([]);
+    });
+  });
+
   it("does not look for a workspace when a failed renewal recovers", async () => {
     mockOrgFindMany.mockResolvedValue([{ id: "org-9", name: "ZZ Test Team" }]);
 
