@@ -1,6 +1,6 @@
 # Upgrade to Supabase's new API keys
 
-Supabase is retiring its legacy API keys, the `anon` key and the `service_role` key, in early 2027. Shelf now supports the keys that replace them: a **publishable key** (`sb_publishable_...`) and a **secret key** (`sb_secret_...`).
+Supabase is retiring its legacy API keys, the `anon` key and the `service_role` key. Its [migration guide](https://supabase.com/docs/guides/getting-started/migrating-to-new-api-keys) and your project's **API Keys** page give Supabase's current schedule, so migrate by whichever date comes first: Supabase's, or Shelf's **2027-02-18** below. Shelf now supports the keys that replace them: a **publishable key** (`sb_publishable_...`) and a **secret key** (`sb_secret_...`).
 
 This guide is for anyone running their own Shelf instance. If you use Shelf at [shelf.nu](https://www.shelf.nu), there is nothing to do.
 
