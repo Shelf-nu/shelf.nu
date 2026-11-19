@@ -157,6 +157,7 @@ describe("POST /oauth/callback/mobile", () => {
     expect(exchangeSsoCode).toHaveBeenCalledWith({
       code: "auth-code",
       codeVerifier: VERIFIER,
+      clientIp: null,
     });
     // Both one-shot cookies are cleared once the code is minted.
     assertIsDataWithResponseInit(result);

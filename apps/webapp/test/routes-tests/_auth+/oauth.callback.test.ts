@@ -205,6 +205,7 @@ describe("POST /oauth/callback, sign-in started at /sso-login", () => {
     expect(exchangeSsoCode).toHaveBeenCalledWith({
       code: "auth-code",
       codeVerifier: VERIFIER,
+      clientIp: null,
     });
     expect(setSession).toHaveBeenCalledWith(callbackSession);
     expect(result).toBeInstanceOf(Response);
@@ -227,6 +228,7 @@ describe("POST /oauth/callback, sign-in started at /sso-login", () => {
     expect(exchangeSsoCode).toHaveBeenCalledWith({
       code: "forwarded-code",
       codeVerifier: null,
+      clientIp: null,
     });
     expect(setSession).not.toHaveBeenCalled();
     expect(resolveUserAndOrgForSsoCallback).not.toHaveBeenCalled();

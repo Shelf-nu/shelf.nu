@@ -28,10 +28,16 @@ import type { SupportedStorage } from "@supabase/supabase-js";
 import { createClient, isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { SERVER_URL, SUPABASE_ANON_PUBLIC, SUPABASE_URL } from "~/utils/env";
+import {
+  SERVER_URL,
+  SUPABASE_ANON_PUBLIC,
+  SUPABASE_SECRET_KEY,
+  SUPABASE_URL,
+} from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { mapAuthSession } from "./mappers.server";
+import type { VisitorIp } from "./service.server";
 
 const label: ErrorLabel = "Auth";
 
@@ -54,10 +60,19 @@ const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]{43,128}$/;
  * `storage` option and keeps the verifier where this code cannot reach it.
  * The store lives only as long as this call, so nothing is persisted.
  *
+ * Authenticates with `SUPABASE_SECRET_KEY` when set, so the visitor's IP can
+ * travel as `Sb-Forwarded-For` (Supabase reads it only with a secret key) and
+ * the per-IP token limit counts the visitor, as for every other sign-in.
+ * Without a secret key it uses the anon key and sends no IP.
+ *
  * @param codeVerifier - The verifier to exchange a code with, if any
+ * @param visitor - see `VisitorIp` in `./service.server`
  * @returns The auth client and the store it writes to
  */
-function createPkceAuthClient(codeVerifier?: string) {
+function createPkceAuthClient(
+  codeVerifier?: string,
+  { clientIp }: VisitorIp = {}
+) {
   const store = new Map<string, string>();
   if (codeVerifier) store.set(VERIFIER_ITEM, JSON.stringify(codeVerifier));
 
@@ -71,16 +86,23 @@ function createPkceAuthClient(codeVerifier?: string) {
     },
   };
 
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_PUBLIC, {
-    auth: {
-      flowType: "pkce",
-      storage,
-      storageKey: STORAGE_KEY,
-      persistSession: true,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  });
+  const headers: Record<string, string> =
+    SUPABASE_SECRET_KEY && clientIp ? { "Sb-Forwarded-For": clientIp } : {};
+  const client = createClient(
+    SUPABASE_URL,
+    SUPABASE_SECRET_KEY || SUPABASE_ANON_PUBLIC,
+    {
+      global: { headers },
+      auth: {
+        flowType: "pkce",
+        storage,
+        storageKey: STORAGE_KEY,
+        persistSession: true,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    }
+  );
 
   /** The verifier the library stored when a sign-in started, if any. */
   function storedVerifier(): unknown {
@@ -118,20 +140,26 @@ export function isCodeVerifier(value: unknown): value is string {
  * @param domain - The company domain whose SSO provider to use
  * @param options.platform - `"mobile"` lands on the native-app callback; the
  *   web callback otherwise
+ * @param options.clientIp - The visitor's IP, see `VisitorIp` in `./service.server`
  * @returns The provider URL and the code verifier
  * @throws {ShelfError} 400 when the domain has no SSO provider
  *   (not captured), or a captured error when Supabase fails to answer
  */
 export async function startSsoSignIn(
   domain: string,
-  { platform = "web" }: { platform?: "web" | "mobile" } = {}
+  {
+    platform = "web",
+    clientIp,
+  }: { platform?: "web" | "mobile" } & VisitorIp = {}
 ): Promise<{ url: string; codeVerifier: string }> {
   try {
     const redirectTo = `${SERVER_URL}/oauth/callback${
       platform === "mobile" ? "/mobile" : ""
     }`;
 
-    const { auth, storedVerifier } = createPkceAuthClient();
+    const { auth, storedVerifier } = createPkceAuthClient(undefined, {
+      clientIp,
+    });
     const { data, error } = await auth.signInWithSSO({
       domain,
       options: { redirectTo },
@@ -189,6 +217,7 @@ export function ssoSignInExpiredError(cause: unknown = null): ShelfError {
  *
  * @param args.code - The `?code=` from the callback URL
  * @param args.codeVerifier - The value of the `sso_code_verifier` cookie
+ * @param args.clientIp - The visitor's IP, see `VisitorIp` in `./service.server`
  * @returns The SSO session
  * @throws {ShelfError} 400 (not captured) when there is no verifier or
  *   Supabase refuses the pair; a captured 500 when Supabase fails to answer
@@ -196,16 +225,17 @@ export function ssoSignInExpiredError(cause: unknown = null): ShelfError {
 export async function exchangeSsoCode({
   code,
   codeVerifier,
+  clientIp,
 }: {
   code: string;
   codeVerifier: unknown;
-}): Promise<AuthSession> {
+} & VisitorIp): Promise<AuthSession> {
   if (!code || !isCodeVerifier(codeVerifier)) {
     throw ssoSignInExpiredError();
   }
 
   try {
-    const { auth } = createPkceAuthClient(codeVerifier);
+    const { auth } = createPkceAuthClient(codeVerifier, { clientIp });
     const { data, error } = await auth.exchangeCodeForSession(code);
 
     if (error) throw error;

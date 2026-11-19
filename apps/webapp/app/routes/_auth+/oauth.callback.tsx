@@ -235,6 +235,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
             const authSession = await exchangeSsoCode({
               code: form.code,
               codeVerifier,
+              clientIp: getClientIpFromHeaders(request.headers),
             });
             return await completeSsoSignIn({
               authSession,

@@ -180,7 +180,10 @@ describe("POST /sso-login", () => {
 
       const result = await action(createActionArgs({ request }));
 
-      expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", { platform });
+      expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+        platform,
+        clientIp: null,
+      });
       expect(result).toBeInstanceOf(Response);
       const response = result as Response;
       expect(response.headers.get("Location")).toBe(
@@ -222,7 +225,9 @@ describe("GET /sso-login with a default SSO domain", () => {
 
     const result = await invoke("");
 
-    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com");
+    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+      clientIp: null,
+    });
     expect(result).toBeInstanceOf(Response);
     const response = result as Response;
     expect(response.headers.get("Location")).toBe(
