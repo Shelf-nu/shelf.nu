@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { Logger } from "~/utils/logger";
 import {
   createReport,
   sendReportEmails,
@@ -29,6 +30,18 @@ import {
 // why: the only read is the QR lookup, stubbed per case below.
 vi.mock("~/database/db.server", () => ({
   db: { qr: { findUniqueOrThrow: vi.fn() } },
+}));
+
+// why: the rate-limited case asserts that a refusal is not logged again; the
+// limiter already logged it, throttled.
+vi.mock("~/utils/logger", () => ({
+  Logger: {
+    error: vi.fn(),
+    handledClientError: vi.fn(),
+    warn: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+  },
 }));
 
 // why: `createReport` writes the row and `sendReportEmails` is the behaviour
@@ -137,6 +150,12 @@ describe("contact owner", () => {
     const result = await submit({ contactOwnerRateLimited: true });
 
     expect(statusOf(result)).toBe(429);
+    expect(
+      (result as { data: { error: { message: string } } }).data.error.message
+    ).toMatch(/too many messages/i);
+    // The limiter logged the hit already; the refusal adds no log of its own.
+    expect(Logger.error).not.toHaveBeenCalled();
+    expect(Logger.handledClientError).not.toHaveBeenCalled();
     expect(db.qr.findUniqueOrThrow).not.toHaveBeenCalled();
     expect(createReport).not.toHaveBeenCalled();
     expect(sendReportEmails).not.toHaveBeenCalled();

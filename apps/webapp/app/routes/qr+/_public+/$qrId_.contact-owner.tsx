@@ -129,18 +129,22 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     /**
      * Over a contact-owner rate limit (see `contactOwnerGuard`). Refused here,
-     * before any query, so the form shows the message inline.
+     * before any query, so the form shows the message inline. Returned rather
+     * than thrown: the guard already logged the hit, throttled per bucket, and
+     * `error()` would log every refused retry again.
      */
     if (context.contactOwnerRateLimited) {
-      throw new ShelfError({
-        cause: null,
-        title: "Too many messages",
-        message:
-          "You have sent too many messages. Please wait a few minutes and try again.",
-        status: 429,
-        label: "QR",
-        shouldBeCaptured: false,
-      });
+      return data(
+        {
+          error: {
+            message:
+              "You have sent too many messages. Please wait a few minutes and try again.",
+            label: "QR" as const,
+            title: "Too many messages",
+          },
+        },
+        { status: 429 }
+      );
     }
 
     /** Query the QR and include the asset and userId for later use */
