@@ -64,3 +64,19 @@ export function normalizeRoutePath(path: string): string {
 export function isPathWithin(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
+
+/**
+ * Matches the public "contact owner" route of a QR code, normalised by
+ * {@link normalizeRoutePath}: `/qr/<qrId>/contact-owner`.
+ */
+const CONTACT_OWNER_PATH = /^\/qr\/([^/]+)\/contact-owner$/;
+
+/**
+ * The QR id a request to the public "contact owner" route is for.
+ *
+ * @param path - A path already passed through {@link normalizeRoutePath}
+ * @returns The QR id, or `null` when the path is not that route
+ */
+export function getContactOwnerQrId(path: string): string | null {
+  return CONTACT_OWNER_PATH.exec(path)?.[1] ?? null;
+}

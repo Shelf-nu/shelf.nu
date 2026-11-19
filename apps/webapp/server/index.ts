@@ -24,6 +24,7 @@ import {
 import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
 import {
   calendarFeedGuard,
+  contactOwnerGuard,
   mobileApiGuard,
   sentryTunnelGuard,
 } from "./path-guards";
@@ -189,6 +190,14 @@ export default createHonoServer<ServerEnv>({
      * cannot spend an address's budget and get real reports refused.
      */
     server.use("*", sentryTunnelGuard());
+
+    /**
+     * QR "contact owner" bounds. The form is public (below) and every
+     * submission sends Shelf email to an address the caller chooses, so it is
+     * limited per (address, QR) and per address before the action runs and
+     * before `session()`. GET is left out so opening the form costs nothing.
+     */
+    server.use("*", contactOwnerGuard());
 
     /**
      * Add session middleware

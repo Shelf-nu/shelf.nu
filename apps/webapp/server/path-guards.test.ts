@@ -17,10 +17,15 @@ import {
 } from "~/utils/constants";
 import {
   calendarFeedGuard,
+  contactOwnerGuard,
   mobileApiGuard,
   sentryTunnelGuard,
 } from "./path-guards";
-import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
+import {
+  getContactOwnerQrId,
+  normalizeRequestPath,
+  normalizeRoutePath,
+} from "./request-path";
 
 // @vitest-environment node
 
@@ -44,8 +49,12 @@ const CALENDAR_LIMIT = 60;
 /** Low tunnel ceiling so the rate tests stay short. */
 const TUNNEL_LIMIT = 5;
 
+/** Low contact-owner ceilings: per (address, QR), and per address. */
+const CONTACT_PER_QR_LIMIT = 2;
+const CONTACT_PER_IP_LIMIT = 4;
+
 /**
- * An app with the three guards mounted on `*`, as in `server/index.ts`, and a
+ * An app with the four guards mounted on `*`, as in `server/index.ts`, and a
  * handler that answers 200 for anything that gets past them.
  */
 function buildApp() {
@@ -53,6 +62,7 @@ function buildApp() {
   app.use("*", mobileApiGuard());
   app.use("*", calendarFeedGuard());
   app.use("*", sentryTunnelGuard(TUNNEL_LIMIT));
+  app.use("*", contactOwnerGuard(CONTACT_PER_QR_LIMIT, CONTACT_PER_IP_LIMIT));
   app.all("*", (c) => c.text("ok"));
   return app;
 }
@@ -251,5 +261,95 @@ describe("sentryTunnelGuard", () => {
       body: "{}",
     });
     expect(envelope.status).toBe(200);
+  });
+});
+
+describe("getContactOwnerQrId", () => {
+  it.each([
+    ["/qr/abc123/contact-owner", "abc123"],
+    ["/qr/abc123", null],
+    ["/qr/abc123/contact-owner/extra", null],
+    ["/qr//contact-owner", null],
+    ["/api/qr/abc123/contact-owner", null],
+  ])("reads %s as %s", (path, expected) => {
+    expect(getContactOwnerQrId(path)).toBe(expected);
+  });
+});
+
+describe("contactOwnerGuard", () => {
+  /** A form submission to a QR's contact-owner action. */
+  function submit(app: Hono, path: string, ip: string, method = "POST") {
+    return send(app, path, ip, {
+      method,
+      body: new URLSearchParams({ email: "a@example.com", content: "found" }),
+    });
+  }
+
+  it("counts every spelling of one QR's action in one bucket", async () => {
+    const app = buildApp();
+    const spellings = [
+      "/qr/qr-a/contact-owner",
+      "/QR/qr-a/Contact-Owner/",
+      "/qr/qr-a/contact-owner.data",
+    ];
+
+    for (const path of spellings.slice(0, CONTACT_PER_QR_LIMIT)) {
+      expect((await submit(app, path, "4.4.4.1")).status).toBe(200);
+    }
+
+    expect((await submit(app, spellings[2], "4.4.4.1")).status).toBe(429);
+    // Another visitor reporting the same QR keeps their own budget.
+    expect((await submit(app, spellings[0], "4.4.4.2")).status).toBe(200);
+  });
+
+  it("caps one address across QR ids, so rotating QRs keeps no fresh budget", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      const res = await submit(app, `/qr/qr-${i}/contact-owner`, "4.4.4.3");
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await submit(app, "/qr/qr-new/contact-owner", "4.4.4.3");
+    expect(blocked.status).toBe(429);
+  });
+
+  it("opens again once the per-QR window has passed", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4");
+    }
+    expect(
+      (await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4")).status
+    ).toBe(429);
+
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+
+    expect(
+      (await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4")).status
+    ).toBe(200);
+  });
+
+  it("does not spend the budget on opening the form", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT * 3; i++) {
+      const res = await send(app, "/qr/qr-c/contact-owner", "4.4.4.5");
+      expect(res.status).toBe(200);
+    }
+
+    expect(
+      (await submit(app, "/qr/qr-c/contact-owner", "4.4.4.5")).status
+    ).toBe(200);
+  });
+
+  it("leaves the QR's other public pages alone", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT * 3; i++) {
+      const res = await submit(app, "/qr/qr-d", "4.4.4.6");
+      expect(res.status).toBe(200);
+    }
   });
 });

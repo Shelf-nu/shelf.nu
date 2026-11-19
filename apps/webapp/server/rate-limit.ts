@@ -4,14 +4,18 @@ import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { getClientIp } from "./client-ip";
-import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
+import {
+  getContactOwnerQrId,
+  normalizeRequestPath,
+  normalizeRoutePath,
+} from "./request-path";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
 
 /**
  * How long one bucket stays silent after emitting a telemetry entry. Matches
- * every limiter's `windowMs`, so a bucket contributes at most one log per
- * limiter window.
+ * the shortest limiter `windowMs`, so a bucket contributes at most one log per
+ * minute however long its own window is.
  */
 const TELEMETRY_WINDOW_MS = 60_000;
 
@@ -226,6 +230,13 @@ const bucketKeys = {
   // its `.data` form share one bucket.
   calendarFeed: (c: Context) => `calendar:${normalizeRoutePath(c.req.path)}`,
   sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
+  // The guard only runs on the contact-owner route, so the QR id is always
+  // present; the fallback keeps the key total if it is ever mounted wider.
+  contactOwnerQr: (c: Context) =>
+    `contact-owner:ip:${getClientIp(c)}:qr:${
+      getContactOwnerQrId(normalizeRoutePath(c.req.path)) ?? "none"
+    }`,
+  contactOwnerIp: (c: Context) => `contact-owner:ip:${getClientIp(c)}`,
 };
 
 /**
@@ -450,3 +461,74 @@ export const calendarFeedRateLimit = () =>
       return c.text("Too many requests. Please try again later.", 429);
     },
   });
+
+/** Builds the 429 answer shared by the two contact-owner limiters. */
+function contactOwnerLimitHandler(
+  scope: string,
+  bucket: (c: Context) => string
+) {
+  return (c: Context) => {
+    // Anonymous route, so the bucket (address and QR id) is all there is to
+    // record. The form body carries an email address and is never logged.
+    logRateLimitHit({ scope, bucket: bucket(c), detail: c.req.path });
+
+    return c.json(
+      {
+        error: {
+          message: "Too many requests. Please try again later.",
+        },
+      },
+      429
+    );
+  };
+}
+
+/**
+ * Rate limits for the public QR "contact owner" form
+ * (`/qr/<qrId>/contact-owner`).
+ *
+ * The form needs no account, and every submission writes a `ReportFound` row
+ * and sends two Shelf emails: one to the workspace owner carrying the caller's
+ * text, one to whatever address the caller typed. Unbounded, that makes Shelf a
+ * mail relay to any inbox and lets one caller flood an owner. Two buckets:
+ *
+ * - **Per (address, QR)**: {@link perQrLimit} submissions per 10 minutes. A
+ *   finder writes once or twice; this stops one caller flooding one owner.
+ * - **Per address, across every QR**: {@link perIpLimit} submissions per hour.
+ *   QR ids are printed on labels and anyone can claim QRs in a free workspace,
+ *   so without this a caller would rotate QR ids to keep mailing one address.
+ *
+ * Keyed by `getClientIp`, so the buckets are per visitor wherever that helper
+ * can resolve one and coarser where it cannot; the ceilings are set high
+ * enough that visitors sharing an address are not throttled by a real finder.
+ * Counters are per machine (in-memory store, as {@link mobileIpRateLimit}),
+ * and a caller with many addresses is not bounded here: the Cloudflare edge
+ * rule on `POST /qr/<qrId>/contact-owner` is the cross-machine ceiling.
+ *
+ * @param perQrLimit - Submissions per (address, QR) per 10 minutes
+ * @param perIpLimit - Submissions per address per hour
+ * @returns The two limiters, per-QR first, to compose with `every`
+ */
+export const contactOwnerRateLimits = (perQrLimit = 5, perIpLimit = 20) =>
+  [
+    rateLimiter({
+      windowMs: 10 * 60_000,
+      limit: perQrLimit,
+      standardHeaders: "draft-7",
+      keyGenerator: bucketKeys.contactOwnerQr,
+      handler: contactOwnerLimitHandler(
+        "contact-owner-qr",
+        bucketKeys.contactOwnerQr
+      ),
+    }),
+    rateLimiter({
+      windowMs: 60 * 60_000,
+      limit: perIpLimit,
+      standardHeaders: "draft-7",
+      keyGenerator: bucketKeys.contactOwnerIp,
+      handler: contactOwnerLimitHandler(
+        "contact-owner-ip",
+        bucketKeys.contactOwnerIp
+      ),
+    }),
+  ] as const;
