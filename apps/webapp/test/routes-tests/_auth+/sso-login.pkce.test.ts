@@ -59,6 +59,7 @@ const { startSsoSignIn } = await import("~/modules/auth/sso-pkce.server");
 afterEach(() => {
   ssoEnv.defaultDomain = "";
   vi.mocked(startSsoSignIn).mockClear();
+  vi.unstubAllEnvs();
 });
 
 /**
@@ -180,7 +181,10 @@ describe("POST /sso-login", () => {
 
       const result = await action(createActionArgs({ request }));
 
-      expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", { platform });
+      expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+        platform,
+        clientIp: null,
+      });
       expect(result).toBeInstanceOf(Response);
       const response = result as Response;
       expect(response.headers.get("Location")).toBe(
@@ -193,6 +197,31 @@ describe("POST /sso-login", () => {
       );
     }
   );
+});
+
+describe("POST /sso-login: visitor address", () => {
+  it("passes the visitor's address to Supabase when starting the sign-in", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+    const request = new Request("http://localhost/sso-login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Forwarded-For": "203.0.113.7",
+      },
+      body: new URLSearchParams({ domain: "acme.com", platform: "web" }),
+    });
+
+    await action(createActionArgs({ request }));
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+      platform: "web",
+      clientIp: "203.0.113.7",
+    });
+  });
 });
 
 describe("the verifier cookie", () => {
@@ -222,7 +251,9 @@ describe("GET /sso-login with a default SSO domain", () => {
 
     const result = await invoke("");
 
-    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com");
+    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+      clientIp: null,
+    });
     expect(result).toBeInstanceOf(Response);
     const response = result as Response;
     expect(response.headers.get("Location")).toBe(

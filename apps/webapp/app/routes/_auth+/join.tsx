@@ -36,6 +36,7 @@ import {
 } from "~/modules/signup-intent/schema";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import {
   ShelfError,
   isZodValidationError,
@@ -146,7 +147,9 @@ export async function action({ request }: ActionFunctionArgs) {
         }
 
         // Sign up with the provided email and password
-        await signUpWithEmailPass(email, password);
+        await signUpWithEmailPass(email, password, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
 
         return redirect(
           `/otp?email=${encodeURIComponent(email)}&mode=confirm_signup`,

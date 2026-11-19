@@ -4,6 +4,7 @@ import pino from "pino";
 import { SENTRY_DSN, env } from "./env";
 import { ShelfError } from "./error";
 import { redactSensitive } from "./redact";
+import { withoutUnloggedHeaders } from "./unlogged-headers";
 
 /**
  * Fraction of handled 4xx errors to record in the Sentry log trail. Defaults
@@ -166,8 +167,8 @@ export class RequestTimeLogger {
 /**
  * Log the full context when a form submission reaches the server without the expected `intent` field.
  *
- * Excludes sensitive headers (cookies/authorization) but preserves all other request metadata and the form payload so we
- * can diagnose client issues after the fact.
+ * Excludes sensitive headers (see `UNLOGGED_HEADERS` in `./unlogged-headers`) but preserves all other request metadata and the form
+ * payload so we can diagnose client issues after the fact.
  */
 export function logMissingFormIntent({
   formData,
@@ -185,10 +186,8 @@ export function logMissingFormIntent({
     return;
   }
 
-  const safeHeaders = Object.fromEntries(
-    Array.from(request.headers.entries()).filter(
-      ([key]) => !["cookie", "authorization"].includes(key.toLowerCase())
-    )
+  const safeHeaders = withoutUnloggedHeaders(
+    Object.fromEntries(request.headers.entries())
   );
 
   const formSnapshot: Record<string, unknown> = {};

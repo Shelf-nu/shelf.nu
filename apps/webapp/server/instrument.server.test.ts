@@ -1,5 +1,6 @@
 /**
- * The ShelfError overlay merged into every captured Sentry error event.
+ * The ShelfError overlay merged into every captured Sentry error event, and
+ * the credentials scrubbed from the request Sentry attaches to it.
  *
  * `extra` is built from the error's `additionalData`, message and cause, all of
  * which can carry user-submitted values. It must not leak a credential and must
@@ -8,11 +9,16 @@
  * @see {@link file://./instrument.server.ts} `makeSentryContext`
  * @see {@link file://./../app/utils/redact.ts}
  */
+import type { Event } from "@sentry/react-router";
 import { describe, expect, it } from "vitest";
 
 import { ShelfError } from "~/utils/error";
 import { MAX_LOGGED_STRING_LENGTH } from "~/utils/redact";
-import { makeSentryContext } from "./instrument.server";
+import {
+  handleBeforeSendTransaction,
+  makeSentryContext,
+  scrubEventRequest,
+} from "./instrument.server";
 
 /** `extra` spreads arbitrary `additionalData` keys, so tests read it as a record. */
 function extraOf(error: ShelfError): Record<string, unknown> | undefined {
@@ -81,5 +87,50 @@ describe("makeSentryContext", () => {
 
     expect(JSON.stringify(extra)).not.toContain("s3cr3t");
     expect(extra?.userId).toBe("user-1");
+  });
+});
+
+describe("scrubEventRequest", () => {
+  it("drops credentials and the proxy secret from request headers, whatever their case", () => {
+    const event: Event = {
+      request: {
+        headers: {
+          Cookie: "__authSession=abc",
+          authorization: "Bearer token",
+          "X-Shelf-Proxy-Secret": "zone-secret",
+          "user-agent": "Mozilla/5.0",
+        },
+        cookies: { __authSession: "abc", sso_code_verifier: "verifier" },
+      },
+    };
+
+    scrubEventRequest(event);
+
+    expect(event.request?.headers).toEqual({ "user-agent": "Mozilla/5.0" });
+    // Parsed cookies go entirely: they hold the session and the SSO verifier.
+    expect(event.request?.cookies).toBeUndefined();
+  });
+
+  it("leaves an event without a request alone", () => {
+    const event: Event = { message: "no request" };
+    scrubEventRequest(event);
+    expect(event).toEqual({ message: "no request" });
+  });
+});
+
+describe("handleBeforeSendTransaction", () => {
+  it("scrubs the request on a transaction before it is sent", () => {
+    const transaction: Event = {
+      type: "transaction",
+      request: {
+        headers: { "x-shelf-proxy-secret": "zone-secret", accept: "*/*" },
+        cookies: { __authSession: "abc" },
+      },
+    };
+
+    const sent = handleBeforeSendTransaction(transaction);
+
+    expect(sent.request?.headers).toEqual({ accept: "*/*" });
+    expect(sent.request?.cookies).toBeUndefined();
   });
 });
