@@ -85,6 +85,10 @@ visitor:
    proxy added. Without it, Shelf sends no IP, because the rest of that header
    is written by the visitor and a script could put a new address in it on
    every attempt.
+   This is only safe when every request reaches Shelf through those proxies.
+   Do not expose the app port (3000 by default) directly: bind it to localhost
+   or a private network, or firewall it. Otherwise a visitor can connect around
+   the proxies and write the entry Shelf reads.
 
 Shelf then sends each visitor's IP to Supabase (`Sb-Forwarded-For`) on
 password sign-in, sign-up, one-time codes, password reset and email change.

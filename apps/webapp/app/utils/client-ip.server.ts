@@ -24,7 +24,8 @@
  *   entry that many places from the right, the one the operator's outermost
  *   proxy added. Entries further left came from the client and can say
  *   anything. Without the setting there is no trustworthy answer, so the result
- *   is null. `Fly-Client-IP` and `CF-Connecting-IP` are never read here,
+ *   is null. The setting is only sound when the app port is reachable solely
+ *   through those proxies. `Fly-Client-IP` and `CF-Connecting-IP` are never read here,
  *   because without the Fly edge either one is just a header the client chose.
  *
  * @see {@link file://./../../server/client-ip.ts}

@@ -29,7 +29,8 @@ function onFlyBehindOwnZone() {
 }
 
 afterEach(() => {
-  // why: each case picks Fly or self-hosted through FLY_APP_NAME.
+  // why: each case picks Fly or self-hosted through FLY_APP_NAME and pins
+  // TRUSTED_PROXY_HOPS, so the shell's own environment cannot leak in.
   vi.unstubAllEnvs();
 });
 
@@ -121,6 +122,7 @@ describe("getClientIpFromHeaders on Fly", () => {
 describe("getClientIpFromHeaders self-hosted", () => {
   it("knows nothing without TRUSTED_PROXY_HOPS, because the client writes X-Forwarded-For", () => {
     vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
     const headers = new Headers({ "X-Forwarded-For": `${VISITOR}, 10.0.0.5` });
     expect(getClientIpFromHeaders(headers)).toBeNull();
   });
