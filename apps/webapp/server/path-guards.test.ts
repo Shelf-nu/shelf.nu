@@ -21,6 +21,7 @@ import {
   mobileApiGuard,
   sentryTunnelGuard,
 } from "./path-guards";
+import { CONTACT_OWNER_LIMITED_KEY } from "./rate-limit";
 import {
   getContactOwnerQrId,
   normalizeRequestPath,
@@ -55,7 +56,8 @@ const CONTACT_PER_IP_LIMIT = 4;
 
 /**
  * An app with the four guards mounted on `*`, as in `server/index.ts`, and a
- * handler that answers 200 for anything that gets past them.
+ * handler that answers 200 for anything that gets past them (429 for a
+ * contact-owner submission the guard marked, as the route's action does).
  */
 function buildApp() {
   const app = new Hono();
@@ -63,7 +65,13 @@ function buildApp() {
   app.use("*", calendarFeedGuard());
   app.use("*", sentryTunnelGuard(TUNNEL_LIMIT));
   app.use("*", contactOwnerGuard(CONTACT_PER_QR_LIMIT, CONTACT_PER_IP_LIMIT));
-  app.all("*", (c) => c.text("ok"));
+  // Stands in for the contact-owner action, which refuses a submission the
+  // guard marked as over its limit.
+  app.all("*", (c) =>
+    c.get(CONTACT_OWNER_LIMITED_KEY) === true
+      ? c.text("limited", 429)
+      : c.text("ok")
+  );
   return app;
 }
 
@@ -342,6 +350,50 @@ describe("contactOwnerGuard", () => {
     expect(
       (await submit(app, "/qr/qr-c/contact-owner", "4.4.4.5")).status
     ).toBe(200);
+  });
+
+  it("reopens the per-address budget after an hour, and a refused request creates no per-QR count", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      await submit(app, `/qr/qr-h${i}/contact-owner`, "4.4.4.7");
+    }
+    // Refused by the per-address bucket; the per-QR bucket must not count it.
+    expect(
+      (await submit(app, "/qr/qr-fresh/contact-owner", "4.4.4.7")).status
+    ).toBe(429);
+
+    vi.advanceTimersByTime(60 * 60_000 + 1);
+
+    // A full per-QR budget remains for the QR the refused request named.
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      const res = await submit(app, "/qr/qr-fresh/contact-owner", "4.4.4.7");
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("caps the QR id kept in a bucket key, so a long id is still one bucket", async () => {
+    const app = buildApp();
+    const longId = "a".repeat(5_000);
+
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      await submit(app, `/qr/${longId}${i}/contact-owner`, "4.4.4.8");
+    }
+
+    // Ids differing only past the cap share one per-QR bucket.
+    expect(
+      (await submit(app, `/qr/${longId}x/contact-owner`, "4.4.4.8")).status
+    ).toBe(429);
+  });
+
+  it("reports only the per-address budget in the RateLimit headers", async () => {
+    const app = buildApp();
+
+    const res = await submit(app, "/qr/qr-hdr/contact-owner", "4.4.4.9");
+
+    expect(res.headers.get("RateLimit-Policy")).toBe(
+      `${CONTACT_PER_IP_LIMIT};w=3600`
+    );
   });
 
   it("off Fly without trusted proxies, a rotated X-Forwarded-For buys no fresh budget", async () => {

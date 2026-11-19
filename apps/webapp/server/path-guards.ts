@@ -182,6 +182,6 @@ export function contactOwnerGuard(
   perQrLimit?: number,
   perIpLimit?: number
 ): MiddlewareHandler {
-  const [perQr, perIp] = contactOwnerRateLimits(perQrLimit, perIpLimit);
+  const [perIp, perQr] = contactOwnerRateLimits(perQrLimit, perIpLimit);
   return guardWhen(isContactOwnerSubmission, every(perIp, perQr));
 }

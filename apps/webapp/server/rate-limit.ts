@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, Next } from "hono";
 import { rateLimiter } from "hono-rate-limiter";
 import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
@@ -211,6 +211,13 @@ function logRateLimitHit({
 }
 
 /**
+ * Longest QR id kept in a per-QR bucket key. Real ids are cuids, far shorter;
+ * the cap keeps a key small whatever id a caller puts in the path. Two ids
+ * that share this prefix share a bucket, which only makes the limit stricter.
+ */
+const CONTACT_OWNER_QR_KEY_MAX = 64;
+
+/**
  * Bucket-key builders, shared between each limiter's `keyGenerator` and its
  * 429 `handler`.
  *
@@ -232,10 +239,11 @@ const bucketKeys = {
   sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
   // The guard only runs on the contact-owner route, so the QR id is always
   // present; the fallback keeps the key total if it is ever mounted wider.
+  // The id is capped (CONTACT_OWNER_QR_KEY_MAX) because the caller writes it.
   contactOwnerQr: (c: Context) =>
-    `contact-owner:ip:${getVerifiedClientIp(c)}:qr:${
+    `contact-owner:ip:${getVerifiedClientIp(c)}:qr:${(
       getContactOwnerQrId(normalizeRoutePath(c.req.path)) ?? "none"
-    }`,
+    ).slice(0, CONTACT_OWNER_QR_KEY_MAX)}`,
   contactOwnerIp: (c: Context) => `contact-owner:ip:${getVerifiedClientIp(c)}`,
 };
 
@@ -460,25 +468,34 @@ export const calendarFeedRateLimit = () =>
     },
   });
 
-/** Builds the 429 answer shared by the two contact-owner limiters. */
+/**
+ * Context key the contact-owner limiters set on a submission that is over
+ * either limit. The request still reaches the route, whose action reads it
+ * (as `contactOwnerRateLimited` on the load context) and answers 429 before
+ * any query, so the form shows the error inline and keeps the typed message.
+ */
+export const CONTACT_OWNER_LIMITED_KEY = "shelf.contactOwnerLimited";
+
+/**
+ * Builds the over-limit handler shared by the two contact-owner limiters: log
+ * the hit, mark the request, and let it through to the route's action.
+ */
 function contactOwnerLimitHandler(
   scope: string,
   bucket: (c: Context) => string
 ) {
-  return (c: Context) => {
+  return (c: Context, next: Next) => {
     // Anonymous route, so the bucket (address and QR id) is all there is to
     // record. The form body carries an email address and is never logged.
     logRateLimitHit({ scope, bucket: bucket(c), detail: c.req.path });
-
-    return c.json(
-      {
-        error: {
-          message: "Too many requests. Please try again later.",
-        },
-      },
-      429
-    );
+    c.set(CONTACT_OWNER_LIMITED_KEY, true);
+    return next();
   };
+}
+
+/** Whether an earlier contact-owner limiter already refused this request. */
+function isContactOwnerLimited(c: Context): boolean {
+  return c.get(CONTACT_OWNER_LIMITED_KEY) === true;
 }
 
 /**
@@ -496,6 +513,15 @@ function contactOwnerLimitHandler(
  *   QR ids are printed on labels and anyone can claim QRs in a free workspace,
  *   so without this a caller would rotate QR ids to keep mailing one address.
  *
+ * The guard runs the per-address limiter first, and the per-QR limiter skips a
+ * request the per-address one refused, so a blocked address never creates a
+ * per-QR key. Every submission, including one the per-QR limiter then refuses,
+ * counts once toward the hourly per-address budget.
+ *
+ * An over-limit submission is marked with {@link CONTACT_OWNER_LIMITED_KEY}
+ * rather than answered here; the route's action refuses it with a 429 before
+ * any query.
+ *
  * Keyed by `getVerifiedClientIp`, never by a client-written
  * `X-Forwarded-For`: a caller able to choose its own key would get a fresh
  * budget per request. The buckets are per visitor wherever a trusted source
@@ -506,22 +532,15 @@ function contactOwnerLimitHandler(
  * and a caller with many addresses is not bounded here: the Cloudflare edge
  * rule on `POST /qr/<qrId>/contact-owner` is the cross-machine ceiling.
  *
+ * Only the per-address limiter sets the `RateLimit` headers, so a client sees
+ * one budget rather than the second limiter overwriting the first.
+ *
  * @param perQrLimit - Submissions per (address, QR) per 10 minutes
  * @param perIpLimit - Submissions per address per hour
- * @returns The per-QR and per-address limiters; the guard runs per-address first
+ * @returns The per-address and per-QR limiters, in the order the guard runs them
  */
 export const contactOwnerRateLimits = (perQrLimit = 5, perIpLimit = 20) =>
   [
-    rateLimiter({
-      windowMs: 10 * 60_000,
-      limit: perQrLimit,
-      standardHeaders: "draft-7",
-      keyGenerator: bucketKeys.contactOwnerQr,
-      handler: contactOwnerLimitHandler(
-        "contact-owner-qr",
-        bucketKeys.contactOwnerQr
-      ),
-    }),
     rateLimiter({
       windowMs: 60 * 60_000,
       limit: perIpLimit,
@@ -530,6 +549,17 @@ export const contactOwnerRateLimits = (perQrLimit = 5, perIpLimit = 20) =>
       handler: contactOwnerLimitHandler(
         "contact-owner-ip",
         bucketKeys.contactOwnerIp
+      ),
+    }),
+    rateLimiter({
+      windowMs: 10 * 60_000,
+      limit: perQrLimit,
+      standardHeaders: false,
+      skip: isContactOwnerLimited,
+      keyGenerator: bucketKeys.contactOwnerQr,
+      handler: contactOwnerLimitHandler(
+        "contact-owner-qr",
+        bucketKeys.contactOwnerQr
       ),
     }),
   ] as const;

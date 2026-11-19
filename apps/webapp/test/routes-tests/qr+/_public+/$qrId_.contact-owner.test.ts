@@ -18,7 +18,10 @@ import {
   sendReportEmails,
 } from "~/modules/report-found/service.server";
 
-import { action } from "~/routes/qr+/_public+/$qrId_.contact-owner";
+import {
+  action,
+  REPORT_CONTENT_MAX_LENGTH,
+} from "~/routes/qr+/_public+/$qrId_.contact-owner";
 
 // @vitest-environment node
 
@@ -39,20 +42,28 @@ const ORG_WITH_OWNER = {
   organization: { owner: { id: "user-owner", email: "owner@example.com" } },
 };
 
-async function submit() {
+async function submit({
+  content = "Found this on the train",
+  contactOwnerRateLimited = false,
+}: { content?: string; contactOwnerRateLimited?: boolean } = {}) {
   return action(
     createActionArgs({
       request: new Request("http://localhost/qr/qr-1/contact-owner", {
         method: "POST",
-        body: new URLSearchParams({
-          email: "finder@example.com",
-          content: "Found this on the train",
-        }),
+        body: new URLSearchParams({ email: "finder@example.com", content }),
       }),
       params: { qrId: "qr-1" },
-      context: { getSession: () => ({ userId: null }) } as never,
+      context: {
+        getSession: () => ({ userId: null }),
+        contactOwnerRateLimited,
+      } as never,
     })
   );
+}
+
+/** The status of an action result, which is a `data()` response object. */
+function statusOf(result: unknown): number | undefined {
+  return (result as { init?: { status?: number } }).init?.status;
 }
 
 describe("contact owner", () => {
@@ -114,5 +125,33 @@ describe("contact owner", () => {
     expect(createReport).toHaveBeenCalledWith(
       expect.objectContaining({ kitId: "kit-1" })
     );
+  });
+
+  it("refuses a submission over the rate limit before any query or email", async () => {
+    const result = await submit({ contactOwnerRateLimited: true });
+
+    expect(statusOf(result)).toBe(429);
+    expect(db.qr.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(createReport).not.toHaveBeenCalled();
+    expect(sendReportEmails).not.toHaveBeenCalled();
+  });
+
+  it("refuses a message over the length cap without recording it", async () => {
+    vi.mocked(db.qr.findUniqueOrThrow).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-1",
+      kitId: null,
+      asset: { id: "asset-1", title: "Drill", ...ORG_WITH_OWNER },
+      kit: null,
+    } as never);
+
+    const result = await submit({
+      content: "x".repeat(REPORT_CONTENT_MAX_LENGTH + 1),
+    });
+
+    expect(statusOf(result)).toBe(400);
+    expect(createReport).not.toHaveBeenCalled();
+    expect(sendReportEmails).not.toHaveBeenCalled();
   });
 });

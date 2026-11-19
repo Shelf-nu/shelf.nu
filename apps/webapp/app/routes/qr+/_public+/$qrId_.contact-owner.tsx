@@ -21,6 +21,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
 import {
   assertIsPost,
   payload,
@@ -32,12 +33,24 @@ import { tw } from "~/utils/tw";
 
 export const meta = () => [{ title: appendToMetaTitle("Contact owner") }];
 
+/**
+ * Longest message a finder can send. It is emailed to the workspace owner and
+ * stored on the `ReportFound` row, so it stays the size of a note.
+ */
+export const REPORT_CONTENT_MAX_LENGTH = 2000;
+
 export const NewReportSchema = z.object({
   email: z
     .string()
     .email("Please enter a valid Email address")
     .transform((email) => email.toLowerCase()),
-  content: z.string().min(3, "Content is required"),
+  content: z
+    .string()
+    .min(3, "Content is required")
+    .max(
+      REPORT_CONTENT_MAX_LENGTH,
+      `Please keep your message under ${REPORT_CONTENT_MAX_LENGTH} characters`
+    ),
 });
 
 export const QR_SELECT_FOR_REPORT = {
@@ -100,11 +113,27 @@ export async function loader({ params }: LoaderFunctionArgs) {
   }
 }
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ request, params, context }: ActionFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
   try {
     assertIsPost(request);
+
+    /**
+     * Over a contact-owner rate limit (see `contactOwnerGuard`). Refused here,
+     * before any query, so the form shows the message inline.
+     */
+    if (context.contactOwnerRateLimited) {
+      throw new ShelfError({
+        cause: null,
+        title: "Too many messages",
+        message:
+          "You have sent too many messages. Please wait a few minutes and try again.",
+        status: 429,
+        label: "QR",
+        shouldBeCaptured: false,
+      });
+    }
 
     /** Query the QR and include the asset and userId for later use */
     const qr = await db.qr
@@ -186,6 +215,13 @@ export default function ContactOwner() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const isReported = data && !data.error;
+  /** Server-side errors, shown when client-side validation is bypassed */
+  const validationErrors = getValidationErrors<typeof NewReportSchema>(
+    data?.error
+  );
+  /** A refusal that is not about one field, such as the rate limit */
+  const formError =
+    data?.error && !validationErrors ? data.error.message : undefined;
   usePosition();
 
   return (
@@ -208,7 +244,9 @@ export default function ContactOwner() {
             type="email"
             autoComplete="email"
             name={zo.fields.email()}
-            error={zo.errors.email()?.message}
+            error={
+              validationErrors?.email?.message || zo.errors.email()?.message
+            }
             disabled={disabled}
             required
           />
@@ -217,7 +255,10 @@ export default function ContactOwner() {
               label="Message"
               inputType="textarea"
               name={zo.fields.content()}
-              error={zo.errors.content()?.message}
+              error={
+                validationErrors?.content?.message ||
+                zo.errors.content()?.message
+              }
               disabled={disabled}
             />
             <p className="mt-2.5 text-center text-gray-600">
@@ -225,6 +266,11 @@ export default function ContactOwner() {
               the asset can contact you.
             </p>
           </div>
+          {formError ? (
+            <p className="mb-3 text-sm text-error-500" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <Button type="submit" width="full" disabled={disabled}>
             Send
           </Button>
