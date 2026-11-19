@@ -20,7 +20,7 @@
 // @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
 // why: importing the route pulls the Prisma client transitively; the action's
@@ -106,9 +106,11 @@ const VERIFIER = "v".repeat(56);
  * action.
  *
  * @param fields - the form fields; Supabase's code unless given
+ * @param headers - any further request headers, such as X-Forwarded-For
  */
 async function postCallback(
-  fields: Record<string, string> = { code: "auth-code" }
+  fields: Record<string, string> = { code: "auth-code" },
+  headers: Record<string, string> = {}
 ) {
   const cookie = (await ssoCodeVerifierCookie.serialize(VERIFIER)).split(
     ";"
@@ -118,6 +120,7 @@ async function postCallback(
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       Cookie: cookie,
+      ...headers,
     },
     body: new URLSearchParams(fields),
   });
@@ -146,6 +149,10 @@ beforeEach(() => {
   vi.mocked(createMobileAuthCode).mockResolvedValue("plain-code");
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /oauth/callback/mobile", () => {
   it("trades Supabase's code with this browser's verifier", async () => {
     vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
@@ -164,6 +171,25 @@ describe("POST /oauth/callback/mobile", () => {
     const cleared = new Headers(result.init?.headers).getSetCookie().join("\n");
     expect(cleared).toMatch(/sso_code_verifier=;/);
     expect(cleared).toMatch(/mobile_pkce_challenge=;/);
+  });
+
+  it("passes the visitor's address to Supabase with the code exchange", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+      user: { id: callbackSession.userId },
+    } as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>);
+
+    await postCallback(undefined, { "X-Forwarded-For": "203.0.113.7" });
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(exchangeSsoCode).toHaveBeenCalledWith({
+      code: "auth-code",
+      codeVerifier: VERIFIER,
+      clientIp: "203.0.113.7",
+    });
   });
 
   it("refuses tokens posted in place of a code", async () => {

@@ -80,11 +80,7 @@ if (SENTRY_DSN) {
      * must NOT go through the error-event filter: a transaction carries no
      * exception, and that filter drops every event without one.
      */
-    beforeSendTransaction(event) {
-      // Sentry copies request headers onto transactions too.
-      scrubEventRequest(event);
-      return maskEmailsInSentryPayload(event);
-    },
+    beforeSendTransaction: handleBeforeSendTransaction,
     beforeSend(event, hint) {
       const kept = handleBeforeSendError(event, hint);
       return kept && maskEmailsInSentryPayload(kept);
@@ -101,16 +97,29 @@ if (SENTRY_DSN) {
 }
 
 /**
- * Removes credentials from the request Sentry attached to an error event, in
- * place: the `__authSession` cookie, and every `UNLOGGED_HEADERS` header
- * (raw `cookie`, `authorization`, the Cloudflare proxy secret). Sentry's SDK
- * copies every incoming request header onto error events.
+ * Hook for performance transactions: scrubs credentials from the request
+ * (see {@link scrubEventRequest}) and masks email addresses.
  *
- * @param event - The error event about to be sent
+ * @param event - The transaction about to be sent
+ * @returns The transaction to send
+ */
+export function handleBeforeSendTransaction<E extends Event>(event: E): E {
+  scrubEventRequest(event);
+  return maskEmailsInSentryPayload(event);
+}
+
+/**
+ * Removes credentials from the request Sentry attached to an event, in place:
+ * every parsed cookie (the session and the SSO verifier and challenge among
+ * them), and every `UNLOGGED_HEADERS` header (raw `cookie`, `authorization`,
+ * the Cloudflare proxy secret). Sentry's SDK copies the incoming request's
+ * headers and cookies onto errors and transactions alike.
+ *
+ * @param event - The event about to be sent
  */
 export function scrubEventRequest(event: Event): void {
   if (event.request?.cookies) {
-    event.request.cookies["__authSession"] = "hidden";
+    delete event.request.cookies;
   }
   if (event.request?.headers) {
     event.request.headers = withoutUnloggedHeaders(event.request.headers);

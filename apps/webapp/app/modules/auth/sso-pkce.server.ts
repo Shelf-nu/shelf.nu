@@ -27,7 +27,10 @@
 import type { SupportedStorage } from "@supabase/supabase-js";
 import { createClient, isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
-import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  getSupabaseAdmin,
+  visitorIpHeaders,
+} from "~/integrations/supabase/client";
 import {
   SERVER_URL,
   SUPABASE_ANON_PUBLIC,
@@ -86,8 +89,7 @@ function createPkceAuthClient(
     },
   };
 
-  const headers: Record<string, string> =
-    SUPABASE_SECRET_KEY && clientIp ? { "Sb-Forwarded-For": clientIp } : {};
+  const headers = visitorIpHeaders(clientIp);
   const client = createClient(
     SUPABASE_URL,
     SUPABASE_SECRET_KEY || SUPABASE_ANON_PUBLIC,

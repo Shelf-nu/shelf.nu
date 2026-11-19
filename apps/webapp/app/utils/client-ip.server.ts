@@ -112,6 +112,64 @@ function cameThroughOwnZone(headers: Headers): boolean {
   return timingSafeEqual(digest(received), digest(expected));
 }
 
+/** Set once the invalid-setting warning has been printed, so it prints once. */
+let warnedAboutHops = false;
+
+/**
+ * The number of reverse proxies in front of Shelf, from `TRUSTED_PROXY_HOPS`.
+ *
+ * A value that is not a positive integer (`0`, `none`, `two`) counts as unset,
+ * with a one-time warning, so a typo behaves like an instance without the
+ * setting instead of silently changing how visitors are told apart.
+ *
+ * @returns The hop count, or null when unset or invalid
+ */
+export function getTrustedProxyHops(): number | null {
+  const raw = process.env.TRUSTED_PROXY_HOPS?.trim();
+  if (!raw) return null;
+  const hops = Number(raw);
+  if (Number.isInteger(hops) && hops >= 1) return hops;
+  if (!warnedAboutHops) {
+    warnedAboutHops = true;
+    // why: the Logger module reads env, so it cannot be imported here
+    // eslint-disable-next-line no-console
+    console.warn(
+      `TRUSTED_PROXY_HOPS must be a positive whole number of proxies; got "${raw}". Ignoring it.`
+    );
+  }
+  return null;
+}
+
+/**
+ * Expands an IPv6 address to its eight full groups.
+ *
+ * @param ip - A valid IPv6 address without an embedded IPv4 part
+ */
+function expandIPv6(ip: string): string[] {
+  const [head, tail = ""] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const missing = ip.includes("::") ? 8 - left.length - right.length : 0;
+  return [...left, ...Array<string>(missing).fill("0"), ...right].map((group) =>
+    group.padStart(4, "0")
+  );
+}
+
+/**
+ * The key an in-memory rate limiter counts an address under.
+ *
+ * One IPv6 visitor usually holds a whole /64 and can pick a new address in it
+ * for every request, so IPv6 addresses count by their /64. IPv4 addresses, and
+ * IPv6 addresses carrying an IPv4 part, count as themselves.
+ *
+ * @param ip - A valid IP address
+ * @returns The rate-limit key for that address
+ */
+export function rateLimitKeyForIp(ip: string): string {
+  if (isIP(ip) !== 6 || ip.includes(".")) return ip;
+  return `${expandIPv6(ip).slice(0, 4).join(":")}::/64`;
+}
+
 /**
  * The visitor's IP address, read from the headers trusted where the app runs
  * (see the file header).
@@ -132,8 +190,8 @@ export function getClientIpFromHeaders(headers: Headers): string | null {
     return edgeIp;
   }
 
-  const hops = Number(process.env.TRUSTED_PROXY_HOPS);
-  if (!Number.isInteger(hops) || hops < 1) return null;
+  const hops = getTrustedProxyHops();
+  if (hops === null) return null;
   const entries = headers.get("x-forwarded-for")?.split(",") ?? [];
   return asIp(entries[entries.length - hops]);
 }

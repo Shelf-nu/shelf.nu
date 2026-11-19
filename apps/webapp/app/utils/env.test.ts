@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   findWeakSigningSecrets,
   getEnv,
+  isPlaceholderValue,
   SUPABASE_SERVICE_ROLE_SUPPORT_ENDS,
   warnAboutLegacySupabaseKey,
   warnAboutWeakSigningSecrets,
@@ -293,11 +294,34 @@ describe("warnAboutLegacySupabaseKey", () => {
   it("warns, with the end date, when only the legacy service_role key is set", () => {
     const log = vi.fn();
 
-    expect(warnAboutLegacySupabaseKey({}, log)).toBe(true);
+    expect(
+      warnAboutLegacySupabaseKey({ SUPABASE_SERVICE_ROLE: "legacy" }, log)
+    ).toBe(true);
 
     const message = log.mock.calls[0][0] as string;
     expect(message).toMatch(/SUPABASE_SECRET_KEY/);
     expect(message).toContain(SUPABASE_SERVICE_ROLE_SUPPORT_ENDS);
+  });
+
+  it("treats the .env.example placeholder as no secret key", () => {
+    const log = vi.fn();
+
+    expect(
+      warnAboutLegacySupabaseKey(
+        {
+          SUPABASE_SECRET_KEY: "{SECRET_KEY}",
+          SUPABASE_SERVICE_ROLE: "legacy",
+        },
+        log
+      )
+    ).toBe(true);
+  });
+
+  it("stays quiet when neither key is set, since the server refuses to start", () => {
+    const log = vi.fn();
+
+    expect(warnAboutLegacySupabaseKey({}, log)).toBe(false);
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("stays quiet when a secret key is set", () => {
@@ -308,4 +332,17 @@ describe("warnAboutLegacySupabaseKey", () => {
     ).toBe(false);
     expect(log).not.toHaveBeenCalled();
   });
+});
+
+describe("isPlaceholderValue", () => {
+  it.each(["{SECRET_KEY}", " {SERVICE_ROLE} ", "{}"])("flags %j", (value) => {
+    expect(isPlaceholderValue(value)).toBe(true);
+  });
+
+  it.each(["sb_secret_abc", "https://{YOUR_INSTANCE_NAME}.supabase.co", ""])(
+    "accepts %j",
+    (value) => {
+      expect(isPlaceholderValue(value)).toBe(false);
+    }
+  );
 });

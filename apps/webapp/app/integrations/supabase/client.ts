@@ -42,6 +42,23 @@ function getSupabaseClient(
 
 const supabaseClient = getSupabaseClient(SUPABASE_ANON_PUBLIC);
 
+/**
+ * The header that tells Supabase Auth which visitor a server-side call acts
+ * for. Supabase reads `Sb-Forwarded-For` only on requests made with a secret
+ * key, so it is sent only when `SUPABASE_SECRET_KEY` is configured.
+ *
+ * Every server-side Supabase client that acts for a visitor builds its headers
+ * here, so the rule lives in one place.
+ *
+ * @param clientIp - The visitor's IP, from `getClientIpFromHeaders`
+ * @returns The headers to send; empty without a secret key or an IP
+ */
+function visitorIpHeaders(clientIp?: string | null): Record<string, string> {
+  return SUPABASE_SECRET_KEY && clientIp
+    ? { "Sb-Forwarded-For": clientIp }
+    : {};
+}
+
 /** Options for {@link getSupabaseAdmin}. */
 type SupabaseAdminOptions = {
   /**
@@ -78,13 +95,10 @@ function getSupabaseAdmin({ clientIp }: SupabaseAdminOptions = {}) {
     });
 
   if (SUPABASE_SECRET_KEY) {
-    return getSupabaseClient(
-      SUPABASE_SECRET_KEY,
-      clientIp ? { "Sb-Forwarded-For": clientIp } : {}
-    );
+    return getSupabaseClient(SUPABASE_SECRET_KEY, visitorIpHeaders(clientIp));
   }
 
   return getSupabaseClient(SUPABASE_SERVICE_ROLE);
 }
 
-export { getSupabaseAdmin, supabaseClient };
+export { getSupabaseAdmin, supabaseClient, visitorIpHeaders };

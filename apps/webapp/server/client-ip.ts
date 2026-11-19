@@ -2,7 +2,9 @@ import type { Context } from "hono";
 
 import {
   getClientIpFromHeaders,
+  getTrustedProxyHops,
   getUnverifiedForwardedIp,
+  rateLimitKeyForIp,
 } from "~/utils/client-ip.server";
 
 /**
@@ -18,6 +20,9 @@ import {
  * With `TRUSTED_PROXY_HOPS` set there is no fallback: a request whose chain
  * cannot be resolved gets `"unknown"`.
  *
+ * IPv6 addresses count by their /64 (see `rateLimitKeyForIp`), since one
+ * visitor usually holds the whole range.
+ *
  * `"unknown"` is the last-resort key; it collapses to a single shared bucket,
  * which fail-closes (misconfigured infra still gets throttled rather than waved
  * through).
@@ -25,13 +30,23 @@ import {
  * @see {@link file://./../app/utils/client-ip.server.ts}
  */
 export function getClientIp(c: Context): string {
-  const headers = c.req.raw.headers;
+  const ip = resolveBucketIp(c.req.raw.headers);
+  return ip ? rateLimitKeyForIp(ip) : "unknown";
+}
+
+/**
+ * The address a request's rate-limit bucket is keyed by, before IPv6
+ * addresses are grouped by their /64.
+ *
+ * @param headers - The incoming request's headers
+ */
+function resolveBucketIp(headers: Headers): string | null {
   const verified = getClientIpFromHeaders(headers);
   if (verified) return verified;
   // On Fly the edge headers are the only trusted source; never fall back.
-  if (process.env.FLY_APP_NAME) return "unknown";
+  if (process.env.FLY_APP_NAME) return null;
   // An operator who set TRUSTED_PROXY_HOPS named the only trusted entry; a
   // chain too short to hold it gets the shared bucket, never a client value.
-  if (process.env.TRUSTED_PROXY_HOPS) return "unknown";
-  return getUnverifiedForwardedIp(headers) ?? "unknown";
+  if (getTrustedProxyHops() !== null) return null;
+  return getUnverifiedForwardedIp(headers);
 }

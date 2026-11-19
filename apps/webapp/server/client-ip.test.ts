@@ -25,6 +25,7 @@ describe("getClientIp", () => {
   afterEach(() => {
     // why: tests below mutate FLY_APP_NAME via stubEnv; restore between cases.
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("on Fly, trusts Fly-Client-IP and ignores X-Forwarded-For", async () => {
@@ -75,6 +76,23 @@ describe("getClientIp", () => {
     vi.stubEnv("TRUSTED_PROXY_HOPS", "2");
     const ip = await resolve({ "X-Forwarded-For": "9.9.9.9" });
     expect(ip).toBe("unknown");
+  });
+
+  it("off Fly, an invalid TRUSTED_PROXY_HOPS behaves as if it were unset", async () => {
+    // why: the invalid value prints a one-time warning; keep test output clean
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "0");
+    const ip = await resolve({ "X-Forwarded-For": "9.9.9.9, 10.0.0.5" });
+    expect(ip).toBe("9.9.9.9");
+  });
+
+  it("counts IPv6 visitors by their /64", async () => {
+    vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
+    const one = await resolve({ "Fly-Client-IP": "2001:db8:1:2::1" });
+    const other = await resolve({ "Fly-Client-IP": "2001:db8:1:2::beef" });
+    expect(one).toBe("2001:0db8:0001:0002::/64");
+    expect(other).toBe(one);
   });
 
   it("returns 'unknown' when no usable header is present", async () => {

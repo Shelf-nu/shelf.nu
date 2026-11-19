@@ -10,8 +10,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   getClientIpFromHeaders,
+  getTrustedProxyHops,
   isCloudflareEdgeIp,
   PROXY_SECRET_HEADER,
+  rateLimitKeyForIp,
 } from "./client-ip.server";
 import { UNLOGGED_HEADERS } from "./unlogged-headers";
 
@@ -32,6 +34,7 @@ afterEach(() => {
   // why: each case picks Fly or self-hosted through FLY_APP_NAME and pins
   // TRUSTED_PROXY_HOPS, so the shell's own environment cannot leak in.
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("isCloudflareEdgeIp", () => {
@@ -174,5 +177,40 @@ describe("getClientIpFromHeaders self-hosted", () => {
 describe("the proxy secret header", () => {
   it("is never written to logs or Sentry", () => {
     expect(UNLOGGED_HEADERS).toContain(PROXY_SECRET_HEADER);
+  });
+});
+
+describe("getTrustedProxyHops", () => {
+  it.each(["1", "2", " 3 "])("reads %j as a hop count", (value) => {
+    vi.stubEnv("TRUSTED_PROXY_HOPS", value);
+    expect(getTrustedProxyHops()).toBe(Number(value.trim()));
+  });
+
+  it.each(["0", "-1", "none", "two", "1.5"])(
+    "treats %j as unset, so a typo cannot change how visitors are told apart",
+    (value) => {
+      // why: the invalid value prints a one-time warning; keep test output clean
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.stubEnv("TRUSTED_PROXY_HOPS", value);
+      expect(getTrustedProxyHops()).toBeNull();
+    }
+  );
+});
+
+describe("rateLimitKeyForIp", () => {
+  it("keeps an IPv4 address as is", () => {
+    expect(rateLimitKeyForIp(VISITOR)).toBe(VISITOR);
+  });
+
+  it("counts every address in one IPv6 /64 together", () => {
+    const a = rateLimitKeyForIp("2001:db8:1:2::1");
+    const b = rateLimitKeyForIp("2001:db8:1:2:ffff:ffff:ffff:ffff");
+    expect(a).toBe("2001:0db8:0001:0002::/64");
+    expect(b).toBe(a);
+    expect(rateLimitKeyForIp("2001:db8:1:3::1")).not.toBe(a);
+  });
+
+  it("handles a compressed address that starts with ::", () => {
+    expect(rateLimitKeyForIp("::1")).toBe("0000:0000:0000:0000::/64");
   });
 });

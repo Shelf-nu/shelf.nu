@@ -14,7 +14,11 @@ import { describe, expect, it } from "vitest";
 
 import { ShelfError } from "~/utils/error";
 import { MAX_LOGGED_STRING_LENGTH } from "~/utils/redact";
-import { makeSentryContext, scrubEventRequest } from "./instrument.server";
+import {
+  handleBeforeSendTransaction,
+  makeSentryContext,
+  scrubEventRequest,
+} from "./instrument.server";
 
 /** `extra` spreads arbitrary `additionalData` keys, so tests read it as a record. */
 function extraOf(error: ShelfError): Record<string, unknown> | undefined {
@@ -96,22 +100,37 @@ describe("scrubEventRequest", () => {
           "X-Shelf-Proxy-Secret": "zone-secret",
           "user-agent": "Mozilla/5.0",
         },
-        cookies: { __authSession: "abc", theme: "dark" },
+        cookies: { __authSession: "abc", sso_code_verifier: "verifier" },
       },
     };
 
     scrubEventRequest(event);
 
     expect(event.request?.headers).toEqual({ "user-agent": "Mozilla/5.0" });
-    expect(event.request?.cookies).toEqual({
-      __authSession: "hidden",
-      theme: "dark",
-    });
+    // Parsed cookies go entirely: they hold the session and the SSO verifier.
+    expect(event.request?.cookies).toBeUndefined();
   });
 
   it("leaves an event without a request alone", () => {
     const event: Event = { message: "no request" };
     scrubEventRequest(event);
     expect(event).toEqual({ message: "no request" });
+  });
+});
+
+describe("handleBeforeSendTransaction", () => {
+  it("scrubs the request on a transaction before it is sent", () => {
+    const transaction: Event = {
+      type: "transaction",
+      request: {
+        headers: { "x-shelf-proxy-secret": "zone-secret", accept: "*/*" },
+        cookies: { __authSession: "abc" },
+      },
+    };
+
+    const sent = handleBeforeSendTransaction(transaction);
+
+    expect(sent.request?.headers).toEqual({ accept: "*/*" });
+    expect(sent.request?.cookies).toBeUndefined();
   });
 });

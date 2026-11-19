@@ -235,6 +235,26 @@ export function warnAboutWeakSigningSecrets(
 }
 
 /**
+ * Whether a value is an unfilled template placeholder such as `{SECRET_KEY}`,
+ * as `.env.example` ships them.
+ *
+ * @param value - An environment value
+ */
+export function isPlaceholderValue(value: string): boolean {
+  return /^\{[^{}]*\}$/.test(value.trim());
+}
+
+/**
+ * The secret key when one is really configured: set, and not the
+ * `.env.example` placeholder.
+ *
+ * @param value - The raw `SUPABASE_SECRET_KEY` value
+ */
+function usableSecretKey(value: string | undefined): string | undefined {
+  return value && !isPlaceholderValue(value) ? value : undefined;
+}
+
+/**
  * The last day a release accepts `SUPABASE_SERVICE_ROLE` without
  * `SUPABASE_SECRET_KEY`. Releases after it require the secret key.
  */
@@ -248,17 +268,22 @@ export const SUPABASE_SERVICE_ROLE_SUPPORT_ENDS = "2027-02-18";
  * so its per-IP sign-in limits count the server instead of each visitor.
  * Supabase is also retiring the legacy keys.
  *
+ * Called once at server start (`server/index.ts`), not when this module loads,
+ * so builds and scripts stay quiet.
+ *
  * @param source - The environment to read (usually `process.env`)
  * @param log - Where the warning is written (`console.warn` by default)
  * @returns True when the warning was logged
  */
 export function warnAboutLegacySupabaseKey(
-  source: { SUPABASE_SECRET_KEY?: string },
+  source: { SUPABASE_SECRET_KEY?: string; SUPABASE_SERVICE_ROLE?: string },
   // why: the Logger module reads env, so it cannot be imported here
   // eslint-disable-next-line no-console
   log: (message: string) => void = console.warn
 ): boolean {
-  if (source.SUPABASE_SECRET_KEY) return false;
+  if (usableSecretKey(source.SUPABASE_SECRET_KEY)) return false;
+  // Neither key set: getEnv refuses to start the server with its own error.
+  if (!source.SUPABASE_SERVICE_ROLE) return false;
 
   log(
     [
@@ -275,8 +300,6 @@ export function warnAboutLegacySupabaseKey(
 
 if (!isBrowser) {
   warnAboutWeakSigningSecrets(process.env, process.env.NODE_ENV);
-  // why: tests run without a secret key on purpose; the warning is for operators
-  if (process.env.NODE_ENV !== "test") warnAboutLegacySupabaseKey(process.env);
 }
 
 export function initEnv() {
@@ -293,9 +316,9 @@ export const SERVER_URL = getEnv("SERVER_URL").replace(/\/+$/, "");
  * sign-in rate limits apply per visitor. Takes precedence over
  * {@link SUPABASE_SERVICE_ROLE}.
  */
-export const SUPABASE_SECRET_KEY = getEnv("SUPABASE_SECRET_KEY", {
-  isRequired: false,
-});
+export const SUPABASE_SECRET_KEY: string | undefined = usableSecretKey(
+  getEnv("SUPABASE_SECRET_KEY", { isRequired: false })
+);
 /**
  * Legacy `service_role` key. Deprecated: required only while
  * {@link SUPABASE_SECRET_KEY} is not set (see

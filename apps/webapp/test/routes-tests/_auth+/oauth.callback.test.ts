@@ -24,7 +24,7 @@
 // @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
 // why: importing the route pulls the Prisma client transitively; the action's
@@ -117,14 +117,20 @@ const VERIFIER = "v".repeat(56);
  *
  * @param fields - the form fields
  * @param cookie - the request's Cookie header, if any
+ * @param headers - any further request headers, such as X-Forwarded-For
  */
-async function post(fields: Record<string, string>, cookie?: string) {
+async function post(
+  fields: Record<string, string>,
+  cookie?: string,
+  headers: Record<string, string> = {}
+) {
   const setSession = vi.fn();
   const request = new Request("http://localhost/oauth/callback", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       ...(cookie ? { Cookie: cookie } : {}),
+      ...headers,
     },
     body: new URLSearchParams(fields),
   });
@@ -147,6 +153,18 @@ function postCallback(extraFields: Record<string, string> = {}) {
     redirectTo: "/assets",
     ...extraFields,
   });
+}
+
+/** The visitor's address as a self-hosted proxy reports it. */
+const VISITOR_IP = "203.0.113.7";
+
+/**
+ * Trusts one proxy in front of a self-hosted instance, so the proxy's
+ * X-Forwarded-For entry names the visitor. Undone in `afterEach`.
+ */
+function trustOneProxy() {
+  vi.stubEnv("FLY_APP_NAME", "");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
 }
 
 /** The Cookie header carrying this browser's verifier. */
@@ -195,6 +213,10 @@ beforeEach(() => {
   } as never);
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /oauth/callback, sign-in started at /sso-login", () => {
   it("trades the code with this browser's verifier, signs in and clears the verifier", async () => {
     const { result, setSession } = await post(
@@ -211,6 +233,24 @@ describe("POST /oauth/callback, sign-in started at /sso-login", () => {
     expect(result).toBeInstanceOf(Response);
     expect((result as Response).headers.get("Location")).toBe("/assets");
     expect(setCookies(result).join("\n")).toMatch(/sso_code_verifier=;/);
+  });
+
+  it("passes the visitor's address to Supabase with the code exchange", async () => {
+    // why: a self-hosted instance whose single proxy names the visitor.
+    trustOneProxy();
+
+    await post(
+      { intent: "code", code: "auth-code", redirectTo: "/assets" },
+      await verifierCookie(),
+      { "X-Forwarded-For": VISITOR_IP }
+    );
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(exchangeSsoCode).toHaveBeenCalledWith({
+      code: "auth-code",
+      codeVerifier: VERIFIER,
+      clientIp: VISITOR_IP,
+    });
   });
 
   it("passes no verifier when the browser holds none, and signs nobody in", async () => {
@@ -299,6 +339,26 @@ describe("POST /oauth/callback, sign-in started from the identity provider", () 
     expect(setSession).toHaveBeenCalledWith(callbackSession);
     expect((result as Response).headers.get("Location")).toBe("/assets");
     expect(setCookies(result).join("\n")).not.toMatch(/sso_code_verifier/);
+  });
+
+  it("passes the visitor's address to Supabase with the confirmed refresh", async () => {
+    // why: a self-hosted instance whose single proxy names the visitor.
+    trustOneProxy();
+
+    await post(
+      {
+        intent: "confirm",
+        accessToken: "fragment-access-token",
+        refreshToken: "client-refresh-token",
+        redirectTo: "/assets",
+      },
+      undefined,
+      { "X-Forwarded-For": VISITOR_IP }
+    );
+
+    expect(refreshAccessToken).toHaveBeenCalledWith("client-refresh-token", {
+      clientIp: VISITOR_IP,
+    });
   });
 
   it("refuses a confirmation whose refresh token belongs to another account", async () => {

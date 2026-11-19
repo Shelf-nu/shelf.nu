@@ -7,9 +7,10 @@
  * @see {@link file://./account-details.general.tsx}
  */
 import { OrganizationRoles } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
+import { refreshAccessToken } from "~/modules/auth/service.server";
 import * as userService from "~/modules/user/service.server";
 import * as rolesServer from "~/utils/roles.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -73,15 +74,37 @@ vi.mock("~/utils/sso.server", () => ({
   getConfiguredSSODomains: vi.fn().mockResolvedValue([]),
 }));
 
-const { mockGenerateLink } = vi.hoisted(() => ({
-  mockGenerateLink: vi.fn(),
-}));
-// why: starting an email change asks Supabase Auth for a code, a network call;
-// the spy records whether the change was started at all.
+const { mockGenerateLink, mockVerifyOtp, mockSignOut, mockGetSupabaseAdmin } =
+  vi.hoisted(() => {
+    const mockGenerateLink = vi.fn();
+    const mockVerifyOtp = vi.fn();
+    const mockSignOut = vi.fn();
+    return {
+      mockGenerateLink,
+      mockVerifyOtp,
+      mockSignOut,
+      mockGetSupabaseAdmin: vi.fn(
+        (_options?: { clientIp?: string | null }) => ({
+          auth: {
+            verifyOtp: mockVerifyOtp,
+            admin: { generateLink: mockGenerateLink, signOut: mockSignOut },
+          },
+        })
+      ),
+    };
+  });
+// why: starting and confirming an email change are Supabase Auth network
+// calls; the spies record whether the change was started and which visitor
+// address the client was built with.
 vi.mock("~/integrations/supabase/client", () => ({
-  getSupabaseAdmin: () => ({
-    auth: { admin: { generateLink: mockGenerateLink } },
-  }),
+  getSupabaseAdmin: mockGetSupabaseAdmin,
+}));
+
+// why: refreshing the session after an email change is a Supabase call; the
+// test asserts on what it is handed.
+vi.mock("~/modules/auth/service.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/modules/auth/service.server")>()),
+  refreshAccessToken: vi.fn(),
 }));
 
 describe("account-details.general action — updateFormatPrefs", () => {
@@ -282,6 +305,75 @@ describe("account-details.general action - initiateEmailChange SSO guard", () =>
       type: "email_change_new",
       email: "member@sso-corp.com",
       newEmail: "member@personal.com",
+    });
+  });
+});
+
+describe("account-details.general action: verifyEmailChange visitor address", () => {
+  const VISITOR_IP = "203.0.113.7";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({} as never);
+    vi.mocked(assertEmailChangeAllowed).mockResolvedValue(undefined);
+    vi.mocked(userService.getUserByID).mockResolvedValue({
+      id: "user-1",
+    } as never);
+    mockVerifyOtp.mockResolvedValue({ data: {}, error: null });
+    mockSignOut.mockResolvedValue({ error: null });
+    vi.mocked(refreshAccessToken).mockResolvedValue({
+      accessToken: "new-access-token",
+    } as never);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes the visitor's address to Supabase for the code check and the refresh", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+    const body = new URLSearchParams({
+      intent: "verifyEmailChange",
+      type: "verifyEmailChange",
+      email: "member@personal.com",
+      otp: "123456",
+    });
+
+    await action(
+      createActionArgs({
+        request: new Request("http://localhost/account-details/general", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Forwarded-For": VISITOR_IP,
+          },
+          body: body.toString(),
+        }),
+        context: {
+          getSession: () => ({
+            userId: "user-1",
+            email: "member@example.com",
+            refreshToken: "refresh-token",
+          }),
+          setSession: vi.fn(),
+        } as never,
+      })
+    );
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(mockGetSupabaseAdmin).toHaveBeenCalledWith({
+      clientIp: VISITOR_IP,
+    });
+    expect(mockVerifyOtp).toHaveBeenCalledWith({
+      email: "member@personal.com",
+      token: "123456",
+      type: "email_change",
+    });
+    expect(refreshAccessToken).toHaveBeenCalledWith("refresh-token", {
+      clientIp: VISITOR_IP,
     });
   });
 });
