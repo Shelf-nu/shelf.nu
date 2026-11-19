@@ -39,9 +39,17 @@ export const meta = () => [{ title: appendToMetaTitle("Contact owner") }];
  */
 export const REPORT_CONTENT_MAX_LENGTH = 2000;
 
+/**
+ * Longest email address a finder can give: the SMTP limit (RFC 5321). It is
+ * stored on the `ReportFound` row and written into both emails.
+ */
+export const REPORT_EMAIL_MAX_LENGTH = 254;
+
 export const NewReportSchema = z.object({
   email: z
     .string()
+    // Checked before `.email()`, so an oversized value never reaches its regex.
+    .max(REPORT_EMAIL_MAX_LENGTH, "Please enter a valid Email address")
     .email("Please enter a valid Email address")
     .transform((email) => email.toLowerCase()),
   content: z

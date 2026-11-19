@@ -476,6 +476,13 @@ export const calendarFeedRateLimit = () =>
  */
 export const CONTACT_OWNER_LIMITED_KEY = "shelf.contactOwnerLimited";
 
+declare module "hono" {
+  interface ContextVariableMap {
+    /** Set by the contact-owner limiters; see {@link CONTACT_OWNER_LIMITED_KEY} */
+    "shelf.contactOwnerLimited": boolean;
+  }
+}
+
 /**
  * Builds the over-limit handler shared by the two contact-owner limiters: log
  * the hit, mark the request, and let it through to the route's action.

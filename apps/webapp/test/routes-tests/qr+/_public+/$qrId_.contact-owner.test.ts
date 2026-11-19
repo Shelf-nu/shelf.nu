@@ -21,6 +21,7 @@ import {
 import {
   action,
   REPORT_CONTENT_MAX_LENGTH,
+  REPORT_EMAIL_MAX_LENGTH,
 } from "~/routes/qr+/_public+/$qrId_.contact-owner";
 
 // @vitest-environment node
@@ -43,14 +44,19 @@ const ORG_WITH_OWNER = {
 };
 
 async function submit({
+  email = "finder@example.com",
   content = "Found this on the train",
   contactOwnerRateLimited = false,
-}: { content?: string; contactOwnerRateLimited?: boolean } = {}) {
+}: {
+  email?: string;
+  content?: string;
+  contactOwnerRateLimited?: boolean;
+} = {}) {
   return action(
     createActionArgs({
       request: new Request("http://localhost/qr/qr-1/contact-owner", {
         method: "POST",
-        body: new URLSearchParams({ email: "finder@example.com", content }),
+        body: new URLSearchParams({ email, content }),
       }),
       params: { qrId: "qr-1" },
       context: {
@@ -148,6 +154,25 @@ describe("contact owner", () => {
 
     const result = await submit({
       content: "x".repeat(REPORT_CONTENT_MAX_LENGTH + 1),
+    });
+
+    expect(statusOf(result)).toBe(400);
+    expect(createReport).not.toHaveBeenCalled();
+    expect(sendReportEmails).not.toHaveBeenCalled();
+  });
+
+  it("refuses an email address over the length cap without recording it", async () => {
+    vi.mocked(db.qr.findUniqueOrThrow).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-1",
+      kitId: null,
+      asset: { id: "asset-1", title: "Drill", ...ORG_WITH_OWNER },
+      kit: null,
+    } as never);
+
+    const result = await submit({
+      email: `${"a".repeat(REPORT_EMAIL_MAX_LENGTH)}@example.com`,
     });
 
     expect(statusOf(result)).toBe(400);
