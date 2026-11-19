@@ -135,12 +135,12 @@ export async function createAssetsFromStock(
 
   for (let attempt = 1; ; attempt++) {
     try {
-      const { pool, created, adjustment } = await db.$transaction(
+      const { pool, created, adjustment, actor } = await db.$transaction(
         (tx) => convertInTransaction(tx, { ...input, title }),
         LONG_TRANSACTION_OPTIONS
       );
 
-      await afterCommit({ pool, created, adjustment, userId, count });
+      await afterCommit({ pool, created, adjustment, actor, userId, count });
 
       return {
         assets: created.map(({ id, title }) => ({ id, title })),
@@ -402,8 +402,11 @@ async function convertInTransaction(
     );
   }
 
-  return { pool, created, adjustment };
+  return { pool, created, adjustment, actor };
 }
+
+/** Image copies run this many at a time, so a full batch stays well inside a request. */
+const IMAGE_COPY_CONCURRENCY = 5;
 
 /**
  * Everything after the commit, best effort: the location timelines, the
@@ -414,12 +417,14 @@ async function afterCommit({
   pool,
   created,
   adjustment,
+  actor,
   userId,
   count,
 }: {
   pool: Pool;
   created: Created[];
   adjustment: Awaited<ReturnType<typeof applyQuantityAdjustment>>;
+  actor: Parameters<typeof createAssetLocationMoveNotes>[0]["actor"];
   userId: string;
   count: number;
 }) {
@@ -434,10 +439,6 @@ async function afterCommit({
   const { locationId, locationName } = adjustment.location;
   if (locationId) {
     try {
-      const actor = await db.user.findUniqueOrThrow({
-        where: { id: userId },
-        select: { id: true, ...USER_NAME_SELECT },
-      });
       await createAssetLocationMoveNotes({
         moves: created.map((asset) =>
           firstPlacementMove(
@@ -460,11 +461,12 @@ async function afterCommit({
     }
   }
 
-  if (pool.mainImage) {
-    for (const asset of created) {
+  const mainImage = pool.mainImage;
+  if (mainImage) {
+    const copyImage = async (asset: Created) => {
       try {
         const imagePath = await uploadDuplicateAssetMainImage(
-          pool.mainImage,
+          mainImage,
           asset.id,
           userId
         );
@@ -488,6 +490,11 @@ async function afterCommit({
           })
         );
       }
+    };
+    for (let i = 0; i < created.length; i += IMAGE_COPY_CONCURRENCY) {
+      await Promise.all(
+        created.slice(i, i + IMAGE_COPY_CONCURRENCY).map(copyImage)
+      );
     }
   }
 
