@@ -75,11 +75,14 @@ if (SENTRY_DSN) {
       return breadcrumb;
     },
     /**
-     * Performance transactions are kept, with email addresses masked. They
+     * Performance transactions are kept, with credentials scrubbed from the
+     * request (see {@link scrubEventRequest}) and email addresses masked. They
      * must NOT go through the error-event filter: a transaction carries no
      * exception, and that filter drops every event without one.
      */
     beforeSendTransaction(event) {
+      // Sentry copies request headers onto transactions too.
+      scrubEventRequest(event);
       return maskEmailsInSentryPayload(event);
     },
     beforeSend(event, hint) {

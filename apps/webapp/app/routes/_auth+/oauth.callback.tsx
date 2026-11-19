@@ -52,6 +52,7 @@ import {
 } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import {
   clearSsoCodeVerifier,
   expireListPreferenceCookies,
@@ -257,7 +258,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
             // The browser posts both tokens, so neither is trusted alone.
             const [account, authSession] = await Promise.all([
               readTokenAccount(form.accessToken),
-              refreshAccessToken(form.refreshToken),
+              refreshAccessToken(form.refreshToken, {
+                clientIp: getClientIpFromHeaders(request.headers),
+              }),
             ]);
             if (authSession.userId !== account.userId) {
               throw ssoSignInExpiredError();

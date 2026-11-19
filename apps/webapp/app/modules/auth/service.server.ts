@@ -827,8 +827,20 @@ export async function validateSession(token: string, userId: string) {
   }
 }
 
+/**
+ * Trades a refresh token for a fresh session.
+ *
+ * Supabase counts refresh grants in the same per-IP token-endpoint limit as
+ * password sign-ins, so every caller acting for a visitor passes their IP.
+ *
+ * @param refreshToken - The session's refresh token
+ * @param visitor - see {@link VisitorIp}
+ * @returns The refreshed auth session
+ * @throws {ShelfError} When the token is missing or Supabase refuses it
+ */
 export async function refreshAccessToken(
-  refreshToken?: string
+  refreshToken?: string,
+  { clientIp }: VisitorIp = {}
 ): Promise<AuthSession> {
   try {
     if (!refreshToken) {
@@ -839,7 +851,9 @@ export async function refreshAccessToken(
       });
     }
 
-    const { data, error } = await getSupabaseAdmin().auth.refreshSession({
+    const { data, error } = await getSupabaseAdmin({
+      clientIp,
+    }).auth.refreshSession({
       refresh_token: refreshToken,
     });
 

@@ -444,7 +444,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         /** Refresh the session so it has the up-to-date email */
         const { refreshToken } = authSession;
-        const newSession = await refreshAccessToken(refreshToken);
+        const newSession = await refreshAccessToken(refreshToken, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
         context.setSession(newSession);
         /** Destroy all other sessions */
         await getSupabaseAdmin().auth.admin.signOut(

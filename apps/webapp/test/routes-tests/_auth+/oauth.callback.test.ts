@@ -291,7 +291,9 @@ describe("POST /oauth/callback, sign-in started from the identity provider", () 
   it("signs in once confirmed, when both tokens belong to the named account", async () => {
     const { result, setSession } = await postCallback();
 
-    expect(refreshAccessToken).toHaveBeenCalledWith("client-refresh-token");
+    expect(refreshAccessToken).toHaveBeenCalledWith("client-refresh-token", {
+      clientIp: null,
+    });
     expect(setSession).toHaveBeenCalledWith(callbackSession);
     expect((result as Response).headers.get("Location")).toBe("/assets");
     expect(setCookies(result).join("\n")).not.toMatch(/sso_code_verifier/);
