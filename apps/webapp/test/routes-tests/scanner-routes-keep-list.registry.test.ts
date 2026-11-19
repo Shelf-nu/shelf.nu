@@ -237,3 +237,30 @@ it("the location scanner marks a kits failure after its assets saved", () => {
     /return scanSaveError\(reason, \{ partlySaved: assetsSaved \}\);/
   );
 });
+
+/**
+ * Removing an audit scan is sent in the background after the row is gone. When
+ * the server refuses the removal, the drawer reports it, says the list may be
+ * out of date, and offers a reload. The decision is tested in
+ * audit-remove-scan.test.ts;
+ * this pins that the drawer reads the removal's answer and shows the notice.
+ */
+it("the audit scanner says when a removal was refused", () => {
+  const drawer = readFileSync(
+    path.resolve(__dirname, "../../app/components/audit/audit-drawer.tsx"),
+    "utf8"
+  );
+  expect(drawer).toMatch(/refusedRemovalMessage\(removeAnswer\)/);
+  // Completing waits for a reload: the list may be out of date.
+  expect(drawer).toMatch(/removeRefusal !== null \|\|/);
+  // Shown only on the audit whose removal was refused, read once, and
+  // cleared when the audit changes.
+  expect(drawer).toMatch(
+    /if \(message && removalAuditIdRef\.current === auditSession\?\.id\)/
+  );
+  expect(drawer).toMatch(/removalAuditIdRef\.current = auditSession\.id;/);
+  // Reload warns about unsaved work instead of being disabled.
+  expect(drawer).toMatch(
+    /unsavedWork=\{\s*removeScanFetcher\.state !== "idle" \|\|\s*reloadWouldLoseWork\(\{/
+  );
+});
