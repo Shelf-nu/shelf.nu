@@ -65,17 +65,22 @@ import {
 } from "../shared/modal";
 import When from "../when/when";
 
+/** The dialogs the Actions menu opens beside itself. */
+type ActionsMenuDialog =
+  | "adjust-quantity"
+  | "quantity-custody"
+  | "relink-qr"
+  | "set-reminder"
+  | "report-problem";
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
 const ConditionalActionsDropdown = () => {
   const { asset, custodySources } = useLoaderData<typeof loader>();
-  const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
-  const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
-  const [isQuantityCustodyDialogOpen, setIsQuantityCustodyDialogOpen] =
-    useState(false);
-  const [isAdjustQuantityDialogOpen, setIsAdjustQuantityDialogOpen] =
-    useState(false);
-  const [isReportProblemDialogOpen, setIsReportProblemDialogOpen] =
-    useState(false);
+  /** The menu's dialogs open one at a time; `null` when none is open. */
+  const [openDialog, setOpenDialog] = useState<ActionsMenuDialog | null>(null);
+  /** Controlled `onOpenChange` for one dialog: closing it clears `openDialog`. */
+  const dialogOpenChange = (dialog: ActionsMenuDialog) => (next: boolean) =>
+    setOpenDialog(next ? dialog : null);
   /** The two Actions triggers (desktop and phone); one is hidden by CSS. */
   const desktopTriggerRef = useRef<HTMLElement>(null);
   const mobileTriggerRef = useRef<HTMLElement>(null);
@@ -278,7 +283,7 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={() => {
                       handleMenuClose();
-                      setIsAdjustQuantityDialogOpen(true);
+                      setOpenDialog("adjust-quantity");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -310,7 +315,7 @@ const ConditionalActionsDropdown = () => {
                       }
                       onClick={() => {
                         handleMenuClose();
-                        setIsQuantityCustodyDialogOpen(true);
+                        setOpenDialog("quantity-custody");
                       }}
                     >
                       <span className="flex items-center gap-2">
@@ -427,7 +432,7 @@ const ConditionalActionsDropdown = () => {
                     disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
-                      setIsRelinkQrDialogOpen(true);
+                      setOpenDialog("relink-qr");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -450,7 +455,7 @@ const ConditionalActionsDropdown = () => {
                     disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
-                      setIsSetReminderDialogOpen(true);
+                      setOpenDialog("set-reminder");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -573,7 +578,7 @@ const ConditionalActionsDropdown = () => {
                     disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
-                      setIsReportProblemDialogOpen(true);
+                      setOpenDialog("report-problem");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -656,25 +661,25 @@ const ConditionalActionsDropdown = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <When truthy={isRelinkQrDialogOpen}>
+      <When truthy={openDialog === "relink-qr"}>
         <RelinkQrCodeDialog
           key={asset.qrCodes[0]?.id || asset.id}
-          open={isRelinkQrDialogOpen}
+          open={openDialog === "relink-qr"}
           onClose={() => {
-            setIsRelinkQrDialogOpen(false);
+            setOpenDialog(null);
           }}
         />
       </When>
-      <When truthy={isSetReminderDialogOpen && canSetReminder}>
+      <When truthy={openDialog === "set-reminder" && canSetReminder}>
         <SetOrEditReminderDialog
           action={`/assets/${asset.id}`}
-          open={isSetReminderDialogOpen}
+          open={openDialog === "set-reminder"}
           onClose={() => {
-            setIsSetReminderDialogOpen(false);
+            setOpenDialog(null);
           }}
         />
       </When>
-      <When truthy={isQuantityCustodyDialogOpen}>
+      <When truthy={openDialog === "quantity-custody"}>
         {/* Max and sources come from the same loader summary the custody
             card's dialog reads, so both entry points agree. */}
         <QuantityCustodyDialog
@@ -682,16 +687,16 @@ const ConditionalActionsDropdown = () => {
           unitOfMeasure={asset.unitOfMeasure}
           availableQuantity={custodySources.poolAvailable}
           sources={custodySources}
-          open={isQuantityCustodyDialogOpen}
-          onOpenChange={setIsQuantityCustodyDialogOpen}
+          open={openDialog === "quantity-custody"}
+          onOpenChange={dialogOpenChange("quantity-custody")}
         />
       </When>
-      <When truthy={isReportProblemDialogOpen && canReportProblem}>
+      <When truthy={openDialog === "report-problem" && canReportProblem}>
         <ReportProblemDialog
           assetId={asset.id}
           assetTitle={asset.title}
-          open={isReportProblemDialogOpen}
-          onOpenChange={setIsReportProblemDialogOpen}
+          open={openDialog === "report-problem"}
+          onOpenChange={dialogOpenChange("report-problem")}
           returnFocusTo={() =>
             firstDisplayedElement(
               desktopTriggerRef.current,
@@ -700,7 +705,7 @@ const ConditionalActionsDropdown = () => {
           }
         />
       </When>
-      <When truthy={isAdjustQuantityDialogOpen}>
+      <When truthy={openDialog === "adjust-quantity"}>
         <QuickAdjustDialog
           assetId={asset.id}
           unitOfMeasure={asset.unitOfMeasure}
@@ -713,8 +718,8 @@ const ConditionalActionsDropdown = () => {
               0
             ) ?? 0)
           }
-          open={isAdjustQuantityDialogOpen}
-          onOpenChange={setIsAdjustQuantityDialogOpen}
+          open={openDialog === "adjust-quantity"}
+          onOpenChange={dialogOpenChange("adjust-quantity")}
         />
       </When>
     </>

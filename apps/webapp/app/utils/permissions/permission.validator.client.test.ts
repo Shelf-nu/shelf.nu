@@ -2,12 +2,11 @@
  * Tests for the webapp's client-side permission adapter.
  *
  * The RULE itself is tested in the package
- * (`packages/permissions/src/resolver.test.ts`) — duplicating those cases here
- * would just assert the same matrix twice. What is genuinely this module's is
- * that it stays a pure DELEGATION: it gates ~47 UI call sites and used to
- * hand-roll its own matrix walk and its own copy of the ADMIN/OWNER
- * short-circuit, so the risk worth pinning is that a bespoke branch creeps
- * back in and the UI silently re-forks from what the server enforces.
+ * (`packages/permissions/src/resolver.test.ts`), so those cases are not
+ * repeated here. What this module must guarantee is that it only delegates:
+ * the UI gates must give exactly the shared resolver's answer for every role,
+ * entity and action, so the UI never offers what the server refuses, or the
+ * reverse.
  *
  * @see {@link file://../../../../../packages/permissions/src/resolver.test.ts}
  * @see {@link file://./permission.validator.server.test.ts}
@@ -55,9 +54,9 @@ describe("userHasPermission (client adapter)", () => {
   });
 
   it("forwards action ARRAYS to the resolver rather than reimplementing them", () => {
-    // The sweep above only exercises single actions. Array any-match is the
-    // capability that kept this adapter hand-rolled until the resolver gained
-    // it, so it needs its own delegation check.
+    // The sweep above only exercises single actions. An action array is
+    // granted when any one of its actions is (any-match), and that answer
+    // must come from the resolver too.
     const cases: PermissionAction[][] = [
       [PermissionAction.create, PermissionAction.read], // one granted
       [PermissionAction.create, PermissionAction.delete], // none granted

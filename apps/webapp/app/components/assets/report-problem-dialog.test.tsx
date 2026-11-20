@@ -152,6 +152,23 @@ describe("ReportProblemDialog", () => {
     );
   });
 
+  it("says only that no email was sent when nobody was emailed", () => {
+    const { rerender } = render(dialog());
+    typeReport("Lens is cracked");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    mockFetcherState = { state: "submitting", data: undefined };
+    rerender(dialog());
+    mockFetcherState = {
+      state: "idle",
+      data: { notifiedCount: 0, error: null },
+    };
+    rerender(dialog());
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Your report is saved in the asset's history. No email was sent."
+    );
+  });
+
   it("refuses text that is too short without sending it", () => {
     render(dialog());
     typeReport("ab");

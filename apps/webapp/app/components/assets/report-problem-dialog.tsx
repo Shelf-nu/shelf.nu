@@ -10,7 +10,7 @@
  * @see {@link file://./actions-dropdown.tsx}
  */
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useReducer } from "react";
 import { useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -59,7 +59,45 @@ type ReportProblemResponse = {
 export function reportSentMessage(notifiedCount: number) {
   return notifiedCount > 0
     ? `Your report was sent to the ${PROBLEM_REPORT_AUDIENCE} of this workspace by email, and it is saved in the asset's history.`
-    : "Your report is saved in the asset's history. No one else receives problem reports in this workspace, so no email was sent.";
+    : "Your report is saved in the asset's history. No email was sent.";
+}
+
+/** What the text field shows besides the text: errors for this opening only. */
+type FieldState = {
+  /** The `open` this state belongs to, to notice the next opening. */
+  open: boolean;
+  /** The schema's complaint about the text, before anything is sent. */
+  clientError: string | null;
+  /**
+   * The server refusal the member has started editing away from. It stays
+   * hidden until the next submit, which may answer with the same message.
+   */
+  dismissedRefusal: string | null;
+};
+
+type FieldAction =
+  | { type: "openChanged"; open: boolean }
+  | { type: "submitted"; clientError: string | null }
+  | { type: "edited"; refusal: string | null };
+
+function fieldReducer(state: FieldState, action: FieldAction): FieldState {
+  switch (action.type) {
+    case "openChanged":
+      return { open: action.open, clientError: null, dismissedRefusal: null };
+    case "submitted":
+      return {
+        ...state,
+        clientError: action.clientError,
+        dismissedRefusal: null,
+      };
+    case "edited":
+      // Typing changes nothing here most of the time: keep the same state so
+      // a keystroke does not re-render the dialog.
+      return state.clientError === null &&
+        state.dismissedRefusal === action.refusal
+        ? state
+        : { ...state, clientError: null, dismissedRefusal: action.refusal };
+  }
 }
 
 /**
@@ -80,24 +118,22 @@ export function ReportProblemDialog({
   });
   const disabled = useDisabled(fetcher);
   const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
-  const [clientError, setClientError] = useState<string | null>(null);
-  /**
-   * The server refusal the member has started editing away from. It stays
-   * hidden until the next submit, which may answer with the same message.
-   */
-  const [dismissedRefusal, setDismissedRefusal] = useState<string | null>(null);
+  const [field, dispatch] = useReducer(fieldReducer, {
+    open,
+    clientError: null,
+    dismissedRefusal: null,
+  });
+  // Each opening starts clean. Updated while rendering, so a stale error
+  // never shows for a frame on the new opening.
+  if (field.open !== open) dispatch({ type: "openChanged", open });
   const textareaRef = useAutoFocus<HTMLTextAreaElement>({ when: open });
-
-  useEffect(() => {
-    if (open) setClientError(null);
-  }, [open]);
 
   const sent = outcome.status === "accepted";
   // Read only once this opening's report is accepted, so it is this report's.
   const notifiedCount = fetcher.data?.notifiedCount ?? 0;
   const closeRef = useAutoFocus<HTMLElement>({ when: sent });
   const serverError =
-    outcome.message && outcome.message !== dismissedRefusal
+    outcome.message && outcome.message !== field.dismissedRefusal
       ? outcome.message
       : null;
 
@@ -106,13 +142,13 @@ export function ReportProblemDialog({
     const parsed = problemReportContentSchema.safeParse(
       typeof content === "string" ? content : ""
     );
-    setDismissedRefusal(null);
-    if (!parsed.success) {
-      event.preventDefault();
-      setClientError(
-        parsed.error.issues[0]?.message ?? "Describe the problem."
-      );
-    }
+    if (!parsed.success) event.preventDefault();
+    dispatch({
+      type: "submitted",
+      clientError: parsed.success
+        ? null
+        : parsed.error.issues[0]?.message ?? "Describe the problem.",
+    });
   }
 
   return (
@@ -169,11 +205,10 @@ export function ReportProblemDialog({
               required
               characterLimit={PROBLEM_REPORT_MAX_LENGTH}
               disabled={disabled}
-              error={clientError || serverError || undefined}
-              onChange={() => {
-                setClientError(null);
-                setDismissedRefusal(outcome.message);
-              }}
+              error={field.clientError || serverError || undefined}
+              onChange={() =>
+                dispatch({ type: "edited", refusal: outcome.message })
+              }
             />
             <AlertDialogFooter className="mt-4">
               <Button
