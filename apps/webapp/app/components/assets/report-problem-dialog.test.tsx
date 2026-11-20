@@ -17,9 +17,7 @@ import { ReportProblemDialog } from "./report-problem-dialog";
 
 type FetcherState = {
   state: "idle" | "submitting" | "loading";
-  data:
-    | { notifiedCount?: number; error?: { message?: string } | null }
-    | undefined;
+  data: { emailed?: boolean; error?: { message?: string } | null } | undefined;
 };
 
 let mockFetcherState: FetcherState = { state: "idle", data: undefined };
@@ -119,7 +117,7 @@ describe("ReportProblemDialog", () => {
   it("does not show an earlier opening's success on a fresh opening", () => {
     mockFetcherState = {
       state: "idle",
-      data: { notifiedCount: 3, error: null },
+      data: { emailed: true, error: null },
     };
 
     render(dialog());
@@ -140,7 +138,7 @@ describe("ReportProblemDialog", () => {
     rerender(dialog());
     mockFetcherState = {
       state: "idle",
-      data: { notifiedCount: 3, error: null },
+      data: { emailed: true, error: null },
     };
     rerender(dialog());
 
@@ -160,7 +158,7 @@ describe("ReportProblemDialog", () => {
     rerender(dialog());
     mockFetcherState = {
       state: "idle",
-      data: { notifiedCount: 0, error: null },
+      data: { emailed: false, error: null },
     };
     rerender(dialog());
 

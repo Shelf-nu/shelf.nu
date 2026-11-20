@@ -58,7 +58,11 @@ import { requirePermission } from "~/utils/roles.server";
 
 /** Shape of the `data()` result both actions return. */
 type DataResult = {
-  data: { notifiedCount?: number; error?: { message: string } | null };
+  data: {
+    emailed?: boolean;
+    notifiedCount?: number;
+    error?: { message: string } | null;
+  };
   init: ResponseInit | null;
 };
 
@@ -226,9 +230,9 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
 
     expect(web).toEqual({
       status: 200,
-      body: expect.objectContaining({ notifiedCount: 2 }),
+      body: expect.objectContaining({ emailed: true }),
     });
-    expect(mobile).toEqual({ status: 200, body: { notifiedCount: 2 } });
+    expect(mobile).toEqual({ status: 200, body: { emailed: true } });
 
     const [webCall, mobileCall] = vi.mocked(reportAssetProblem).mock.calls;
     for (const [args] of [webCall, mobileCall]) {
@@ -242,4 +246,32 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
       );
     }
   });
+
+  it.each([
+    ["the web action", callWeb],
+    ["the mobile route", callMobile],
+  ] as const)(
+    "%s says only whether anyone was emailed, never how many",
+    async (_route, call) => {
+      for (const notifiedCount of [3, 0]) {
+        vi.mocked(reportAssetProblem).mockResolvedValue({
+          note: { id: "note-1" },
+          notifiedCount,
+        } as never);
+
+        const { status, body } = await call({
+          assetId: "asset-1",
+          content: "Lens is cracked",
+        });
+
+        expect(status).toBe(200);
+        expect(body.emailed).toBe(notifiedCount > 0);
+        expect(body).not.toHaveProperty("notifiedCount");
+        // `error: null` is the web success envelope, nothing about the report.
+        expect(Object.keys(body).filter((key) => key !== "error")).toEqual([
+          "emailed",
+        ]);
+      }
+    }
+  );
 });

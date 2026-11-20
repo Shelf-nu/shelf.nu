@@ -6,7 +6,8 @@
  * accepts and refuses exactly what the web does.
  *
  * Body: `{ assetId: string, content: string }`
- * Returns: `{ notifiedCount: number }`, or `{ error: { message } }` with the
+ * Returns: `{ emailed: boolean }`, whether the email went to anyone, or
+ * `{ error: { message } }` with the
  * refusal's status.
  *
  * @see {@link file://../../../modules/problem-report/service.server.ts}
@@ -56,6 +57,8 @@ export async function action({ request }: ActionFunctionArgs) {
       "Assets"
     );
 
+    // Only whether anyone was emailed: how many would tell a member without
+    // access to the team list how many people run the workspace.
     const { notifiedCount } = await reportAssetProblem({
       assetId,
       organizationId,
@@ -63,7 +66,7 @@ export async function action({ request }: ActionFunctionArgs) {
       content,
     });
 
-    return data({ notifiedCount });
+    return data({ emailed: notifiedCount > 0 });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(

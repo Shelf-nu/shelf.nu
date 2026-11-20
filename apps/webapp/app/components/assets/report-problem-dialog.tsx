@@ -46,18 +46,19 @@ export type ReportProblemDialogProps = {
 
 /** What the action answers on success. */
 type ReportProblemResponse = {
-  notifiedCount?: number;
+  /** Whether anyone was emailed; the count is never sent to the browser. */
+  emailed?: boolean;
   error?: { message?: string } | null;
 };
 
 /**
  * The confirmation shown once the report is saved.
  *
- * @param notifiedCount - How many people were emailed
+ * @param emailed - Whether anyone was emailed
  * @returns The sentence for the dialog
  */
-export function reportSentMessage(notifiedCount: number) {
-  return notifiedCount > 0
+export function reportSentMessage(emailed: boolean) {
+  return emailed
     ? `Your report was sent to the ${PROBLEM_REPORT_AUDIENCE} of this workspace by email, and it is saved in the asset's history.`
     : "Your report is saved in the asset's history. No email was sent.";
 }
@@ -130,7 +131,7 @@ export function ReportProblemDialog({
 
   const sent = outcome.status === "accepted";
   // Read only once this opening's report is accepted, so it is this report's.
-  const notifiedCount = fetcher.data?.notifiedCount ?? 0;
+  const emailed = fetcher.data?.emailed === true;
   const closeRef = useAutoFocus<HTMLElement>({ when: sent });
   // A refusal always says something, even when the response carried no text.
   const refusal =
@@ -179,7 +180,7 @@ export function ReportProblemDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             {sent ? (
-              <span role="status">{reportSentMessage(notifiedCount)}</span>
+              <span role="status">{reportSentMessage(emailed)}</span>
             ) : (
               <>
                 Tell the {PROBLEM_REPORT_AUDIENCE} of this workspace what is

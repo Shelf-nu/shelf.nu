@@ -33,7 +33,9 @@ export function loader({ params }: LoaderFunctionArgs) {
 /**
  * Saves the report on the asset and emails the people who run the workspace.
  *
- * @returns `{ notifiedCount }` on success, or the refusal with its status
+ * @returns `{ emailed }` on success (whether anyone was emailed, never how
+ *   many: that would tell a member without access to the team list how many
+ *   people run the workspace), or the refusal with its status
  */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -65,7 +67,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
     });
 
-    return payload({ notifiedCount });
+    return payload({ emailed: notifiedCount > 0 });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return data(error(reason), { status: reason.status });
