@@ -146,7 +146,23 @@ describe("buildProblemReportNote", () => {
   });
 });
 
+/**
+ * Emails go out after `reportAssetProblem` answers. Waits until no new one has
+ * arrived for a moment, so no test's emails reach the next test's checks.
+ */
+async function emailsSettled() {
+  let seen = -1;
+  while (seen !== mocks.sendEmail.mock.calls.length) {
+    seen = mocks.sendEmail.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 describe("reportAssetProblem", () => {
+  afterEach(async () => {
+    await emailsSettled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getAsset.mockResolvedValue({
@@ -358,6 +374,19 @@ describe("reportAssetProblem", () => {
     });
     expect(mocks.createNote).not.toHaveBeenCalled();
     expect(mocks.getOrganizationNotificationAudience).not.toHaveBeenCalled();
+  });
+
+  it("emails no one, and says so, when the reporter is the only one who would receive it", async () => {
+    mocks.getOrganizationNotificationAudience.mockResolvedValue([
+      audience.find((member) => member.id === reporter.id),
+    ]);
+
+    await expect(report()).resolves.toEqual({
+      note: { id: "note-1" },
+      emailed: false,
+    });
+    await emailsSettled();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
   it("keeps the saved report when the audience lookup fails", async () => {

@@ -181,6 +181,19 @@ describe("ActionsDropdown: custody-only caller (SELF_SERVICE)", () => {
 });
 
 describe("ActionsDropdown: custody of kit members", () => {
+  it("explains the actions a kit in use disables", () => {
+    caller.roles = [OrganizationRoles.ADMIN];
+    renderMenu({
+      assetKits: [
+        { kit: { id: "kit-1", name: "Camera Kit", status: "CHECKED_OUT" } },
+      ],
+    });
+
+    expect(
+      screen.getByText(/disabled due to the asset being part of a kit/i)
+    ).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     // An admin sees every item.
     caller.roles = [OrganizationRoles.ADMIN];
@@ -342,6 +355,18 @@ describe("ActionsDropdown: Base member", () => {
     expect(
       screen.getByRole("dialog", { name: "Report a problem dialog" })
     ).toBeInTheDocument();
+  });
+
+  it("shows no notice about a kit that holds actions it does not have", () => {
+    renderMenu({
+      assetKits: [
+        { kit: { id: "kit-1", name: "Camera Kit", status: "CHECKED_OUT" } },
+      ],
+    });
+
+    expect(
+      screen.queryByText(/disabled due to the asset being part of a kit/i)
+    ).not.toBeInTheDocument();
   });
 
   it("shows no notice about disabled actions it does not have", () => {

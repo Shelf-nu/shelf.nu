@@ -9,6 +9,8 @@
  * @see {@link file://../../modules/problem-report/service.server.ts}
  * @see {@link file://../../components/assets/report-problem-dialog.tsx}
  * @see {@link file://../api+/mobile+/asset.report-problem.ts}
+ * @see {@link file://../../../test/routes-tests/api+/mobile+/asset.report-problem.test.ts}
+ *   tests this action side by side with the mobile route
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";

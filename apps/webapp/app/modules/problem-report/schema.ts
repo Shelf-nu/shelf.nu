@@ -12,7 +12,10 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 
 /** The fewest characters a report may have, after trimming. */
 export const PROBLEM_REPORT_MIN_LENGTH = 3;
-/** The most characters a report may have, as sent and as stored. */
+/**
+ * The most characters a report may have, as sent. The stored note is longer:
+ * it adds the reporter link and escapes the text inside a Markdoc tag.
+ */
 export const PROBLEM_REPORT_MAX_LENGTH = 1000;
 
 const TOO_LONG = `Keep the description to ${PROBLEM_REPORT_MAX_LENGTH.toLocaleString(
@@ -27,9 +30,9 @@ const TOO_LONG = `Keep the description to ${PROBLEM_REPORT_MAX_LENGTH.toLocaleSt
  *    of the text, only ever sees a bounded string.
  * 2. Markdoc delimiters are removed (the text is written into a note that
  *    renders through Markdoc) and the result is trimmed.
- * 3. What is left is {@link PROBLEM_REPORT_MIN_LENGTH} to
- *    {@link PROBLEM_REPORT_MAX_LENGTH} characters, so text that is only
- *    delimiters or spaces is refused.
+ * 3. What is left is at least {@link PROBLEM_REPORT_MIN_LENGTH} characters,
+ *    so text that is only delimiters or spaces is refused. It cannot be
+ *    longer than step 1 allowed: stripping and trimming only shorten it.
  */
 export const problemReportContentSchema = z
   .string({ required_error: "Describe the problem." })
@@ -42,7 +45,6 @@ export const problemReportContentSchema = z
         PROBLEM_REPORT_MIN_LENGTH,
         `Describe the problem in at least ${PROBLEM_REPORT_MIN_LENGTH} characters.`
       )
-      .max(PROBLEM_REPORT_MAX_LENGTH, TOO_LONG)
   );
 
 /** The web form: the text only, the asset comes from the URL. */

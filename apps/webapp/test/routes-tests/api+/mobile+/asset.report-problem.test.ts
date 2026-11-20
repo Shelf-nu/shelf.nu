@@ -251,6 +251,28 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
       }),
     ],
     [
+      "a member over the hourly limit",
+      new ShelfError({
+        cause: null,
+        title: "Too many reports",
+        message:
+          "You have sent 10 problem reports in the last hour. Try again later.",
+        label: "Assets",
+        status: 429,
+      }),
+    ],
+    [
+      "a report while another from the member is still being saved",
+      new ShelfError({
+        cause: null,
+        title: "Too many reports",
+        message:
+          "Another report from you is still being sent. Try again in a moment.",
+        label: "Assets",
+        status: 429,
+      }),
+    ],
+    [
       "a report in a Personal workspace",
       new ShelfError({
         cause: null,
