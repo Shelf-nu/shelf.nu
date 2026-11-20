@@ -1768,8 +1768,9 @@ model ConsumptionLog {
 
   // The location the units left or arrived at, when the movement had one:
   // the custody source for CHECKOUT / RETURN / CONSUME, and the chosen
-  // location for a RESTOCK / LOSS / ADJUSTMENT made at a location. NULL for
-  // the unplaced units and for rows written before the column existed.
+  // location for a RESTOCK / LOSS / ADJUSTMENT / CONVERTED made at a
+  // location. NULL for the unplaced units and for rows written before the
+  // column existed.
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   locationId String?
 

@@ -4,7 +4,7 @@
  * Manages quantity-tracking operations for assets in Shelf.nu.
  * Handles hand-out and return logs (CHECKOUT, RETURN), querying paginated log
  * history, computing available quantities, and adjusting the total quantity
- * of a quantity-tracked asset (RESTOCK, ADJUSTMENT, LOSS).
+ * of a quantity-tracked asset (RESTOCK, ADJUSTMENT, LOSS, CONVERTED).
  *
  * Consumption logs are immutable audit records: they are never updated or deleted.
  * Two kinds of row share the table:
@@ -484,7 +484,11 @@ type AdjustQuantityArgs = {
   assetId: string;
   /** The number of units to add or subtract (must be > 0) */
   quantity: number;
-  /** The consumption category — must be RESTOCK, ADJUSTMENT, or LOSS */
+  /**
+   * The ledger category: RESTOCK (add), LOSS (subtract) or ADJUSTMENT (either)
+   * from the Adjust routes, or CONVERTED (subtract) from Create assets from
+   * stock.
+   */
   category: ConsumptionCategory;
   /** Whether to add or subtract from the total */
   direction: "add" | "subtract";
@@ -514,9 +518,10 @@ export type AdjustmentLocationOutcome = {
 /**
  * Adjusts the total quantity of a quantity-tracked asset.
  *
- * Used for RESTOCK (add stock), ADJUSTMENT (correction), and LOSS (reduce stock)
- * operations. These change the total pool size, unlike CHECKOUT/RETURN which
- * move units between the available pool and custody.
+ * Used for RESTOCK (add stock), ADJUSTMENT (correction), LOSS (reduce stock)
+ * and CONVERTED (units made into individual assets) operations. These change
+ * the total pool size, unlike CHECKOUT/RETURN which move units between the
+ * available pool and custody.
  *
  * With a location, the placement moves with the total: adding raises (or
  * creates) that manual placement, removing lowers it (deleting a row that
@@ -652,10 +657,10 @@ export async function applyQuantityAdjustment(
   const asset = await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
   /**
-   * Step 2: The asset belongs to the caller's organization. The lock in
-   * Step 1 is org-scoped, so a foreign-org id is already a 404 there; this
-   * check states the invariant the rest of the function relies on, as in
-   * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
+   * Step 2: The asset belongs to the caller's organization.
+   * `lockAssetForQuantityUpdate` scopes the lock to the organization; this
+   * check guards the write boundary on its own, so it holds even if the lock
+   * stops doing so. Same as `checkOutQuantity` / `releaseQuantity`.
    */
   if (asset.organizationId !== organizationId) {
     throw new ShelfError({

@@ -571,10 +571,18 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
       "logs its own 'placed N units at L' line",
     "app/modules/location/service.server.ts#updateLocationAssets":
       "writes its lines through createBulkLocationChangeNotes",
+  };
+
+  /**
+   * Declarations that record the event inside a transaction and leave the
+   * location line to another declaration in the same file that runs after
+   * the commit. The test checks that the named declaration writes the line.
+   */
+  const WRITES_ITS_LINE_AFTER_THE_COMMIT: Record<string, string> = {
     "app/modules/consumption-log/service.server.ts#applyQuantityAdjustment":
-      "the locked half; writeAdjustmentLocationNotes writes the line after the commit",
+      "writeAdjustmentLocationNotes",
     "app/modules/asset/create-from-stock.server.ts#convertInTransaction":
-      "the locked half; afterCommit writes the line after the commit",
+      "afterCommit",
   };
 
   const RECORDS_THE_EVENT =
@@ -620,15 +628,19 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
   it("also write the location activity log", () => {
     const appRoot = join(__dirname, "../..");
     const webappRoot = join(appRoot, "..");
+    /** Every top-level declaration of a file that records the event. */
+    const declarations = new Map<string, string>();
     const writers = sourceFiles(appRoot).flatMap((path) => {
       const source = readFileSync(path, "utf8");
       if (!source.includes("ASSET_LOCATION_CHANGED")) return [];
-      return topLevelDeclarations(withoutComments(source))
+      const file = relative(webappRoot, path);
+      const all = topLevelDeclarations(withoutComments(source));
+      for (const { name, body } of all) {
+        declarations.set(`${file}#${name}`, body);
+      }
+      return all
         .filter(({ body }) => RECORDS_THE_EVENT.test(body))
-        .map(({ name, body }) => ({
-          key: `${relative(webappRoot, path)}#${name}`,
-          body,
-        }));
+        .map(({ name, body }) => ({ key: `${file}#${name}`, body }));
     });
 
     expect(writers.length).toBeGreaterThan(5);
@@ -636,17 +648,30 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
       .filter(
         ({ key, body }) =>
           !(key in WRITES_ITS_LOCATION_LINE_ELSEWHERE) &&
+          !(key in WRITES_ITS_LINE_AFTER_THE_COMMIT) &&
           !body.includes("createAssetLocationMoveNotes(")
       )
       .map(({ key }) => key);
     expect(missing).toEqual([]);
 
+    // The post-commit half named for each locked half writes the line.
+    const silentAfterCommit = Object.entries(WRITES_ITS_LINE_AFTER_THE_COMMIT)
+      .filter(([key, writer]) => {
+        const file = key.split("#")[0];
+        return !declarations
+          .get(`${file}#${writer}`)
+          ?.includes("createAssetLocationMoveNotes(");
+      })
+      .map(([key]) => key);
+    expect(silentAfterCommit).toEqual([]);
+
     // An allow-listed declaration that no longer records the event is stale.
     const writerKeys = new Set(writers.map(({ key }) => key));
     expect(
-      Object.keys(WRITES_ITS_LOCATION_LINE_ELSEWHERE).filter(
-        (key) => !writerKeys.has(key)
-      )
+      [
+        ...Object.keys(WRITES_ITS_LOCATION_LINE_ELSEWHERE),
+        ...Object.keys(WRITES_ITS_LINE_AFTER_THE_COMMIT),
+      ].filter((key) => !writerKeys.has(key))
     ).toEqual([]);
   });
 });

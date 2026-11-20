@@ -162,8 +162,9 @@ type AssertAssetQuantityNotBelowReservationsArgs = {
  */
 export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
   AvailabilityBatchClient,
-  "custody" | "assetKit" | "bookingAsset" | "consumptionLog"
->;
+  "custody" | "assetKit"
+> &
+  PeakReservedTxClient;
 
 /**
  * STOCK-LOWERING guard: blocks reducing a QUANTITY_TRACKED asset's total
@@ -454,7 +455,7 @@ export async function readCommittedUnits({
   AssertAssetQuantityNotBelowReservationsArgs,
   "assetId" | "organizationId" | "tx"
 >): Promise<CommittedUnits> {
-  const [custodyGroups, inKitsGroups, reservedRows] = await Promise.all([
+  const [custodyGroups, inKitsGroups, peaks] = await Promise.all([
     tx.custody.groupBy({
       by: ["assetId"],
       // Custody has no `organizationId` column of its own — scope through
@@ -471,83 +472,15 @@ export async function readCommittedUnits({
       where: { assetId, organizationId },
       _sum: { quantity: true },
     }),
-    tx.bookingAsset.findMany({
-      where: {
-        assetId,
-        // Kit-driven slices are already counted via `inKits` — summing them
-        // here too would double-count the same units.
-        assetKitId: null,
-        // `window: null` — the asset's FULL active-reservation timeline, not
-        // just one booking's dates. We're protecting every future instant
-        // this asset could be drawn from, not a single window.
-        booking: buildActiveBookingWhere(organizationId, null),
-      },
-      select: {
-        assetId: true,
-        bookingId: true,
-        quantity: true,
-        booking: { select: { from: true, to: true, status: true } },
-      },
-    }),
+    // Standalone reservations over the asset's whole active timeline, with
+    // returns attributed per booking slice, so units returned from a kit
+    // slice never shrink a standalone slice of the same booking.
+    getPeakReservedUnitsByAsset({ assetIds: [assetId], organizationId, tx }),
   ]);
 
   const inCustody = custodyGroups[0]?._sum.quantity ?? 0;
   const inKits = inKitsGroups[0]?._sum.quantity ?? 0;
-
-  let peakReserved = 0;
-  if (reservedRows.length > 0) {
-    const bookingIds = [...new Set(reservedRows.map((r) => r.bookingId))];
-
-    // Mirrors every other availability read's logged-dispositions query —
-    // RETURN/CONSUME/LOSS/DAMAGE reduce a booking's remaining reserved
-    // footprint before it competes for the pool.
-    const loggedGroups = await tx.consumptionLog.groupBy({
-      by: ["bookingId", "assetId"],
-      where: {
-        assetId,
-        bookingId: { in: bookingIds },
-        category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-      },
-      _sum: { quantity: true },
-    });
-
-    const loggedByBookingId = new Map<string, number>();
-    for (const group of loggedGroups) {
-      if (group.bookingId) {
-        loggedByBookingId.set(group.bookingId, group._sum.quantity ?? 0);
-      }
-    }
-
-    const intervals: AvailabilityInterval[] = [];
-    for (const row of reservedRows) {
-      // Defensive only: `Booking` is a required (non-nullable) relation on
-      // `BookingAsset`, so a row with no `booking` should never occur.
-      if (!row.booking) continue;
-
-      const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-      // Clamp at 0 per row, same defence-in-depth as every other primitive
-      // in this module — an over-logged booking can't push demand negative.
-      const remaining = Math.max(0, row.quantity - logged);
-      if (remaining === 0) continue;
-
-      // `windowTo` fallback is unreachable here (`row.booking.to` is always
-      // defined whenever `row.booking` is) — passed through only to satisfy
-      // `resolveIntervalTo`'s signature, mirroring
-      // `flagBookingStockConflicts`'s identical unwindowed sweep in
-      // `~/modules/booking/stock-conflicts.server`.
-      const to = resolveIntervalTo(
-        row.booking.status,
-        row.booking.to,
-        row.booking.to
-      );
-      intervals.push({ from: row.booking.from, to, qty: remaining });
-    }
-
-    // PEAK, not sum — two bookings that never overlap must not stack and
-    // inflate the threshold above what the pool is ever actually holding at
-    // once (the bb1/bb2 model).
-    peakReserved = peakConcurrent(intervals);
-  }
+  const peakReserved = peaks.get(assetId) ?? 0;
 
   return {
     inCustody,

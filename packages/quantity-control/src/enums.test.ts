@@ -4,15 +4,17 @@
  * The package deliberately re-declares its `Qt*` string-union enums instead of
  * importing `@prisma/client` (zero runtime deps, Metro-safe). That freedom is
  * only safe if the literals stay byte-identical to the database enums, so this
- * test pins each `QT_*` runtime array against a list COPIED BY HAND from
- * `packages/database/prisma/schema.prisma`. If the schema gains/loses/renames
- * an enum value, this test fails until both the package union and this copied
- * list are reconciled — the cheap drift guard the plan calls for.
+ * test reads each enum's members straight from
+ * `packages/database/prisma/schema.prisma` and compares them with the matching
+ * `QT_*` array. A value added to, removed from or renamed in the schema fails
+ * here until the package array follows. The schema is read as text, so the
+ * test needs no generated Prisma client.
  *
  * @see {@link file://../../database/prisma/schema.prisma}
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -22,64 +24,53 @@ import {
   QT_CONSUMPTION_TYPES,
 } from "./types";
 
+const schema = readFileSync(
+  new URL("../../database/prisma/schema.prisma", import.meta.url),
+  "utf8"
+);
+
+/**
+ * The members of `enum <name> { ... }` in the schema, in declaration order.
+ * Comments and attributes (`@map`, `@@map`) are ignored.
+ */
+function schemaEnum(name: string): string[] {
+  const block = new RegExp(`^enum\\s+${name}\\s*\\{([\\s\\S]*?)^\\}`, "m").exec(
+    schema
+  );
+  assert.ok(block, `enum ${name} not found in schema.prisma`);
+  return block[1]
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, "").trim())
+    .filter((line) => line && !line.startsWith("@@"))
+    .map((line) => line.split(/\s+/)[0]);
+}
+
 /** Compares two string lists as sets (order-independent, duplicate-free). */
 function assertSameSet(actual: readonly string[], expected: readonly string[]) {
   assert.deepEqual([...new Set(actual)].sort(), [...new Set(expected)].sort());
 }
 
-// ---------------------------------------------------------------------------
-// The right-hand lists below are hand-copied from schema.prisma. Update BOTH
-// the package union AND the list here whenever the schema enum changes.
-// ---------------------------------------------------------------------------
+const PAIRS = [
+  ["AssetType", QT_ASSET_TYPES],
+  ["ConsumptionType", QT_CONSUMPTION_TYPES],
+  ["ConsumptionCategory", QT_CONSUMPTION_CATEGORIES],
+  ["BookingStatus", QT_BOOKING_STATUSES],
+] as const;
 
-test("QT_ASSET_TYPES equals schema AssetType", () => {
-  // enum AssetType { INDIVIDUAL, QUANTITY_TRACKED }
-  assertSameSet(QT_ASSET_TYPES, ["INDIVIDUAL", "QUANTITY_TRACKED"]);
-});
+for (const [name, members] of PAIRS) {
+  test(`QT array equals schema enum ${name}`, () => {
+    assertSameSet(members, schemaEnum(name));
+  });
+}
 
-test("QT_CONSUMPTION_TYPES equals schema ConsumptionType", () => {
-  // enum ConsumptionType { ONE_WAY, TWO_WAY }
-  assertSameSet(QT_CONSUMPTION_TYPES, ["ONE_WAY", "TWO_WAY"]);
-});
-
-test("QT_CONSUMPTION_CATEGORIES equals schema ConsumptionCategory", () => {
-  // enum ConsumptionCategory { CHECKOUT, RETURN, RESTOCK, ADJUSTMENT, LOSS,
-  //   CONSUME, DAMAGE, MOVE, INITIAL, OPENING_BALANCE, CONVERTED }
-  assertSameSet(QT_CONSUMPTION_CATEGORIES, [
-    "CHECKOUT",
-    "RETURN",
-    "RESTOCK",
-    "ADJUSTMENT",
-    "LOSS",
-    "CONSUME",
-    "DAMAGE",
-    "MOVE",
-    "INITIAL",
-    "OPENING_BALANCE",
-    "CONVERTED",
-  ]);
-});
-
-test("QT_BOOKING_STATUSES equals schema BookingStatus", () => {
-  // enum BookingStatus { DRAFT, RESERVED, ONGOING, OVERDUE, COMPLETE, ARCHIVED, CANCELLED }
-  assertSameSet(QT_BOOKING_STATUSES, [
-    "DRAFT",
-    "RESERVED",
-    "ONGOING",
-    "OVERDUE",
-    "COMPLETE",
-    "ARCHIVED",
-    "CANCELLED",
-  ]);
+test("reads enum members from the schema, comments and all", () => {
+  assert.ok(schemaEnum("ConsumptionCategory").includes("CONVERTED"));
+  assert.ok(schemaEnum("ConsumptionCategory").includes("OPENING_BALANCE"));
+  assert.equal(schemaEnum("AssetType").length, 2);
 });
 
 test("no QT_* array has duplicate members", () => {
-  for (const arr of [
-    QT_ASSET_TYPES,
-    QT_CONSUMPTION_TYPES,
-    QT_CONSUMPTION_CATEGORIES,
-    QT_BOOKING_STATUSES,
-  ]) {
+  for (const [, arr] of PAIRS) {
     assert.equal(new Set(arr).size, arr.length);
   }
 });
