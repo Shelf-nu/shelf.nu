@@ -19,12 +19,6 @@ import When from "../when/when";
 
 type EventCardProps = EventContentArg;
 
-export const DATE_FORMAT_OPTIONS = {
-  weekday: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-} as const;
-
 export default function renderEventCard({ event }: EventCardProps) {
   const viewType = event._context.calendarApi.view.type;
   const booking = event.extendedProps as CalendarExtendedProps;
@@ -308,9 +302,11 @@ export function EventCardContent({
       </div>
 
       <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-gray-600">
-        <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
+        {/* Full date and time: a booking can span days, so the day alone is
+            ambiguous. */}
+        <DateS date={booking.start} includeTime />
         <ArrowRightIcon className="size-3 text-gray-600" />
-        <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
+        <DateS date={booking.end} includeTime />
       </div>
 
       {/* The period above is the booking's; this asset left it earlier. */}
@@ -321,7 +317,7 @@ export function EventCardContent({
         >
           <CheckIcon className="size-3" aria-hidden="true" />
           <span>Returned</span>
-          <DateS date={booking.returnedAt} options={DATE_FORMAT_OPTIONS} />
+          <DateS date={booking.returnedAt} includeTime />
         </div>
       ) : null}
 

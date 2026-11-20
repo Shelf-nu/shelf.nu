@@ -186,8 +186,8 @@ Add these secrets for testing in GitHub Actions:
 DATABASE_URL=your-test-database-url
 DIRECT_URL=your-test-direct-url
 SUPABASE_URL=your-test-supabase-url
-SUPABASE_SERVICE_ROLE=your-test-service-role
-SUPABASE_ANON_PUBLIC=your-test-anon-key
+SUPABASE_SECRET_KEY=sb_secret_your-test-secret-key
+SUPABASE_ANON_PUBLIC=sb_publishable_your-test-publishable-key
 SESSION_SECRET=test-session-secret
 SERVER_URL=http://localhost:3000  # Important for tests!
 ```
