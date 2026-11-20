@@ -144,7 +144,8 @@ pnpm install
 cp .env.example .env
 # Fill in: DATABASE_URL, DIRECT_URL, SUPABASE_URL, SUPABASE_ANON_PUBLIC,
 #          SUPABASE_SECRET_KEY, SESSION_SECRET
-# (`supabase status` prints the Publishable and Secret keys)
+# Local stack: `supabase status` prints the API URL (use it as SUPABASE_URL)
+# and the Publishable and Secret keys. Those keys only work with that local URL.
 
 # 3. Set up companion app environment
 # Get your Mac's LAN IP:
