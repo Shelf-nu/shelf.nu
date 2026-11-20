@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   findUser: vi.fn(),
   findOrganization: vi.fn(),
   countNotes: vi.fn(),
+  lock: vi.fn(),
 }));
 
 // why: the asset lookup is the asset page's own; the question here is which
@@ -50,15 +51,19 @@ vi.mock("~/modules/organization/service.server", () => ({
 // why: no mail server; the calls show who would receive the email
 vi.mock("~/emails/mail.server", () => ({ sendEmail: mocks.sendEmail }));
 
-// why: the reporter, the workspace and the reporter's recent report count are
-// read from the database; the count query itself runs in the db suite
-vi.mock("~/database/db.server", () => ({
-  db: {
-    user: { findUniqueOrThrow: mocks.findUser },
-    organization: { findUniqueOrThrow: mocks.findOrganization },
-    note: { count: mocks.countNotes },
-  },
-}));
+// why: the reporter and the workspace are read from the database, and the
+// report is admitted and written in a transaction; the lock and the count
+// query themselves run against Postgres in the db suite
+vi.mock("~/database/db.server", () => {
+  const tx = { $queryRaw: mocks.lock, note: { count: mocks.countNotes } };
+  return {
+    db: {
+      user: { findUniqueOrThrow: mocks.findUser },
+      organization: { findUniqueOrThrow: mocks.findOrganization },
+      $transaction: (run: (client: typeof tx) => unknown) => run(tx),
+    },
+  };
+});
 
 import { ShelfError } from "~/utils/error";
 import {
@@ -174,6 +179,18 @@ describe("reportAssetProblem", () => {
     expect(mocks.createNote).not.toHaveBeenCalled();
   });
 
+  it("counts the member's reports under their report lock, in the transaction that writes", async () => {
+    await report();
+
+    expect(mocks.lock).toHaveBeenCalledTimes(1);
+    expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.countNotes.mock.invocationCallOrder[0]
+    );
+    expect(mocks.countNotes.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createNote.mock.invocationCallOrder[0]
+    );
+  });
+
   it("refuses a member over the hourly report limit and writes nothing", async () => {
     mocks.countNotes.mockResolvedValue(PROBLEM_REPORT_LIMIT);
 
@@ -217,13 +234,16 @@ describe("reportAssetProblem", () => {
   it("writes one UPDATE note and emails the audience except the reporter", async () => {
     const result = await report();
 
-    expect(mocks.createNote).toHaveBeenCalledWith({
-      content: buildProblemReportNote(reporter, "The lens is cracked"),
-      type: "UPDATE",
-      userId: reporter.id,
-      assetId: "asset-1",
-      organizationId: "org-1",
-    });
+    expect(mocks.createNote).toHaveBeenCalledWith(
+      {
+        content: buildProblemReportNote(reporter, "The lens is cracked"),
+        type: "UPDATE",
+        userId: reporter.id,
+        assetId: "asset-1",
+        organizationId: "org-1",
+      },
+      expect.objectContaining({ note: expect.anything() })
+    );
     expect(mocks.sendEmail.mock.calls.map(([mail]) => mail.to)).toEqual([
       "owner@example.com",
       "admin@example.com",

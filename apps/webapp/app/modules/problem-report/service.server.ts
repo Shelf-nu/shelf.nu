@@ -120,8 +120,6 @@ export async function reportAssetProblem({
     });
   }
 
-  await assertUnderProblemReportLimit({ userId, organizationId });
-
   const [reporter, organization] = await Promise.all([
     db.user.findUniqueOrThrow({
       where: { id: userId },
@@ -133,12 +131,21 @@ export async function reportAssetProblem({
     }),
   ]);
 
-  const note = await createNote({
-    content: buildProblemReportNote(reporter, content),
-    type: "UPDATE",
-    userId,
-    assetId: asset.id,
-    organizationId,
+  // Admission and the write are one step: with the member's report lock held,
+  // a second report from them waits here and then counts this one.
+  const note = await db.$transaction(async (tx) => {
+    await lockMemberProblemReports(tx, { userId, organizationId });
+    await assertUnderProblemReportLimit({ userId, organizationId }, tx);
+    return createNote(
+      {
+        content: buildProblemReportNote(reporter, content),
+        type: "UPDATE",
+        userId,
+        assetId: asset.id,
+        organizationId,
+      },
+      tx
+    );
   });
 
   // From here on the report is saved: a failure only costs the email, never
@@ -256,22 +263,36 @@ async function getAssetToReport({
 }
 
 /**
+ * Takes a transaction-scoped lock on one member's problem reports in one
+ * workspace, so their reports are admitted one at a time across servers. It
+ * is released at commit or rollback.
+ *
+ * @param tx - The active transaction
+ * @param args.userId - The reporter
+ * @param args.organizationId - The workspace the report is for
+ */
+async function lockMemberProblemReports(
+  tx: Pick<typeof db, "$queryRaw">,
+  { userId, organizationId }: { userId: string; organizationId: string }
+) {
+  await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('problem-report:' || ${organizationId} || ':' || ${userId}))`;
+}
+
+/**
  * Refuses a report when the member has already sent
  * {@link PROBLEM_REPORT_LIMIT} in this workspace within the last
  * {@link PROBLEM_REPORT_WINDOW_MS}. Counted from their report notes, so the
  * limit holds across servers and covers the web form and the mobile route
- * alike.
+ * alike. Run it inside the transaction that writes the report, after
+ * {@link lockMemberProblemReports}, or two reports can both pass.
  *
  * @throws {ShelfError} 429 when the member is over the limit
  */
-async function assertUnderProblemReportLimit({
-  userId,
-  organizationId,
-}: {
-  userId: string;
-  organizationId: string;
-}) {
-  const sent = await db.note.count({
+async function assertUnderProblemReportLimit(
+  { userId, organizationId }: { userId: string; organizationId: string },
+  tx: Pick<typeof db, "note">
+) {
+  const sent = await tx.note.count({
     where: {
       userId,
       type: "UPDATE",

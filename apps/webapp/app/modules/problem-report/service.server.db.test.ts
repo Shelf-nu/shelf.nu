@@ -360,4 +360,51 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     });
     expect(sendEmail).not.toHaveBeenCalled();
   });
+
+  it("admits exactly one of two reports sent at once at the last free place, and leaves other members alone", async () => {
+    const member = await db.user.findUniqueOrThrow({
+      where: { id: userIds.SELF_SERVICE },
+    });
+    const sent = await db.note.count({
+      where: { userId: member.id, content: { contains: "reported a problem" } },
+    });
+    await db.note.createMany({
+      data: Array.from(
+        { length: service.PROBLEM_REPORT_LIMIT - 1 - sent },
+        () => ({
+          content: service.buildProblemReportNote(member, "Earlier report"),
+          type: "UPDATE" as const,
+          userId: member.id,
+          assetId: assets.bookable,
+        })
+      ),
+    });
+
+    const results = await Promise.allSettled([
+      report("SELF_SERVICE", assets.bookable, "First at once"),
+      report("SELF_SERVICE", assets.bookable, "Second at once"),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    const refused = results.find((result) => result.status === "rejected");
+    expect((refused as PromiseRejectedResult).reason).toMatchObject({
+      status: 429,
+    });
+    expect(
+      await db.note.count({
+        where: {
+          userId: member.id,
+          content: { contains: "reported a problem" },
+        },
+      })
+    ).toBe(service.PROBLEM_REPORT_LIMIT);
+
+    // Another member of the same workspace is not held back.
+    await expect(report("ADMIN", assets.bookable)).resolves.toMatchObject({
+      note: expect.objectContaining({ userId: userIds.ADMIN }),
+    });
+  });
 });
