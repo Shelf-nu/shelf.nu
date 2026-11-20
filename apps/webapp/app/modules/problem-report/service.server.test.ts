@@ -104,13 +104,18 @@ const audience = [
   { id: "user-base", email: "base@example.com", firstName: "Bea" },
 ];
 
-function report(content = "The lens is cracked") {
-  return reportAssetProblem({
+/** The email work of every report a test made; settled after each test. */
+const emailWork: Promise<void>[] = [];
+
+async function report(content = "The lens is cracked") {
+  const result = await reportAssetProblem({
     assetId: "asset-1",
     organizationId: "org-1",
     userId: reporter.id,
     content,
   });
+  emailWork.push(result.emailsDone);
+  return result;
 }
 
 function tagsOf(content: string) {
@@ -146,21 +151,11 @@ describe("buildProblemReportNote", () => {
   });
 });
 
-/**
- * Emails go out after `reportAssetProblem` answers. Waits until no new one has
- * arrived for a moment, so no test's emails reach the next test's checks.
- */
-async function emailsSettled() {
-  let seen = -1;
-  while (seen !== mocks.sendEmail.mock.calls.length) {
-    seen = mocks.sendEmail.mock.calls.length;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
-
 describe("reportAssetProblem", () => {
+  // Emails go out after `reportAssetProblem` answers; finishing each test's
+  // email work keeps it out of the next test's checks.
   afterEach(async () => {
-    await emailsSettled();
+    await Promise.all(emailWork.splice(0));
   });
 
   beforeEach(() => {
@@ -339,8 +334,9 @@ describe("reportAssetProblem", () => {
       },
       expect.objectContaining({ note: expect.anything() })
     );
-    expect(result).toEqual({ note: { id: "note-1" }, emailed: true });
-    await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(2));
+    expect(result).toMatchObject({ note: { id: "note-1" }, emailed: true });
+    await result.emailsDone;
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
     expect(mocks.sendEmail.mock.calls.map(([mail]) => mail.to).sort()).toEqual([
       "admin@example.com",
       "owner@example.com",
@@ -352,13 +348,31 @@ describe("reportAssetProblem", () => {
   });
 
   it("answers without waiting for the emails to be rendered", async () => {
-    mocks.renderHtml.mockReturnValue(new Promise(() => {}));
+    let finishRender = (_html: string) => {};
+    mocks.renderHtml.mockReturnValue(
+      new Promise<string>((resolve) => {
+        finishRender = resolve;
+      })
+    );
 
-    await expect(report()).resolves.toEqual({
-      note: { id: "note-1" },
-      emailed: true,
-    });
+    const result = await report();
+
+    expect(result).toMatchObject({ note: { id: "note-1" }, emailed: true });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
+
+    finishRender("<p>rendered</p>");
+    await result.emailsDone;
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("settles the email work even when every email fails, so an ignored handle never rejects", async () => {
+    mocks.renderHtml.mockRejectedValue(new Error("render failed"));
+
+    const result = await report();
+
+    await expect(result.emailsDone).resolves.toBeUndefined();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    expect(mocks.loggerError).toHaveBeenCalledTimes(2);
   });
 
   it("refuses in a Personal workspace and writes nothing", async () => {
@@ -381,11 +395,10 @@ describe("reportAssetProblem", () => {
       audience.find((member) => member.id === reporter.id),
     ]);
 
-    await expect(report()).resolves.toEqual({
-      note: { id: "note-1" },
-      emailed: false,
-    });
-    await emailsSettled();
+    const result = await report();
+
+    expect(result).toMatchObject({ note: { id: "note-1" }, emailed: false });
+    await result.emailsDone;
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -394,10 +407,10 @@ describe("reportAssetProblem", () => {
       new Error("database unavailable")
     );
 
-    await expect(report()).resolves.toEqual({
-      note: { id: "note-1" },
-      emailed: false,
-    });
+    const result = await report();
+
+    expect(result).toMatchObject({ note: { id: "note-1" }, emailed: false });
+    await result.emailsDone;
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -406,15 +419,15 @@ describe("reportAssetProblem", () => {
       throw new Error("bad address");
     });
 
-    await expect(report()).resolves.toMatchObject({ emailed: true });
+    const result = await report();
+    expect(result.emailed).toBe(true);
 
-    await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() =>
-      expect(mocks.loggerError).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: "Could not send a problem report email",
-        })
-      )
+    await result.emailsDone;
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Could not send a problem report email",
+      })
     );
   });
 });

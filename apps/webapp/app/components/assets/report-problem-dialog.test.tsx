@@ -146,7 +146,7 @@ describe("ReportProblemDialog", () => {
       screen.getByRole("heading", { name: "Report sent" })
     ).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Your report was sent to the owners, administrators and managers of this workspace by email, and it is saved in the asset's history."
+      "Your report is saved in the asset's history and is being emailed to the owners, administrators and managers of this workspace."
     );
   });
 

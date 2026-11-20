@@ -177,34 +177,35 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
   });
 
   afterEach(async () => {
-    await emailsSettled();
+    await emailsDone();
   });
 
-  function report(
+  /** The email work of every report a test made, finished by `emailsDone`. */
+  const emailWork: Promise<void>[] = [];
+
+  async function report(
     role: string,
     assetId: string,
     content = "The lens is cracked",
     orgId = organizationId
   ) {
-    return service.reportAssetProblem({
+    const result = await service.reportAssetProblem({
       assetId,
       organizationId: orgId,
       userId: userIds[role],
       content,
     });
+    emailWork.push(result.emailsDone);
+    return result;
   }
 
   /**
-   * Emails go out after `reportAssetProblem` answers. Waits until no new one
-   * has arrived for a moment, so a test reads all of its own and none leak
-   * into the next test.
+   * Emails go out after `reportAssetProblem` answers. Waits for the email work
+   * of every report made so far, so a test reads all of its own emails and
+   * none reach the next test.
    */
-  async function emailsSettled() {
-    let seen = -1;
-    while (seen !== sendEmail.mock.calls.length) {
-      seen = sendEmail.mock.calls.length;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+  async function emailsDone() {
+    await Promise.all(emailWork.splice(0));
   }
 
   function emailedTo() {
@@ -271,7 +272,7 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
 
   it("emails the owner, administrator and manager, never the reporter", async () => {
     await report("MANAGER", assets.bookable);
-    await emailsSettled();
+    await emailsDone();
 
     expect(emailedTo()).toEqual([emailOf("ADMIN"), emailOf("OWNER")].sort());
   });
@@ -282,7 +283,7 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
       assets.bookable,
       "Battery does not charge"
     );
-    await emailsSettled();
+    await emailsDone();
 
     expect(emailed).toBe(true);
     expect(emailedTo()).toEqual(
@@ -305,7 +306,7 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
       "Screen flickers",
       soloOrganizationId
     );
-    await emailsSettled();
+    await emailsDone();
 
     expect(emailed).toBe(false);
     expect(sendEmail).not.toHaveBeenCalled();

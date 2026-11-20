@@ -89,8 +89,10 @@ export function buildProblemReportNote(
  * @param args.userOrganizations - The reporter's workspaces (web only), so an
  *   asset in another of their workspaces answers like the asset page does
  * @param args.request - The request (web only), for that same answer
- * @returns The note, and whether anyone is emailed (the emails are sent after
- *   this returns)
+ * @returns The note; `emailed`, whether anyone is being emailed (the emails
+ *   are sent after this returns); and `emailsDone`, which settles once every
+ *   email has been handed to the mailer or its failure logged. It never
+ *   rejects. The routes ignore it; tests await it.
  * @throws {ShelfError} 404 when the reporter cannot open the asset; 400 when
  *   it is archived or the workspace is a Personal one; 429 when the reporter
  *   is over the hourly limit or another report from them is still being
@@ -191,7 +193,9 @@ export async function reportAssetProblem({
   // The member is answered without waiting for the emails: rendering them
   // takes longer the more people run the workspace, and the wait would let
   // a member who cannot see the team list estimate its size.
-  void sendProblemReportEmails({
+  // The handle never rejects: every failure is caught and logged inside it,
+  // so a caller that ignores it cannot cause an unhandled rejection.
+  const emailsDone = sendProblemReportEmails({
     recipients,
     reporter,
     organization,
@@ -200,14 +204,14 @@ export async function reportAssetProblem({
     content,
   });
 
-  return { note, emailed: recipients.length > 0 };
+  return { note, emailed: recipients.length > 0, emailsDone };
 }
 
 /**
  * Renders and hands one problem report email per recipient to the mailer, one
- * recipient at a time. Called without `await` once the report is saved, so it
- * never throws: every failure is logged, and one bad address or render does
- * not stop the others.
+ * recipient at a time. It runs once the report is saved and its promise never
+ * rejects: every failure is logged, and one bad address or render does not
+ * stop the others.
  */
 async function sendProblemReportEmails({
   recipients,
@@ -223,7 +227,7 @@ async function sendProblemReportEmails({
   organizationId: string;
   asset: { id: string; title: string };
   content: string;
-}) {
+}): Promise<void> {
   try {
     const reporterName = resolveUserDisplayName(reporter) || reporter.email;
 

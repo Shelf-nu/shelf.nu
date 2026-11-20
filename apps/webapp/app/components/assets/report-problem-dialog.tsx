@@ -54,12 +54,13 @@ type ReportProblemResponse = {
 /**
  * The confirmation shown once the report is saved.
  *
- * @param emailed - Whether anyone was emailed
+ * @param emailed - Whether anyone is being emailed; the emails go out after
+ *   the answer, so the sentence never says they arrived
  * @returns The sentence for the dialog
  */
 export function reportSentMessage(emailed: boolean) {
   return emailed
-    ? `Your report was sent to the ${PROBLEM_REPORT_AUDIENCE} of this workspace by email, and it is saved in the asset's history.`
+    ? `Your report is saved in the asset's history and is being emailed to the ${PROBLEM_REPORT_AUDIENCE} of this workspace.`
     : "Your report is saved in the asset's history. No email was sent.";
 }
 
