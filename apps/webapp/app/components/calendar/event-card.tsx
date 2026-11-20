@@ -317,7 +317,8 @@ export function EventCardContent({
         />
       </div>
 
-      <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-gray-600">
+      {/* Each end stays on one line; a narrow card moves the end below the start. */}
+      <div className="mb-3 flex w-full flex-wrap items-center gap-x-2 text-sm text-gray-600 [&>span]:whitespace-nowrap">
         <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
         <ArrowRightIcon className="size-3 text-gray-600" />
         <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />

@@ -256,7 +256,7 @@ describe("EventCardContent — returned asset", () => {
   });
 });
 
-describe("DATE_FORMAT_OPTIONS — popover period", () => {
+describe("DATE_FORMAT_OPTIONS: popover period", () => {
   /** Prefs for a viewer in UTC; only the date order and clock vary per case. */
   const prefs = (
     overrides: Partial<ResolvedFormatPrefs> = {}
