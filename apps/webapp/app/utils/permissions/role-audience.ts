@@ -35,6 +35,11 @@ export const RESERVATION_AUDIENCE = describeRoleAudience(
   (policy) => policy.notifications.orgBookingBroadcasts
 );
 
+/** Who is emailed when a member reports a problem with an asset. */
+export const PROBLEM_REPORT_AUDIENCE = describeRoleAudience(
+  (policy) => policy.notifications.problemReports
+);
+
 /** Who a booking notification picker offers. */
 export const PICKABLE_RECIPIENT_AUDIENCE = describeRoleAudience(
   (policy) => policy.notifications.selectableAsRecipient

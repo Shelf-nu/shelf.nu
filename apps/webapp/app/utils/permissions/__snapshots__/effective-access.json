@@ -576,6 +576,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "ADMIN": {
@@ -1154,6 +1172,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "MANAGER": {
@@ -1263,6 +1299,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "SELF_SERVICE": {
@@ -1337,6 +1376,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "BASE": {
@@ -1407,6 +1449,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "OWNER+ADMIN": {
@@ -1969,6 +2014,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -2563,6 +2626,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "OWNER+SELF_SERVICE": {
@@ -3125,6 +3206,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -3719,6 +3818,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "ADMIN+OWNER": {
@@ -4281,6 +4398,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -4875,6 +5010,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "ADMIN+SELF_SERVICE": {
@@ -5437,6 +5590,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -6031,6 +6202,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "MANAGER+OWNER": {
@@ -6593,6 +6782,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -7187,6 +7394,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "MANAGER+SELF_SERVICE": {
@@ -7296,6 +7521,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "MANAGER+BASE": {
@@ -7405,6 +7633,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "SELF_SERVICE+OWNER": {
@@ -7967,6 +8198,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -8561,6 +8810,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "SELF_SERVICE+MANAGER": {
@@ -8670,6 +8937,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "SELF_SERVICE+BASE": {
@@ -8746,6 +9016,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "BASE+OWNER": {
@@ -9308,6 +9581,24 @@
         "change-role"
       ],
       "command-palette-search": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "problemReport": [
         "create",
         "read",
         "update",
@@ -9902,6 +10193,24 @@
         "custody",
         "manage-kits",
         "change-role"
+      ],
+      "problemReport": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "approve",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
       ]
     },
     "BASE+MANAGER": {
@@ -10011,6 +10320,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "BASE+SELF_SERVICE": {
@@ -10087,6 +10399,9 @@
       ],
       "command-palette-search": [
         "read"
+      ],
+      "problemReport": [
+        "create"
       ]
     },
     "(none)": {
@@ -10121,7 +10436,8 @@
       "emailSettings": [],
       "user-data": [],
       "update": [],
-      "command-palette-search": []
+      "command-palette-search": [],
+      "problemReport": []
     },
     "UNKNOWN_ROLE": {
       "asset": [],
@@ -10155,7 +10471,8 @@
       "emailSettings": [],
       "user-data": [],
       "update": [],
-      "command-palette-search": []
+      "command-palette-search": [],
+      "problemReport": []
     }
   },
   "workspaceGrants": {
@@ -27114,6 +27431,7 @@
     "OWNER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27121,6 +27439,7 @@
     "ADMIN": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27128,6 +27447,7 @@
     "MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27135,6 +27455,7 @@
     "SELF_SERVICE": {
       "orgBookingBroadcasts": false,
       "lowStock": false,
+      "problemReports": false,
       "bookingNotifyPicker": false,
       "reminderPicker": false,
       "modelFiltersRecipients": false
@@ -27142,6 +27463,7 @@
     "BASE": {
       "orgBookingBroadcasts": false,
       "lowStock": false,
+      "problemReports": false,
       "bookingNotifyPicker": false,
       "reminderPicker": false,
       "modelFiltersRecipients": false
@@ -27149,6 +27471,7 @@
     "OWNER+ADMIN": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27156,6 +27479,7 @@
     "OWNER+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27163,6 +27487,7 @@
     "OWNER+SELF_SERVICE": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27170,6 +27495,7 @@
     "OWNER+BASE": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27177,6 +27503,7 @@
     "ADMIN+OWNER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27184,6 +27511,7 @@
     "ADMIN+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27191,6 +27519,7 @@
     "ADMIN+SELF_SERVICE": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27198,6 +27527,7 @@
     "ADMIN+BASE": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27205,6 +27535,7 @@
     "MANAGER+OWNER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27212,6 +27543,7 @@
     "MANAGER+ADMIN": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27219,6 +27551,7 @@
     "MANAGER+SELF_SERVICE": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27226,6 +27559,7 @@
     "MANAGER+BASE": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27233,6 +27567,7 @@
     "SELF_SERVICE+OWNER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27240,6 +27575,7 @@
     "SELF_SERVICE+ADMIN": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27247,6 +27583,7 @@
     "SELF_SERVICE+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27254,6 +27591,7 @@
     "SELF_SERVICE+BASE": {
       "orgBookingBroadcasts": false,
       "lowStock": false,
+      "problemReports": false,
       "bookingNotifyPicker": false,
       "reminderPicker": false,
       "modelFiltersRecipients": false
@@ -27261,6 +27599,7 @@
     "BASE+OWNER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27268,6 +27607,7 @@
     "BASE+ADMIN": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27275,6 +27615,7 @@
     "BASE+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
+      "problemReports": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
@@ -27282,6 +27623,7 @@
     "BASE+SELF_SERVICE": {
       "orgBookingBroadcasts": false,
       "lowStock": false,
+      "problemReports": false,
       "bookingNotifyPicker": false,
       "reminderPicker": false,
       "modelFiltersRecipients": false
@@ -27289,6 +27631,7 @@
     "(none)": {
       "orgBookingBroadcasts": false,
       "lowStock": false,
+      "problemReports": false,
       "bookingNotifyPicker": false,
       "reminderPicker": false,
       "modelFiltersRecipients": false
@@ -27296,6 +27639,7 @@
     "UNKNOWN_ROLE": {
       "orgBookingBroadcasts": false,
       "lowStock": false,
+      "problemReports": false,
       "bookingNotifyPicker": false,
       "reminderPicker": false,
       "modelFiltersRecipients": false
