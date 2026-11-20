@@ -20,10 +20,15 @@ import {
 } from "~/utils/constants";
 import {
   calendarFeedRateLimit,
+  contactOwnerRateLimits,
   mobileIpRateLimit,
   sentryTunnelRateLimit,
 } from "./rate-limit";
-import { isPathWithin, normalizeRoutePath } from "./request-path";
+import {
+  getContactOwnerQrId,
+  isPathWithin,
+  normalizeRoutePath,
+} from "./request-path";
 
 /**
  * Methods that never deliver a body to a route action: GET and HEAD go to the
@@ -144,4 +149,39 @@ export function sentryTunnelGuard(limit?: number): MiddlewareHandler {
       })
     )
   );
+}
+
+/**
+ * Whether a request is a submission to a QR's public "contact owner" action:
+ * the route in any spelling (including its single-fetch `.data` form), with
+ * any method that carries a body. Opening the form (GET) is left out, so a
+ * finder who reloads the page does not spend the budget.
+ *
+ * @param path - A path already passed through {@link normalizeRoutePath}
+ * @param c - The Hono context, for the method
+ */
+export function isContactOwnerSubmission(path: string, c: Context): boolean {
+  return getContactOwnerQrId(path) !== null && methodCarriesBody(c.req.method);
+}
+
+/**
+ * Rate limits for the public QR "contact owner" form, per address then per
+ * (address, QR), applied to every submission its action would receive.
+ *
+ * The per-address bucket runs first so an address over its budget is refused
+ * before a per-QR key is created: otherwise a blocked caller rotating QR ids
+ * would mint a new in-memory key on every request.
+ *
+ * @param perQrLimit - Submissions per (address, QR) per 10 minutes; tests pass
+ *   a low value, production uses the limiter's default
+ * @param perIpLimit - Submissions per address per hour; same as above
+ * @returns A middleware for `server.use("*", ...)`
+ * @see {@link contactOwnerRateLimits} for why each bucket exists
+ */
+export function contactOwnerGuard(
+  perQrLimit?: number,
+  perIpLimit?: number
+): MiddlewareHandler {
+  const [perIp, perQr] = contactOwnerRateLimits(perQrLimit, perIpLimit);
+  return guardWhen(isContactOwnerSubmission, every(perIp, perQr));
 }
