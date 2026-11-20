@@ -335,4 +335,29 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     expect(note).toMatchObject({ assetId: assets.quantity, type: "UPDATE" });
     expect(notifiedCount).toBe(3);
   });
+
+  it("refuses a member who has sent the hourly limit of reports in this workspace", async () => {
+    const manager = await db.user.findUniqueOrThrow({
+      where: { id: userIds.MANAGER },
+    });
+    const sent = await db.note.count({
+      where: {
+        userId: manager.id,
+        content: { contains: "reported a problem" },
+      },
+    });
+    await db.note.createMany({
+      data: Array.from({ length: service.PROBLEM_REPORT_LIMIT - sent }, () => ({
+        content: service.buildProblemReportNote(manager, "Earlier report"),
+        type: "UPDATE" as const,
+        userId: manager.id,
+        assetId: assets.bookable,
+      })),
+    });
+
+    await expect(report("MANAGER", assets.bookable)).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
 });

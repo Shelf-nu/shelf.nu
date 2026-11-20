@@ -10,7 +10,9 @@
 import { z } from "zod";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 
+/** The fewest characters a report may have, after trimming. */
 export const PROBLEM_REPORT_MIN_LENGTH = 3;
+/** The most characters a report may have, after trimming. */
 export const PROBLEM_REPORT_MAX_LENGTH = 1000;
 
 /**

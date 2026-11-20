@@ -298,3 +298,41 @@ describe('ActionsDropdown: a Manager under "Managers can edit assets"', () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
   });
 });
+
+describe("ActionsDropdown: Base member", () => {
+  beforeEach(() => {
+    caller.roles = [OrganizationRoles.BASE];
+    caller.assign = "none";
+  });
+
+  /** Every row the open menu offers, by its accessible name. */
+  function menuRows() {
+    return [
+      ...screen.queryAllByRole("button"),
+      ...screen.queryAllByRole("link"),
+    ]
+      .map((row) => row.textContent?.trim() ?? "")
+      .filter((name) => name && !/^actions/i.test(name));
+  }
+
+  it("offers only Report a problem, plus the mobile Close button", () => {
+    renderMenu();
+
+    expect(menuRows().sort()).toEqual(["Close", "Report a problem"]);
+  });
+
+  it("shows no notice about disabled actions it does not have", () => {
+    renderMenu({ status: "CHECKED_OUT" });
+
+    expect(
+      screen.queryByText(/some actions are disabled/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it("disables Report a problem on an archived asset, with the reason", () => {
+    renderMenu({ archivedAt: new Date() } as Partial<typeof baseAsset>);
+
+    const item = screen.getByRole("button", { name: /report a problem/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+  });
+});

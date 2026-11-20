@@ -27,13 +27,21 @@ import { getAsset } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapNameForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import { resolveUserDisplayName, resolveUserGreetingName } from "~/utils/user";
 
 const label = "Assets";
+
+/** The most reports one member may send in {@link PROBLEM_REPORT_WINDOW_MS}. */
+export const PROBLEM_REPORT_LIMIT = 10;
+/** The window the report limit counts over: one hour. */
+export const PROBLEM_REPORT_WINDOW_MS = 60 * 60 * 1000;
+
+/** Text between the reporter link and the report in every report note. */
+const PROBLEM_REPORT_PHRASE = " reported a problem: ";
 
 /**
  * The history line for a report: the reporter as a link, then their text.
@@ -77,7 +85,8 @@ export function buildProblemReportNote(
  * @param args.request - The request (web only), for that same answer
  * @returns The note and how many copies of the email went to the mailer
  * @throws {ShelfError} 404 when the reporter cannot open the asset, 400 when
- *   it is archived, or when the note cannot be written
+ *   it is archived, 429 when the reporter is over the report limit, or when
+ *   the note cannot be written
  */
 export async function reportAssetProblem({
   assetId,
@@ -94,18 +103,24 @@ export async function reportAssetProblem({
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
 }) {
-  const asset = await getAsset({
-    id: assetId,
+  const asset = await getAssetToReport({
+    assetId,
     organizationId,
     userOrganizations,
     request,
   });
 
-  await assertAssetsAreNotArchived({
-    assetIds: [asset.id],
-    organizationId,
-    actorUserId: userId,
-  });
+  // `getAsset` already read the archive state; the guard runs only to refuse
+  // with the reason every other action on an archived asset gives.
+  if (asset.archivedAt) {
+    await assertAssetsAreNotArchived({
+      assetIds: [asset.id],
+      organizationId,
+      actorUserId: userId,
+    });
+  }
+
+  await assertUnderProblemReportLimit({ userId, organizationId });
 
   const [reporter, organization] = await Promise.all([
     db.user.findUniqueOrThrow({
@@ -193,4 +208,88 @@ export async function reportAssetProblem({
   );
 
   return { note, notifiedCount: handedToMailer.filter(Boolean).length };
+}
+
+/**
+ * The asset page's own lookup, with a message that says what happened when
+ * the asset belongs to another of the reporter's workspaces. The page answers
+ * that case with a workspace switch prompt, which the report dialog cannot
+ * show, so the generic "does not exist" text would mislead.
+ *
+ * @throws {ShelfError} 404 when the reporter cannot open the asset
+ */
+async function getAssetToReport({
+  assetId,
+  organizationId,
+  userOrganizations,
+  request,
+}: {
+  assetId: string;
+  organizationId: string;
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}) {
+  try {
+    return await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+      request,
+    });
+  } catch (cause) {
+    // `getAsset` names the other workspace in `additionalData.organization`
+    // only for an asset the reporter can open after switching.
+    if (isLikeShelfError(cause) && cause.additionalData?.organization) {
+      throw new ShelfError({
+        cause,
+        title: "Asset not found",
+        message:
+          "This asset belongs to another workspace. Switch to that workspace to report a problem with it.",
+        additionalData: { assetId, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+    throw cause;
+  }
+}
+
+/**
+ * Refuses a report when the member has already sent
+ * {@link PROBLEM_REPORT_LIMIT} in this workspace within the last
+ * {@link PROBLEM_REPORT_WINDOW_MS}. Counted from their report notes, so the
+ * limit holds across servers and covers the web form and the mobile route
+ * alike.
+ *
+ * @throws {ShelfError} 429 when the member is over the limit
+ */
+async function assertUnderProblemReportLimit({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}) {
+  const sent = await db.note.count({
+    where: {
+      userId,
+      type: "UPDATE",
+      createdAt: { gte: new Date(Date.now() - PROBLEM_REPORT_WINDOW_MS) },
+      content: { contains: PROBLEM_REPORT_PHRASE },
+      asset: { organizationId },
+    },
+  });
+
+  if (sent >= PROBLEM_REPORT_LIMIT) {
+    throw new ShelfError({
+      cause: null,
+      title: "Too many reports",
+      message: `You have sent ${PROBLEM_REPORT_LIMIT} problem reports in the last hour. Try again later.`,
+      additionalData: { userId, organizationId },
+      label,
+      status: 429,
+      shouldBeCaptured: false,
+    });
+  }
 }

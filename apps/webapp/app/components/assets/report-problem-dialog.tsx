@@ -132,10 +132,13 @@ export function ReportProblemDialog({
   // Read only once this opening's report is accepted, so it is this report's.
   const notifiedCount = fetcher.data?.notifiedCount ?? 0;
   const closeRef = useAutoFocus<HTMLElement>({ when: sent });
-  const serverError =
-    outcome.message && outcome.message !== field.dismissedRefusal
-      ? outcome.message
+  // A refusal always says something, even when the response carried no text.
+  const refusal =
+    outcome.status === "rejected"
+      ? outcome.message || "The report could not be sent. Try again."
       : null;
+  const serverError =
+    refusal && refusal !== field.dismissedRefusal ? refusal : null;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     const content = new FormData(event.currentTarget).get("content");
@@ -154,7 +157,15 @@ export function ReportProblemDialog({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent
-        onEscapeKeyDown={() => onOpenChange(false)}
+        onEscapeKeyDown={(event) => {
+          // While the report is sending, the dialog stays open so the member
+          // sees whether it arrived, as Cancel is disabled then too.
+          if (disabled) {
+            event.preventDefault();
+            return;
+          }
+          onOpenChange(false);
+        }}
         onCloseAutoFocus={(event) => {
           const target = returnFocusTo?.();
           if (!target) return;
@@ -206,9 +217,7 @@ export function ReportProblemDialog({
               characterLimit={PROBLEM_REPORT_MAX_LENGTH}
               disabled={disabled}
               error={field.clientError || serverError || undefined}
-              onChange={() =>
-                dispatch({ type: "edited", refusal: outcome.message })
-              }
+              onChange={() => dispatch({ type: "edited", refusal })}
             />
             <AlertDialogFooter className="mt-4">
               <Button

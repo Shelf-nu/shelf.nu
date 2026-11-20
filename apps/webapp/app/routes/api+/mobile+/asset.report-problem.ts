@@ -28,9 +28,16 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 
+/**
+ * Saves a problem report sent from the phone and emails the workspace's
+ * problem-report audience. See the file header for the body and the answer.
+ */
 export async function action({ request }: ActionFunctionArgs) {
+  // Known once the caller is authenticated, so a refusal's log names them.
+  let userId: string | undefined;
   try {
     const { user } = await requireMobileAuth(request);
+    userId = user.id;
     const organizationId = await requireOrganizationAccess(request, user.id);
 
     await requireMobilePermission({
@@ -58,7 +65,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return data({ notifiedCount });
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(cause, { userId });
     return data(
       { error: { message: reason.message } },
       { status: reason.status }
