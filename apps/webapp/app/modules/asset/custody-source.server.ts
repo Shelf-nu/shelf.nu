@@ -571,8 +571,9 @@ export type CustodySourceNoteVerb =
 
 /**
  * Writes a note on a location's timeline when units of a pool leave it into
- * custody, are used up from it, or are restocked / lost there. Holders are
- * never named: the note says what happened to the location's units.
+ * custody, are used up from it, are restocked / lost there, or are made into
+ * individual assets there. Holders are never named: the note says what
+ * happened to the location's units.
  *
  * Only called for pools placed at two or more locations, so a pool at one location
  * adds nothing new to its location's timeline. Best-effort: the stock

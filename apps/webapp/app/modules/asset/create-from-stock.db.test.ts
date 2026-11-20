@@ -256,6 +256,7 @@ describe.skipIf(!DATABASE_URL)(
           assetLocations: { select: { locationId: true, quantity: true } },
           qrCodes: { select: { id: true } },
           notes: { select: { content: true } },
+          customFields: { select: { customFieldId: true, value: true } },
         },
         orderBy: { title: "asc" },
       });
@@ -263,6 +264,33 @@ describe.skipIf(!DATABASE_URL)(
 
     it("turns units at a location into placed individual assets with a model, and lowers the pool there", async () => {
       const poolId = await createPool("ZZ Pool A", 6, 4);
+      // The pool has a colour; the model fills the length it leaves empty.
+      const [colour, length] = await Promise.all(
+        ["ZZ Colour", "ZZ Length"].map((name) =>
+          db.customField.create({
+            data: {
+              name: `${name} ${stamp}`,
+              type: "TEXT",
+              organizationId,
+              userId,
+            },
+          })
+        )
+      );
+      await db.assetCustomFieldValue.create({
+        data: {
+          assetId: poolId,
+          customFieldId: colour.id,
+          value: { raw: "blue", valueText: "blue" },
+        },
+      });
+      await db.assetModelCustomFieldDefault.create({
+        data: {
+          assetModelId: modelId,
+          customFieldId: length.id,
+          value: { raw: "25 m", valueText: "25 m" },
+        },
+      });
 
       const result = await fromStock.createAssetsFromStock({
         poolId,
@@ -301,7 +329,26 @@ describe.skipIf(!DATABASE_URL)(
         expect(made.notes[0].content).toContain(
           "created this asset from the stock of"
         );
+        expect(
+          made.customFields
+            .map((field) => [field.customFieldId, field.value])
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        ).toEqual(
+          [
+            [colour.id, { raw: "blue", valueText: "blue" }],
+            [length.id, { raw: "25 m", valueText: "25 m" }],
+          ].sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        );
       }
+
+      const events = await db.activityEvent.groupBy({
+        by: ["action"],
+        where: { organizationId, entityId: { in: created.map((a) => a.id) } },
+        _count: { _all: true },
+      });
+      expect(
+        Object.fromEntries(events.map((e) => [e.action, e._count._all]))
+      ).toEqual({ ASSET_CREATED: 3, ASSET_LOCATION_CHANGED: 3 });
 
       expect(await poolState(poolId)).toEqual({
         total: 7,
@@ -504,6 +551,49 @@ describe.skipIf(!DATABASE_URL)(
       });
       const rows = await expectLedgerMatchesLive(poolId);
       expect(rows.some((r) => r.category === "CONVERTED")).toBe(false);
+    }, 60_000);
+
+    it("tries again when another writer took a sequential id, and creates every asset", async () => {
+      const poolId = await createPool("ZZ Pool H", 2, 0);
+      const [taken] = await db.asset.findMany({
+        where: {
+          organizationId,
+          sequentialId: { not: null },
+          archivedAt: null,
+        },
+        select: { sequentialId: true },
+        take: 1,
+      });
+      let calls = 0;
+      // Only the first attempt collides; the retry draws real ids.
+      sequentialIds.override = (count) => {
+        calls += 1;
+        if (calls > 1) {
+          sequentialIds.override = null;
+          return Array.from({ length: count }, (_, i) => `ZZ-${stamp}-H${i}`);
+        }
+        return Array.from({ length: count }, () => taken.sequentialId!);
+      };
+
+      try {
+        await fromStock.createAssetsFromStock({
+          poolId,
+          organizationId,
+          userId,
+          count: 2,
+          source: loc.shelf,
+          title: "ZZ Retry",
+        });
+      } finally {
+        sequentialIds.override = null;
+      }
+
+      expect(calls).toBe(2);
+      expect((await assetsTitled("ZZ Retry")).map((a) => a.title)).toEqual([
+        "ZZ Retry 1",
+        "ZZ Retry 2",
+      ]);
+      expect((await poolState(poolId)).total).toBe(0);
     }, 60_000);
 
     it("refuses another workspace's asset model", async () => {

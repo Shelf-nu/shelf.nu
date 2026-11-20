@@ -652,15 +652,10 @@ export async function applyQuantityAdjustment(
   const asset = await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
   /**
-   * Step 2: Validate asset belongs to the caller's organization.
-   * Prevents cross-tenant IDOR: without this guard, any authenticated
-   * user with `asset:update` in any org could mutate another org's
-   * qty-tracked asset by passing its id. Mirrors the pattern used in
+   * Step 2: The asset belongs to the caller's organization. The lock in
+   * Step 1 is org-scoped, so a foreign-org id is already a 404 there; this
+   * check states the invariant the rest of the function relies on, as in
    * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
-   *
-   * Now defense-in-depth: `lockAssetForQuantityUpdate` is org-scoped, so a
-   * foreign-org id already 404'd at Step 1 (no lock taken) and never reaches
-   * here. We keep this belt-and-braces check to document the invariant.
    */
   if (asset.organizationId !== organizationId) {
     throw new ShelfError({

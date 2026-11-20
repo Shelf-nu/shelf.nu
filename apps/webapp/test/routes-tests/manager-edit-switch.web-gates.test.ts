@@ -54,6 +54,8 @@ import {
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr/service.server";
 import { action as assetDetailAction } from "~/routes/_layout+/assets.$assetId";
+import { createAssetsFromStock } from "~/modules/asset/create-from-stock.server";
+import { action as createFromStockAction } from "~/routes/_layout+/assets.$assetId.overview.create-from-stock";
 import { action as duplicateAssetAction } from "~/routes/_layout+/assets.$assetId.overview.duplicate";
 import { action as updateAssetLocationAction } from "~/routes/_layout+/assets.$assetId.overview.update-location";
 import { action as editAssetAction } from "~/routes/_layout+/assets.$assetId_.edit";
@@ -204,6 +206,15 @@ vi.mock("~/modules/asset/service.server", () => ({
 
 // why: the form routes resolve category-driven custom fields from the
 // database; none are defined in this workspace.
+// why: the conversion is the gated service; its rows have their own tests
+vi.mock("~/modules/asset/create-from-stock.server", () => ({
+  createAssetsFromStock: vi.fn(async () => ({
+    assets: [{ id: "asset-new", title: "Tripod" }],
+    locationId: null,
+  })),
+  getAssetsFromStockChoices: vi.fn(),
+}));
+
 vi.mock("~/modules/custom-field/service.server", () => ({
   getActiveCustomFields: vi.fn(async () => []),
 }));
@@ -434,6 +445,22 @@ const OPENED_BY_THE_SWITCH: GatedRoute[] = [
     receives: expect.objectContaining({
       organizationId: ORG_ID,
       title: "Tripod",
+    }),
+    status: 302,
+  },
+  {
+    route: "_layout+/assets.$assetId.overview.create-from-stock.tsx action",
+    call: post(
+      createFromStockAction,
+      "/assets/asset-1/overview/create-from-stock",
+      { count: "1", source: "unplaced", title: "Tripod" },
+      { assetId: "asset-1" }
+    ),
+    service: createAssetsFromStock,
+    receives: expect.objectContaining({
+      poolId: "asset-1",
+      organizationId: ORG_ID,
+      count: 1,
     }),
     status: 302,
   },

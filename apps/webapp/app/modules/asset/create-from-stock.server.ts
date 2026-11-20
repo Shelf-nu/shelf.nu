@@ -27,7 +27,7 @@ import { AssetType, ErrorCorrection, Prisma } from "@prisma/client";
 import type { Asset } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
-import { recordEvent } from "~/modules/activity-event/service.server";
+import { recordEvents } from "~/modules/activity-event/service.server";
 import { planModelDefaultFill } from "~/modules/asset-model/defaults";
 import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
@@ -41,7 +41,7 @@ import {
   createAssetLocationMoveNotes,
   firstPlacementMove,
 } from "~/modules/location-note/service.server";
-import { createNote } from "~/modules/note/service.server";
+import { createNotesPerAsset } from "~/modules/note/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
@@ -134,18 +134,12 @@ export async function createAssetsFromStock(
   }
 
   for (let attempt = 1; ; attempt++) {
+    let converted: Awaited<ReturnType<typeof convertInTransaction>>;
     try {
-      const { pool, created, adjustment, actor } = await db.$transaction(
+      converted = await db.$transaction(
         (tx) => convertInTransaction(tx, { ...input, title }),
         LONG_TRANSACTION_OPTIONS
       );
-
-      await afterCommit({ pool, created, adjustment, actor, userId, count });
-
-      return {
-        assets: created.map(({ id, title }) => ({ id, title })),
-        locationId: adjustment.location.locationId,
-      };
     } catch (cause) {
       if (isSequentialIdCollision(cause) && attempt < MAX_ATTEMPTS) continue;
       if (cause instanceof ShelfError) throw cause;
@@ -157,6 +151,15 @@ export async function createAssetsFromStock(
         label,
       });
     }
+
+    // Outside the retry: the conversion is saved, so nothing after the
+    // commit may turn it into an error or a second attempt.
+    const { pool, created, adjustment, actor } = converted;
+    await afterCommit({ pool, created, adjustment, actor, userId, count });
+    return {
+      assets: created.map(({ id, title }) => ({ id, title })),
+      locationId: adjustment.location.locationId,
+    };
   }
 }
 
@@ -296,78 +299,101 @@ async function convertInTransaction(
 
   const titles = assetsFromStockTitles(title, count);
   const sequentialIds = await getNextSequentialIds(organizationId, count, tx);
-  const created: Created[] = [];
+  const created: Created[] = titles.map((assetTitle) => ({
+    id: id(),
+    title: assetTitle,
+    type: AssetType.INDIVIDUAL,
+    unitOfMeasure: null,
+  }));
+  const assetIds = created.map((asset) => asset.id);
 
-  for (const [index, assetTitle] of titles.entries()) {
-    const asset = await tx.asset.create({
+  // One statement per table, as the import writes its rows, so the pool's
+  // lock is held for a handful of queries whatever the count. Each asset
+  // ends up as `createAsset` would leave an individual asset.
+  // @see {@link file://./service.server.ts} `createAsset`
+  await tx.asset.createMany({
+    data: created.map((asset, index) => ({
+      id: asset.id,
+      title: asset.title,
+      description: pool.description,
+      sequentialId: sequentialIds[index],
+      type: AssetType.INDIVIDUAL,
+      // The pool's valuation is per unit (its total value is valuation times
+      // quantity), so each asset made from one unit carries it.
+      valuation,
+      availableToBook: pool.availableToBook,
+      userId,
+      organizationId,
+      categoryId,
+      assetModelId: model?.id ?? null,
+    })),
+  });
+  await tx.qr.createMany({
+    data: assetIds.map((assetId) => ({
+      id: id(),
+      version: 0,
+      errorCorrection: ErrorCorrection.L,
+      userId,
+      organizationId,
+      assetId,
+    })),
+  });
+  // The pool's own tags, so already in this workspace; one write per tag.
+  for (const tag of pool.tags) {
+    await tx.tag.update({
+      where: { id: tag.id, organizationId },
       data: {
-        title: assetTitle,
-        description: pool.description,
-        sequentialId: sequentialIds[index],
-        type: AssetType.INDIVIDUAL,
-        // The pool's valuation is per unit (its total value is valuation
-        // times quantity), so each asset made from one unit carries it.
-        valuation,
-        availableToBook: pool.availableToBook,
-        user: { connect: { id: userId } },
-        organization: { connect: { id: organizationId } },
-        qrCodes: {
-          create: {
-            id: id(),
-            version: 0,
-            errorCorrection: ErrorCorrection.L,
-            user: { connect: { id: userId } },
-            organization: { connect: { id: organizationId } },
-          },
-        },
-        ...(categoryId && { category: { connect: { id: categoryId } } }),
-        ...(model && { assetModel: { connect: { id: model.id } } }),
-        ...(pool.tags.length > 0 && {
-          tags: { connect: pool.tags.map((tag) => ({ id: tag.id })) },
-        }),
-        ...(customFieldValues.length > 0 && {
-          customFields: { create: customFieldValues },
-        }),
+        assets: { connect: assetIds.map((assetId) => ({ id: assetId })) },
       },
-      select: { id: true, title: true, type: true, unitOfMeasure: true },
     });
-    created.push(asset);
+  }
+  if (customFieldValues.length > 0) {
+    await tx.assetCustomFieldValue.createMany({
+      data: assetIds.flatMap((assetId) =>
+        customFieldValues.map((field) => ({ ...field, assetId }))
+      ),
+    });
+  }
+  if (locationId) {
+    await tx.assetLocation.createMany({
+      data: assetIds.map((assetId) => ({
+        assetId,
+        locationId,
+        organizationId,
+        quantity: 1,
+      })),
+    });
+  }
 
-    if (locationId) {
-      await tx.assetLocation.create({
-        data: { assetId: asset.id, locationId, organizationId, quantity: 1 },
-      });
-    }
-
-    await recordEvent(
+  await recordEvents(
+    assetIds.flatMap((assetId) => [
       {
         organizationId,
         actorUserId: userId,
-        action: "ASSET_CREATED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
+        action: "ASSET_CREATED" as const,
+        entityType: "ASSET" as const,
+        entityId: assetId,
+        assetId,
       },
-      tx
-    );
-    if (locationId) {
-      await recordEvent(
-        {
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_LOCATION_CHANGED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          locationId,
-          field: "locationId",
-          fromValue: null,
-          toValue: locationId,
-        },
-        tx
-      );
-    }
-  }
+      ...(locationId
+        ? [
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: assetId,
+              assetId,
+              locationId,
+              field: "locationId",
+              fromValue: null,
+              toValue: locationId,
+            },
+          ]
+        : []),
+    ]),
+    tx
+  );
 
   const actor = await tx.user.findUniqueOrThrow({
     where: { id: userId },
@@ -376,31 +402,27 @@ async function convertInTransaction(
   const actorLink = wrapUserLinkForNote(actor);
   const poolLink = wrapLinkForNote(`/assets/${pool.id}`, pool.title);
 
-  await createNote(
+  await createNotesPerAsset(
     {
-      content: `${actorLink} created ${wrapAssetsWithDataForNote(
-        created,
-        "created"
-      )} from this stock. The stock went down by **${count}**.`,
+      notes: [
+        {
+          assetId: pool.id,
+          content: `${actorLink} created ${wrapAssetsWithDataForNote(
+            created,
+            "created"
+          )} from this stock. The stock went down by **${count}**.`,
+        },
+        ...assetIds.map((assetId) => ({
+          assetId,
+          content: `${actorLink} created this asset from the stock of ${poolLink}.`,
+        })),
+      ],
       type: "UPDATE",
       userId,
-      assetId: pool.id,
       organizationId,
     },
     tx
   );
-  for (const asset of created) {
-    await createNote(
-      {
-        content: `${actorLink} created this asset from the stock of ${poolLink}.`,
-        type: "UPDATE",
-        userId,
-        assetId: asset.id,
-        organizationId,
-      },
-      tx
-    );
-  }
 
   return { pool, created, adjustment, actor };
 }

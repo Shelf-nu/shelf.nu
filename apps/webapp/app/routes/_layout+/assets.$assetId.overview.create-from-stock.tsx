@@ -14,14 +14,9 @@
  */
 
 import { useState } from "react";
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import {
-  data,
-  redirect,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from "react-router";
+import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodySourceSelect } from "~/components/assets/custody-source-select";
@@ -32,7 +27,12 @@ import Icon from "~/components/icons/icon";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { MAX_ASSETS_FROM_STOCK } from "~/modules/asset/create-from-stock";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useDisabled } from "~/hooks/use-disabled";
+import {
+  assetsFromStockMax,
+  MAX_ASSETS_FROM_STOCK,
+} from "~/modules/asset/create-from-stock";
 import {
   createAssetsFromStock,
   getAssetsFromStockChoices,
@@ -45,7 +45,6 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -56,6 +55,7 @@ import { validatePermission } from "~/utils/permissions/permission.validator.ser
 import { requirePermission } from "~/utils/roles.server";
 import { requiredNumberFromString } from "~/utils/zod-numeric";
 
+/** The tab title. */
 export const meta = () => [
   { title: appendToMetaTitle("Create assets from stock") },
 ];
@@ -131,7 +131,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         total: asset.quantity ?? 0,
       }),
-      getAssetModels({ organizationId }),
+      // The same first page the asset form loads; search reaches the rest.
+      getAssetModels({ organizationId, page: 1, perPage: 100 }),
     ]);
 
     return payload({
@@ -224,6 +225,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+/** The modal layout styles every overview dialog route loads. */
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
@@ -240,7 +242,7 @@ export default function CreateAssetsFromStock() {
   const validationErrors = getValidationErrors<
     typeof CreateAssetsFromStockSchema
   >(actionData?.error);
-  const isProcessing = isFormProcessing(useNavigation().state);
+  const isProcessing = useDisabled();
 
   const [pickedSource, setPickedSource] = useState<string | null>(null);
   const source =
@@ -248,12 +250,13 @@ export default function CreateAssetsFromStock() {
     defaultAssignSourceOption(options) ??
     options[0] ??
     null;
-  const max = Math.min(free, source?.left ?? 0, MAX_ASSETS_FROM_STOCK);
+  const max = assetsFromStockMax(free, source?.left ?? 0);
   const unitLabel = asset.unitOfMeasure || "units";
   const isArchived = Boolean(asset.archivedAt);
+  const canReinstate = useCanArchiveAssets();
 
   const blocked = isArchived
-    ? "Reinstate this asset before creating assets from its stock."
+    ? archivedAssetBlockedReason({ canReinstate })
     : max < 1
     ? free < 1
       ? `No ${unitLabel} are free: every unit is in custody, in a kit or reserved by a booking.`
@@ -345,7 +348,7 @@ export default function CreateAssetsFromStock() {
               initialDataKey="assetModels"
               countKey="totalAssetModels"
               closeOnSelect
-              selectionMode="set"
+              selectionMode="none"
               allowClear
             />
           </div>

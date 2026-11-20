@@ -328,6 +328,26 @@ describe("ActionsDropdown: create assets from stock", () => {
     ).toBeNull();
   });
 
+  it("follows the Manager edit switch", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+      managersCanEditAssets: true,
+    });
+    renderMenu(pool);
+    expect(
+      screen.getByRole("link", { name: "Create assets from stock" })
+    ).toBeInTheDocument();
+  });
+
+  it("is not offered to a Manager while the edit switch is off", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+      managersCanEditAssets: false,
+    });
+    renderMenu(pool);
+    expect(
+      screen.queryByRole("link", { name: "Create assets from stock" })
+    ).toBeNull();
+  });
+
   it("is not offered to a member who may not create assets", () => {
     caller.roles = [OrganizationRoles.BASE];
 
