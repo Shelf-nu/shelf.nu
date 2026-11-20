@@ -21,6 +21,7 @@ import {
 
 import {
   action,
+  NewReportSchema,
   REPORT_CONTENT_MAX_LENGTH,
   REPORT_EMAIL_MAX_LENGTH,
 } from "~/routes/qr+/_public+/$qrId_.contact-owner";
@@ -197,5 +198,19 @@ describe("contact owner", () => {
     expect(statusOf(result)).toBe(400);
     expect(createReport).not.toHaveBeenCalled();
     expect(sendReportEmails).not.toHaveBeenCalled();
+  });
+
+  it("stops at the length check, so an oversized email never reaches the email regex", () => {
+    // Oversized and malformed: if the email check ran, it would add an issue.
+    const result = NewReportSchema.safeParse({
+      email: "a".repeat(REPORT_EMAIL_MAX_LENGTH + 1),
+      content: "Found this on the train",
+    });
+
+    expect(result.success).toBe(false);
+    const emailIssues = result.error?.issues.filter(
+      (issue) => issue.path[0] === "email"
+    );
+    expect(emailIssues?.map((issue) => issue.code)).toEqual(["too_big"]);
   });
 });

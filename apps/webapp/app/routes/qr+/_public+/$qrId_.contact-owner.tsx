@@ -48,9 +48,10 @@ export const REPORT_EMAIL_MAX_LENGTH = 254;
 export const NewReportSchema = z.object({
   email: z
     .string()
-    // Checked before `.email()`, so an oversized value never reaches its regex.
     .max(REPORT_EMAIL_MAX_LENGTH, "Please enter a valid Email address")
-    .email("Please enter a valid Email address")
+    // Piped, not chained: a string schema runs every check even after one
+    // fails, so this is what keeps an oversized value from the email regex.
+    .pipe(z.string().email("Please enter a valid Email address"))
     .transform((email) => email.toLowerCase()),
   content: z
     .string()
