@@ -46,6 +46,36 @@ function isUsableDate(value: Date | undefined): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
+/** Every preset the timeframe picker can write to the URL. */
+export const TIMEFRAME_PRESETS: readonly TimeframePreset[] = [
+  "today",
+  "last_7d",
+  "last_30d",
+  "last_90d",
+  "this_month",
+  "last_month",
+  "this_quarter",
+  "this_year",
+  "all_time",
+  "custom",
+];
+
+/**
+ * Whether a URL value names a supported timeframe preset.
+ *
+ * Use it before `resolveTimeframe` so an unknown value falls back to the
+ * caller's default *with* the user's format preferences; the resolver's own
+ * fallback for an unknown preset runs on UTC defaults.
+ */
+export function isTimeframePreset(
+  value: string | null | undefined
+): value is TimeframePreset {
+  return (
+    typeof value === "string" &&
+    (TIMEFRAME_PRESETS as readonly string[]).includes(value)
+  );
+}
+
 export function resolveTimeframe(
   preset: TimeframePreset,
   customFrom?: Date,

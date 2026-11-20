@@ -13,7 +13,12 @@
 import { DateTime } from "luxon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
-import { resolveTimeframe, toZonedBoundaryISO } from "./timeframe";
+import {
+  TIMEFRAME_PRESETS,
+  isTimeframePreset,
+  resolveTimeframe,
+  toZonedBoundaryISO,
+} from "./timeframe";
 
 /**
  * Guard: the custom-range label must render in the user's OWN date format —
@@ -222,5 +227,17 @@ describe("resolveTimeframe - unrecognised preset", () => {
     // Tokyo is UTC+9, so an identically-named range starts at a different
     // instant. Equal boundaries would mean the pref was thrown away.
     expect(tokyo.from.toISOString()).not.toBe(utc.from.toISOString());
+  });
+});
+
+describe("isTimeframePreset", () => {
+  it("accepts every supported preset and nothing else", () => {
+    for (const preset of TIMEFRAME_PRESETS) {
+      expect(isTimeframePreset(preset)).toBe(true);
+    }
+    expect(isTimeframePreset("last_365d")).toBe(false);
+    expect(isTimeframePreset("")).toBe(false);
+    expect(isTimeframePreset(null)).toBe(false);
+    expect(isTimeframePreset(undefined)).toBe(false);
   });
 });

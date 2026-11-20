@@ -1,8 +1,8 @@
 /**
  * Plan gate on every reports door.
  *
- * Reports are part of the Plus and Team plans. Four routes hand out report
- * data, and each must refuse a workspace whose plan does not include them:
+ * Reports are part of the Plus and Team plans. Every route that hands out
+ * report data must refuse a workspace whose plan does not include them:
  *
  * | Door            | Free workspace gets                          |
  * | --------------- | -------------------------------------------- |
@@ -10,6 +10,8 @@
  * | a report page   | a redirect to the index (the unlock page)    |
  * | CSV export      | 403 with the plan copy                       |
  * | PDF data        | 403 with the plan copy                       |
+ * | report builder  | a redirect to the index (the unlock page)    |
+ * | builder CSV     | 403 with the plan copy                       |
  *
  * The plan is the WORKSPACE's: its owner's tier, never the viewer's own. So the
  * database stand-in answers by user id, and the cases prove whose tier is read.
@@ -18,7 +20,7 @@
  *
  * The manifest test reads the route files from disk: a new route that names
  * `PermissionEntity.reports` fails this suite until it joins `DOORS`, which is
- * what keeps a fifth door from shipping without the gate.
+ * what keeps another door from shipping without the gate.
  *
  * @see {@link file://../../app/utils/subscription.server.ts} `workspaceCanUseReports`
  * @see {@link file://../../app/modules/reports/plan-copy.ts}
@@ -44,6 +46,8 @@ import { loader as customFieldValuesLoader } from "~/routes/api+/reports.custom-
 import { loader as reportLoader } from "~/routes/_layout+/reports.$reportId";
 import { loader as indexLoader } from "~/routes/_layout+/reports._index";
 import { loader as csvLoader } from "~/routes/_layout+/reports.export.$fileName[.csv]";
+import { loader as builderLoader } from "~/routes/_layout+/reports.builder";
+import { loader as builderCsvLoader } from "~/routes/_layout+/reports.builder.export.$fileName[.csv]";
 
 // why: the tier, custom tier and organization rows live in the database; the
 // stand-in answers by user id so the cases can prove whose tier is read
@@ -80,6 +84,35 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   monthlyBookingTrendsReport: vi.fn(),
   assetUtilizationReport: vi.fn(),
   assetActivityReport: vi.fn(),
+}));
+
+// why: the builder compiles and runs raw SQL; the gate only decides whether
+// it is reached
+vi.mock("~/modules/reports/builder/compile.server", () => ({
+  runBuilderReport: vi.fn(() =>
+    Promise.resolve({
+      spec: {
+        dataset: "assets",
+        groupBy: "category",
+        customFieldId: null,
+        measure: "assetCount",
+      },
+      rows: [],
+      kpis: [],
+      chartSeries: [],
+      totalGroups: 0,
+      truncated: false,
+      computedMs: 1,
+    })
+  ),
+}));
+
+// why: the acting user's date and time preferences are a database read, and
+// the builder resolves them before building anything
+vi.mock("~/utils/date-format.server", () => ({
+  resolveUserFormatPrefsById: vi.fn(() =>
+    Promise.resolve({ timeZone: "UTC", dateFormat: "DD_MM_YYYY" })
+  ),
 }));
 
 // why: the report page loads its filter pick-lists (categories, locations,
@@ -178,6 +211,9 @@ function givenViewer(userId: string, role: OrganizationRoles) {
     imageId: null,
     userId: OWNER_ID,
     currency: "USD",
+    // The add-on is on throughout: these cases vary the PLAN, and the builder
+    // answers the plan before the add-on.
+    advancedReportsEnabled: true,
   };
   vi.mocked(getSelectedOrganization).mockResolvedValue({
     organizationId: ORG_ID,
@@ -363,6 +399,36 @@ const DOORS: Door[] = [
           request: new Request(
             "http://localhost:3000/api/reports/custom-field-values?customFieldId=f-1"
           ),
+          context,
+        })
+      ),
+    lockedOutcome: {
+      kind: "refused",
+      status: 403,
+      title: PLAN_TITLE,
+      message: PLAN_MESSAGE,
+    },
+  },
+  {
+    file: "_layout+/reports.builder.tsx",
+    run: (context) =>
+      builderLoader(
+        createLoaderArgs({
+          request: new Request("http://localhost:3000/reports/builder"),
+          context,
+        })
+      ),
+    lockedOutcome: { kind: "redirect", location: "/reports" },
+  },
+  {
+    file: "_layout+/reports.builder.export.$fileName[.csv].tsx",
+    run: (context) =>
+      builderCsvLoader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/builder/export/builder.csv"
+          ),
+          params: { fileName: "builder" },
           context,
         })
       ),
