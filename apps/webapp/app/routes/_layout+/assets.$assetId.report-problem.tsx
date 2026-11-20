@@ -58,7 +58,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { additionalData: { userId, assetId }, shouldBeCaptured: false }
     );
 
-    const { notifiedCount } = await reportAssetProblem({
+    const { emailed } = await reportAssetProblem({
       assetId,
       organizationId,
       userId,
@@ -67,7 +67,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
     });
 
-    return payload({ emailed: notifiedCount > 0 });
+    return payload({ emailed });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return data(error(reason), { status: reason.status });

@@ -22,6 +22,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -122,12 +123,18 @@ const ConditionalActionsDropdown = () => {
     entity: PermissionEntity.asset,
     action: PermissionAction.custody,
   });
-  /** Every role holds it; checked like any other grant. */
-  const canReportProblem = userHasPermission({
-    roles,
-    entity: PermissionEntity.problemReport,
-    action: PermissionAction.create,
-  });
+  /**
+   * Every role holds the grant; checked like any other. A Personal workspace
+   * has one person, so a report there would go to its own author.
+   */
+  const isPersonalWorkspace = useCurrentOrganization()?.type === "PERSONAL";
+  const canReportProblem =
+    !isPersonalWorkspace &&
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.problemReport,
+      action: PermissionAction.create,
+    });
   /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
   const canArchiveAsset = useCanArchiveAssets();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";

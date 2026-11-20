@@ -11,6 +11,7 @@
  */
 import Markdoc from "@markdoc/markdoc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ProblemReportEmail from "~/emails/problem-report";
 
 const mocks = vi.hoisted(() => ({
   getAsset: vi.fn(),
@@ -22,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   findOrganization: vi.fn(),
   countNotes: vi.fn(),
   lock: vi.fn(),
+  renderHtml: vi.fn(),
+  realRenderHtml: null as unknown as (...args: unknown[]) => Promise<string>,
+  loggerError: vi.fn(),
 }));
 
 // why: the asset lookup is the asset page's own; the question here is which
@@ -51,6 +55,17 @@ vi.mock("~/modules/organization/service.server", () => ({
 // why: no mail server; the calls show who would receive the email
 vi.mock("~/emails/mail.server", () => ({ sendEmail: mocks.sendEmail }));
 
+// why: one case holds the HTML render open to show the member is answered
+// without waiting for the emails; every other case renders the real template
+vi.mock("~/emails/problem-report", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProblemReportEmail>();
+  mocks.realRenderHtml = actual.problemReportEmailHtml as never;
+  return { ...actual, problemReportEmailHtml: mocks.renderHtml };
+});
+
+// why: a failed email is logged, never thrown; the calls show it was caught
+vi.mock("~/utils/logger", () => ({ Logger: { error: mocks.loggerError } }));
+
 // why: the reporter and the workspace are read from the database, and the
 // report is admitted and written in a transaction; the lock and the count
 // query themselves run against Postgres in the db suite
@@ -67,6 +82,7 @@ vi.mock("~/database/db.server", () => {
 
 import { ShelfError } from "~/utils/error";
 import {
+  PERSONAL_WORKSPACE_REFUSAL,
   PROBLEM_REPORT_LIMIT,
   buildProblemReportNote,
   reportAssetProblem,
@@ -136,8 +152,10 @@ describe("reportAssetProblem", () => {
     mocks.findOrganization.mockResolvedValue({
       name: "ZZ Workspace",
       customEmailFooter: null,
+      type: "TEAM",
     });
     mocks.createNote.mockResolvedValue({ id: "note-1" });
+    mocks.renderHtml.mockImplementation(mocks.realRenderHtml);
     mocks.getOrganizationNotificationAudience.mockResolvedValue(audience);
   });
 
@@ -247,15 +265,41 @@ describe("reportAssetProblem", () => {
       },
       expect.objectContaining({ note: expect.anything() })
     );
-    expect(mocks.sendEmail.mock.calls.map(([mail]) => mail.to)).toEqual([
-      "owner@example.com",
+    expect(result).toEqual({ note: { id: "note-1" }, emailed: true });
+    await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(2));
+    expect(mocks.sendEmail.mock.calls.map(([mail]) => mail.to).sort()).toEqual([
       "admin@example.com",
+      "owner@example.com",
     ]);
     expect(mocks.sendEmail.mock.calls[0][0]).toMatchObject({
       subject: "Problem reported: ZZ Camera",
       replyTo: "base@example.com",
     });
-    expect(result).toEqual({ note: { id: "note-1" }, notifiedCount: 2 });
+  });
+
+  it("answers without waiting for the emails to be rendered", async () => {
+    mocks.renderHtml.mockReturnValue(new Promise(() => {}));
+
+    await expect(report()).resolves.toEqual({
+      note: { id: "note-1" },
+      emailed: true,
+    });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("refuses in a Personal workspace and writes nothing", async () => {
+    mocks.findOrganization.mockResolvedValue({
+      name: "Personal",
+      customEmailFooter: null,
+      type: "PERSONAL",
+    });
+
+    await expect(report()).rejects.toMatchObject({
+      status: 400,
+      message: PERSONAL_WORKSPACE_REFUSAL,
+    });
+    expect(mocks.createNote).not.toHaveBeenCalled();
+    expect(mocks.getOrganizationNotificationAudience).not.toHaveBeenCalled();
   });
 
   it("keeps the saved report when the audience lookup fails", async () => {
@@ -265,19 +309,25 @@ describe("reportAssetProblem", () => {
 
     await expect(report()).resolves.toEqual({
       note: { id: "note-1" },
-      notifiedCount: 0,
+      emailed: false,
     });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
-  it("leaves a copy the mailer refused out of the count, and still sends the rest", async () => {
+  it("logs a copy the mailer refused and still sends the rest", async () => {
     mocks.sendEmail.mockImplementationOnce(() => {
       throw new Error("bad address");
     });
 
-    const result = await report();
+    await expect(report()).resolves.toMatchObject({ emailed: true });
 
-    expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
-    expect(result.notifiedCount).toBe(1);
+    await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(mocks.loggerError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Could not send a problem report email",
+        })
+      )
+    );
   });
 });

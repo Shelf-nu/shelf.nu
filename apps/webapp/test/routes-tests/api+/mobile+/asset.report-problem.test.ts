@@ -4,7 +4,7 @@
  * The phone must never accept what the web refuses. Each case below runs the
  * same request through both routes and asserts the same answer: the grant
  * check, the text rule, the service's refusals (an asset the member cannot
- * open, an archived asset) and the success payload.
+ * open, an archived asset, a Personal workspace) and the success payload.
  *
  * The service's own rules run against a real database in
  * `app/modules/problem-report/service.server.db.test.ts`.
@@ -33,6 +33,8 @@ vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 // whether both routes hand it the same request and pass on the same answer
 vi.mock("~/modules/problem-report/service.server", () => ({
   reportAssetProblem: vi.fn(),
+  PERSONAL_WORKSPACE_REFUSAL:
+    "Report a problem is for team workspaces. A Personal workspace has no one else to report to.",
 }));
 
 // why: a refused web request raises a toast through the server-sent events
@@ -46,7 +48,10 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { reportAssetProblem } from "~/modules/problem-report/service.server";
+import {
+  PERSONAL_WORKSPACE_REFUSAL,
+  reportAssetProblem,
+} from "~/modules/problem-report/service.server";
 import { action as mobileAction } from "~/routes/api+/mobile+/asset.report-problem";
 import { action as webAction } from "~/routes/_layout+/assets.$assetId.report-problem";
 import { ShelfError } from "~/utils/error";
@@ -139,7 +144,7 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
     } as never);
     vi.mocked(reportAssetProblem).mockResolvedValue({
       note: { id: "note-1" },
-      notifiedCount: 2,
+      emailed: true,
     } as never);
   });
 
@@ -208,6 +213,16 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
         status: 400,
       }),
     ],
+    [
+      "a report in a Personal workspace",
+      new ShelfError({
+        cause: null,
+        title: "Not available in a Personal workspace",
+        message: PERSONAL_WORKSPACE_REFUSAL,
+        label: "Assets",
+        status: 400,
+      }),
+    ],
   ])("both pass on the service's refusal of %s", async (_case, refusal) => {
     vi.mocked(reportAssetProblem).mockRejectedValue(refusal);
 
@@ -253,10 +268,10 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
   ] as const)(
     "%s says only whether anyone was emailed, never how many",
     async (_route, call) => {
-      for (const notifiedCount of [3, 0]) {
+      for (const emailed of [true, false]) {
         vi.mocked(reportAssetProblem).mockResolvedValue({
           note: { id: "note-1" },
-          notifiedCount,
+          emailed,
         } as never);
 
         const { status, body } = await call({
@@ -265,7 +280,7 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
         });
 
         expect(status).toBe(200);
-        expect(body.emailed).toBe(notifiedCount > 0);
+        expect(body.emailed).toBe(emailed);
         expect(body).not.toHaveProperty("notifiedCount");
         // `error: null` is the web success envelope, nothing about the report.
         expect(Object.keys(body).filter((key) => key !== "error")).toEqual([

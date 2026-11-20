@@ -176,6 +176,10 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     sendEmail.mockClear();
   });
 
+  afterEach(async () => {
+    await emailsSettled();
+  });
+
   function report(
     role: string,
     assetId: string,
@@ -188,6 +192,19 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
       userId: userIds[role],
       content,
     });
+  }
+
+  /**
+   * Emails go out after `reportAssetProblem` answers. Waits until no new one
+   * has arrived for a moment, so a test reads all of its own and none leak
+   * into the next test.
+   */
+  async function emailsSettled() {
+    let seen = -1;
+    while (seen !== sendEmail.mock.calls.length) {
+      seen = sendEmail.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   }
 
   function emailedTo() {
@@ -254,18 +271,20 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
 
   it("emails the owner, administrator and manager, never the reporter", async () => {
     await report("MANAGER", assets.bookable);
+    await emailsSettled();
 
     expect(emailedTo()).toEqual([emailOf("ADMIN"), emailOf("OWNER")].sort());
   });
 
   it("emails all three when a Base member reports, with the asset, reporter and text", async () => {
-    const { notifiedCount } = await report(
+    const { emailed } = await report(
       "BASE",
       assets.bookable,
       "Battery does not charge"
     );
+    await emailsSettled();
 
-    expect(notifiedCount).toBe(3);
+    expect(emailed).toBe(true);
     expect(emailedTo()).toEqual(
       [emailOf("ADMIN"), emailOf("MANAGER"), emailOf("OWNER")].sort()
     );
@@ -280,14 +299,15 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
   });
 
   it("writes the note and sends no email when the reporter is the only one who would receive it", async () => {
-    const { note, notifiedCount } = await report(
+    const { note, emailed } = await report(
       "OUTSIDER",
       assets.solo,
       "Screen flickers",
       soloOrganizationId
     );
+    await emailsSettled();
 
-    expect(notifiedCount).toBe(0);
+    expect(emailed).toBe(false);
     expect(sendEmail).not.toHaveBeenCalled();
     expect(
       await db.note.count({ where: { id: note.id, type: "UPDATE" } })
@@ -326,14 +346,43 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
   });
 
   it("works the same for a quantity-tracked asset", async () => {
-    const { note, notifiedCount } = await report(
+    const { note, emailed } = await report(
       "SELF_SERVICE",
       assets.quantity,
       "Two packs are swollen"
     );
 
     expect(note).toMatchObject({ assetId: assets.quantity, type: "UPDATE" });
-    expect(notifiedCount).toBe(3);
+    expect(emailed).toBe(true);
+  });
+
+  it("refuses a report in a Personal workspace and writes nothing", async () => {
+    const personal = await db.organization.create({
+      data: {
+        name: `ZZ Problem report personal ${stamp}`,
+        userId: userIds.OUTSIDER,
+        type: "PERSONAL",
+      },
+    });
+    organizationIds.push(personal.id);
+    await db.userOrganization.create({
+      data: {
+        userId: userIds.OUTSIDER,
+        organizationId: personal.id,
+        roles: ["OWNER"],
+      },
+    });
+    const assetId = await createAsset(personal.id, "ZZ Own drill", {
+      userId: userIds.OUTSIDER,
+    });
+
+    await expect(
+      report("OUTSIDER", assetId, "Bit is blunt", personal.id)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: service.PERSONAL_WORKSPACE_REFUSAL,
+    });
+    expect(await db.note.count({ where: { assetId } })).toBe(0);
   });
 
   it("refuses a member who has sent the hourly limit of reports in this workspace", async () => {

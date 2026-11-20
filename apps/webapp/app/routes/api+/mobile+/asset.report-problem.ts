@@ -59,14 +59,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Only whether anyone was emailed: how many would tell a member without
     // access to the team list how many people run the workspace.
-    const { notifiedCount } = await reportAssetProblem({
+    const { emailed } = await reportAssetProblem({
       assetId,
       organizationId,
       userId: user.id,
       content,
     });
 
-    return data({ emailed: notifiedCount > 0 });
+    return data({ emailed });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(

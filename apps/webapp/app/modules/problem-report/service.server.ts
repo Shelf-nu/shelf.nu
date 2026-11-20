@@ -40,6 +40,10 @@ export const PROBLEM_REPORT_LIMIT = 10;
 /** The window the report limit counts over: one hour. */
 export const PROBLEM_REPORT_WINDOW_MS = 60 * 60 * 1000;
 
+/** The refusal for a report in a Personal workspace, on web and phone alike. */
+export const PERSONAL_WORKSPACE_REFUSAL =
+  "Report a problem is for team workspaces. A Personal workspace has no one else to report to.";
+
 /** Text between the reporter link and the report in every report note. */
 const PROBLEM_REPORT_PHRASE = " reported a problem: ";
 
@@ -71,9 +75,11 @@ export function buildProblemReportNote(
  *
  * Refuses exactly when the asset page would refuse to open the asset (the
  * same `getAsset` lookup), and refuses an archived asset with the reason every
- * other action on an archived asset gives. The note is written before any
- * email is sent; a failed audience lookup or email is logged and never undoes
- * the note or fails the request.
+ * other action on an archived asset gives, and refuses in a Personal
+ * workspace. The note is written before any email is sent. The emails are
+ * sent after this returns, so the member never waits for them; a failed
+ * audience lookup or email is logged and never undoes the note or fails the
+ * request.
  *
  * @param args.assetId - The asset the report is about, from the request
  * @param args.organizationId - The reporter's current workspace
@@ -83,9 +89,10 @@ export function buildProblemReportNote(
  * @param args.userOrganizations - The reporter's workspaces (web only), so an
  *   asset in another of their workspaces answers like the asset page does
  * @param args.request - The request (web only), for that same answer
- * @returns The note and how many copies of the email went to the mailer
+ * @returns The note, and whether anyone is emailed (the emails are sent after
+ *   this returns)
  * @throws {ShelfError} 404 when the reporter cannot open the asset, 400 when
- *   it is archived, 429 when the reporter is over the report limit, or when
+ *   it is archived or the workspace is a Personal one, 429 when the reporter is over the report limit, or when
  *   the note cannot be written
  */
 export async function reportAssetProblem({
@@ -117,9 +124,22 @@ export async function reportAssetProblem({
     }),
     db.organization.findUniqueOrThrow({
       where: { id: organizationId },
-      select: { name: true, customEmailFooter: true },
+      select: { name: true, customEmailFooter: true, type: true },
     }),
   ]);
+
+  // A Personal workspace has one person: a report would go to its own author.
+  if (organization.type === "PERSONAL") {
+    throw new ShelfError({
+      cause: null,
+      title: "Not available in a Personal workspace",
+      message: PERSONAL_WORKSPACE_REFUSAL,
+      additionalData: { organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
 
   // Admission and the write are one step: with the member's report lock held,
   // a second report from them waits here and then counts this one.
@@ -166,51 +186,90 @@ export async function reportAssetProblem({
     );
   }
 
-  const reporterName = resolveUserDisplayName(reporter) || reporter.email;
+  // The member is answered without waiting for the emails: rendering them
+  // takes longer the more people run the workspace, and the wait would let
+  // a member who cannot see the team list estimate its size.
+  void sendProblemReportEmails({
+    recipients,
+    reporter,
+    organization,
+    organizationId,
+    asset,
+    content,
+  });
 
-  // One render per recipient, each in its own try: one bad address or render
-  // must not stop the others, and the report is already saved. Only the
-  // copies handed to the mailer are counted.
-  const handedToMailer = await Promise.all(
-    recipients.map(async (recipient) => {
-      try {
-        const props = {
-          greetingName: resolveUserGreetingName(recipient) || null,
-          recipientEmail: recipient.email,
-          workspaceName: organization.name,
-          assetId: asset.id,
-          assetTitle: asset.title,
-          reporterName,
-          content,
-          customEmailFooter: organization.customEmailFooter,
-        };
-        sendEmail({
-          to: recipient.email,
-          replyTo: reporter.email,
-          subject: problemReportSubject(asset.title),
-          text: problemReportEmailText(props),
-          html: await problemReportEmailHtml(props),
-        });
-        return true;
-      } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Could not send a problem report email",
-            additionalData: {
-              assetId: asset.id,
-              organizationId,
-              recipientId: recipient.id,
-            },
-            label,
-          })
-        );
-        return false;
-      }
-    })
-  );
+  return { note, emailed: recipients.length > 0 };
+}
 
-  return { note, notifiedCount: handedToMailer.filter(Boolean).length };
+/**
+ * Renders and hands one problem report email per recipient to the mailer.
+ * Called without `await` once the report is saved, so it never throws: every
+ * failure is logged, and one bad address or render does not stop the others.
+ */
+async function sendProblemReportEmails({
+  recipients,
+  reporter,
+  organization,
+  organizationId,
+  asset,
+  content,
+}: {
+  recipients: Awaited<ReturnType<typeof getOrganizationNotificationAudience>>;
+  reporter: { email: string } & Parameters<typeof resolveUserDisplayName>[0];
+  organization: { name: string; customEmailFooter: string | null };
+  organizationId: string;
+  asset: { id: string; title: string };
+  content: string;
+}) {
+  try {
+    const reporterName = resolveUserDisplayName(reporter) || reporter.email;
+
+    await Promise.all(
+      recipients.map(async (recipient) => {
+        try {
+          const props = {
+            greetingName: resolveUserGreetingName(recipient) || null,
+            recipientEmail: recipient.email,
+            workspaceName: organization.name,
+            assetId: asset.id,
+            assetTitle: asset.title,
+            reporterName,
+            content,
+            customEmailFooter: organization.customEmailFooter,
+          };
+          sendEmail({
+            to: recipient.email,
+            replyTo: reporter.email,
+            subject: problemReportSubject(asset.title),
+            text: problemReportEmailText(props),
+            html: await problemReportEmailHtml(props),
+          });
+        } catch (cause) {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Could not send a problem report email",
+              additionalData: {
+                assetId: asset.id,
+                organizationId,
+                recipientId: recipient.id,
+              },
+              label,
+            })
+          );
+        }
+      })
+    );
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Could not send the problem report emails",
+        additionalData: { assetId: asset.id, organizationId },
+        label,
+      })
+    );
+  }
 }
 
 /**
