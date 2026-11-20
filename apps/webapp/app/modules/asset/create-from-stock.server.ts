@@ -178,6 +178,7 @@ function isSequentialIdCollision(cause: unknown) {
 /** The pool fields the new assets copy. */
 const POOL_SELECT = {
   id: true,
+  organizationId: true,
   title: true,
   type: true,
   unitOfMeasure: true,
@@ -500,9 +501,15 @@ async function afterCommit({
           userId
         );
         if (typeof imagePath === "string") {
-          await db.asset.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `asset.id` was created in this request's org-scoped transaction
-            where: { id: asset.id },
+          // A copy can finish after the response; it never replaces an
+          // image someone set on the new asset in the meantime.
+          await db.asset.updateMany({
+            where: {
+              id: asset.id,
+              organizationId: pool.organizationId,
+              mainImage: null,
+              archivedAt: null,
+            },
             data: {
               mainImage: imagePath,
               mainImageExpiration: threeDaysFromNow(),
