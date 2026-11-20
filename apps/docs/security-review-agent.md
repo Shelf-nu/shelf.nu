@@ -105,7 +105,7 @@ The agent operates against a Shelf-specific checklist baked into
   `safeParse` before any DB write; components must surface server-side
   errors via `getValidationErrors`.
 - **Secrets / env** — no hardcoded credentials; no leaking of
-  `SESSION_SECRET`, `SUPABASE_SERVICE_ROLE`, Stripe keys, SMTP creds, etc.
+  `SESSION_SECRET`, `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE`, Stripe keys, SMTP creds, etc.
   into client bundles.
 - **Supabase RLS** — every `CREATE TABLE` in a new migration must have a
   matching `ENABLE ROW LEVEL SECURITY` line in the same PR (a `CREATE TABLE`

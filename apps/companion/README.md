@@ -143,7 +143,9 @@ pnpm install
 # 2. Set up webapp environment (monorepo root)
 cp .env.example .env
 # Fill in: DATABASE_URL, DIRECT_URL, SUPABASE_URL, SUPABASE_ANON_PUBLIC,
-#          SUPABASE_SERVICE_ROLE, SESSION_SECRET
+#          SUPABASE_SECRET_KEY, SESSION_SECRET
+# Local stack: `supabase status` prints the API URL (use it as SUPABASE_URL)
+# and the Publishable and Secret keys. Those keys only work with that local URL.
 
 # 3. Set up companion app environment
 # Get your Mac's LAN IP:
@@ -151,11 +153,11 @@ ipconfig getifaddr en0   # e.g. 192.168.1.100
 
 cat > apps/companion/.env.local << 'EOF'
 EXPO_PUBLIC_SUPABASE_URL="http://<YOUR_LAN_IP>:54321"
-EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="<your-supabase-anon-key>"
+EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="<your-publishable-key>"
 EXPO_PUBLIC_API_URL="http://<YOUR_LAN_IP>:3000"
 EOF
 # Replace <YOUR_LAN_IP> with your actual LAN IP from step above
-# Get the anon key from: supabase status (Publishable key)
+# Get the publishable key (sb_publishable_...) from: supabase status
 #
 # IMPORTANT: All 3 URLs must use your LAN IP, NOT 127.0.0.1 or localhost.
 # Your phone cannot reach localhost — it's a different device.
