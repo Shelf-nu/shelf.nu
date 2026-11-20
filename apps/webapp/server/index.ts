@@ -24,10 +24,11 @@ import {
 import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
 import {
   calendarFeedGuard,
+  contactOwnerGuard,
   mobileApiGuard,
   sentryTunnelGuard,
 } from "./path-guards";
-import { appLoaderRateLimit } from "./rate-limit";
+import { appLoaderRateLimit, CONTACT_OWNER_LIMITED_KEY } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
 import { normalizeRequestPath } from "./request-path";
 import { securityHeaders } from "./security-headers";
@@ -79,6 +80,7 @@ export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
       session.unset(authSessionKey);
     },
     errorMessage: session.get("errorMessage") || null,
+    contactOwnerRateLimited: c.get(CONTACT_OWNER_LIMITED_KEY) === true,
   } satisfies AppLoadContext;
 };
 
@@ -190,6 +192,16 @@ export default createHonoServer<ServerEnv>({
      * cannot spend an address's budget and get real reports refused.
      */
     server.use("*", sentryTunnelGuard());
+
+    /**
+     * QR "contact owner" bounds. The form is public (below) and every
+     * submission sends Shelf email to an address the caller chooses, so it is
+     * counted per address and per (address, QR) before `session()`. An
+     * over-limit submission is marked for the route's action, which refuses it
+     * with a 429 the form shows inline (see `contactOwnerRateLimited` on the
+     * load context). GET is left out so opening the form costs nothing.
+     */
+    server.use("*", contactOwnerGuard());
 
     /**
      * Add session middleware
@@ -344,5 +356,11 @@ declare module "react-router" {
      * The flash error message related to session
      */
     errorMessage: string | null;
+    /**
+     * Whether this submission to a QR's public "contact owner" form is over
+     * one of its rate limits. Set by `contactOwnerGuard`; the route's action
+     * refuses the submission with a 429 when it is true.
+     */
+    readonly contactOwnerRateLimited: boolean;
   }
 }

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getClientIp } from "./client-ip";
+import { getClientIp, getVerifiedClientIp } from "./client-ip";
 
 // @vitest-environment node
 
@@ -10,11 +10,14 @@ import { getClientIp } from "./client-ip";
  * running it inside a throwaway Hono handler (the only way to obtain a real
  * `Context`).
  */
-async function resolve(headers: Record<string, string>): Promise<string> {
+async function resolve(
+  headers: Record<string, string>,
+  read: typeof getClientIp = getClientIp
+): Promise<string> {
   const app = new Hono();
   let captured = "";
   app.get("/", (c) => {
-    captured = getClientIp(c);
+    captured = read(c);
     return c.text("ok");
   });
   await app.request("/", { headers });
@@ -99,5 +102,49 @@ describe("getClientIp", () => {
     vi.stubEnv("FLY_APP_NAME", "");
     const ip = await resolve({});
     expect(ip).toBe("unknown");
+  });
+});
+
+describe("getVerifiedClientIp", () => {
+  afterEach(() => {
+    // why: tests below mutate FLY_APP_NAME and TRUSTED_PROXY_HOPS via stubEnv.
+    vi.unstubAllEnvs();
+  });
+
+  it("off Fly without TRUSTED_PROXY_HOPS, never keys on X-Forwarded-For", async () => {
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
+    const ip = await resolve(
+      { "X-Forwarded-For": "9.9.9.9, 10.0.0.5" },
+      getVerifiedClientIp
+    );
+    expect(ip).toBe("unknown");
+  });
+
+  it("off Fly with TRUSTED_PROXY_HOPS, keys by the entry the operator's proxy added", async () => {
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+    const ip = await resolve(
+      { "X-Forwarded-For": "6.6.6.6, 9.9.9.9" },
+      getVerifiedClientIp
+    );
+    expect(ip).toBe("9.9.9.9");
+  });
+
+  it("on Fly, keys by Fly-Client-IP", async () => {
+    vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
+    const ip = await resolve(
+      { "Fly-Client-IP": "1.2.3.4", "X-Forwarded-For": "6.6.6.6" },
+      getVerifiedClientIp
+    );
+    expect(ip).toBe("1.2.3.4");
+  });
+
+  it("counts IPv6 visitors by their /64, like getClientIp", async () => {
+    vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
+    const headers = { "Fly-Client-IP": "2001:db8:1:2:aaaa::1" };
+    expect(await resolve(headers, getVerifiedClientIp)).toBe(
+      await resolve(headers)
+    );
   });
 });
