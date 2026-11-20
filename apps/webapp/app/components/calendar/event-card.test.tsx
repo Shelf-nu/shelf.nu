@@ -28,9 +28,14 @@ import { bookingStatusColorMap } from "~/utils/bookings";
 import renderEventCard, { EventCardContent } from "./event-card";
 
 // why: DateS reads client hints from Remix context unavailable in the test;
-// stub to a plain node since date formatting is orthogonal to slice gating.
+// stub to a plain node that exposes whether the time was requested, so the
+// tests can check the card asks for a full date and time.
 vi.mock("~/components/shared/date", () => ({
-  DateS: () => <span>date</span>,
+  DateS: ({ includeTime }: { includeTime?: boolean }) => (
+    <span data-testid="date" data-include-time={String(Boolean(includeTime))}>
+      date
+    </span>
+  ),
 }));
 
 // why: TeamMemberBadge pulls roles/org/user from Remix loader data; the
@@ -174,6 +179,18 @@ describe("EventCardContent — per-slice breakdown gating", () => {
     // ...but the redundant per-slice Qty and the total are suppressed.
     expect(screen.queryByText(/^Qty /)).toBeNull();
     expect(screen.queryByText(/Total reserved/)).toBeNull();
+  });
+});
+
+describe("EventCardContent: booking period", () => {
+  it("shows the full date and time for the start and end", () => {
+    render(<EventCardContent booking={makeBooking()} />);
+
+    const dates = screen.getAllByTestId("date");
+    expect(dates).toHaveLength(2);
+    for (const date of dates) {
+      expect(date).toHaveAttribute("data-include-time", "true");
+    }
   });
 });
 
