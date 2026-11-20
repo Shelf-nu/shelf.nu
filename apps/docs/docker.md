@@ -47,7 +47,7 @@ docker run -d \
 > Replace the placeholder values with your actual configuration:
 >
 > - `USER`, `PASSWORD`, `HOST`, `DB_NAME` - Your Supabase database details
-> - `your-anon-public-key`, `your-service-role-key` - From Supabase API settings
+> - `sb_publishable_your-publishable-key`, `sb_secret_your-secret-key` - From **Project Settings** → **API Keys** in Supabase
 > - `your-instance-name` - Your Supabase project reference
 > - Other tokens and secrets as needed
 >
