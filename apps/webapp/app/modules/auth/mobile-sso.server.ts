@@ -48,6 +48,7 @@ import { SESSION_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { refreshAccessToken } from "./service.server";
+import type { VisitorIp } from "./service.server";
 
 const label: ErrorLabel = "Auth";
 
@@ -308,13 +309,15 @@ export async function createMobileAuthCode({
  * @param code - The plaintext authorization code from the deeplink
  * @param codeVerifier - PKCE verifier. Optional in the signature only so the
  *   refusal path stays reachable; a redemption without one always fails.
+ * @param visitor - The device's IP, see `VisitorIp` in `./service.server`
  * @returns The refreshed SSO session for the device
  * @throws {ShelfError} 400 when the code cannot be redeemed; 500 when the
  *   database or Supabase fails to answer
  */
 export async function redeemMobileAuthCode(
   code: string,
-  codeVerifier?: string
+  codeVerifier?: string,
+  visitor: VisitorIp = {}
 ): Promise<AuthSession> {
   try {
     if (!code) {
@@ -374,7 +377,7 @@ export async function redeemMobileAuthCode(
 
     let session: AuthSession;
     try {
-      session = await refreshAccessToken(refreshToken);
+      session = await refreshAccessToken(refreshToken, visitor);
     } catch (cause) {
       // Supabase says the session was signed out or expired between the
       // callback and the exchange: signing in again is the only remedy, as for

@@ -25,6 +25,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
+import {
+  isRestoredLookup,
+  RESTORED_LOOKUP_PARAM,
+} from "~/utils/restored-scan-lookup";
 import { requirePermission } from "~/utils/roles.server";
 import type {
   AssetFromScanner,
@@ -45,7 +49,9 @@ export type KitFromBarcode = KitFromScanner;
  * Each resolve records the scan as `WEB_DRAWER`, with no note on the asset: a
  * drawer row is a list entry, and the action the drawer performs keeps its
  * own trail. A resolve carrying `auditSessionId` records nothing, because the
- * audit's own writer (`recordAuditScan`) records that scan.
+ * audit's own writer (`recordAuditScan`) records that scan. Neither does one
+ * carrying `restored=1`: the row was put back from a scan draft, so no one
+ * scanned the barcode just now (see {@link RESTORED_LOOKUP_PARAM}).
  *
  * @see {@link file://./get-scanned-item.$qrId.ts} the QR / SAM ID twin
  */
@@ -91,10 +97,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     // a loader sees them; the URL still has the difference.
     const value = readRawLastPathSegment(request, encodedValue);
 
-    const { auditSessionId, pickerContext } = parseData(
+    const { auditSessionId, pickerContext, restored } = parseData(
       searchParams,
       z.object({
         auditSessionId: z.string().optional(),
+        /** `1` when a restored scan draft row looks the code up again. */
+        [RESTORED_LOOKUP_PARAM]: z.string().optional(),
         /** Mirror of the get-scanned-item shape; see that endpoint. */
         pickerContext: z
           .string()
@@ -117,6 +125,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     ) as {
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
+      restored?: string;
     };
 
     const barcode = await getBarcodeByValue({
@@ -133,6 +142,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { value, shouldSendNotification: false },
         label: "Barcode",
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
       });
     }
 
@@ -142,11 +153,13 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         message: "Barcode is not linked to any asset or kit",
         additionalData: { value, shouldSendNotification: false },
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
         label: "Barcode",
       });
     }
 
-    if (!auditSessionId) {
+    if (!auditSessionId && !isRestoredLookup(restored)) {
       // Non-fatal: a failed record never fails the resolve. Not awaited: a
       // drawer row needs only the resolved item, and a scanner list resolves
       // one code per scan.

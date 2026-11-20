@@ -33,6 +33,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import {
   ShelfError,
@@ -135,7 +136,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         let authSession: Awaited<ReturnType<typeof signInWithEmail>>;
         try {
-          authSession = await signInWithEmail(email, password);
+          authSession = await signInWithEmail(email, password, {
+            clientIp: getClientIpFromHeaders(request.headers),
+          });
         } catch (cause) {
           if (
             isLikeShelfError(cause) &&

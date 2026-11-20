@@ -51,16 +51,22 @@ vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
   };
 });
 
-const { mockVerifyOtp, mockSignOut } = vi.hoisted(() => ({
-  mockVerifyOtp: vi.fn(),
-  mockSignOut: vi.fn(),
-}));
+const { mockVerifyOtp, mockSignOut, mockGetSupabaseAdmin } = vi.hoisted(() => {
+  const mockVerifyOtp = vi.fn();
+  const mockSignOut = vi.fn();
+  return {
+    mockVerifyOtp,
+    mockSignOut,
+    mockGetSupabaseAdmin: vi.fn((_options?: { clientIp?: string | null }) => ({
+      auth: { verifyOtp: mockVerifyOtp, admin: { signOut: mockSignOut } },
+    })),
+  };
+});
 // why: the confirm step verifies the recovery code with Supabase Auth and ends
-// the recovery session it opened on refusal; both are network calls.
+// the recovery session it opened on refusal; both are network calls. The
+// factory is a spy so the tests can read which visitor address it was given.
 vi.mock("~/integrations/supabase/client", () => ({
-  getSupabaseAdmin: () => ({
-    auth: { verifyOtp: mockVerifyOtp, admin: { signOut: mockSignOut } },
-  }),
+  getSupabaseAdmin: mockGetSupabaseAdmin,
 }));
 
 const { mockUserFindMany } = vi.hoisted(() => ({
@@ -76,12 +82,27 @@ import { action } from "~/routes/_auth+/forgot-password";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
-/** POSTs a password-reset request for `email`. */
-function requestReset(email: string) {
+/** The visitor's address as a self-hosted proxy reports it. */
+const VISITOR_IP = "203.0.113.7";
+
+/**
+ * Trusts one proxy in front of a self-hosted instance, so the proxy's
+ * X-Forwarded-For entry names the visitor. Undone by `vi.unstubAllEnvs()`.
+ */
+function trustOneProxy() {
+  vi.stubEnv("FLY_APP_NAME", "");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+}
+
+/** POSTs a password-reset request for `email`, with any extra headers. */
+function requestReset(email: string, headers: Record<string, string> = {}) {
   return action({
     request: new Request("https://app.shelf.nu/forgot-password", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
       body: new URLSearchParams({ intent: "request-otp", email }).toString(),
     }),
     params: {},
@@ -112,6 +133,10 @@ describe("forgot-password enumeration", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("responds IDENTICALLY for a registered and an unregistered address", async () => {
     mockUserFindMany.mockResolvedValueOnce([{ id: "user-1", sso: false }]);
     const registered = observable(await requestReset("real@example.com"));
@@ -140,7 +165,22 @@ describe("forgot-password enumeration", () => {
 
     await requestReset("real@example.com");
 
-    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com");
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com", {
+      clientIp: null,
+    });
+  });
+
+  it("passes the visitor's address to Supabase with the reset code", async () => {
+    // why: a self-hosted instance whose single proxy names the visitor.
+    trustOneProxy();
+    mockUserFindMany.mockResolvedValue([{ id: "user-1", sso: false }]);
+
+    await requestReset("real@example.com", { "X-Forwarded-For": VISITOR_IP });
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com", {
+      clientIp: VISITOR_IP,
+    });
   });
 
   it("finds an account stored with different letter case", async () => {
@@ -156,7 +196,9 @@ describe("forgot-password enumeration", () => {
         where: { email: expect.objectContaining({ mode: "insensitive" }) },
       })
     );
-    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("jane@acme.com");
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("jane@acme.com", {
+      clientIp: null,
+    });
   });
 
   it("sends NOTHING for an unknown address", async () => {
@@ -187,7 +229,9 @@ describe("forgot-password enumeration", () => {
 
     const res = observable(await requestReset("real@example.com"));
 
-    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com");
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com", {
+      clientIp: null,
+    });
     expect(res.status).toBe(302);
   });
 
@@ -227,7 +271,8 @@ describe("forgot-password enumeration", () => {
     await requestReset("old-timer@sso-corp.com");
 
     expect(mockSendResetPasswordLink).toHaveBeenCalledWith(
-      "old-timer@sso-corp.com"
+      "old-timer@sso-corp.com",
+      { clientIp: null }
     );
     expect(mockGetLegacyLoginDecision).not.toHaveBeenCalled();
   });
@@ -253,11 +298,18 @@ describe("forgot-password enumeration", () => {
 });
 
 /** POSTs the confirm step: the recovery code plus the new password. */
-function confirmReset(email: string, destroySession = vi.fn()) {
+function confirmReset(
+  email: string,
+  destroySession = vi.fn(),
+  headers: Record<string, string> = {}
+) {
   return action({
     request: new Request("https://app.shelf.nu/forgot-password", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
       body: new URLSearchParams({
         intent: "confirm-otp",
         email,
@@ -282,6 +334,26 @@ describe("forgot-password confirm step", () => {
       error: null,
     });
     mockSignOut.mockResolvedValue({ error: null });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes the visitor's address to Supabase with the code check", async () => {
+    // why: a self-hosted instance whose single proxy names the visitor.
+    trustOneProxy();
+    mockGetLegacyLoginDecisionForUser.mockResolvedValue({ allowed: true });
+
+    await confirmReset("owner@example.com", vi.fn(), {
+      "X-Forwarded-For": VISITOR_IP,
+    });
+
+    // Supabase counts its per-IP verify limits against the visitor.
+    expect(mockGetSupabaseAdmin).toHaveBeenCalledWith({
+      clientIp: VISITOR_IP,
+    });
+    expect(mockVerifyOtp).toHaveBeenCalled();
   });
 
   it("refuses to set a password for an address that must use SSO", async () => {

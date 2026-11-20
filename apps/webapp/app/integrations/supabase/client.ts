@@ -1,6 +1,19 @@
+/**
+ * Supabase clients
+ *
+ * `supabaseClient` uses the public anon key and is safe in the browser.
+ * `getSupabaseAdmin` uses the server's admin credential and must never reach
+ * the browser.
+ *
+ * @see {@link file://./../../utils/env.ts} for SUPABASE_SECRET_KEY and the
+ *   deprecated SUPABASE_SERVICE_ROLE
+ * @see {@link file://./../../utils/client-ip.server.ts} for where the visitor IP
+ *   comes from
+ */
 import { createClient } from "@supabase/supabase-js";
 
 import {
+  SUPABASE_SECRET_KEY,
   SUPABASE_SERVICE_ROLE,
   SUPABASE_URL,
   SUPABASE_ANON_PUBLIC,
@@ -8,38 +21,71 @@ import {
 import { ShelfError } from "~/utils/error";
 import { isBrowser } from "~/utils/is-browser";
 
-// ⚠️ cloudflare needs you define fetch option : https://github.com/supabase/supabase-js#custom-fetch-implementation
-// Use Remix fetch polyfill for node (See https://remix.run/docs/en/v1/other-api/node)
-function getSupabaseClient(supabaseKey: string, accessToken?: string) {
-  const global = accessToken
-    ? {
-        global: {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-      }
-    : {};
-
+/**
+ * Builds a Supabase client that never stores or refreshes a session itself.
+ *
+ * @param supabaseKey - The API key the client authenticates with
+ * @param headers - Extra headers sent on every request
+ */
+function getSupabaseClient(
+  supabaseKey: string,
+  headers: Record<string, string> = {}
+) {
   return createClient(SUPABASE_URL, supabaseKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-    ...global,
+    global: { headers },
   });
 }
 
 const supabaseClient = getSupabaseClient(SUPABASE_ANON_PUBLIC);
 
 /**
- * Provides a Supabase Admin Client with full admin privileges
+ * The header that tells Supabase Auth which visitor a server-side call acts
+ * for. Supabase reads `Sb-Forwarded-For` only on requests made with a secret
+ * key, so it is sent only when `SUPABASE_SECRET_KEY` is configured.
+ *
+ * Every server-side Supabase client that acts for a visitor builds its headers
+ * here, so the rule lives in one place.
+ *
+ * @param clientIp - The visitor's IP, from `getClientIpFromHeaders`
+ * @returns The headers to send; empty without a secret key or an IP
+ */
+function visitorIpHeaders(clientIp?: string | null): Record<string, string> {
+  return SUPABASE_SECRET_KEY && clientIp
+    ? { "Sb-Forwarded-For": clientIp }
+    : {};
+}
+
+/** Options for {@link getSupabaseAdmin}. */
+type SupabaseAdminOptions = {
+  /**
+   * The IP of the visitor whose action this call performs (from
+   * `getClientIpFromHeaders`). Pass it on every sign-in, sign-up, code and
+   * reset call so Supabase Auth's per-IP limits count the visitor, not this
+   * server.
+   */
+  clientIp?: string | null;
+};
+
+/**
+ * Provides a Supabase Admin Client with full admin privileges.
  *
  * It's a per request scoped client, to prevent access token leaking if you don't use it like `getSupabaseAdmin().auth.api`.
- *
  * Reason : https://github.com/rphlmr/supa-fly-stack/pull/43#issue-1336412790
+ *
+ * Authenticates with `SUPABASE_SECRET_KEY` when set, else the legacy
+ * `SUPABASE_SERVICE_ROLE`. With a secret key and a `clientIp`, it sends
+ * `Sb-Forwarded-For`, which Supabase Auth uses as the caller's IP when the
+ * project has IP address forwarding enabled. Supabase ignores the header for
+ * legacy keys, so it is only sent with a secret key.
+ *
+ * @param options - See {@link SupabaseAdminOptions}
+ * @throws {ShelfError} When called in the browser
  */
-function getSupabaseAdmin() {
+function getSupabaseAdmin({ clientIp }: SupabaseAdminOptions = {}) {
   if (isBrowser)
     throw new ShelfError({
       cause: null,
@@ -48,7 +94,11 @@ function getSupabaseAdmin() {
       label: "Dev error",
     });
 
+  if (SUPABASE_SECRET_KEY) {
+    return getSupabaseClient(SUPABASE_SECRET_KEY, visitorIpHeaders(clientIp));
+  }
+
   return getSupabaseClient(SUPABASE_SERVICE_ROLE);
 }
 
-export { getSupabaseAdmin, supabaseClient };
+export { getSupabaseAdmin, supabaseClient, visitorIpHeaders };

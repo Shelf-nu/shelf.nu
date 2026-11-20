@@ -28,6 +28,7 @@ import {
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -218,7 +219,8 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
      */
     const authSession = await signInWithEmail(
       normalizeInviteEmail(updatedInvite.inviteeEmail),
-      password
+      password,
+      { clientIp: getClientIpFromHeaders(request.headers) }
     ).catch(
       // We don't care about the error here, let the user login if he's already registered
       () => null

@@ -8,16 +8,24 @@
  * beside the atom, scoped to one flow and one target, and a flow opts in by
  * restoring from it on entry and writing to it as the list changes.
  *
- * **Only the codes are stored.** A `ScanListItem` carries the asset's entire
+ * **No row payload is stored.** A `ScanListItem` carries the asset's entire
  * server payload, which is both far too large for this and stale the moment it
- * is written. A restored entry has no `data`, so `GenericItemRow` resolves it
- * again on mount and a resumed list is as current as a freshly scanned one.
+ * is written. A draft keeps each code with how it was scanned, plus what the
+ * operator set around the list: the units entered and the "From location"
+ * picked on the rows (keyed by asset id), and an optional context (on the bulk
+ * scanner, the action the list belongs to). A restored entry comes back in the
+ * shape of a code that has just been scanned and is still being looked up: no
+ * `data` and no `type`, so `GenericItemRow` resolves it again on mount and a
+ * resumed list is as current as a freshly scanned one. The `type` is left out
+ * on purpose. Scanner drawers read `data` from any entry that has a `type`,
+ * which holds for every entry a scan produces, and a restored entry must not be
+ * the one exception.
  *
  * This is a stopgap for one browser on one device. The real fix is a persisted
  * server-side session, tracked in GitHub issue #3160.
  *
  * @see {@link file://./../components/scanner/drawer/generic-item-row.tsx} for
- *   the re-resolution that makes storing codes alone sufficient.
+ *   the re-resolution that lets a draft leave the row payload out.
  */
 import type { ScanListItems } from "~/atoms/qr-scanner";
 import {
@@ -41,12 +49,54 @@ const DRAFT_TTL_MS = 12 * 60 * 60 * 1000;
 /** One scanned code, reduced to what is worth keeping. */
 type DraftEntry = {
   codeType?: "qr" | "barcode" | "samId";
-  type?: "asset" | "kit";
 };
 
 type StoredDraft = {
   savedAt: number;
   entries: Record<string, DraftEntry>;
+  /**
+   * What the operator was doing with the list when it was parked (on the bulk
+   * scanner, which action). Kept inside the draft, so it is written, expired
+   * and removed together with the list it belongs to.
+   */
+  context?: string;
+  /** Units entered per quantity-tracked asset, keyed by asset id. */
+  quantities?: Record<string, number>;
+  /** "From location" picked per pool, keyed by asset id. */
+  sources?: Record<string, string>;
+  /**
+   * The list was sent in a save that got no answer, so it may already be
+   * saved. Kept so the warning comes back with the list after a reload.
+   */
+  unconfirmedSave?: boolean;
+};
+
+/**
+ * What the operator set on the rows beyond the codes themselves. Both maps are
+ * keyed by asset id, like the atoms they come from, so they apply again as soon
+ * as a restored row resolves to its asset. Without them a restored list would
+ * look complete while each row fell back to its default (one unit, the
+ * pre-selected location), and a confirm could move the wrong units.
+ */
+export type ScanDraftChoices = {
+  quantities: Record<string, number>;
+  sources: Record<string, string>;
+};
+
+/** Everything a draft keeps besides its codes. See {@link saveScanDraft}. */
+export type ScanDraftExtras = {
+  /**
+   * What the operator is doing with the list, handed back by
+   * {@link readScanDraftContext}.
+   */
+  context?: string | null;
+  /** The per-row choices, handed back by {@link readScanDraftChoices}. */
+  choices?: ScanDraftChoices;
+  /**
+   * The list was sent in a save that got no answer. Handed back by
+   * {@link readScanDraftUnconfirmedSave}.
+   */
+  unconfirmedSave?: boolean;
 };
 
 /**
@@ -86,30 +136,42 @@ function isSyntheticKey(key: string): boolean {
 }
 
 /**
- * Saves the resolved codes from a scan list, replacing any previous draft.
+ * Saves the codes from a scan list, replacing any previous draft.
  *
- * Unresolved and failed entries are dropped: a code that did not resolve has
- * nothing to restore, and one that errored would only fail again. Writing an
+ * Kept: every code nothing is known to be wrong with. That is a code that
+ * resolved, a code still owed a lookup (`pendingLookup`: restored from a
+ * draft, or its last lookup got no answer), and a code scanned a moment ago
+ * whose first lookup has not answered yet: a reload in that moment must not
+ * lose it. Each is looked up again when the draft is restored. Dropped: a
+ * code the server refused, which would only be refused again. Writing an
  * empty list removes the draft rather than storing an empty one.
  *
  * @param key - From {@link scanDraftKey}.
  * @param items - The current scan list.
+ * @param extras - Context and per-row choices, written with every save so a
+ *   list that is emptied and refilled still carries them.
  */
-export function saveScanDraft(key: string, items: ScanListItems): void {
+export function saveScanDraft(
+  key: string,
+  items: ScanListItems,
+  { context, choices, unconfirmedSave }: ScanDraftExtras = {}
+): void {
   const entries: Record<string, DraftEntry> = {};
 
   for (const [code, item] of Object.entries(items)) {
-    // `type` is the test, not `data`. A restored entry has a type and no data
-    // precisely so its row re-resolves, and it keeps that shape until the
-    // fetch lands; requiring `data` would drop the whole list back out of the
-    // draft in the moments after a restore.
-    if (!item || item.error || !item.type) {
+    if (!item) {
+      continue;
+    }
+    // Only a refusal drops a code. A code still owed a lookup carries an
+    // error from its last attempt, but that error says nothing about the
+    // code, so it is kept like a code that has not been answered yet.
+    if (item.error && !item.pendingLookup) {
       continue;
     }
     if (isSyntheticKey(code)) {
       continue;
     }
-    entries[code] = { codeType: item.codeType, type: item.type };
+    entries[code] = { codeType: item.codeType };
   }
 
   if (Object.keys(entries).length === 0) {
@@ -117,7 +179,18 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
     return;
   }
 
-  const draft: StoredDraft = { savedAt: Date.now(), entries };
+  const draft: StoredDraft = {
+    savedAt: Date.now(),
+    entries,
+    ...(context ? { context } : {}),
+    ...(choices && Object.keys(choices.quantities).length > 0
+      ? { quantities: choices.quantities }
+      : {}),
+    ...(choices && Object.keys(choices.sources).length > 0
+      ? { sources: choices.sources }
+      : {}),
+    ...(unconfirmedSave ? { unconfirmedSave: true } : {}),
+  };
 
   try {
     localStorage.setItem(key, JSON.stringify(draft));
@@ -128,16 +201,15 @@ export function saveScanDraft(key: string, items: ScanListItems): void {
 }
 
 /**
- * Reads a draft back as scan-list entries, or `null` when there is nothing
- * worth restoring.
+ * Reads the stored draft, or `null` when there is none worth using.
  *
- * Entries carry no `data`, so each row re-resolves against the server on mount.
- * An expired or unreadable draft is removed rather than returned.
+ * An expired, unreadable or malformed draft is removed rather than returned,
+ * so nothing stored with it (its context included) outlives the expiry.
  *
  * @param key - From {@link scanDraftKey}.
- * @returns Scan-list entries ready to seed the atom, or `null`.
+ * @returns The stored draft, or `null`.
  */
-export function readScanDraft(key: string): ScanListItems | null {
+function readStoredDraft(key: string): StoredDraft | null {
   let raw: string | null = null;
 
   try {
@@ -173,20 +245,96 @@ export function readScanDraft(key: string): ScanListItems | null {
     return null;
   }
 
+  return draft;
+}
+
+/**
+ * Reads a draft back as scan-list entries, or `null` when there is nothing
+ * worth restoring.
+ *
+ * Entries carry no `data`, so each row re-resolves against the server on mount.
+ * An expired or unreadable draft is removed rather than returned.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns Scan-list entries ready to seed the atom, or `null`.
+ */
+export function readScanDraft(key: string): ScanListItems | null {
+  const draft = readStoredDraft(key);
+  if (!draft) {
+    return null;
+  }
+
   const restored: ScanListItems = {};
   for (const [code, entry] of Object.entries(draft.entries)) {
     if (isSyntheticKey(code)) {
       continue;
     }
-    restored[code] = { codeType: entry?.codeType, type: entry?.type };
+    restored[code] = { codeType: entry?.codeType, pendingLookup: true };
   }
 
   return Object.keys(restored).length > 0 ? restored : null;
 }
 
 /**
- * Removes a draft. Called once its scans have been submitted, so returning to
- * the scanner does not offer work that is already done.
+ * Reads the context saved with a draft: what the operator was doing with the
+ * list when it was parked.
+ *
+ * It lives inside the draft, so it is `null` whenever the draft is gone,
+ * expired or unreadable.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns The saved value, or `null` when none was saved
+ */
+export function readScanDraftContext(key: string): string | null {
+  const context = readStoredDraft(key)?.context;
+  return typeof context === "string" && context ? context : null;
+}
+
+/**
+ * Reads the per-row choices saved with a draft. Values of the wrong shape are
+ * left out, so a damaged entry falls back to the row's default.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns The saved choices, empty when the draft has none or is gone
+ */
+export function readScanDraftChoices(key: string): ScanDraftChoices {
+  const draft = readStoredDraft(key);
+  const quantities: Record<string, number> = {};
+  const sources: Record<string, string> = {};
+
+  if (draft?.quantities && typeof draft.quantities === "object") {
+    for (const [assetId, quantity] of Object.entries(draft.quantities)) {
+      if (Number.isInteger(quantity) && quantity >= 1) {
+        quantities[assetId] = quantity;
+      }
+    }
+  }
+  if (draft?.sources && typeof draft.sources === "object") {
+    for (const [assetId, source] of Object.entries(draft.sources)) {
+      if (typeof source === "string" && source) {
+        sources[assetId] = source;
+      }
+    }
+  }
+
+  return { quantities, sources };
+}
+
+/**
+ * Whether the parked list was sent in a save that got no answer, so it may
+ * already be saved and the operator must check before confirming it again.
+ *
+ * @param key - From {@link scanDraftKey}.
+ * @returns `true` only for a draft that carries the mark
+ */
+export function readScanDraftUnconfirmedSave(key: string): boolean {
+  return readStoredDraft(key)?.unconfirmedSave === true;
+}
+
+/**
+ * Removes a draft, and the context saved with it. Called once its scans have
+ * been saved, so returning to the scanner does not offer work that is already
+ * done.
  *
  * @param key - From {@link scanDraftKey}.
  */

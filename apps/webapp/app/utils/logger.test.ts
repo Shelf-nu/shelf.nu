@@ -2,7 +2,7 @@
 import * as Sentry from "@sentry/react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "./error";
-import { Logger } from "./logger";
+import { Logger, logMissingFormIntent } from "./logger";
 
 // why: handledClientError emits to Sentry's structured-log API; capture the
 // calls instead of hitting the network. captureException is stubbed too because
@@ -55,5 +55,37 @@ describe("Logger.handledClientError", () => {
       expect.any(String),
       expect.objectContaining({ userId: "real-user-1" })
     );
+  });
+});
+
+describe("logMissingFormIntent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports the request headers without credentials or the proxy secret", () => {
+    const request = new Request("https://app.example.com/bookings/b1", {
+      method: "POST",
+      headers: {
+        Cookie: "__authSession=abc",
+        Authorization: "Bearer token",
+        "X-Shelf-Proxy-Secret": "zone-secret",
+        "User-Agent": "test-agent",
+      },
+    });
+
+    logMissingFormIntent({
+      formData: new FormData(),
+      request,
+      bookingId: "b1",
+      userId: "u1",
+    });
+
+    const reported = vi.mocked(Sentry.captureException).mock.calls[0][0] as {
+      additionalData: { headers: Record<string, string> };
+    };
+    expect(reported.additionalData.headers).toEqual({
+      "user-agent": "test-agent",
+    });
   });
 });

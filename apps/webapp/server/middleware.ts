@@ -7,6 +7,7 @@ import {
   refreshAccessToken,
   validateSession,
 } from "~/modules/auth/service.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
@@ -273,7 +274,14 @@ export function refreshSession() {
     }
 
     try {
-      session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
+      session.set(
+        authSessionKey,
+        await refreshAccessToken(auth.refreshToken, {
+          // The verified helper, never getClientIp(c): this value leaves the
+          // server, and getClientIp falls back to client-written headers.
+          clientIp: getClientIpFromHeaders(c.req.raw.headers),
+        })
+      );
     } catch (_cause) {
       session.flash(
         "errorMessage",
