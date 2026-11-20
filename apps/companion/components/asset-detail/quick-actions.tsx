@@ -11,6 +11,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import type { AssetDetail } from "@/lib/api";
+import type { MoreMenuAction } from "@/lib/asset-archive";
 import { kitMemberCustodyBlock } from "@/lib/kit-member-custody";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -23,6 +24,8 @@ interface QuickActionsProps {
   onLocationPress: () => void;
   onEditPress: () => void;
   onDeletePress: () => void;
+  /** Starts the archive flow (the screen checks, confirms and sends). */
+  onArchivePress: () => void;
   isActionLoading: boolean;
   showOverflowMenu: boolean;
   setShowOverflowMenu: (show: boolean) => void;
@@ -43,8 +46,11 @@ interface QuickActionsProps {
   isSelfService?: boolean;
   /** Role can update the asset (location/edit). */
   canUpdate: boolean;
-  /** Role can delete the asset. */
-  canDelete: boolean;
+  /**
+   * The More menu's entries in order (`moreMenuActions` in
+   * `lib/asset-archive.ts`). The More button shows only when it has one.
+   */
+  moreActions: MoreMenuAction[];
   /**
    * QUANTITY_TRACKED rendering. When true the green "Release Custody" primary
    * is never shown (release moves to the per-holder custody rows on the
@@ -76,13 +82,14 @@ export const QuickActions = memo(function QuickActions({
   onLocationPress,
   onEditPress,
   onDeletePress,
+  onArchivePress,
   isActionLoading,
   setShowOverflowMenu,
   canCustody,
   canReleaseCustody = true,
   isSelfService = false,
   canUpdate,
-  canDelete,
+  moreActions,
   isQtyTracked = false,
   custodyAvailable,
   archivedReason,
@@ -101,7 +108,8 @@ export const QuickActions = memo(function QuickActions({
   const showPrimary =
     canCustody &&
     (isQtyTracked || (hasCustody ? canReleaseCustody : isAvailable));
-  const showSecondary = canUpdate || canDelete;
+  const showMore = moreActions.length > 0;
+  const showSecondary = canUpdate || showMore;
   // Disabled only when the server SENT a cap and it is exhausted; an absent
   // cap (older server) keeps the button live and lets the server validate.
   const assignQtyDisabled =
@@ -293,20 +301,29 @@ export const QuickActions = memo(function QuickActions({
               <Text style={styles.secondaryActionText}>Edit</Text>
             </TouchableOpacity>
           )}
-          {canDelete && (
+          {showMore && (
             <TouchableOpacity
               style={styles.secondaryAction}
               onPress={() => {
                 if (Platform.OS === "ios") {
+                  // Archive first, Delete last and red: the permanent action
+                  // never sits where the reversible one is expected.
+                  const labels = moreActions.map((action) =>
+                    action === "archive" ? "Archive Asset" : "Delete Asset"
+                  );
+                  const deleteIndex = moreActions.indexOf("delete");
                   ActionSheetIOS.showActionSheetWithOptions(
                     {
-                      options: ["Cancel", "Delete Asset"],
-                      destructiveButtonIndex: 1,
+                      options: ["Cancel", ...labels],
+                      destructiveButtonIndex:
+                        deleteIndex === -1 ? undefined : deleteIndex + 1,
                       cancelButtonIndex: 0,
                       title: "Asset Actions",
                     },
                     (buttonIndex) => {
-                      if (buttonIndex === 1) onDeletePress();
+                      const action = moreActions[buttonIndex - 1];
+                      if (action === "archive") onArchivePress();
+                      if (action === "delete") onDeletePress();
                     }
                   );
                 } else {

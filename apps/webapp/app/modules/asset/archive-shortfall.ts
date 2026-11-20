@@ -27,6 +27,13 @@ export type ModelReservationShortfall = {
 /** The form field that confirms an archive despite a shortfall. */
 export const CONFIRM_MODEL_SHORTFALL_FIELD = "confirmModelShortfall";
 
+/**
+ * The error `reason` the mobile API sends with the shortfall warning, so the
+ * phone offers "Archive anyway" without matching on the message text. The
+ * companion mirrors it in `apps/companion/lib/asset-archive.ts`.
+ */
+export const MODEL_SHORTFALL_REASON = "model_shortfall";
+
 /** Opening words every shortfall warning starts with; what the UI keys on. */
 const MESSAGE_PREFIX = "Archiving would leave model reservations short";
 
