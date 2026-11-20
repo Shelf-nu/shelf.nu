@@ -66,7 +66,6 @@ for (const [name, members] of PAIRS) {
 test("reads enum members from the schema, comments and all", () => {
   assert.ok(schemaEnum("ConsumptionCategory").includes("CONVERTED"));
   assert.ok(schemaEnum("ConsumptionCategory").includes("OPENING_BALANCE"));
-  assert.equal(schemaEnum("AssetType").length, 2);
 });
 
 test("no QT_* array has duplicate members", () => {

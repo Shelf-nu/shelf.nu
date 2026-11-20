@@ -665,6 +665,22 @@ describe("ASSET_LOCATION_CHANGED writers", () => {
       .map(([key]) => key);
     expect(silentAfterCommit).toEqual([]);
 
+    // The locked stock change leaves its location lines to
+    // writeAdjustmentLocationNotes, so a file that runs one runs the other.
+    const lockedWithoutNotes = sourceFiles(appRoot)
+      .map((path) => ({
+        file: relative(webappRoot, path),
+        source: withoutComments(readFileSync(path, "utf8")),
+      }))
+      .filter(
+        ({ source }) =>
+          source.includes("applyQuantityAdjustment(") &&
+          !/export async function applyQuantityAdjustment\(/.test(source) &&
+          !source.includes("writeAdjustmentLocationNotes(")
+      )
+      .map(({ file }) => file);
+    expect(lockedWithoutNotes).toEqual([]);
+
     // An allow-listed declaration that no longer records the event is stale.
     const writerKeys = new Set(writers.map(({ key }) => key));
     expect(

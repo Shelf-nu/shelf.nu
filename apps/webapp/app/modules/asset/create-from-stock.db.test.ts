@@ -596,6 +596,36 @@ describe.skipIf(!DATABASE_URL)(
       expect((await poolState(poolId)).total).toBe(0);
     }, 60_000);
 
+    it("writes the pool leaving and the assets arriving when a conversion empties the pool's only placement", async () => {
+      const poolId = await createPool("ZZ Pool I", 2, 0);
+      const before = new Date();
+
+      const { assets } = await fromStock.createAssetsFromStock({
+        poolId,
+        organizationId,
+        userId,
+        count: 2,
+        source: loc.shelf,
+        title: "ZZ Emptied",
+      });
+
+      expect(await poolState(poolId)).toEqual({ total: 0, placed: {} });
+      const notes = await db.locationNote.findMany({
+        where: { locationId: loc.shelf, createdAt: { gte: before } },
+        select: { content: true },
+      });
+      const left = notes.filter(
+        (n) => n.content.includes(" removed ") && n.content.includes(poolId)
+      );
+      const arrived = notes.filter(
+        (n) =>
+          n.content.includes(" added ") &&
+          assets.every((asset) => n.content.includes(asset.id))
+      );
+      expect(left).toHaveLength(1);
+      expect(arrived).toHaveLength(1);
+    }, 60_000);
+
     it("refuses another workspace's asset model", async () => {
       const poolId = await createPool("ZZ Pool G", 2, 0);
 
