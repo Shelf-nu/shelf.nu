@@ -13,7 +13,7 @@ If you get stuck, open an issue or join us on
 
 ## Set up
 
-**Prerequisites:** Node.js 24.22.1 or newer and pnpm 9.15 or newer.
+**Prerequisites:** Node.js 24.22.3 or newer and pnpm 9.15 or newer.
 
 1. Fork the [repository](https://github.com/Shelf-nu/shelf.nu), clone your
    fork, and add Shelf's repository as `upstream`:
