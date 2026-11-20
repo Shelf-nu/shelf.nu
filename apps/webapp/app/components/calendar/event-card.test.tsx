@@ -208,8 +208,11 @@ describe("EventCardContent — returned asset", () => {
 
     const line = screen.getByTestId("event-card-returned");
     expect(line).toHaveTextContent("Returned");
-    // The return instant is printed on the line (DateS is stubbed to "date").
-    expect(within(line).getByText("date")).toBeInTheDocument();
+    // The return instant is printed on the line with its full date and time.
+    expect(within(line).getByTestId("date")).toHaveAttribute(
+      "data-include-time",
+      "true"
+    );
     // The badge is the booking's own status, not the bar's display status.
     expect(screen.getByTestId("status-badge")).toHaveTextContent("ONGOING");
   });
