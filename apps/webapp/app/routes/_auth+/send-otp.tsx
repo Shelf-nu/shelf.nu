@@ -4,6 +4,7 @@ import { data, redirect } from "react-router";
 import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
 import { sendOTP } from "~/modules/auth/service.server";
 import { refreshSignupIntentHeaders } from "~/modules/signup-intent/cookie.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { error, getActionMethod, parseData } from "~/utils/http.server";
 import { validateNonSSOSignup } from "~/utils/sso.server";
@@ -25,7 +26,9 @@ export async function action({ request }: ActionFunctionArgs) {
           await validateNonSSOSignup(email);
         }
 
-        await sendOTP(email);
+        await sendOTP(email, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
 
         return redirect(
           `/otp?email=${encodeURIComponent(email)}&mode=${mode}`,

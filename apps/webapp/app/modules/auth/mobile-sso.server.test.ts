@@ -163,9 +163,14 @@ describe("redeemMobileAuthCode", () => {
     const { code } = await mintedCode();
     vi.mocked(refreshAccessToken).mockResolvedValue(REFRESHED);
 
-    const session = await redeemMobileAuthCode(code, TEST_VERIFIER);
+    const session = await redeemMobileAuthCode(code, TEST_VERIFIER, {
+      clientIp: "203.0.113.7",
+    });
 
-    expect(refreshAccessToken).toHaveBeenCalledWith(STORED_REFRESH_TOKEN);
+    // The device's IP reaches Supabase's per-IP refresh limit.
+    expect(refreshAccessToken).toHaveBeenCalledWith(STORED_REFRESH_TOKEN, {
+      clientIp: "203.0.113.7",
+    });
     expect(session).toEqual(REFRESHED);
   });
 

@@ -89,10 +89,42 @@ vi.mock("~/modules/booking/service.server", async () => {
   const actual = await vi.importActual<typeof BookingServiceServer>(
     "~/modules/booking/service.server"
   );
+  const computeBookingAssetRemaining = vi.fn().mockResolvedValue(0);
+  const computeBookingAssetRemainingToCheckOut = vi.fn().mockResolvedValue(0);
+  /** Answers a batched read one asset at a time, from a per-asset mock. */
+  const perAsset =
+    (single: typeof computeBookingAssetRemaining) =>
+    async (client: unknown, bookingId: string, assetIds: string[]) =>
+      new Map(
+        await Promise.all(
+          assetIds.map(
+            async (assetId): Promise<[string, number]> => [
+              assetId,
+              await single(client, bookingId, assetId),
+            ]
+          )
+        )
+      );
   return {
     ...actual,
-    computeBookingAssetRemaining: vi.fn().mockResolvedValue(0),
-    computeBookingAssetRemainingToCheckOut: vi.fn().mockResolvedValue(0),
+    computeBookingAssetRemaining,
+    computeBookingAssetRemainingToCheckOut,
+    // why: the loader reads every asset's remaining units in one batched call
+    // each. These answer from the per-asset mocks above, so a test sets an
+    // asset's remaining the same way whichever helper the loader calls.
+    computeBookingCheckinRemaining: vi.fn(
+      async (client: unknown, bookingId: string, assetIds: string[]) => ({
+        byAsset: await perAsset(computeBookingAssetRemaining)(
+          client,
+          bookingId,
+          assetIds
+        ),
+        bySlice: new Map<string, number>(),
+      })
+    ),
+    computeBookingAssetsRemainingToCheckOut: vi.fn(
+      perAsset(computeBookingAssetRemainingToCheckOut)
+    ),
     getDetailedPartialCheckinData: vi
       .fn()
       .mockResolvedValue({ checkedInAssetIds: [], partialCheckinDetails: {} }),

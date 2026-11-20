@@ -33,6 +33,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
+import { redirectFromStalePendingApprovalFilter } from "~/modules/booking/stale-pending-filter.server";
 import { getMemberCalendarFeedUrl } from "~/modules/calendar-subscription/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
@@ -88,6 +89,13 @@ export type AvailabilitySlice = {
 export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
+  /**
+   * True while the booking is a reservation request waiting for a decision
+   * (workspace requires approval, nothing approved yet). The bar is drawn in
+   * the pending palette and the popover badge says so. Absent on surfaces
+   * that do not derive it.
+   */
+  isPendingApproval?: boolean;
   name: string;
   description: string | null;
   start: string;
@@ -146,6 +154,16 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     };
 
     const searchParams = getCurrentSearchParams(request);
+
+    // A "Pending approval" filter left over from before approval was turned
+    // off shows every booking instead of a blank calendar.
+    const stalePendingRedirect = await redirectFromStalePendingApprovalFilter({
+      request,
+      organizationId,
+      searchParams,
+    });
+    if (stalePendingRedirect) return stalePendingRedirect;
+
     const { teamMemberIds } = getParamsValues(searchParams);
     const [
       teamMembersData,
@@ -429,7 +447,11 @@ export default function Calendar() {
                 return getStatusClasses(
                   eventInfo.event.extendedProps.status,
                   isOneDay,
-                  viewType
+                  viewType,
+                  {
+                    pendingApproval:
+                      eventInfo.event.extendedProps.isPendingApproval === true,
+                  }
                 );
               }}
             />

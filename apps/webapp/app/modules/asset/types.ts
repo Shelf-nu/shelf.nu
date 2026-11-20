@@ -127,6 +127,12 @@ export type AdvancedAssetBooking = Pick<
 > & {
   from: string;
   to: string;
+  /**
+   * When the reservation was approved; null on a request still waiting.
+   * Absent on fixtures and surfaces that predate approval, which reads as
+   * settled.
+   */
+  approvedAt?: string | null;
   tags: Array<Pick<Tag, "id" | "name" | "color">>;
   custodianTeamMember?: Pick<TeamMember, "id" | "name">;
   custodianUser?: Pick<

@@ -11,6 +11,8 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestApprovedWithinTx,
+  assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
@@ -55,6 +57,12 @@ vi.mock("~/modules/booking/utils.server", () => ({
 // their own suites in service.server.test.ts; this module only chooses and
 // sequences them, which is what these tests pin.
 vi.mock("~/modules/booking/service.server", () => ({
+  // why: the pending-approval preflight reads the booking and the approval
+  // switches; its own suite covers that, here only whether it refused.
+  assertRequestMayBeCheckedOut: vi.fn().mockResolvedValue(undefined),
+  // why: the same gate under the booking lock, inside the claim's own
+  // transaction; its suite covers the reads, here only whether it refused.
+  assertRequestApprovedWithinTx: vi.fn().mockResolvedValue(undefined),
   fulfilModelRequestsAndCheckout: vi.fn(),
   addScannedAssetsToBooking: vi.fn(),
   partialCheckoutBooking: vi.fn(),
@@ -196,6 +204,27 @@ function primeRulePath() {
 }
 
 describe("fulfilAndCheckOut", () => {
+  it.each([true, false])(
+    "writes nothing for a pending request the caller may not approve (explicit check-out %s)",
+    async (requireExplicitCheckout) => {
+      vi.mocked(assertRequestMayBeCheckedOut).mockRejectedValueOnce(
+        new Error("This booking request has not been approved yet.")
+      );
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        status: BookingStatus.RESERVED,
+      } as never);
+
+      await expect(
+        fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout })
+      ).rejects.toThrow(/not been approved yet/);
+
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+      expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+      expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+      expect(partialCheckoutBooking).not.toHaveBeenCalled();
+    }
+  );
+
   it("runs the full fulfil-and-check-out when the rule does not apply", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       status: BookingStatus.RESERVED,
@@ -261,6 +290,9 @@ describe("fulfilAndCheckOut", () => {
       userId: "user-1",
       // Fulfil is authorized by the check-out rule, so it skips the add rule.
       access: null,
+      // A scanned extra that asks for more than was approved is refused in the
+      // add's own transaction.
+      atCheckout: true,
       // With no access to ask, the caller's reach and client hints travel
       // explicitly, for the model-pool refusal the add may raise.
       hints,
@@ -394,6 +426,34 @@ describe("fulfilAndCheckOut", () => {
       }),
       expect.anything()
     );
+  });
+
+  it("claims nothing when the request is pending again by the time the claim locks the booking", async () => {
+    // The preflight passed, then a requester's change cleared the approval.
+    // The claim re-checks under the booking lock and writes nothing.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+    vi.mocked(assertRequestApprovedWithinTx).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message: "This booking request has not been approved yet.",
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true })
+    ).rejects.toThrow(/not been approved yet/);
+    expect(assertRequestApprovedWithinTx).toHaveBeenCalledWith(
+      expect.anything(),
+      { bookingId: "booking-1", organizationId: "org-1", actorUserId: "user-1" }
+    );
+    expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+    expect(partialCheckoutBooking).not.toHaveBeenCalled();
   });
 
   it("offers the claim step only the units it did not add", async () => {

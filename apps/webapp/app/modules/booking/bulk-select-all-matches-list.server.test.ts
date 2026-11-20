@@ -26,6 +26,8 @@ import { db } from "~/database/db.server";
 import { loader as assetTabLoader } from "~/routes/_layout+/assets.$assetId.bookings";
 import { loader as indexLoader } from "~/routes/_layout+/bookings._index";
 import { loader as kitTabLoader } from "~/routes/_layout+/kits.$kitId.bookings";
+import { BOOKING_APPROVAL_ENABLED_WHERE } from "~/utils/bookings";
+import { createFilterCookie } from "~/utils/cookies.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
@@ -62,6 +64,15 @@ vitest.mock("~/database/db.server", () => ({
     },
     tag: { findMany: vitest.fn().mockResolvedValue([]) },
     kit: { findFirst: vitest.fn().mockResolvedValue({ name: "Rack Kit" }) },
+    // why: the index loader drops a "Pending approval" filter when the
+    // workspace does not require approval; the lockstep cases below need the
+    // filter kept, so the workspace requires it unless a case says otherwise.
+    bookingSettings: {
+      findUnique: vitest.fn().mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      }),
+    },
   },
 }));
 
@@ -270,6 +281,8 @@ const LIST_URLS = [
   "status=ALL",
   "status=RESERVED",
   "status=reserved",
+  "status=PENDING_APPROVAL",
+  "s=camera&status=PENDING_APPROVAL&teamMember=tm-1",
   "teamMember=tm-1&teamMember=tm-2",
   "tag=t-1",
   "tag=untagged",
@@ -320,6 +333,115 @@ describe.each(LIST_PAGES)("select all matches the list on $name", (page) => {
           AND: [await listWhere(page, qs, access), MINE_TO_WRITE],
         });
       }
+    );
+  });
+});
+
+describe("the Pending approval filter", () => {
+  /** RESERVED, never approved, in a workspace that requires approval. */
+  const PENDING_APPROVAL = {
+    status: BookingStatus.RESERVED,
+    approvedAt: null,
+    organization: { bookingSettings: BOOKING_APPROVAL_ENABLED_WHERE },
+  };
+
+  it("resolves to never-approved reservations in a workspace that requires approval, in SQL", async () => {
+    expect(
+      await listWhere(BOOKINGS_INDEX, "status=PENDING_APPROVAL", ADMIN)
+    ).toEqual({
+      organizationId: ORG,
+      AND: [ONLY_MY_DRAFTS],
+      ...PENDING_APPROVAL,
+    });
+  });
+
+  it("keeps the other filters, which can only narrow it", async () => {
+    expect(
+      await listWhere(
+        BOOKINGS_INDEX,
+        "status=PENDING_APPROVAL&teamMember=tm-1",
+        ADMIN
+      )
+    ).toEqual({
+      organizationId: ORG,
+      AND: [ONLY_MY_DRAFTS, { custodianTeamMemberId: { in: ["tm-1"] } }],
+      ...PENDING_APPROVAL,
+    });
+  });
+
+  it("is dropped from the URL when the workspace does not require approval", async () => {
+    // why: with the switch off the picker has no such option, so the filter
+    // would show "All" over an empty list; the loader redirects to the
+    // unfiltered list instead, keeping the rest of the query.
+    vitest.mocked(db.bookingSettings.findUnique).mockResolvedValueOnce({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    } as never);
+    requirePermissionMock.mockResolvedValue({
+      organizationId: ORG,
+      access: ADMIN,
+      currentOrganization: { id: ORG },
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    const response = await BOOKINGS_INDEX.loader({
+      context: { getSession: () => ({ userId: ME }) },
+      request: new Request(
+        "http://localhost/bookings?status=PENDING_APPROVAL&teamMember=tm-1&page=3"
+      ),
+      params: {},
+    } as unknown as LoaderFunctionArgs);
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(302);
+    expect((response as Response).headers.get("Location")).toBe(
+      "/bookings?teamMember=tm-1"
+    );
+    // why: the saved filter cookie is rewritten from the cleaned query, so a
+    // later visit without a query cannot restore the stale status.
+    const cookie = (response as Response).headers.get("Set-Cookie") ?? "";
+    const saved = await createFilterCookie({
+      orgId: ORG,
+      name: "bookingFilter_v2",
+      path: "/",
+    }).parse(cookie);
+    expect(saved).toBe("teamMember=tm-1");
+  });
+
+  it("expires a saved filter cookie that only held the stale status", async () => {
+    // why: a cookie holding only status=PENDING_APPROVAL would otherwise
+    // restore the status on the next visit and loop back to this redirect.
+    vitest.mocked(db.bookingSettings.findUnique).mockResolvedValueOnce({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    } as never);
+    requirePermissionMock.mockResolvedValue({
+      organizationId: ORG,
+      access: ADMIN,
+      currentOrganization: { id: ORG },
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    const response = await BOOKINGS_INDEX.loader({
+      context: { getSession: () => ({ userId: ME }) },
+      request: new Request(
+        "http://localhost/bookings?status=PENDING_APPROVAL",
+        {
+          headers: { Cookie: `${ORG}_bookingFilter_v2=stale` },
+        }
+      ),
+      params: {},
+    } as unknown as LoaderFunctionArgs);
+
+    expect((response as Response).headers.get("Location")).toBe("/bookings");
+    const cookie = (response as Response).headers.get("Set-Cookie") ?? "";
+    expect(cookie).toContain(`${ORG}_bookingFilter_v2=`);
+    expect(cookie).toMatch(/Max-Age=0/);
+  });
+
+  it("is not a status: a lowercase value resolves the same way", async () => {
+    expect(
+      await listWhere(BOOKINGS_INDEX, "status=pending_approval", ADMIN)
+    ).toEqual(
+      await listWhere(BOOKINGS_INDEX, "status=PENDING_APPROVAL", ADMIN)
     );
   });
 });

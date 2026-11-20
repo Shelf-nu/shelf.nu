@@ -56,6 +56,7 @@ import {
 } from "~/modules/asset-import/viewer-payload";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
+import { getPendingApprovalCount } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
   getSelectedOrganization,
@@ -309,13 +310,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         );
         return null;
       });
+    const bookingSettingsPromise = getBookingSettingsForOrganization(
+      currentOrganization.id
+    );
     const [
       bookingSettings,
       workingHours,
       unreadUpdatesCount,
       activeAssetImport,
+      pendingApprovalCount,
     ] = await Promise.all([
-      getBookingSettingsForOrganization(currentOrganization.id),
+      bookingSettingsPromise,
       getWorkingHoursForOrganization(currentOrganization.id),
       (() => {
         // Same audience rule as the updates page (announcementRole), so the
@@ -328,6 +333,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // The import in flight (or just finished for the starter), shown by
       // the floating card and the assets index notice.
       activeAssetImportPromise,
+      // Reservation requests waiting for a decision, counted on the Bookings
+      // menu for the people who can decide them.
+      bookingSettingsPromise.then((settings) =>
+        getPendingApprovalCount({
+          organizationId,
+          userId,
+          roles: currentOrganizationUserRoles ?? [],
+          settings,
+        })
+      ),
     ]);
 
     return data(
@@ -336,6 +351,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizations,
         currentOrganizationId: organizationId,
         bookingSettings,
+        pendingApprovalCount,
         workingHours,
         currentOrganization,
         currentOrganizationUserRoles,

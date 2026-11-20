@@ -58,57 +58,37 @@ type SentryExceptionValue = NonNullable<
 >[number];
 
 /**
- * Whether an exception value has NO first-party (`in_app`) stack frame — i.e.
- * no application-code origin we could act on.
- *
- * Noise filters use this to stay narrow: an error thrown by OUR code carries
- * `in_app` frames (it identifies a fixable bug and its on-screen Error ID must
- * stay resolvable in Sentry), whereas the browser/extension/gateway noise we
- * want to drop has no first-party origin.
- *
- * @param value - A serialized Sentry exception entry
- * @returns `true` when none of its frames are first-party
+ * An error message that is only an HTTP gateway status, optionally followed by
+ * its reason phrase: 502, 503 and 504, plus Cloudflare's 520 to 524 (the origin
+ * did not answer properly). React Router throws exactly this shape,
+ * `${status} ${statusText}`, when its route manifest request (`/__manifest`)
+ * gets a gateway error, and `statusText` is empty over HTTP/2.
  */
-function hasNoFirstPartyFrame(value: SentryExceptionValue): boolean {
-  return !(value.stacktrace?.frames?.some((f) => f.in_app === true) ?? false);
-}
+const GATEWAY_STATUS_PATTERN = /^5(?:0[234]|2[0-4])(?: [A-Za-z ]+)?$/;
 
 /**
- * Bare 3-digit gateway codes (502/503/504) that show up as an error `value`
- * with no JS origin — transient deploy/gateway blips, not app bugs.
- */
-const BARE_GATEWAY_STATUS_PATTERN = /^50[234]$/;
-
-/**
- * True for a "bare gateway status" Error: an `Error` whose entire message is
- * a 5xx gateway code (502/503/504) AND which carries no first-party
- * (`in_app`) stack frames. Those are transient gateway/deploy blips surfaced
- * to the browser with no first-party origin.
+ * Whether an event is a gateway status error: its main exception is an
+ * `Error` whose whole message is a gateway status (see
+ * {@link GATEWAY_STATUS_PATTERN}). These are transient deploy and gateway
+ * blips with nothing to fix in the app.
  *
- * The no-`in_app`-frames guard is deliberate and keeps the match narrow: a
- * genuine `throw new Error("502")` from our own code would carry first-party
- * frames and therefore stays capturable. Only origin-less status blips are
- * dropped.
+ * Only the main exception counts. Sentry lists chained exceptions oldest
+ * first, so it is the last entry; an error that merely has a gateway status
+ * as its `cause` was raised by code that may have a bug of its own.
+ *
+ * Stack frames are not consulted: React Router is part of the client bundle,
+ * so its throw carries bundle frames just like our own code would. No Shelf
+ * code throws an error whose message is only a status code.
  *
  * @param event - The Sentry error event
- * @returns `true` when the event is a bare gateway-status blip
+ * @returns `true` when the event is a gateway status error
  */
-function isBareGatewayStatusError(event: ErrorEvent): boolean {
-  const values = event.exception?.values;
-  if (!values || values.length === 0) {
-    return false;
-  }
-  return values.some((v) => {
-    if (v.type !== "Error") {
-      return false;
-    }
-    const value = (v.value ?? "").trim();
-    if (!BARE_GATEWAY_STATUS_PATTERN.test(value)) {
-      return false;
-    }
-    // No first-party frames → no JS origin we could act on.
-    return hasNoFirstPartyFrame(v);
-  });
+function isGatewayStatusError(event: ErrorEvent): boolean {
+  const main = event.exception?.values?.at(-1);
+  return (
+    main?.type === "Error" &&
+    GATEWAY_STATUS_PATTERN.test((main.value ?? "").trim())
+  );
 }
 
 /**
@@ -158,6 +138,59 @@ function isExpectedRouteErrorRejection(event: ErrorEvent): boolean {
 }
 
 /**
+ * Matches errors from the script a crypto wallet injects into every page
+ * (Brave's built-in wallet, MetaMask-style extensions), which sets
+ * `window.ethereum.selectedAddress` before the wallet object exists. Safari
+ * words it "evaluating 'window.ethereum.selectedAddress = undefined'",
+ * Chromium "Cannot set properties of undefined (setting 'selectedAddress')".
+ * Shelf never touches `window.ethereum`, so neither phrase comes from app code.
+ */
+const WALLET_INJECTION_PATTERN = /window\.ethereum|'selectedAddress'/;
+
+/**
+ * Path every file of the client bundle is served under (`assetsDir` and the
+ * chunk names in `vite.config.ts`). A stack frame whose URL contains it ran
+ * Shelf's own code.
+ */
+const CLIENT_BUNDLE_PATH = "/file-assets/";
+
+/**
+ * Whether an exception has a stack frame from Shelf's own client bundle.
+ *
+ * Judged by the frame's URL, not `in_app`: the browser SDK sets `in_app: true`
+ * on every frame it parses, so a script an extension injects into the page,
+ * or an inline script, looks first-party by that flag.
+ *
+ * @param value - A serialized Sentry exception entry
+ * @returns `true` when at least one frame comes from the client bundle
+ */
+function hasClientBundleFrame(value: SentryExceptionValue): boolean {
+  return (
+    value.stacktrace?.frames?.some((f) =>
+      (f.filename ?? "").includes(CLIENT_BUNDLE_PATH)
+    ) ?? false
+  );
+}
+
+/**
+ * Whether an event is a crypto wallet's injected script failing on the page
+ * rather than an error in Shelf. Requires that no exception in the event has a
+ * frame from the client bundle as well, so an error thrown or rethrown by our
+ * own code is never dropped by its wording alone. An event holds several
+ * exceptions when one is the cause of another.
+ *
+ * @param event - The Sentry error event
+ * @returns `true` when the error comes from an injected wallet script
+ */
+function isWalletInjectionError(event: ErrorEvent): boolean {
+  const values = event.exception?.values ?? [];
+  return (
+    values.some((v) => WALLET_INJECTION_PATTERN.test(v.value ?? "")) &&
+    !values.some(hasClientBundleFrame)
+  );
+}
+
+/**
  * Client `beforeSend` hook body: decides whether a captured browser error is
  * worth sending to Sentry. Returns the (unchanged) event to send it, or
  * `null` to drop it.
@@ -203,17 +236,15 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
     return null;
   }
 
-  // Hard-filter `DataCloneError` ("The object can not be cloned.") that has NO
-  // first-party origin. Thrown by structuredClone / postMessage / IndexedDB on
-  // a non-cloneable value — usually from browser internals or extensions.
-  // Matched by the serialized error name (Sentry puts the constructor name in
-  // `.type`). The no-first-party-frames guard keeps a DataCloneError thrown by
-  // OUR code capturable: it flags a fixable bug and its on-screen Error ID must
-  // stay resolvable in Sentry (see hasNoFirstPartyFrame).
+  // Hard-filter `DataCloneError` ("The object can not be cloned.") unless the
+  // client bundle threw it. structuredClone, postMessage and IndexedDB throw it
+  // on a value they cannot copy, usually inside browser internals or an
+  // extension script. One with a frame from our bundle is a fixable bug and
+  // stays capturable (see hasClientBundleFrame for why `in_app` cannot tell).
+  const values = event.exception?.values ?? [];
   if (
-    event.exception?.values?.some(
-      (v) => v.type === "DataCloneError" && hasNoFirstPartyFrame(v)
-    )
+    values.some((v) => v.type === "DataCloneError") &&
+    !values.some(hasClientBundleFrame)
   ) {
     return null;
   }
@@ -246,11 +277,9 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
     return null;
   }
 
-  // Hard-filter bare gateway-status blips (`Error: 502` / `503` / `504` with
-  // no first-party stack). Transient deploy/gateway hiccups with no JS
-  // origin; a real `throw new Error("502")` from our code keeps its
-  // first-party frames and is left capturable (see isBareGatewayStatusError).
-  if (isBareGatewayStatusError(event)) {
+  // Hard-filter gateway status errors (see isGatewayStatusError). Same
+  // Error-ID tradeoff as the hard-filtered patterns above.
+  if (isGatewayStatusError(event)) {
     return null;
   }
 
@@ -258,6 +287,12 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // global unhandled-rejection handler instead of the error boundary. Same
   // policy as the boundary branch below (see isExpectedRouteErrorRejection).
   if (isExpectedRouteErrorRejection(event)) {
+    return null;
+  }
+
+  // Hard-filter errors from a crypto wallet's injected script; they run in
+  // the page but are not Shelf code (see isWalletInjectionError).
+  if (isWalletInjectionError(event)) {
     return null;
   }
 

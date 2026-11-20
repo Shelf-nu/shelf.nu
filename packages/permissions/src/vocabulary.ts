@@ -18,6 +18,9 @@ export enum PermissionAction {
   delete = "delete",
   checkout = "checkout",
   checkin = "checkin",
+  // Approving a booking reservation request. MANAGER holds it through the
+  // matrix; ADMIN/OWNER through the resolver short-circuit.
+  approve = "approve",
   export = "export",
   import = "import",
   archive = "archive",

@@ -32,7 +32,12 @@ import { Logger } from "~/utils/logger";
 /**
  * Discriminated set of booking lifecycle events that trigger notifications.
  *
- * - `RESERVATION` — a new booking is confirmed / reserved
+ * - `RESERVATION`: a new booking is confirmed / reserved. Recipients for a
+ *   reservation request are resolved under this event too (the broadcast
+ *   fires); the sender then titles it `REQUEST_RECEIVED`
+ * - `REQUEST_RECEIVED`: a reservation request was submitted in a workspace
+ *   that requires approval; a title, never a recipient-resolution event
+ * - `APPROVED`: an administrator or manager approved a pending reservation request
  * - `CHECKOUT_REMINDER` — scheduled reminder before checkout time
  * - `CHECKIN_REMINDER` — scheduled reminder before checkin time
  * - `CHECKIN` — booking assets have been checked in (completed)
@@ -46,6 +51,8 @@ import { Logger } from "~/utils/logger";
  */
 export type BookingEventType =
   | "RESERVATION"
+  | "REQUEST_RECEIVED"
+  | "APPROVED"
   | "CHECKOUT_REMINDER"
   | "CHECKIN_REMINDER"
   | "CHECKIN"

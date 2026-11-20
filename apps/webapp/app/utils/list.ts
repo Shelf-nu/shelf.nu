@@ -4,7 +4,10 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
-import { EXPIRED_BOOKINGS_FILTER } from "~/modules/booking/constants";
+import {
+  EXPIRED_BOOKINGS_FILTER,
+  PENDING_APPROVAL_BOOKINGS_FILTER,
+} from "~/modules/booking/constants";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "1"),
@@ -33,6 +36,11 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
     // date passed), accepted beside the enum. See `EXPIRED_BOOKINGS_FILTER`.
     if (raw.toLowerCase() === EXPIRED_BOOKINGS_FILTER.toLowerCase()) {
       return EXPIRED_BOOKINGS_FILTER;
+    }
+    // "Pending approval" is the other derived option (RESERVED, not yet
+    // approved). See `PENDING_APPROVAL_BOOKINGS_FILTER`.
+    if (raw.toLowerCase() === PENDING_APPROVAL_BOOKINGS_FILTER.toLowerCase()) {
+      return PENDING_APPROVAL_BOOKINGS_FILTER;
     }
     // Normalize to valid BookingStatus enum value (handles lowercase URLs)
     return (

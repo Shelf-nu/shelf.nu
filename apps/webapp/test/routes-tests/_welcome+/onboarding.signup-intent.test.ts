@@ -12,7 +12,7 @@
  * @see {@link file://./../../../app/modules/signup-intent/schema.ts}
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
 import {
@@ -78,8 +78,9 @@ vi.mock("~/modules/organization/service.server", () => ({
 vi.mock("~/utils/stripe.server", () => ({
   createStripeCustomer: vi.fn(),
 }));
-// why: the password-setting branch signs the user in through Supabase; these
-// tests submit as a password signup, so the auth service must not be reached.
+// why: the password-setting branch signs the user in through Supabase; most
+// tests submit as a password signup, and the one that sets a password only
+// checks what the sign-in is handed.
 vi.mock("~/modules/auth/service.server", () => ({
   signInWithEmail: vi.fn(),
   getAuthUserById: vi.fn(),
@@ -125,10 +126,12 @@ function onboardingRequest({
   fields = {},
   cookie,
   urlSuffix = "",
+  forwardedFor,
 }: {
   fields?: Record<string, string>;
   cookie?: string;
   urlSuffix?: string;
+  forwardedFor?: string;
 } = {}) {
   const body = new URLSearchParams({
     username: "jane",
@@ -146,6 +149,9 @@ function onboardingRequest({
   });
   if (cookie) {
     headers.set("Cookie", cookie);
+  }
+  if (forwardedFor) {
+    headers.set("X-Forwarded-For", forwardedFor);
   }
   return new Request(`http://localhost:3000/onboarding${urlSuffix}`, {
     method: "POST",
@@ -182,6 +188,36 @@ describe("onboarding action — consuming the signup intent", () => {
     vi.mocked(upsertBusinessIntel).mockResolvedValue({} as never);
     vi.mocked(createStripeCustomer).mockResolvedValue({} as never);
     vi.mocked(signInWithEmail).mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes the visitor's address to Supabase when signing in after setting a password", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+
+    const response = await submit(
+      onboardingRequest({
+        fields: {
+          userSignedUpWithPassword: "false",
+          password: "correct-horse-battery",
+          confirmPassword: "correct-horse-battery",
+        },
+        forwardedFor: "203.0.113.7",
+      })
+    );
+
+    expect(response.status).toBe(302);
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(signInWithEmail).toHaveBeenCalledWith(
+      USER.email,
+      "correct-horse-battery",
+      { clientIp: "203.0.113.7" }
+    );
   });
 
   it("skips the Personal/Team question for a Team trial and clears the cookie", async () => {

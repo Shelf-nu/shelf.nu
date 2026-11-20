@@ -82,9 +82,13 @@ if (isUnsupportedBrowser()) {
   // The inline check in `root.tsx` flagged a browser that cannot run this
   // bundle. Leave the server-rendered "browser out of date" screen in place
   // rather than hydrating an app that would crash behind it, and record the
-  // visit so the size of that audience stays visible.
+  // visit so the size of that audience stays visible. It goes to Sentry Logs,
+  // not issues: the screen is expected behaviour with nothing to fix.
   if (window.env?.SENTRY_DSN) {
-    Sentry.captureMessage("Unsupported browser blocked", "info");
+    Sentry.logger.info("Unsupported browser blocked", {
+      label: "Browser support",
+      path: window.location.pathname,
+    });
   }
 } else {
   React.startTransition(() => {

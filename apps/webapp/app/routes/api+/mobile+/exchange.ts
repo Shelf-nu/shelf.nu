@@ -17,6 +17,7 @@ import {
   deleteExpiredMobileAuthCodes,
   redeemMobileAuthCode,
 } from "~/modules/auth/mobile-sso.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { getActionMethod, logException } from "~/utils/http.server";
 
@@ -65,7 +66,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const authSession = await redeemMobileAuthCode(
       parsed.data.code,
-      parsed.data.codeVerifier
+      parsed.data.codeVerifier,
+      { clientIp: getClientIpFromHeaders(request.headers) }
     );
 
     // Opportunistic cleanup of expired codes (no app-level cron in this repo).

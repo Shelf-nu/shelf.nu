@@ -108,6 +108,10 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
+import {
+  bookingSavedCheck,
+  ScanSubmitFailureAlert,
+} from "../scan-submit-failure-alert";
 import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 
 /**
@@ -592,6 +596,7 @@ export default function FulfilReservationsDrawer({
 
   return (
     <ConfigurableDrawer
+      savedCheck={bookingSavedCheck(session.bookingId)}
       schema={fulfilAndCheckoutSchema}
       items={items}
       onClearItems={clearList}
@@ -1080,6 +1085,13 @@ function FulfilCheckoutForm({
         </Button>
 
         <CheckoutDialog
+          // The drawer's own notice is behind this dialog, so this one
+          // carries the same link to where the save can be checked.
+          notice={
+            <ScanSubmitFailureAlert
+              savedCheck={bookingSavedCheck(booking.id)}
+            />
+          }
           booking={booking}
           disabled={disableSubmit || isLoading}
           portalContainer={formElement || undefined}

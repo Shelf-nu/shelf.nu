@@ -146,6 +146,9 @@ vitest.mock("~/database/db.server", () => ({
     // throws a TypeError instead of exercising the org check.
     assetModel: {
       findFirst: vitest.fn().mockResolvedValue(null),
+      // why: bulkCreateAssetsFromModel reads the model's defaults through
+      // getAssetModel before creating the batch.
+      findFirstOrThrow: vitest.fn().mockResolvedValue(null),
     },
     location: {
       findFirst: vitest.fn().mockResolvedValue(null),
@@ -166,10 +169,12 @@ vitest.mock("~/database/db.server", () => ({
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
-    // why: createAsset retypes the orphaned barcodes it reuses inside its
-    // create transaction, so the delegate has to exist for the tx body to run.
+    // why: createAsset retypes the orphaned barcodes it reuses, and frees the
+    // unattached ones holding a value it writes, inside its create
+    // transaction, so the delegate has to exist for the tx body to run.
     barcode: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: checkOutQuantity finds/creates/increments the operator-allocated
     // custody row; releaseQuantity finds it then deletes or decrements by
@@ -844,6 +849,71 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+    // The copy's arrival at the location reaches the Activity Summary.
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_LOCATION_CHANGED",
+        assetId: "asset-new",
+        fromValue: null,
+        toValue: "loc-a",
+      }),
+      expect.anything()
+    );
+  });
+
+  it("adds every copy to the location in one line, once all copies exist", async () => {
+    // why: createAsset proves the location belongs to the org.
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-store",
+    } as never);
+    // why: each create re-reads its placed row; one per copy.
+    vi.mocked(db.asset.findUniqueOrThrow)
+      .mockResolvedValueOnce(placedAsset("c1", "Boxes (copy 1)") as never)
+      .mockResolvedValueOnce(placedAsset("c2", "Boxes (copy 2)") as never);
+
+    await duplicateAsset({
+      asset: makeSource({
+        assetLocations: [{ location: { id: "loc-store" } }],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 2,
+      organizationId: "org-1",
+    });
+
+    expect(db.locationNote.createMany).toHaveBeenCalledOnce();
+    expect(locationLines()).toEqual([
+      expect.objectContaining({
+        locationId: "loc-store",
+        userId: "user-1",
+        content: expect.stringContaining('count=2 ids="c1,c2"'),
+      }),
+    ]);
+  });
+
+  it("adds nothing to the location when a copy fails and the others are deleted", async () => {
+    // why: createAsset proves the location belongs to the org.
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-store",
+    } as never);
+    vi.mocked(db.asset.findUniqueOrThrow).mockResolvedValueOnce(
+      placedAsset("c1", "Boxes (copy 1)") as never
+    );
+    mockAssetCreate
+      .mockResolvedValueOnce({ id: "c1" })
+      .mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(
+      duplicateAsset({
+        asset: makeSource({
+          assetLocations: [{ location: { id: "loc-store" } }],
+        }),
+        userId: "user-1",
+        amountOfDuplicates: 2,
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow();
+
+    expect(db.locationNote.createMany).not.toHaveBeenCalled();
   });
 
   it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
@@ -1490,6 +1560,176 @@ describe("createAsset quantity validation", () => {
         },
       ],
     });
+  });
+});
+
+/**
+ * An asset as the create transaction re-reads it once it is placed at
+ * "Store", created by Sam Lee.
+ *
+ * @param id - The asset id
+ * @param title - The asset title
+ */
+function placedAsset(id: string, title: string) {
+  return {
+    id,
+    title,
+    type: "INDIVIDUAL",
+    unitOfMeasure: null,
+    assetLocations: [
+      { quantity: 1, location: { id: "loc-store", name: "Store" } },
+    ],
+    user: {
+      id: "user-1",
+      firstName: "Sam",
+      lastName: "Lee",
+      displayName: "Sam Lee",
+    },
+  };
+}
+
+/** Every location activity line written, across all `createMany` calls. */
+function locationLines() {
+  return vi
+    .mocked(db.locationNote.createMany)
+    .mock.calls.flatMap(([args]) => (args as { data: unknown[] }).data);
+}
+
+describe("createAsset first placement in the Activity Summary", () => {
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+
+  /** The actions `createAsset` recorded, in call order. */
+  function recordedActions() {
+    return mockRecordEvent.mock.calls.map(
+      ([input]) => (input as { action: string }).action
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: createAsset proves the location belongs to the org before placing
+    // the asset there; a hit is how the org-scoped lookup says it does.
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-store",
+    } as never);
+  });
+
+  it("records an individual asset's location as a move from nowhere", async () => {
+    await createAsset({
+      title: "Sofa",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      locationId: "loc-store",
+      type: "INDIVIDUAL",
+    });
+
+    expect(recordedActions()).toEqual([
+      "ASSET_CREATED",
+      "ASSET_LOCATION_CHANGED",
+    ]);
+    expect(mockRecordEvent).toHaveBeenLastCalledWith(
+      {
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_LOCATION_CHANGED",
+        entityType: "ASSET",
+        entityId: "asset-new",
+        assetId: "asset-new",
+        locationId: "loc-store",
+        field: "locationId",
+        fromValue: null,
+        toValue: "loc-store",
+        meta: {},
+      },
+      expect.anything()
+    );
+  });
+
+  it("names the units a quantity-tracked pool starts with at its location", async () => {
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      locationId: "loc-store",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    expect(mockRecordEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: "ASSET_LOCATION_CHANGED",
+        fromValue: null,
+        toValue: "loc-store",
+        meta: { quantity: 40 },
+      }),
+      expect.anything()
+    );
+  });
+
+  it("adds the new asset to its location's Activity tab after the commit", async () => {
+    // why: the re-read inside the create transaction returns the stored row;
+    // this is the shape it has once the placement exists.
+    vi.mocked(db.asset.findUniqueOrThrow).mockResolvedValueOnce({
+      id: "asset-new",
+      title: "Chairs",
+      type: "QUANTITY_TRACKED",
+      unitOfMeasure: null,
+      assetLocations: [
+        { quantity: 40, location: { id: "loc-store", name: "Store" } },
+      ],
+      user: {
+        id: "user-1",
+        firstName: "Sam",
+        lastName: "Lee",
+        displayName: "Sam Lee",
+      },
+    } as never);
+
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      locationId: "loc-store",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    const lines = vi
+      .mocked(db.locationNote.createMany)
+      .mock.calls.flatMap(([args]) => (args as { data: unknown[] }).data);
+    expect(lines).toEqual([
+      expect.objectContaining({
+        locationId: "loc-store",
+        type: "UPDATE",
+        userId: "user-1",
+        content: expect.stringMatching(/added .*40.* to .*Store/),
+      }),
+    ]);
+  });
+
+  it("records no location event for an asset created without a location", async () => {
+    await createAsset({
+      title: "Lamp",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+    });
+
+    expect(recordedActions()).toEqual(["ASSET_CREATED"]);
   });
 });
 
@@ -2840,6 +3080,86 @@ describe("createAsset reused barcodes", () => {
         }),
       })
     );
+  });
+
+  it("frees unattached barcodes holding a new value before creating the asset", async () => {
+    expect.assertions(3);
+
+    await createAsset({
+      title: "ZZ Test Asset",
+      description: null,
+      categoryId: null,
+      valuation: null,
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [
+        { type: "Code128", value: "zz-label-1" },
+        { type: "ExternalQR", value: "zz-Label-2" },
+        // Reused by id: connected as it is, so it must not be freed.
+        { type: "Code128", value: "ZZ-KEPT-1", existingId: "bc-orphan" },
+      ],
+    });
+
+    // Only this workspace's rows, only the values written as new rows
+    // (normalized per type), only rows attached to nothing, never the row
+    // the create connects by id.
+    expect(db.barcode.deleteMany).toHaveBeenCalledTimes(1);
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-A",
+        value: { in: ["ZZ-LABEL-1", "zz-Label-2"], mode: "insensitive" },
+        assetId: null,
+        kitId: null,
+        id: { notIn: ["bc-orphan"] },
+      },
+    });
+    expect(
+      vitest.mocked(db.barcode.deleteMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.create).mock.invocationCallOrder[0]);
+  });
+
+  it("keeps a reused row when a new value differs from it only in case", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "ZZ Test Asset",
+      description: null,
+      categoryId: null,
+      valuation: null,
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [
+        // The case-insensitive release matches `zz-code` against the reused
+        // `ZZ-CODE` row, which the create still connects by id.
+        { type: "ExternalQR", value: "ZZ-CODE", existingId: "bc-orphan" },
+        { type: "ExternalQR", value: "zz-code" },
+      ],
+    });
+
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-A",
+        value: { in: ["zz-code"], mode: "insensitive" },
+        assetId: null,
+        kitId: null,
+        id: { notIn: ["bc-orphan"] },
+      },
+    });
+  });
+
+  it("frees nothing when the asset is created without barcodes", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "ZZ Test Asset",
+      description: null,
+      categoryId: null,
+      valuation: null,
+      userId: "user-1",
+      organizationId: "org-A",
+    });
+
+    expect(db.barcode.deleteMany).not.toHaveBeenCalled();
   });
 
   it("does not touch existing barcodes when none are reused", async () => {
@@ -6387,6 +6707,75 @@ describe("bulkCreateAssetsFromModel — pre-validation rejects before any write"
   // can't construct with public params (the renderer always varies the
   // suffix by `startNumber + i`). The branch is defensive — exercised by
   // manual walk-through, not by an automated test.
+});
+
+describe("bulkCreateAssetsFromModel location activity", () => {
+  const ARGS = {
+    assetModelId: "model-1",
+    count: 3,
+    nameTemplate: "Chair {i}",
+    organizationId: "org-1",
+    userId: "user-1",
+    locationId: "loc-store",
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the model and the location are proven to belong to the org, and
+    // the model's defaults are read, before anything is created.
+    vi.mocked(db.assetModel.findFirst).mockResolvedValue({
+      id: "model-1",
+    } as never);
+    vi.mocked(db.assetModel.findFirstOrThrow).mockResolvedValue({
+      id: "model-1",
+      defaultCategoryId: null,
+      defaultValuation: null,
+    } as never);
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-store",
+    } as never);
+    vi.mocked(db.asset.create).mockReset();
+    vi.mocked(db.asset.create).mockResolvedValue({ id: "asset-new" } as never);
+  });
+
+  it("adds the whole batch to its location in one line", async () => {
+    // why: each create re-reads its placed row; one per asset.
+    vi.mocked(db.asset.findUniqueOrThrow)
+      .mockResolvedValueOnce(placedAsset("a1", "Chair 1") as never)
+      .mockResolvedValueOnce(placedAsset("a2", "Chair 2") as never)
+      .mockResolvedValueOnce(placedAsset("a3", "Chair 3") as never);
+
+    const result = await bulkCreateAssetsFromModel(ARGS);
+
+    expect(result).toEqual({ createdAssetIds: ["a1", "a2", "a3"] });
+    expect(db.locationNote.createMany).toHaveBeenCalledOnce();
+    expect(locationLines()).toEqual([
+      expect.objectContaining({
+        locationId: "loc-store",
+        userId: "user-1",
+        content: expect.stringContaining('count=3 ids="a1,a2,a3"'),
+      }),
+    ]);
+  });
+
+  it("still adds the assets saved before a batch stops part-way", async () => {
+    vi.mocked(db.asset.findUniqueOrThrow).mockResolvedValueOnce(
+      placedAsset("a1", "Chair 1") as never
+    );
+    vi.mocked(db.asset.create)
+      .mockResolvedValueOnce({ id: "a1" } as never)
+      .mockRejectedValueOnce(new Error("connection lost"));
+
+    const result = await bulkCreateAssetsFromModel(ARGS);
+
+    expect(result).toMatchObject({ createdAssetIds: ["a1"], failedAt: 1 });
+    expect(locationLines()).toEqual([
+      expect.objectContaining({
+        locationId: "loc-store",
+        content: expect.stringContaining("Chair 1"),
+      }),
+    ]);
+  });
 });
 
 describe("moveAssetLocationUnits", () => {

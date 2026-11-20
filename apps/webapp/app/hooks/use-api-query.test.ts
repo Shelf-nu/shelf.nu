@@ -380,6 +380,7 @@ describe("useApiQuery", () => {
     const onSuccessMock = vi.fn();
 
     mockFetch.mockResolvedValueOnce({
+      status: 200,
       json: vi.fn().mockResolvedValueOnce(mockData),
     });
 
@@ -392,10 +393,32 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(onSuccessMock).toHaveBeenCalledWith(mockData);
+      expect(onSuccessMock).toHaveBeenCalledWith(mockData, { status: 200 });
     });
 
     expect(onSuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands onSuccess the status of an error body, so a refusal and a server failure can be told apart", async () => {
+    const errorBody = { error: { message: "Something went wrong" } };
+    const onSuccessMock = vi.fn();
+
+    mockFetch.mockResolvedValueOnce({
+      status: 503,
+      json: vi.fn().mockResolvedValueOnce(errorBody),
+    });
+
+    renderHook(() =>
+      useApiQuery({
+        api: "/api/test",
+        enabled: true,
+        onSuccess: onSuccessMock,
+      })
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(onSuccessMock).toHaveBeenCalledWith(errorBody, { status: 503 });
+    });
   });
 
   it("should call onError callback when query fails", async () => {
@@ -426,9 +449,11 @@ describe("useApiQuery", () => {
 
     mockFetch
       .mockResolvedValueOnce({
+        status: 200,
         json: vi.fn().mockResolvedValueOnce(mockData1),
       })
       .mockResolvedValueOnce({
+        status: 200,
         json: vi.fn().mockResolvedValueOnce(mockData2),
       });
 
@@ -441,7 +466,7 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(onSuccessMock).toHaveBeenCalledWith(mockData1);
+      expect(onSuccessMock).toHaveBeenCalledWith(mockData1, { status: 200 });
     });
 
     // Trigger refetch
@@ -450,7 +475,7 @@ describe("useApiQuery", () => {
     });
 
     await waitForAsyncUpdate(() => {
-      expect(onSuccessMock).toHaveBeenCalledWith(mockData2);
+      expect(onSuccessMock).toHaveBeenCalledWith(mockData2, { status: 200 });
     });
 
     expect(onSuccessMock).toHaveBeenCalledTimes(2);

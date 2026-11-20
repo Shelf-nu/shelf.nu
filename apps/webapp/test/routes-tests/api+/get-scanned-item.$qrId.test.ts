@@ -83,13 +83,11 @@ const SAM_NOT_FOUND =
 /**
  * The status the SAM error carries.
  *
- * `ShelfError` defaults to 500 when no status is given, and this throw gives
- * none — so a SAM miss answers 500, not 404. `shouldBeCaptured: false` keeps it
- * out of Sentry, and `resolveAssetIdFromSamId` maps whatever status it gets, so
- * nothing downstream depends on the number. Asserted as it stands: the fallback
- * must not move it either way.
+ * A miss is a refusal of the code, so a 4xx. Scanner rows depend on that: a
+ * 5xx means the server failed, and a scan draft keeps such a code to look it
+ * up again, while a refused code is dropped.
  */
-const SAM_NOT_FOUND_STATUS = 500;
+const SAM_NOT_FOUND_STATUS = 404;
 
 /** An asset row as `ASSET_INCLUDE` returns it, trimmed to the image cascade. */
 function assetRow(id: string) {
