@@ -25,7 +25,7 @@
  */
 import type { ReactNode } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withWorkspaceGrants } from "~/utils/permissions/member-roles";
@@ -115,6 +115,12 @@ vi.mock("./quantity-custody-dialog", () => ({
 }));
 vi.mock("./quick-adjust-dialog", () => ({ QuickAdjustDialog: () => null }));
 vi.mock("./relink-qr-code-dialog", () => ({ default: () => null }));
+// why: the report dialog brings its own fetcher form; here the question is
+// only whether the menu row opens it
+vi.mock("./report-problem-dialog", () => ({
+  ReportProblemDialog: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Report a problem dialog" /> : null,
+}));
 vi.mock("../asset-reminder/set-or-edit-reminder-dialog", () => ({
   default: () => null,
 }));
@@ -326,6 +332,16 @@ describe("ActionsDropdown: Base member", () => {
     renderMenu();
 
     expect(menuRows().sort()).toEqual(["Close", "Report a problem"]);
+  });
+
+  it("opens the report dialog from the row", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: /report a problem/i }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Report a problem dialog" })
+    ).toBeInTheDocument();
   });
 
   it("shows no notice about disabled actions it does not have", () => {

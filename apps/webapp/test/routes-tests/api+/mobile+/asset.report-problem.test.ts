@@ -37,6 +37,12 @@ vi.mock("~/modules/problem-report/service.server", () => ({
     "Report a problem is for team workspaces. A Personal workspace has no one else to report to.",
 }));
 
+// why: the per-member write limit keeps its counters in process memory; each
+// case decides whether it lets the request through
+vi.mock("~/utils/rate-limit.server", () => ({
+  enforceUserRateLimit: vi.fn(),
+}));
+
 // why: a refused web request raises a toast through the server-sent events
 // emitter, which needs a live connection registry
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -59,6 +65,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 import { requirePermission } from "~/utils/roles.server";
 
 /** Shape of the `data()` result both actions return. */
@@ -137,6 +144,7 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
       user: { id: "user-1" },
     } as never);
     vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
+    vi.mocked(enforceUserRateLimit).mockResolvedValue(undefined);
     vi.mocked(requireMobilePermission).mockResolvedValue(undefined as never);
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
@@ -161,6 +169,35 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
     expect(requireMobilePermission).toHaveBeenCalledWith(
       expect.objectContaining({ ...grant, organizationId: "org-1" })
     );
+  });
+
+  it("both apply the member's write limit", async () => {
+    await callBoth({ assetId: "asset-1", content: "Lens is cracked" });
+
+    expect(vi.mocked(enforceUserRateLimit).mock.calls).toEqual([
+      ["user-1", "write"],
+      ["user-1", "write"],
+    ]);
+  });
+
+  it("both answer the write limit's refusal without reaching the report", async () => {
+    vi.mocked(enforceUserRateLimit).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Too many requests. Please slow down and try again.",
+        label: "Rate limit",
+        status: 429,
+      })
+    );
+
+    const { web, mobile } = await callBoth({
+      assetId: "asset-1",
+      content: "Lens is cracked",
+    });
+
+    expect(web.status).toBe(429);
+    expect(mobile.status).toBe(429);
+    expect(reportAssetProblem).not.toHaveBeenCalled();
   });
 
   it("both refuse a member without the grant, before any report is written", async () => {

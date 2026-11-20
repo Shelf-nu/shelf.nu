@@ -21,6 +21,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 import { requirePermission } from "~/utils/roles.server";
 
 /** There is no page here: the dialog lives on the asset page. */
@@ -45,6 +46,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    // The same per-member write limit the mobile route applies, before any
+    // database work.
+    await enforceUserRateLimit(userId, "write");
+
     const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,

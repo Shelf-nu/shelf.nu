@@ -45,7 +45,7 @@ export const PERSONAL_WORKSPACE_REFUSAL =
   "Report a problem is for team workspaces. A Personal workspace has no one else to report to.";
 
 /** Text between the reporter link and the report in every report note. */
-const PROBLEM_REPORT_PHRASE = " reported a problem: ";
+export const PROBLEM_REPORT_PHRASE = " reported a problem: ";
 
 /**
  * The history line for a report: the reporter as a link, then their text.
@@ -66,7 +66,7 @@ export function buildProblemReportNote(
 ) {
   return `${wrapUserLinkForNote(
     reporter
-  )} reported a problem: ${wrapNameForNote(content.replace(/\s+/g, " "))}`;
+  )}${PROBLEM_REPORT_PHRASE}${wrapNameForNote(content.replace(/\s+/g, " "))}`;
 }
 
 /**
@@ -141,8 +141,9 @@ export async function reportAssetProblem({
     });
   }
 
-  // Admission and the write are one step: with the member's report lock held,
-  // a second report from them waits here and then counts this one.
+  // Admission and the write are one step under the member's report lock. A
+  // second report from them while it is held is refused at once rather than
+  // waiting, so one member never holds more than one pooled connection here.
   const note = await db.$transaction(async (tx) => {
     await lockMemberProblemReports(tx, { userId, organizationId });
     await assertUnderProblemReportLimit({ userId, organizationId }, tx);
@@ -320,17 +321,34 @@ async function getAssetToReport({
 /**
  * Takes a transaction-scoped lock on one member's problem reports in one
  * workspace, so their reports are admitted one at a time across servers. It
- * is released at commit or rollback.
+ * is released at commit or rollback. It never waits: while another report
+ * from the same member holds it, this one is refused.
  *
  * @param tx - The active transaction
  * @param args.userId - The reporter
  * @param args.organizationId - The workspace the report is for
+ * @throws {ShelfError} 429 when another report from the member holds the lock
  */
 async function lockMemberProblemReports(
   tx: Pick<typeof db, "$queryRaw">,
   { userId, organizationId }: { userId: string; organizationId: string }
 ) {
-  await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('problem-report:' || ${organizationId} || ':' || ${userId}))`;
+  const [row] = await tx.$queryRaw<
+    { locked: boolean }[]
+  >`SELECT pg_try_advisory_xact_lock(hashtext('problem-report:' || ${organizationId} || ':' || ${userId})) AS locked`;
+
+  if (!row?.locked) {
+    throw new ShelfError({
+      cause: null,
+      title: "Too many reports",
+      message:
+        "Another report from you is still being sent. Try again in a moment.",
+      additionalData: { userId, organizationId },
+      label,
+      status: 429,
+      shouldBeCaptured: false,
+    });
+  }
 }
 
 /**

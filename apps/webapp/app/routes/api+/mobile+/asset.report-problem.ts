@@ -28,6 +28,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
  * Saves a problem report sent from the phone and emails the workspace's
@@ -39,6 +40,7 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     userId = user.id;
+    await enforceUserRateLimit(user.id, "write");
     const organizationId = await requireOrganizationAccess(request, user.id);
 
     await requireMobilePermission({

@@ -9,6 +9,7 @@ import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
 import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
+import { canOpenAssetActionsMenu } from "~/components/assets/actions-menu-access";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
@@ -698,22 +699,7 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {/* Every item in the menu checks its own grant, so the menu shows
-            for anyone who holds at least one of them. */}
-        <When
-          truthy={
-            userHasPermission({
-              roles,
-              entity: PermissionEntity.asset,
-              action: [PermissionAction.update, PermissionAction.custody],
-            }) ||
-            userHasPermission({
-              roles,
-              entity: PermissionEntity.problemReport,
-              action: PermissionAction.create,
-            })
-          }
-        >
+        <When truthy={canOpenAssetActionsMenu(roles)}>
           <ActionsDropdown />
         </When>
         <BookingActionsDropdown />

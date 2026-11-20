@@ -10,7 +10,7 @@
  * @see {@link file://./service.server.ts}
  */
 import Markdoc from "@markdoc/markdoc";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ProblemReportEmail from "~/emails/problem-report";
 
 const mocks = vi.hoisted(() => ({
@@ -84,6 +84,8 @@ import { ShelfError } from "~/utils/error";
 import {
   PERSONAL_WORKSPACE_REFUSAL,
   PROBLEM_REPORT_LIMIT,
+  PROBLEM_REPORT_PHRASE,
+  PROBLEM_REPORT_WINDOW_MS,
   buildProblemReportNote,
   reportAssetProblem,
 } from "./service.server";
@@ -124,6 +126,12 @@ describe("buildProblemReportNote", () => {
     );
   });
 
+  it("puts the phrase the hourly limit counts between the reporter and the text", () => {
+    expect(buildProblemReportNote(reporter, "Lens cracked")).toContain(
+      PROBLEM_REPORT_PHRASE
+    );
+  });
+
   it("keeps Markdown and Markdoc in the text as literal text", () => {
     const content = buildProblemReportNote(
       reporter,
@@ -147,6 +155,7 @@ describe("reportAssetProblem", () => {
       archivedAt: null,
     });
     mocks.countNotes.mockResolvedValue(0);
+    mocks.lock.mockResolvedValue([{ locked: true }]);
     mocks.assertAssetsAreNotArchived.mockResolvedValue(undefined);
     mocks.findUser.mockResolvedValue(reporter);
     mocks.findOrganization.mockResolvedValue({
@@ -207,6 +216,55 @@ describe("reportAssetProblem", () => {
     expect(mocks.countNotes.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createNote.mock.invocationCallOrder[0]
     );
+  });
+
+  it("locks on the reporter in this workspace", async () => {
+    await report();
+
+    const [sql, ...values] = mocks.lock.mock.calls[0];
+    expect(sql.join("?")).toContain("pg_try_advisory_xact_lock");
+    expect(values).toEqual(["org-1", reporter.id]);
+  });
+
+  it("refuses at once, without counting or writing, while another report from the member holds the lock", async () => {
+    mocks.lock.mockResolvedValue([{ locked: false }]);
+
+    await expect(report()).rejects.toMatchObject({
+      status: 429,
+      title: "Too many reports",
+    });
+    expect(mocks.countNotes).not.toHaveBeenCalled();
+    expect(mocks.createNote).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  describe("the hourly count", () => {
+    const now = new Date("2026-11-20T12:00:00.000Z");
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("counts only this member's report notes in this workspace from the last hour", async () => {
+      await report();
+
+      expect(mocks.countNotes).toHaveBeenCalledWith({
+        where: {
+          userId: reporter.id,
+          type: "UPDATE",
+          createdAt: {
+            gte: new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS),
+          },
+          content: { contains: PROBLEM_REPORT_PHRASE },
+          asset: { organizationId: "org-1" },
+        },
+      });
+    });
   });
 
   it("refuses a member over the hourly report limit and writes nothing", async () => {
