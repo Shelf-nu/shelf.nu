@@ -110,16 +110,6 @@ export async function reportAssetProblem({
     request,
   });
 
-  // `getAsset` already read the archive state; the guard runs only to refuse
-  // with the reason every other action on an archived asset gives.
-  if (asset.archivedAt) {
-    await assertAssetsAreNotArchived({
-      assetIds: [asset.id],
-      organizationId,
-      actorUserId: userId,
-    });
-  }
-
   const [reporter, organization] = await Promise.all([
     db.user.findUniqueOrThrow({
       where: { id: userId },
@@ -136,6 +126,12 @@ export async function reportAssetProblem({
   const note = await db.$transaction(async (tx) => {
     await lockMemberProblemReports(tx, { userId, organizationId });
     await assertUnderProblemReportLimit({ userId, organizationId }, tx);
+    // Read in the transaction that writes, so an asset archived while this
+    // report waited is refused with the usual archived reason.
+    await assertAssetsAreNotArchived(
+      { assetIds: [asset.id], organizationId, actorUserId: userId },
+      tx
+    );
     return createNote(
       {
         content: buildProblemReportNote(reporter, content),

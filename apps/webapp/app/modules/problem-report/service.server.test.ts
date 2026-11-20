@@ -206,12 +206,8 @@ describe("reportAssetProblem", () => {
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
-  it("refuses an archived asset and writes nothing", async () => {
-    mocks.getAsset.mockResolvedValue({
-      id: "asset-1",
-      title: "ZZ Camera",
-      archivedAt: new Date(),
-    });
+  it("refuses an asset archived after the lookup, inside the transaction that writes", async () => {
+    // The lookup still saw an active asset; the check in the transaction does not.
     mocks.assertAssetsAreNotArchived.mockRejectedValue(
       new ShelfError({
         cause: null,
@@ -223,12 +219,19 @@ describe("reportAssetProblem", () => {
     );
 
     await expect(report()).rejects.toMatchObject({ status: 400 });
-    expect(mocks.assertAssetsAreNotArchived).toHaveBeenCalledWith({
-      assetIds: ["asset-1"],
-      organizationId: "org-1",
-      actorUserId: reporter.id,
-    });
+    expect(mocks.assertAssetsAreNotArchived).toHaveBeenCalledWith(
+      {
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        actorUserId: reporter.id,
+      },
+      expect.objectContaining({ note: expect.anything() })
+    );
+    expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.assertAssetsAreNotArchived.mock.invocationCallOrder[0]
+    );
     expect(mocks.createNote).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
   it("writes one UPDATE note and emails the audience except the reporter", async () => {

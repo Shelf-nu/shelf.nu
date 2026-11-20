@@ -406,5 +406,5 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     await expect(report("ADMIN", assets.bookable)).resolves.toMatchObject({
       note: expect.objectContaining({ userId: userIds.ADMIN }),
     });
-  });
+  }, 30_000);
 });
