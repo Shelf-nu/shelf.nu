@@ -47,12 +47,12 @@ DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/post
 ### API Keys
 
 1. **Go to Project Settings** → **API keys**
-2. **Create a secret key** (it starts with `sb_secret_`) and copy it, plus the anon public key
+2. **Copy the publishable key** (it starts with `sb_publishable_`), then **create a secret key** (it starts with `sb_secret_`) and copy it
 3. **Update your `.env`:**
 
 ```bash
 SUPABASE_URL="https://your-project-ref.supabase.co"
-SUPABASE_ANON_PUBLIC="your-anon-public-key"
+SUPABASE_ANON_PUBLIC="sb_publishable_..."
 SUPABASE_SECRET_KEY="sb_secret_..."
 ```
 
@@ -251,7 +251,7 @@ DIRECT_URL="postgres://postgres.xxxxx:[YOUR-PASSWORD]@xxx.supabase.com:5432/post
 
 # Supabase API
 SUPABASE_URL="https://your-project-ref.supabase.co"
-SUPABASE_ANON_PUBLIC="your-anon-public-key"
+SUPABASE_ANON_PUBLIC="sb_publishable_..."
 SUPABASE_SECRET_KEY="sb_secret_..."
 
 # App configuration
