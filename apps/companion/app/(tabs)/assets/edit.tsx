@@ -120,6 +120,17 @@ export default function EditAssetScreen() {
   const descriptionTooLong =
     descriptionChanged && isAssetDescriptionTooLong(form.description);
 
+  // A quantity-tracked asset placed at more than one location cannot
+  // take a single Location here: saving would collapse every placement
+  // into one. The Location field below renders read-only for it, with a
+  // pointer to Manage placements. Manual placements are the placement
+  // rows not driven by a kit (`viaKit` null).
+  const manualPlacementCount = (form.originalAsset?.placements ?? []).filter(
+    (placement) => !placement.viaKit
+  ).length;
+  const isMultiPlacedPool =
+    form.originalAsset?.type === "QUANTITY_TRACKED" && manualPlacementCount > 1;
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = form.title.trim();
@@ -420,6 +431,22 @@ export default function EditAssetScreen() {
                   Location is managed by kit &quot;
                   {form.originalAsset.kit.name}
                   &quot;
+                </Text>
+              </View>
+            </View>
+          ) : isMultiPlacedPool ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>Location</Text>
+              <View style={styles.kitWarning}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={16}
+                  color={colors.muted}
+                />
+                <Text style={styles.kitWarningText}>
+                  This asset is placed at multiple locations, so its location
+                  cannot be changed here. Use Manage placements on the asset
+                  screen to move units between locations.
                 </Text>
               </View>
             </View>

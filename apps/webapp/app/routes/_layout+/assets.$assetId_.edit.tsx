@@ -112,6 +112,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // Manual placements only: kit-driven rows (`assetKitId` set) follow
+    // the kit. The edit form disables its Location picker when a
+    // quantity-tracked asset has more than one manual placement, because
+    // a single-location save would collapse them all into one.
+    const manualPlacementCount = await db.assetLocation.count({
+      where: { assetId: id, assetKitId: null },
+    });
+
     // An archived asset is read-only (issue #382), and Save would be refused.
     // Say so before the form is filled in, and send the user back to the asset.
     if (asset.archivedAt) {
@@ -165,6 +173,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       asset,
+      manualPlacementCount,
       header,
       categories,
       totalCategories,
@@ -402,7 +411,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AssetEditPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { asset, referer } = useLoaderData<typeof loader>();
+  const { asset, referer, manualPlacementCount } =
+    useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
     [asset.tags]
@@ -433,6 +443,7 @@ export default function AssetEditPage() {
           categoryId={asset.categoryId}
           assetModelId={asset.assetModelId}
           locationId={getPrimaryLocation(asset)?.id ?? null}
+          manualPlacementCount={manualPlacementCount}
           description={asset.description}
           valuation={asset.valuation}
           type={asset.type}
