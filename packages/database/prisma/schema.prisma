@@ -371,6 +371,7 @@ enum ConsumptionCategory {
   MOVE // Units moved between locations, or between a location and the unplaced units. One row per side; the total does not change
   INITIAL // Stock the asset was created with (create form, import)
   OPENING_BALANCE // Stock held at each location when the ledger started for a pool that existed before it
+  CONVERTED // Units taken out of the pool and made into individually tracked assets
 }
 
 model AssetFilterPreset {
@@ -1767,8 +1768,9 @@ model ConsumptionLog {
 
   // The location the units left or arrived at, when the movement had one:
   // the custody source for CHECKOUT / RETURN / CONSUME, and the chosen
-  // location for a RESTOCK / LOSS / ADJUSTMENT made at a location. NULL for
-  // the unplaced units and for rows written before the column existed.
+  // location for a RESTOCK / LOSS / ADJUSTMENT / CONVERTED made at a
+  // location. NULL for the unplaced units and for rows written before the
+  // column existed.
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   locationId String?
 

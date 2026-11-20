@@ -29,6 +29,8 @@ const SCANNED_DIRS = ["routes", "modules"];
 
 /** Files reviewed and allowed to open to a Manager with the switch on. */
 const OPENED_BY_SWITCH = [
+  // Creates assets and lowers the pool: asset create and update, both granted.
+  "routes/_layout+/assets.$assetId.overview.create-from-stock.tsx",
   "routes/_layout+/assets.$assetId.overview.duplicate.tsx",
   "routes/_layout+/assets.$assetId.overview.manage-placements.tsx",
   "routes/_layout+/assets.$assetId.overview.tsx",

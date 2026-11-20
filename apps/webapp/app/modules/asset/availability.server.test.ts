@@ -1871,12 +1871,56 @@ describe("assertAssetQuantityNotBelowReservations", () => {
     status = "RESERVED"
   ) {
     return {
+      id: `row-${bookingId}`,
       assetId: ASSET_ID,
       bookingId,
       quantity,
+      assetKitId: null as string | null,
       booking: { from: new Date(from), to: new Date(to), status },
     };
   }
+
+  it("keeps a standalone slice's reservation when the same booking returns units from its kit slice", async () => {
+    const tx = createMockTx();
+    // Pool of 10: a kit holds 4, and one booking holds that kit slice plus 6
+    // standalone units. The kit slice's 4 units came back.
+    tx.assetKit.groupBy.mockResolvedValue([
+      { assetId: ASSET_ID, _sum: { quantity: 4 } },
+    ]);
+    tx.bookingAsset.findMany.mockResolvedValue([
+      reservedRow("b1", 6, "2026-01-01T00:00:00Z", "2026-01-05T00:00:00Z"),
+      {
+        ...reservedRow("b1", 4, "2026-01-01T00:00:00Z", "2026-01-05T00:00:00Z"),
+        id: "row-b1-kit",
+        assetKitId: "asset-kit-1",
+      },
+    ]);
+    tx.consumptionLog.groupBy.mockResolvedValue([
+      {
+        bookingAssetId: "row-b1-kit",
+        bookingId: "b1",
+        assetId: ASSET_ID,
+        _sum: { quantity: 4 },
+      },
+    ]);
+
+    // committed = 4 (kit) + 6 (standalone, untouched by the kit's return)
+    await expect(
+      assertAssetQuantityNotBelowReservations({
+        assetId: ASSET_ID,
+        organizationId: ORG_ID,
+        tx,
+        newTotal: 9,
+        assetTitle: "Widget",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: expect.objectContaining({
+        peakReserved: 6,
+        committed: 10,
+      }),
+    });
+  });
 
   it("allows any newTotal >= 0 when there are no commitments (custody, kits, or bookings)", async () => {
     const tx = createMockTx();

@@ -15,7 +15,10 @@
 
 /* eslint-disable @typescript-eslint/require-await -- the in-memory stand-in mirrors Prisma's promise-returning delegates without awaiting anything itself */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { adjustQuantity } from "~/modules/consumption-log/service.server";
+import {
+  adjustQuantity,
+  applyQuantityAdjustment,
+} from "~/modules/consumption-log/service.server";
 import { replayStockLedger } from "~/modules/consumption-log/stock-ledger";
 import type { ShelfError } from "~/utils/error";
 import { UNPLACED_SOURCE, UNRECORDED_SOURCE } from "./custody-source";
@@ -1369,6 +1372,69 @@ describe("stock ledger", () => {
         .filter((l) => l.category === "CHECKOUT" || l.category === "RETURN")
         .every((l) => l.stockChange === 0)
     ).toBe(true);
+  });
+
+  it("refuses a quantity that is not a positive whole number before writing anything", async () => {
+    seedPool({ total: 5, placements: [], ledgerStarted: true });
+
+    for (const quantity of [-1, 0, 1.5]) {
+      await expect(
+        applyQuantityAdjustment(fakeDb as never, {
+          assetId: "pool-1",
+          quantity,
+          category: "CONVERTED",
+          direction: "subtract",
+          userId: "user-1",
+          organizationId: ORG,
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(tables.asset[0].quantity).toBe(5);
+    expect(tables.consumptionLog).toEqual([]);
+  });
+
+  it("records units made into assets as CONVERTED where they left", async () => {
+    seedPool({
+      total: 10,
+      placements: [
+        [CAMERA_ROOM, 6],
+        [STUDIO, 3],
+      ],
+      ledgerStarted: false,
+    });
+
+    await adjustQuantity({
+      assetId: "pool-1",
+      quantity: 2,
+      category: "CONVERTED",
+      direction: "subtract",
+      userId: "user-1",
+      organizationId: ORG,
+      locationId: STUDIO,
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 1],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["OPENING_BALANCE", STUDIO, 3],
+      ["CONVERTED", STUDIO, -2],
+    ]);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+    // The location's timeline says the units became assets, not that they were lost.
+    expect(createSystemLocationNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationId: STUDIO,
+        content: expect.stringContaining("created individual assets from"),
+      })
+    );
   });
 });
 

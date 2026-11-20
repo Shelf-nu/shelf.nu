@@ -28,6 +28,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // URL points at the real database.
 import type * as DbModule from "~/database/db.server";
 import type * as Availability from "~/modules/asset/availability.server";
+import type * as FromStock from "~/modules/asset/create-from-stock.server";
 import type * as AssetService from "~/modules/asset/service.server";
 import type * as CheckedOut from "~/modules/booking/checked-out.server";
 import type * as BookingService from "~/modules/booking/service.server";
@@ -46,6 +47,7 @@ vi.mock("~/emails/mail.server", () => ({ sendEmail: vi.fn() }));
 describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
   let db: typeof DbModule.db;
   let asset: typeof AssetService;
+  let fromStock: typeof FromStock;
   let ledger: typeof Ledger;
   let consumption: typeof ConsumptionLogService;
   let location: typeof LocationService;
@@ -72,6 +74,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
 
     ({ db } = await import("~/database/db.server"));
     asset = await import("~/modules/asset/service.server");
+    fromStock = await import("~/modules/asset/create-from-stock.server");
     ledger = await import("./stock-ledger");
     consumption = await import("./service.server");
     location = await import("~/modules/location/service.server");
@@ -300,6 +303,18 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
         ["LOSS", null, -3],
       ])
     );
+
+    // Create assets from stock: units leave the location as assets.
+    await fromStock.createAssetsFromStock({
+      poolId: id,
+      organizationId,
+      userId,
+      count: 2,
+      source: loc.studio,
+      title: "Ledger glove",
+    });
+    rows = await expectLedgerMatchesLive(id);
+    expect(lastRows(rows, 1)).toEqual([["CONVERTED", loc.studio, -2]]);
 
     // Move between locations, then place the unplaced units.
     await asset.moveAssetLocationUnits({
