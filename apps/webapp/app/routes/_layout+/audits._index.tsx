@@ -221,7 +221,7 @@ export default function AuditsIndexPage() {
               <Th>Status</Th>
               <Th>Description</Th>
               <Th>Created by</Th>
-              <Th>Assignee</Th>
+              <Th>Assignees</Th>
               <Th className="whitespace-nowrap">Due date</Th>
               <Th>Created</Th>
               <Th>Started</Th>
@@ -318,6 +318,16 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const assigneeImg =
     firstAssignment?.user?.profilePicture || "/static/images/default_pfp.jpg";
   const hasMultipleAssignees = item.assignments.length > 1;
+  // The rest of the team, for the "+N" badge's tooltip
+  const otherAssigneeNames = item.assignments
+    .slice(1)
+    .map(
+      (assignment) =>
+        resolveUserDisplayName(assignment.user) ||
+        assignment.user?.email ||
+        "Unknown"
+    )
+    .join(", ");
 
   return (
     <>
@@ -353,7 +363,10 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
           <div className="flex items-center gap-1">
             <UserBadge name={assigneeName} img={assigneeImg} />
             {hasMultipleAssignees && (
-              <span className="text-xs text-gray-500">
+              <span
+                className="text-xs text-gray-500"
+                title={otherAssigneeNames}
+              >
                 +{item.assignments.length - 1}
               </span>
             )}

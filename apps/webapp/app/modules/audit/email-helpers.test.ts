@@ -4,7 +4,7 @@
  *
  * @see {@link file://./email-helpers.ts}
  */
-import { sendEmail } from "~/emails/mail.server";
+import { sendEmail, sendEmailAndWait } from "~/emails/mail.server";
 import { sendPush } from "~/modules/push/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import {
@@ -18,6 +18,8 @@ import {
 // why: sending mail is a network call; the test reads what would be sent
 vi.mock("~/emails/mail.server", () => ({
   sendEmail: vi.fn(),
+  // The assignment email is awaited so its sender can pace a fan-out.
+  sendEmailAndWait: vi.fn().mockResolvedValue(undefined),
 }));
 
 // why: sendPush queues a pg-boss job; the queue and delivery are the push
@@ -97,8 +99,8 @@ describe("sendAuditAssignedEmail", () => {
       hints,
     });
 
-    expect(sendEmail).toHaveBeenCalledOnce();
-    expect(vi.mocked(sendEmail).mock.calls[0][0].subject).toBe(
+    expect(sendEmailAndWait).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendEmailAndWait).mock.calls[0][0].subject).toBe(
       `🔍 You've been assigned to audit: "Q4 count" - shelf.nu`
     );
     expect(vi.mocked(sendPush).mock.calls).toEqual([

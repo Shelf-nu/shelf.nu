@@ -1,6 +1,6 @@
 import type { AuditForEmail } from "~/emails/audit-updates-template";
 import { auditUpdatesTemplateString } from "~/emails/audit-updates-template";
-import { sendEmail } from "~/emails/mail.server";
+import { sendEmail, sendEmailAndWait } from "~/emails/mail.server";
 import { auditEmailSubject, PUSH_MESSAGES } from "~/modules/push/messages";
 import { sendPush } from "~/modules/push/service.server";
 import type { ClientHint } from "~/utils/client-hints";
@@ -197,7 +197,9 @@ export async function sendAuditAssignedEmail({
       assetCount,
     });
 
-    sendEmail({
+    // Awaited so the caller's loop only moves on once this email is sent or
+    // safely queued; a failure lands in the catch below with this recipient.
+    await sendEmailAndWait({
       to: assigneeEmail,
       subject: auditEmailSubject("ASSIGNED", audit.name),
       text: auditAssignedEmailContent({
