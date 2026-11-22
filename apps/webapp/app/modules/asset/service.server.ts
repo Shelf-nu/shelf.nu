@@ -190,9 +190,6 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
   createSignedUrl,
   parseFileFormData,
-  parsePdfFormData,
-  removeFileAtPath,
-  removeFilesByPrefix,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import type { UserNameFields } from "~/utils/user";
@@ -200,6 +197,7 @@ import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { formatModelShortfallMessage } from "./archive-shortfall";
 import type { ModelReservationShortfall } from "./archive-shortfall";
+import { resolveStagedAttachment } from "./attachment.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -1070,7 +1068,6 @@ export async function createAsset({
   mainImageExpiration,
   attachmentPath,
   attachmentOriginalName,
-  attachmentSize,
   barcodes,
   id: assetId, // Add support for passing an ID
   type,
@@ -1097,14 +1094,14 @@ export async function createAsset({
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
   /**
-   * Set when a PDF was staged (via the attachment API's no-DB-row-yet
-   * branch) while this asset was still being created - see
-   * stageAssetAttachment(). Not exposed on the edit form; an existing
-   * asset's attachment is only ever changed through updateAssetAttachment.
+   * A PDF the create form staged before the asset existed (see
+   * `stageAssetAttachment`). Checked by `resolveStagedAttachment`, which also
+   * reads its size from Storage. An existing asset's attachment changes only
+   * through `updateAssetAttachment`.
    */
   attachmentPath?: Asset["attachmentPath"];
+  /** The name the create form shows for the staged file; cleaned before storing */
   attachmentOriginalName?: Asset["attachmentOriginalName"];
-  attachmentSize?: Asset["attachmentSize"];
   type?: Asset["type"];
   quantity?: Asset["quantity"];
   minQuantity?: Asset["minQuantity"];
@@ -1153,28 +1150,15 @@ export async function createAsset({
       });
     }
   }
-  if (attachmentPath) {
-    if (!attachmentPath.startsWith(`${organizationId}/`)) {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid attachment",
-        label,
-        status: 400,
-      });
-    }
-    const claimedBy = await db.asset.findFirst({
-      where: { attachmentPath },
-      select: { id: true },
-    });
-    if (claimedBy) {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid attachment",
-        label,
-        status: 400,
-      });
-    }
-  }
+  // Only the path comes from the form; it must be a file this workspace
+  // staged and no asset owns yet. The size is read from Storage.
+  const attachment = attachmentPath
+    ? await resolveStagedAttachment({
+        attachmentPath,
+        attachmentOriginalName,
+        organizationId,
+      })
+    : null;
 
   let attempts = 0;
   const maxAttempts = 3;
@@ -1238,9 +1222,9 @@ export async function createAsset({
         availableToBook,
         mainImage,
         mainImageExpiration,
-        attachmentPath,
-        attachmentOriginalName,
-        attachmentSize,
+        attachmentPath: attachment?.attachmentPath,
+        attachmentOriginalName: attachment?.attachmentOriginalName,
+        attachmentSize: attachment?.attachmentSize,
         type,
         quantity,
         minQuantity,
@@ -5233,276 +5217,6 @@ export async function updateAssetMainImage({
         ? cause.message
         : "Something went wrong while updating asset main image",
       additionalData: { assetId, userId, field: "mainImage" },
-      label,
-    });
-  }
-}
-
-/**
- * Uploads (or replaces) an asset's single PDF attachment - purchase
- * invoice, manual, calibration certificate, etc. See issue #2660.
- *
- * Deliberately standalone rather than routed through `updateAsset()`: this
- * is called from its own dedicated API route with an instant drag-and-drop
- * UI, not as part of the big multi-field edit-asset form submission, so it
- * only needs to touch the three attachment columns.
- */
-export async function updateAssetAttachment({
-  request,
-  assetId,
-  organizationId,
-}: {
-  request: Request;
-  assetId: Asset["id"];
-  organizationId: Organization["id"];
-}) {
-  try {
-    const asset = await db.asset.findFirstOrThrow({
-      where: { id: assetId, organizationId },
-      select: { id: true, attachmentPath: true },
-    });
-
-    const { path, originalName, size } = await parsePdfFormData({
-      request,
-      newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
-        Date.now()
-      )}-${crypto.randomUUID()}`,
-    });
-
-    const updated = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        // Not a URL - see the schema comment on Asset.attachmentPath. A
-        // signed URL is minted on demand wherever this is displayed, after
-        // that caller's own permission check.
-        attachmentPath: path,
-        attachmentOriginalName: originalName ?? null,
-        attachmentSize: size,
-      },
-    });
-
-    if (asset.attachmentPath) {
-      // Best-effort cleanup of the file being replaced, run only after the
-      // new path is persisted above: deleting the old file first and then
-      // failing to persist the new one would leave the asset pointing at a
-      // file that no longer exists. An orphaned storage object is the safer
-      // failure mode, so it isn't worth failing the upload over. Targets the
-      // old path specifically (not a folder sweep) - the new upload above
-      // already landed in the same org/asset folder under a different,
-      // timestamped name.
-      try {
-        await removeFileAtPath({
-          path: asset.attachmentPath,
-          bucketName: "assets",
-        });
-      } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Failed to delete the previous asset attachment",
-            additionalData: { assetId },
-            label,
-          })
-        );
-      }
-    }
-
-    return updated;
-  } catch (cause) {
-    const isShelfError = isLikeShelfError(cause);
-    throw new ShelfError({
-      cause,
-      message: isShelfError
-        ? cause.message
-        : "Something went wrong while uploading the asset attachment",
-      additionalData: { assetId },
-      label,
-    });
-  }
-}
-
-/** Deletes an asset's attachment, both from storage and from the DB. */
-export async function removeAssetAttachment({
-  assetId,
-  organizationId,
-}: {
-  assetId: Asset["id"];
-  organizationId: Organization["id"];
-}) {
-  try {
-    const asset = await db.asset.findFirstOrThrow({
-      where: { id: assetId, organizationId },
-      select: { id: true, attachmentPath: true },
-    });
-
-    const updated = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        attachmentPath: null,
-        attachmentOriginalName: null,
-        attachmentSize: null,
-      },
-    });
-
-    if (asset.attachmentPath) {
-      // Best-effort cleanup, run only after the DB is cleared - see the
-      // matching comment in updateAssetAttachment for why deleting the file
-      // before persisting the metadata change is the wrong order.
-      try {
-        await removeFileAtPath({
-          path: asset.attachmentPath,
-          bucketName: "assets",
-        });
-      } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Failed to delete the removed asset attachment",
-            additionalData: { assetId },
-            label,
-          })
-        );
-      }
-    }
-
-    return updated;
-  } catch (cause) {
-    const isShelfError = isLikeShelfError(cause);
-    throw new ShelfError({
-      cause,
-      message: isShelfError
-        ? cause.message
-        : "Something went wrong while removing the asset attachment",
-      additionalData: { assetId },
-      label,
-    });
-  }
-}
-
-/**
- * Uploads a PDF attachment for an asset that doesn't exist in the DB yet -
- * the create-asset form uses the same instant-upload widget as the edit
- * page, but there is no row to read/write until the whole form is
- * submitted. Storage-only: the resulting metadata is carried through the
- * create form as hidden fields and persisted by createAsset() in the same
- * insert as the rest of the asset.
- *
- * `assetId` here is a client-generated placeholder (not yet a real Asset
- * id) used only to scope the storage path - see AssetForm's pendingId.
- */
-export async function stageAssetAttachment({
-  request,
-  assetId,
-  organizationId,
-}: {
-  request: Request;
-  assetId: string;
-  organizationId: Organization["id"];
-}) {
-  try {
-    const { path, originalName, size } = await parsePdfFormData({
-      request,
-      newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
-        Date.now()
-      )}-${crypto.randomUUID()}`,
-    });
-
-    // The asset doesn't exist yet, so `path` (see Asset.attachmentPath's
-    // schema comment) is what eventually gets persisted, via a hidden form
-    // field, once the rest of the form is submitted. `attachmentDisplayUrl`
-    // is a short-lived signed URL for ONLY this response - the create form
-    // uses it to let the user click through to the file immediately, the
-    // same as they could on the edit page; it is never itself stored
-    // anywhere.
-    const attachmentDisplayUrl = await createSignedUrl({
-      filename: path,
-      bucketName: "assets",
-    });
-
-    return {
-      attachmentPath: path,
-      attachmentDisplayUrl,
-      attachmentOriginalName: originalName ?? null,
-      attachmentSize: size,
-    };
-  } catch (cause) {
-    const isShelfError = isLikeShelfError(cause);
-    throw new ShelfError({
-      cause,
-      message: isShelfError
-        ? cause.message
-        : "Something went wrong while uploading the asset attachment",
-      additionalData: { assetId },
-      label,
-    });
-  }
-}
-
-/**
- * Resolves an asset's stored attachment path (see Asset.attachmentPath's
- * schema comment) into a short-lived signed URL for display. Callers are
- * expected to already have proven the caller may see this asset (e.g. via
- * getAsset()/requirePermission) before reaching this - it does not perform
- * its own permission check.
- *
- * Tolerates a signing failure by returning null rather than throwing,
- * matching how refreshExpiredAssetImages treats a transient storage hiccup
- * as "no image right now" instead of failing the whole page load.
- */
-export async function resolveAssetAttachmentDisplayUrl({
-  attachmentPath,
-  assetId,
-}: {
-  attachmentPath: Asset["attachmentPath"];
-  assetId: Asset["id"];
-}): Promise<string | null> {
-  if (!attachmentPath) {
-    return null;
-  }
-
-  try {
-    return await createSignedUrl({
-      filename: attachmentPath,
-      bucketName: "assets",
-    });
-  } catch (cause) {
-    Logger.error(
-      new ShelfError({
-        cause,
-        message: "Failed to create a signed URL for the asset attachment",
-        additionalData: { assetId },
-        label,
-        shouldBeCaptured: true,
-      })
-    );
-    return null;
-  }
-}
-
-/**
- * Removes a PDF attachment staged for an asset that doesn't exist in the DB
- * yet. There is no `attachmentPath` column to read the exact object key
- * from, so this clears the whole org+placeholder-id storage folder instead
- * of a single known path - see removeFilesByPrefix.
- */
-export async function clearStagedAssetAttachment({
-  assetId,
-  organizationId,
-}: {
-  assetId: string;
-  organizationId: Organization["id"];
-}) {
-  try {
-    await removeFilesByPrefix({
-      organizationId,
-      entityId: assetId,
-      bucketName: "assets",
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while removing the asset attachment",
-      additionalData: { assetId },
       label,
     });
   }

@@ -647,7 +647,10 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
  * unless the buffer's leading bytes match this signature exactly.
  * @param options.invalidSignatureMessage - User-facing message used when
  * `expectedMagicBytes` doesn't match.
- * @returns The stored object's path and its size in bytes.
+ * @returns The path the caller asked for (`path`), the key Storage actually
+ * stored the object under, bucket included (`fullPath`), and the size in
+ * bytes. The two can differ: Storage resolves `.` and `..` segments in the
+ * request URL, while `path` only echoes the request.
  * @throws {ShelfError} When the magic-byte check fails, or the underlying
  * Supabase Storage upload fails for any other reason.
  */
@@ -661,7 +664,7 @@ export async function uploadRawFile(
     expectedMagicBytes,
     invalidSignatureMessage = "Uploaded file does not match its expected format",
   }: UploadOptions
-): Promise<{ path: string; size: number }> {
+): Promise<{ path: string; fullPath: string; size: number }> {
   try {
     const chunks: Uint8Array[] = [];
     for await (const chunk of fileData) {
@@ -696,7 +699,11 @@ export async function uploadRawFile(
       throw error;
     }
 
-    return { path: data.path, size: buffer.byteLength };
+    return {
+      path: data.path,
+      fullPath: data.fullPath,
+      size: buffer.byteLength,
+    };
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 
@@ -714,6 +721,31 @@ export async function uploadRawFile(
 
 /** ASCII "%PDF-" - every valid PDF starts with this, regardless of version. */
 const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+
+/** One segment of a storage key: letters, digits, `.`, `_` and `-`. */
+const SAFE_STORAGE_KEY_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Whether a storage key is safe to send to Storage as written.
+ *
+ * Storage puts the key in the request URL, and the URL parser resolves `.`
+ * and `..` segments before the request leaves, so `org-A/../org-B/file`
+ * reaches `org-B/file`. A safe key has only non-empty segments made of
+ * letters, digits, `.`, `_` and `-`, and none of them is `.` or `..`.
+ *
+ * @param key - The object key, without the bucket
+ * @returns `true` when every segment is safe
+ */
+export function isSafeStorageKey(key: string): boolean {
+  return key
+    .split("/")
+    .every(
+      (segment) =>
+        SAFE_STORAGE_KEY_SEGMENT.test(segment) &&
+        segment !== "." &&
+        segment !== ".."
+    );
+}
 
 /**
  * Parses a single-PDF multipart upload (asset attachments - invoices,
@@ -733,9 +765,11 @@ const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
  * @param maxFileSize - Maximum accepted upload size in bytes.
  * @returns The stored object's path, the client-supplied original
  * filename (if any), and its size in bytes.
- * @throws {ShelfError} When no upload matches the "file" field, the
- * declared or actual content type isn't `application/pdf`, the upload
- * exceeds `maxFileSize`, or the file was stored at an unexpected path.
+ * @throws {ShelfError} 400 when `newFileName` is not a safe storage key
+ * (see {@link isSafeStorageKey}); otherwise when no upload matches the
+ * "file" field, the declared or actual content type isn't
+ * `application/pdf`, the upload exceeds `maxFileSize`, or Storage kept the
+ * file under a different key than the one asked for.
  */
 export async function parsePdfFormData({
   request,
@@ -754,10 +788,23 @@ export async function parsePdfFormData({
   bucketName?: string;
   maxFileSize?: number;
 }): Promise<{ path: string; originalName?: string; size: number }> {
+  const targetFilename = `${newFileName}.pdf`;
+
+  // Checked before the body is read: an unsafe key must never reach Storage.
+  if (!isSafeStorageKey(targetFilename)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid file location",
+      message: "The file could not be stored. Please try again.",
+      additionalData: { targetFilename },
+      label,
+      status: 400,
+    });
+  }
+
   try {
     let uploaded: { path: string; originalName?: string; size: number } | null =
       null;
-    const targetFilename = `${newFileName}.pdf`;
 
     const uploadHandler = async (upload: FileUpload) => {
       // `upload.fieldName` is set by the multipart parser itself from the
@@ -782,7 +829,7 @@ export async function parsePdfFormData({
         return undefined;
       }
 
-      const { path, size } = await uploadRawFile(fileStream, {
+      const { path, fullPath, size } = await uploadRawFile(fileStream, {
         filename: targetFilename,
         contentType: mimeType,
         bucketName,
@@ -790,11 +837,18 @@ export async function parsePdfFormData({
         invalidSignatureMessage: "Uploaded file is not a valid PDF",
       });
 
-      if (path !== targetFilename) {
+      // `path` only echoes the request; `fullPath` is the key Storage used.
+      if (
+        path !== targetFilename ||
+        fullPath !== `${bucketName}/${targetFilename}`
+      ) {
         throw new ShelfError({
           cause: null,
           message: "Uploaded file was stored at an unexpected path",
-          additionalData: { expected: targetFilename, actual: path },
+          additionalData: {
+            expected: `${bucketName}/${targetFilename}`,
+            actual: fullPath,
+          },
           label,
         });
       }
@@ -1259,6 +1313,86 @@ export async function removeFileAtPath({
         ? cause.message
         : "Failed to remove file. Please try again.",
       additionalData: { path, bucketName },
+      label,
+    });
+  }
+}
+
+/** An object stored directly inside a folder, as {@link listFilesInFolder} reports it. */
+export type StoredFile = {
+  /** The object's name inside the folder, without the folder path */
+  name: string;
+  /** Size in bytes as Storage recorded it, or `null` when it reported none */
+  size: number | null;
+};
+
+/**
+ * Lists the objects stored directly inside a folder of a bucket. Subfolders
+ * are left out, and so is their content.
+ *
+ * Pages through `list()` until a short page comes back, so a folder of any
+ * size is read in full.
+ *
+ * @param params.folder - The folder's key, without a trailing `/`. Must be a
+ *   safe storage key (see {@link isSafeStorageKey}).
+ * @param params.bucketName - The bucket to read
+ * @returns The folder's files, in the order Storage lists them
+ * @throws {ShelfError} 400 for an unsafe folder key, or when Storage refuses
+ *   the listing
+ */
+export async function listFilesInFolder({
+  folder,
+  bucketName,
+}: {
+  folder: string;
+  bucketName: string;
+}): Promise<StoredFile[]> {
+  if (!isSafeStorageKey(folder)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Invalid storage folder",
+      additionalData: { folder, bucketName },
+      label,
+      status: 400,
+    });
+  }
+
+  try {
+    const PAGE_SIZE = 100;
+    const files: StoredFile[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: page, error } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .list(folder, { limit: PAGE_SIZE, offset });
+
+      if (error) {
+        throw error;
+      }
+
+      const entries = page ?? [];
+      for (const entry of entries) {
+        // Storage reports a subfolder as an entry with no id.
+        if (entry.id === null) continue;
+        const size = entry.metadata?.size;
+        files.push({
+          name: entry.name,
+          size: typeof size === "number" ? size : null,
+        });
+      }
+
+      offset += entries.length;
+      hasMore = entries.length === PAGE_SIZE;
+    }
+
+    return files;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to read stored files",
+      additionalData: { folder, bucketName },
       label,
     });
   }

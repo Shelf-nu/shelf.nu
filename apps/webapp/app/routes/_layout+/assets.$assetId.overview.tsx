@@ -51,6 +51,7 @@ import { useAssetCustodySources } from "~/hooks/use-asset-custody-sources";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { resolveAssetAttachmentDisplayUrl } from "~/modules/asset/attachment.server";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
@@ -71,7 +72,6 @@ import {
   moveAssetLocationUnits,
   parseAssetValuation,
   placeUnplacedUnits,
-  resolveAssetAttachmentDisplayUrl,
   updateAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";

@@ -7,6 +7,7 @@ import {
   findShelfErrorInCause,
   isSupabaseRateLimitError,
   isSupabaseServerError,
+  listFilesInFolder,
   parsePdfFormData,
   removeFilesByPrefix,
   MAX_PUBLIC_FILES_PER_REMOVE,
@@ -404,6 +405,99 @@ describe("parsePdfFormData", () => {
     ).rejects.toThrow();
 
     expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["org-A/../org-B/asset-b/attachment-1"],
+    ["org-A/./attachment-1"],
+    ["org-A//attachment-1"],
+    ["org-A/asset%2F../attachment-1"],
+  ])("refuses the key %j before reading the body", async (newFileName) => {
+    const request = multipartRequest([
+      {
+        name: "file",
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        body: PDF_BODY,
+      },
+    ]);
+
+    await expect(
+      parsePdfFormData({ request, newFileName })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an upload Storage kept under a different key", async () => {
+    // Storage resolves dot segments, so the key it used can differ from the
+    // path it echoes back.
+    storageUploadMock.mockImplementationOnce((path: string) =>
+      Promise.resolve({
+        data: { path, fullPath: "assets/org-B/asset-b/attachment-1.pdf" },
+        error: null,
+      })
+    );
+    const request = multipartRequest([
+      {
+        name: "file",
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        body: PDF_BODY,
+      },
+    ]);
+
+    await expect(
+      parsePdfFormData({ request, newFileName: "org-1/asset-1/attachment-1" })
+    ).rejects.toThrow("Uploaded file was stored at an unexpected path");
+  });
+});
+
+describe("listFilesInFolder", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("pages through the folder and leaves subfolders out", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({
+      id: `id-${i}`,
+      name: `file-${i}.pdf`,
+      metadata: { size: i },
+    }));
+    storageListMock
+      .mockResolvedValueOnce({ data: firstPage, error: null })
+      .mockResolvedValueOnce({
+        data: [
+          { id: null, name: "subfolder", metadata: null },
+          { id: "id-last", name: "last.pdf", metadata: {} },
+        ],
+        error: null,
+      });
+
+    const files = await listFilesInFolder({
+      folder: "org-1/asset-1",
+      bucketName: "assets",
+    });
+
+    expect(storageListMock).toHaveBeenNthCalledWith(1, "org-1/asset-1", {
+      limit: 100,
+      offset: 0,
+    });
+    expect(storageListMock).toHaveBeenNthCalledWith(2, "org-1/asset-1", {
+      limit: 100,
+      offset: 100,
+    });
+    expect(files).toHaveLength(101);
+    expect(files[5]).toEqual({ name: "file-5.pdf", size: 5 });
+    expect(files[100]).toEqual({ name: "last.pdf", size: null });
+  });
+
+  it("refuses a folder key with a dot segment without calling Storage", async () => {
+    await expect(
+      listFilesInFolder({ folder: "org-1/..", bucketName: "assets" })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(storageListMock).not.toHaveBeenCalled();
   });
 });
 

@@ -50,6 +50,7 @@ import {
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { generateClientId } from "~/utils/id/client-id";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
@@ -202,26 +203,13 @@ export const NewAssetFormSchema = z.object({
       "Unit of measure may not contain Markdoc syntax (`{%` / `%}`)"
     ),
 
-  // Populated only when a PDF was staged via the attachment widget before
-  // this (new, not-yet-created) asset was submitted - see AssetForm's
-  // pendingAttachmentId / pendingAttachment. Absent entirely on the edit
-  // form, where the attachment is written directly by its own dedicated
-  // route. A bare storage path, not a URL - see Asset.attachmentPath's
-  // schema comment.
+  // Sent only by the create form, after a PDF was staged for the new asset
+  // (see AssetForm's pendingAttachment). A bare storage path, not a URL.
+  // createAsset checks the path against Storage and reads the size from
+  // there, so the client sends no size. The edit form never sends these:
+  // the attachment is written by its own endpoint.
   attachmentPath: z.string().optional(),
   attachmentOriginalName: z.string().optional(),
-  attachmentSize: z
-    .string()
-    .optional()
-    .transform((val) => (val === "" || val === undefined ? undefined : +val))
-    .pipe(
-      z
-        .number({ invalid_type_error: "Attachment size must be a number" })
-        .finite("Attachment size must be finite")
-        .int("Attachment size must be a whole number")
-        .nonnegative("Attachment size must not be negative")
-        .optional()
-    ),
 });
 
 /**
@@ -411,7 +399,7 @@ const AssetFormInner = ({
   // The attachment widget always needs an id to scope its storage path by.
   // Editing an existing asset uses its real id; creating a new one has none
   // yet, so mint a client-side placeholder once per mount.
-  const [pendingAttachmentId] = useState(() => id ?? crypto.randomUUID());
+  const [pendingAttachmentId] = useState(() => id ?? generateClientId());
 
   // Lifted staged-attachment state for the create form only (see
   // AssetAttachmentUpload's onUploaded/onRemoved doc comment) - null on the
@@ -1425,20 +1413,6 @@ const AssetFormInner = ({
                 name="attachmentOriginalName"
                 value={pendingAttachment?.attachmentOriginalName ?? ""}
               />
-              <input
-                type="hidden"
-                name="attachmentSize"
-                value={pendingAttachment?.attachmentSize ?? ""}
-              />
-              {/* attachmentPath/attachmentOriginalName are unrefined
-                  z.string().optional() - only attachmentSize carries real
-                  Zod checks (finite/int/nonnegative), so it's the only one
-                  of the three that can fail server-side validation. */}
-              {validationErrors?.attachmentSize?.message ? (
-                <div className="text-sm text-error-500">
-                  {validationErrors.attachmentSize.message}
-                </div>
-              ) : null}
             </When>
           </FormRow>
         </When>

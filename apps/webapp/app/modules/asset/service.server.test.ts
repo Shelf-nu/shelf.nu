@@ -2914,6 +2914,11 @@ describe("createAsset cross-org guards", () => {
     vitest.clearAllMocks();
   });
 
+  // A staged attachment key of the shape attachment.server builds.
+  const STAGED_FOLDER = "5f0c6a2e-1111-4222-8333-444455556666";
+  const STAGED_FILE =
+    "attachment-1760000000-0b7f1a2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c.pdf";
+
   // Valid defaults for createAsset's required fields; each test overrides
   // only the field its guard actually inspects.
   const baseCreateAssetPayload: Parameters<typeof createAsset>[0] = {
@@ -2995,34 +3000,40 @@ describe("createAsset cross-org guards", () => {
     expect(db.category.findFirst).not.toHaveBeenCalled();
   });
 
-  it("rejects an attachmentPath outside the caller's organization folder", async () => {
-    expect.assertions(2);
+  it.each([
+    ["another workspace's folder", `org-B/${STAGED_FOLDER}/${STAGED_FILE}`],
+    ["a climb out of the workspace", `org-A/../org-B/asset-b/${STAGED_FILE}`],
+    ["a key that is not an attachment", "org-A/other-entity/photo.png"],
+  ])(
+    "rejects an attachmentPath in %s before reading anything",
+    async (_case, attachmentPath) => {
+      expect.assertions(3);
 
-    await expect(
-      createAsset({
-        ...baseCreateAssetPayload,
-        attachmentPath: "org-B/some-asset/attachment-123.pdf",
-      })
-    ).rejects.toThrow(ShelfError);
+      await expect(
+        createAsset({ ...baseCreateAssetPayload, attachmentPath })
+      ).rejects.toMatchObject({ status: 400 });
 
-    // The prefix check rejects before ever looking up who owns the path.
-    expect(db.asset.findFirst).not.toHaveBeenCalled();
-  });
+      expect(db.asset.findFirst).not.toHaveBeenCalled();
+      expect(db.asset.create).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects an attachmentPath already claimed by another asset", async () => {
-    expect.assertions(1);
-    // why: a hit means some asset already persisted this exact path - a
-    // forged resubmission of it must not adopt that asset's attachment.
-    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+    expect.assertions(2);
+    // why: a hit means some asset already stores this exact path, so a
+    // resubmission of it must not adopt that asset's file.
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValueOnce({
       id: "asset-owning-it",
     });
 
     await expect(
       createAsset({
         ...baseCreateAssetPayload,
-        attachmentPath: "org-A/asset-owning-it/attachment-123.pdf",
+        attachmentPath: `org-A/${STAGED_FOLDER}/${STAGED_FILE}`,
       })
-    ).rejects.toThrow(ShelfError);
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(db.asset.create).not.toHaveBeenCalled();
   });
 
   it("rejects a tag from a different organization before writing", async () => {

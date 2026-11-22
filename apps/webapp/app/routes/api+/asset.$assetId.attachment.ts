@@ -12,11 +12,12 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  ATTACHMENT_FOLDER_ID_PATTERN,
   clearStagedAssetAttachment,
   removeAssetAttachment,
   stageAssetAttachment,
   updateAssetAttachment,
-} from "~/modules/asset/service.server";
+} from "~/modules/asset/attachment.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
   error,
@@ -29,6 +30,15 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+/**
+ * `assetId` becomes a storage path segment, so it must be a plain id: React
+ * Router decodes `%2F` inside a param, and `..` would climb out of the
+ * workspace's folder.
+ */
+const AttachmentParamsSchema = z.object({
+  assetId: z.string().regex(ATTACHMENT_FOLDER_ID_PATTERN, "Invalid asset id"),
+});
 
 /**
  * POST /api/asset/:assetId/attachment - upload (or replace) the asset's
@@ -49,7 +59,7 @@ import { requirePermission } from "~/utils/roles.server";
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+  const { assetId } = getParams(params, AttachmentParamsSchema, {
     additionalData: { userId },
   });
 
@@ -63,7 +73,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const method = getActionMethod(request);
 
+    // No asset with this id means a create-form placeholder, so archived
+    // assets must be found here too, or their id would be staged against.
     const existingAsset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an archived asset is still an asset, never a placeholder
       where: { id: assetId, organizationId },
       select: { id: true },
     });
@@ -73,7 +86,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         if (!existingAsset) {
           const staged = await stageAssetAttachment({
             request,
-            assetId,
+            placeholderId: assetId,
             organizationId,
           });
           return data(payload(staged));
@@ -88,7 +101,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "DELETE": {
         if (!existingAsset) {
-          await clearStagedAssetAttachment({ assetId, organizationId });
+          await clearStagedAssetAttachment({
+            placeholderId: assetId,
+            organizationId,
+          });
           return data(payload({ success: true }));
         }
         await removeAssetAttachment({ assetId, organizationId });

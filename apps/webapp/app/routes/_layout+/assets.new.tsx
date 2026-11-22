@@ -238,7 +238,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       unitOfMeasure,
       attachmentPath,
       attachmentOriginalName,
-      attachmentSize,
     } = payload;
 
     /** This checks if tags are passed and build the  */
@@ -336,7 +335,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       unitOfMeasure,
       attachmentPath,
       attachmentOriginalName,
-      attachmentSize,
     });
 
     // `asset.user` is the full User row (createAsset includes `user: true`), so

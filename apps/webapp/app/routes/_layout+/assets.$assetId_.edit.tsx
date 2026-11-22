@@ -16,10 +16,10 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { resolveAssetAttachmentDisplayUrl } from "~/modules/asset/attachment.server";
 import {
   getAllEntriesForCreateAndEdit,
   getAsset,
-  resolveAssetAttachmentDisplayUrl,
   updateAsset,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
