@@ -180,8 +180,8 @@ export function sanitizeAttachmentName(
  * @param params.assetId - The asset, already proven to be in the workspace
  * @param params.organizationId - The caller's workspace
  * @returns The updated asset
- * @throws {ShelfError} When the asset is missing, the upload is refused, or
- *   the database write fails
+ * @throws {ShelfError} When the asset is missing or archived, the upload is
+ *   refused, or the database write fails
  */
 export async function updateAssetAttachment({
   request,
@@ -193,9 +193,10 @@ export async function updateAssetAttachment({
   organizationId: Organization["id"];
 }) {
   try {
+    // An archived asset is read-only; the route refuses it with a message
+    // first, so this only stops a caller that skipped that check.
     const asset = await db.asset.findFirstOrThrow({
-      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the route resolves the asset (archived included) before calling this
-      where: { id: assetId, organizationId },
+      where: { id: assetId, organizationId, archivedAt: null },
       select: { id: true, attachmentPath: true },
     });
 
@@ -272,7 +273,8 @@ export async function updateAssetAttachment({
  * @param params.assetId - The asset, already proven to be in the workspace
  * @param params.organizationId - The caller's workspace
  * @returns The updated asset
- * @throws {ShelfError} When the asset is missing or the database write fails
+ * @throws {ShelfError} When the asset is missing or archived, or the database
+ *   write fails
  */
 export async function removeAssetAttachment({
   assetId,
@@ -282,9 +284,10 @@ export async function removeAssetAttachment({
   organizationId: Organization["id"];
 }) {
   try {
+    // An archived asset is read-only; the route refuses it with a message
+    // first, so this only stops a caller that skipped that check.
     const asset = await db.asset.findFirstOrThrow({
-      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the route resolves the asset (archived included) before calling this
-      where: { id: assetId, organizationId },
+      where: { id: assetId, organizationId, archivedAt: null },
       select: { id: true, attachmentPath: true },
     });
 

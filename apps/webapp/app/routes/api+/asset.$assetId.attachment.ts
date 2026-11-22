@@ -34,6 +34,7 @@ import {
   getActionMethod,
   getParams,
 } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -156,6 +157,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       where: { id: assetId, organizationId },
       select: { id: true },
     });
+
+    if (existingAsset) {
+      // An archived asset is read-only until it is reinstated, its
+      // attachment included. Refused with the same wording as other edits.
+      await assertAssetsAreNotArchived({
+        assetIds: [assetId],
+        organizationId,
+        fix: "reinstate",
+        actorUserId: userId,
+      });
+    }
 
     switch (method) {
       case "POST": {

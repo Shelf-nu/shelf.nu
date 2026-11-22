@@ -17,22 +17,38 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
 const {
+  mockAssetCount,
   mockAssetFindFirst,
+  mockAssetFindMany,
+  mockAssetUpdate,
   mockCreateSignedUrl,
   mockListFilesInFolder,
   mockParsePdfFormData,
   mockRequirePermission,
 } = vi.hoisted(() => ({
+  mockAssetCount: vi.fn(),
   mockAssetFindFirst: vi.fn(),
+  mockAssetFindMany: vi.fn(),
+  mockAssetUpdate: vi.fn(),
   mockCreateSignedUrl: vi.fn(),
   mockListFilesInFolder: vi.fn(),
   mockParsePdfFormData: vi.fn(),
   mockRequirePermission: vi.fn(),
 }));
 
-// why: the asset lookup is a Prisma read; no real database in tests.
+// why: the asset reads and writes are Prisma calls; no real database in
+// tests. `count` and `findMany` answer the shared archived-asset guard.
 vi.mock("~/database/db.server", () => ({
-  db: { $connect: vi.fn(), asset: { findFirst: mockAssetFindFirst } },
+  db: {
+    $connect: vi.fn(),
+    asset: {
+      count: mockAssetCount,
+      findFirst: mockAssetFindFirst,
+      findFirstOrThrow: mockAssetFindFirst,
+      findMany: mockAssetFindMany,
+      update: mockAssetUpdate,
+    },
+  },
 }));
 
 // why: Supabase Storage is an external service. The key each call receives is
@@ -190,4 +206,61 @@ describe("assetId that is not a plain id", () => {
       expect(mockCreateSignedUrl).not.toHaveBeenCalled();
     }
   );
+});
+
+describe("POST and DELETE on an archived asset", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    grant({ canUpdate: true });
+    mockAssetFindFirst.mockResolvedValue({
+      id: ASSET_ID,
+      attachmentPath: ASSET_PATH,
+    });
+  });
+
+  /** Makes the shared guard see `ASSET_ID` as archived, or not. */
+  function archived(isArchived: boolean) {
+    mockAssetCount.mockResolvedValue(isArchived ? 1 : 0);
+    mockAssetFindMany.mockResolvedValue(
+      isArchived ? [{ id: ASSET_ID, title: "Drill" }] : []
+    );
+  }
+
+  it.each([["POST"], ["DELETE"]])(
+    "refuses %s with the archived-asset message and changes nothing",
+    async (method) => {
+      archived(true);
+
+      const result = await action(args(ASSET_ID, method));
+
+      expect(statusOf(result)).toBe(400);
+      expect(
+        (result as { data?: { error?: { message?: string } } }).data?.error
+          ?.message
+      ).toMatch(/archived/i);
+      expect(mockParsePdfFormData).not.toHaveBeenCalled();
+      expect(mockAssetUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it("lets an active asset's attachment be replaced", async () => {
+    archived(false);
+    mockParsePdfFormData.mockResolvedValue({
+      path: `${ORG}/${ASSET_ID}/${FILE_NAME}`,
+      originalName: "invoice.pdf",
+      size: 10,
+    });
+    mockAssetUpdate.mockResolvedValue({ id: ASSET_ID });
+
+    const result = await action(args(ASSET_ID, "POST"));
+
+    // payload() stamps `error: null` onto every success.
+    expect((result as { data?: { error?: unknown } }).data?.error).toBeNull();
+    expect(mockAssetUpdate).toHaveBeenCalledTimes(1);
+    expect(mockAssetFindFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { id: ASSET_ID, organizationId: ORG, archivedAt: null },
+      })
+    );
+  });
 });
