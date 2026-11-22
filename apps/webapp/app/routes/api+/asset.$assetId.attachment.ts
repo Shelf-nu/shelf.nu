@@ -1,24 +1,33 @@
 /**
- * Upload / replace / remove endpoint for an asset's single PDF attachment.
+ * View, upload, replace and remove endpoint for an asset's single PDF
+ * attachment.
  *
  * Branches on whether the asset already exists: for an existing asset it
- * persists directly via `updateAssetAttachment` / `removeAssetAttachment`;
- * for one that doesn't exist yet (the create-asset form's staging flow) it
- * only touches storage via `stageAssetAttachment` / `clearStagedAssetAttachment`,
- * and `createAsset()` persists the staged path once the rest of the form is
- * submitted. See the `action()` doc comment below for the full behavior.
+ * reads and writes the asset's own attachment; for one that doesn't exist yet
+ * (the create form's staging flow) it only touches storage, and
+ * `createAsset()` stores the staged path once the rest of the form is
+ * submitted. See `loader()` and `action()` below.
+ *
+ * @see {@link file://./../../modules/asset/attachment.server.ts}
  */
-import { data, type ActionFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   ATTACHMENT_FOLDER_ID_PATTERN,
   clearStagedAssetAttachment,
+  findStagedAttachmentPath,
   removeAssetAttachment,
+  signAttachmentForViewing,
   stageAssetAttachment,
   updateAssetAttachment,
 } from "~/modules/asset/attachment.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   error,
   payload,
@@ -39,6 +48,73 @@ import { requirePermission } from "~/utils/roles.server";
 const AttachmentParamsSchema = z.object({
   assetId: z.string().regex(ATTACHMENT_FOLDER_ID_PATTERN, "Invalid asset id"),
 });
+
+/**
+ * GET /api/asset/:assetId/attachment - open the attachment.
+ *
+ * Pages link here instead of to a signed URL. Every click checks permission
+ * again and redirects to a URL signed for 60 seconds, so a copied, forwarded
+ * or bookmarked link is useless to anyone who cannot open the asset, and to a
+ * member who has since left the workspace.
+ *
+ * `assetId` is the asset's id, or the create form's placeholder id while a
+ * staged file has no asset yet. Opening a staged file needs the permission
+ * that staged it (`asset: update`).
+ */
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const { userId } = context.getSession();
+  const { assetId } = getParams(params, AttachmentParamsSchema, {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an archived asset's page still shows its attachment
+      where: { id: assetId, organizationId },
+      select: { attachmentPath: true },
+    });
+
+    let attachmentPath: string | null;
+    if (asset) {
+      attachmentPath = asset.attachmentPath;
+    } else {
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      });
+      attachmentPath = await findStagedAttachmentPath({
+        placeholderId: assetId,
+        organizationId,
+      });
+    }
+
+    if (!attachmentPath) {
+      throw new ShelfError({
+        cause: null,
+        title: "No attachment",
+        message: "This asset has no attachment.",
+        additionalData: { assetId },
+        label: "Assets",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return redirect(await signAttachmentForViewing(attachmentPath));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    return data(error(reason), { status: reason.status });
+  }
+}
 
 /**
  * POST /api/asset/:assetId/attachment - upload (or replace) the asset's

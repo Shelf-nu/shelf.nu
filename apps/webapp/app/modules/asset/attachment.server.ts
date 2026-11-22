@@ -17,8 +17,13 @@
  * back must pass {@link parseAttachmentPath} for the caller's workspace.
  * Anything looser lets a member read or write another workspace's objects.
  *
+ * Nobody is handed a long-lived link. Pages link to
+ * `GET /api/asset/:assetId/attachment`, which checks permission on every click
+ * and redirects to a URL signed for {@link ATTACHMENT_LINK_TTL_SECONDS}
+ * seconds, so a copied or forwarded link stops working almost at once.
+ *
  * @see {@link file://./../../routes/api+/asset.$assetId.attachment.ts} the
- *   upload and remove endpoint
+ *   viewing, upload and remove endpoint
  * @see {@link file://./service.server.ts} `createAsset`
  */
 
@@ -54,6 +59,12 @@ const ORGANIZATION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 /** The file name of every attachment: `attachment-<unix>-<uuid>.pdf`. */
 const ATTACHMENT_FILE_NAME_PATTERN =
   /^attachment-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/;
+
+/**
+ * Seconds a signed attachment URL stays valid. The viewing route signs on
+ * every click, so the URL only has to survive the redirect.
+ */
+export const ATTACHMENT_LINK_TTL_SECONDS = 60;
 
 /** The longest attachment name kept, in characters. */
 export const MAX_ATTACHMENT_NAME_LENGTH = 255;
@@ -310,8 +321,9 @@ export async function removeAssetAttachment({
  * @param params.placeholderId - The create form's placeholder id, used as the
  *   folder segment
  * @param params.organizationId - The caller's workspace
- * @returns The staged path, the cleaned original name, the size in bytes, and
- *   a signed URL for showing the file on the create form right away
+ * @returns The staged path, the cleaned original name and the size in bytes.
+ *   The create form opens the file through the viewing route, by placeholder
+ *   id, so no URL is returned.
  * @throws {ShelfError} When the placeholder id is unsafe or the upload is
  *   refused
  */
@@ -333,16 +345,8 @@ export async function stageAssetAttachment({
       }),
     });
 
-    // Shown only on this response, so the person can open what they just
-    // uploaded. Never stored.
-    const attachmentDisplayUrl = await createSignedUrl({
-      filename: path,
-      bucketName: ATTACHMENT_BUCKET,
-    });
-
     return {
       attachmentPath: path,
-      attachmentDisplayUrl,
       attachmentOriginalName: sanitizeAttachmentName(originalName),
       attachmentSize: size,
     };
@@ -461,43 +465,56 @@ export async function resolveStagedAttachment({
 }
 
 /**
- * Signs an asset's stored attachment path for display. Callers must already
- * have checked that the viewer may see the asset; this does no permission
- * check of its own.
+ * Finds the PDF currently staged under a create form's placeholder id: the
+ * newest attachment file in the placeholder folder.
  *
- * Returns `null` instead of throwing when signing fails, so a storage hiccup
- * shows "no attachment" rather than failing the page.
- *
- * @param params.attachmentPath - The stored path, or `null`
- * @param params.assetId - For the log line only
- * @returns A signed URL, or `null`
+ * @param params.placeholderId - The create form's placeholder id
+ * @param params.organizationId - The caller's workspace
+ * @returns The staged path, or `null` when nothing is staged
+ * @throws {ShelfError} 400 for an unsafe placeholder id, or when Storage
+ *   cannot be read
  */
-export async function resolveAssetAttachmentDisplayUrl({
-  attachmentPath,
-  assetId,
+export async function findStagedAttachmentPath({
+  placeholderId,
+  organizationId,
 }: {
-  attachmentPath: Asset["attachmentPath"];
-  assetId: Asset["id"];
+  placeholderId: string;
+  organizationId: Organization["id"];
 }): Promise<string | null> {
-  if (!attachmentPath) {
-    return null;
+  if (!ATTACHMENT_FOLDER_ID_PATTERN.test(placeholderId)) {
+    throw invalidAttachmentError({ organizationId, placeholderId });
   }
 
-  try {
-    return await createSignedUrl({
-      filename: attachmentPath,
-      bucketName: ATTACHMENT_BUCKET,
-    });
-  } catch (cause) {
-    Logger.error(
-      new ShelfError({
-        cause,
-        message: "Failed to create a signed URL for the asset attachment",
-        additionalData: { assetId },
-        label,
-        shouldBeCaptured: true,
-      })
-    );
-    return null;
-  }
+  const folder = `${organizationId}/${placeholderId}`;
+  const files = await listFilesInFolder({
+    folder,
+    bucketName: ATTACHMENT_BUCKET,
+  });
+
+  // `attachment-<unix>-...`: the largest timestamp is the newest upload.
+  const uploadedAt = (name: string) => Number(name.split("-")[1]);
+  const newest = files
+    .map((file) => file.name)
+    .filter((name) => ATTACHMENT_FILE_NAME_PATTERN.test(name))
+    .sort((a, b) => uploadedAt(b) - uploadedAt(a))[0];
+
+  return newest ? `${folder}/${newest}` : null;
+}
+
+/**
+ * Signs an attachment path for the viewing route's redirect. The URL lives
+ * {@link ATTACHMENT_LINK_TTL_SECONDS} seconds: long enough to open, too short
+ * to be worth sharing. Callers must already have checked that the viewer may
+ * see the asset; this does no permission check of its own.
+ *
+ * @param attachmentPath - A stored or staged attachment path
+ * @returns The signed URL
+ * @throws {ShelfError} When Storage refuses to sign
+ */
+export function signAttachmentForViewing(attachmentPath: string) {
+  return createSignedUrl({
+    filename: attachmentPath,
+    bucketName: ATTACHMENT_BUCKET,
+    expiresIn: ATTACHMENT_LINK_TTL_SECONDS,
+  });
 }

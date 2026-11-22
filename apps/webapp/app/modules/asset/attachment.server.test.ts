@@ -50,9 +50,11 @@ import {
   MAX_ATTACHMENT_NAME_LENGTH,
   parseAttachmentPath,
   removeAssetAttachment,
-  resolveAssetAttachmentDisplayUrl,
+  ATTACHMENT_LINK_TTL_SECONDS,
+  findStagedAttachmentPath,
   resolveStagedAttachment,
   sanitizeAttachmentName,
+  signAttachmentForViewing,
   stageAssetAttachment,
   updateAssetAttachment,
 } from "./attachment.server";
@@ -330,15 +332,13 @@ describe("asset attachment", () => {
           ),
         })
       );
-      expect(result).toMatchObject({
+      // No signed URL: the form opens the file through the viewing route.
+      expect(result).toEqual({
         attachmentPath: STAGED_PATH,
         attachmentOriginalName: "invoice.pdf",
         attachmentSize: 1234,
       });
-      expect(createSignedUrl).toHaveBeenCalledWith({
-        filename: STAGED_PATH,
-        bucketName: "assets",
-      });
+      expect(createSignedUrl).not.toHaveBeenCalled();
     });
 
     it("refuses a placeholder id that would leave the workspace folder", async () => {
@@ -450,28 +450,57 @@ describe("asset attachment", () => {
     });
   });
 
-  describe("resolveAssetAttachmentDisplayUrl", () => {
-    it("returns null without calling Storage when there is no attachment", async () => {
-      const result = await resolveAssetAttachmentDisplayUrl({
-        attachmentPath: null,
-        assetId: "asset-1",
-      });
+  describe("findStagedAttachmentPath", () => {
+    it("returns the newest attachment in the placeholder folder", async () => {
+      const older = FILE_NAME.replace("1760000000", "1750000000");
+      vi.mocked(listFilesInFolder).mockResolvedValue([
+        { name: older, size: 1 },
+        { name: FILE_NAME, size: 2 },
+        { name: "notes.txt", size: 3 },
+      ]);
 
-      expect(result).toBeNull();
-      expect(createSignedUrl).not.toHaveBeenCalled();
+      await expect(
+        findStagedAttachmentPath({
+          placeholderId: PLACEHOLDER,
+          organizationId: ORG,
+        })
+      ).resolves.toBe(STAGED_PATH);
+      expect(listFilesInFolder).toHaveBeenCalledWith({
+        folder: `${ORG}/${PLACEHOLDER}`,
+        bucketName: "assets",
+      });
     });
 
-    it("returns null instead of throwing when signing fails", async () => {
-      vi.mocked(createSignedUrl).mockRejectedValueOnce(
-        new Error("Supabase is down")
-      );
+    it("returns null when nothing is staged", async () => {
+      vi.mocked(listFilesInFolder).mockResolvedValue([]);
 
-      const result = await resolveAssetAttachmentDisplayUrl({
-        attachmentPath: STAGED_PATH,
-        assetId: "asset-1",
+      await expect(
+        findStagedAttachmentPath({
+          placeholderId: PLACEHOLDER,
+          organizationId: ORG,
+        })
+      ).resolves.toBeNull();
+    });
+
+    it("refuses a placeholder id that would leave the workspace folder", async () => {
+      await expect(
+        findStagedAttachmentPath({ placeholderId: "..", organizationId: ORG })
+      ).rejects.toMatchObject({ status: 400 });
+
+      expect(listFilesInFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("signAttachmentForViewing", () => {
+    it("signs the path for one minute, not the 72-hour image default", async () => {
+      await signAttachmentForViewing(STAGED_PATH);
+
+      expect(ATTACHMENT_LINK_TTL_SECONDS).toBe(60);
+      expect(createSignedUrl).toHaveBeenCalledWith({
+        filename: STAGED_PATH,
+        bucketName: "assets",
+        expiresIn: 60,
       });
-
-      expect(result).toBeNull();
     });
   });
 });

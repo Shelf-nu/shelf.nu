@@ -55,12 +55,31 @@ export function getPublicFileURL({
   }
 }
 
+/**
+ * How long a signed URL lives by default: 72 hours. Must match
+ * `threeDaysFromNow()` in `refreshExpiredAssetImages`, which re-signs asset
+ * images on that schedule.
+ */
+const DEFAULT_SIGNED_URL_TTL_SECONDS = 3 * 24 * 60 * 60;
+
+/**
+ * Signs a private object so a browser can fetch it, retrying transient
+ * Storage failures.
+ *
+ * @param params.filename - The object's key; a leading `/` is ignored
+ * @param params.bucketName - The bucket, `assets` by default
+ * @param params.expiresIn - Seconds the URL stays valid; 72 hours by default
+ * @returns The signed URL
+ * @throws {ShelfError} When Storage refuses, or keeps failing after retries
+ */
 export async function createSignedUrl({
   filename,
   bucketName = "assets",
+  expiresIn = DEFAULT_SIGNED_URL_TTL_SECONDS,
 }: {
   filename: string;
   bucketName?: string;
+  expiresIn?: number;
 }): Promise<string> {
   const normalizedFilename = filename.startsWith("/")
     ? filename.substring(1)
@@ -71,7 +90,7 @@ export async function createSignedUrl({
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { data, error } = await getSupabaseAdmin()
         .storage.from(bucketName)
-        .createSignedUrl(normalizedFilename, 3 * 24 * 60 * 60); // 72h — must match threeDaysFromNow() in refreshExpiredAssetImages
+        .createSignedUrl(normalizedFilename, expiresIn);
 
       if (!error) {
         const signedUrl = data?.signedUrl;

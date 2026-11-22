@@ -14,6 +14,10 @@
  * `onUploaded` / `onRemoved` callbacks so the caller can lift it into its
  * own form state and submit it once the rest of the form is ready.
  *
+ * The file name links to the same route's GET, which checks permission and
+ * redirects to a short-lived signed URL. That works for a staged file too,
+ * by placeholder id.
+ *
  * @see {@link file://../../../routes/api+/asset.$assetId.attachment.ts} for
  * the route and its existing-vs-staged branching.
  * @see {@link file://../../assets/form.tsx} (`AssetForm`) for the
@@ -33,29 +37,31 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import { assetAttachmentHref } from "~/utils/asset-attachment-href";
 import { ASSET_ATTACHMENT_MAX_SIZE } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { formatBytes } from "~/utils/format-bytes";
 import { FileDropzone } from "./file-dropzone";
 import { TrashIcon } from "../../icons/library";
 
-type StagedAttachment = {
+/** What the staging upload returns for a file the create form holds. */
+export type StagedAttachment = {
   /** Raw storage path (see Asset.attachmentPath's schema comment). */
   attachmentPath: string;
-  /** Short-lived signed URL for showing/linking to the file right now. */
-  attachmentDisplayUrl: string;
   attachmentOriginalName: string | null;
   attachmentSize: number;
 };
 
 type AssetAttachmentUploadProps = {
+  /** The asset's id, or the create form's placeholder id */
   assetId: string;
-  attachmentUrl?: string | null;
+  /** Whether a file is attached (stored on the asset, or staged) */
+  hasAttachment: boolean;
   attachmentOriginalName?: string | null;
   attachmentSize?: number | null;
   /**
    * Fires after a successful upload. The edit page doesn't need this - the
-   * asset already exists, so `attachmentUrl` (a loader-data prop) refreshes
+   * asset already exists, so `hasAttachment` (from loader data) refreshes
    * on its own via React Router's automatic revalidation after the fetcher
    * completes. The create-asset form has no loader-backed asset yet, so it
    * uses this to lift the staged attachment into its own form state and
@@ -81,7 +87,7 @@ type AssetAttachmentUploadProps = {
  */
 export function AssetAttachmentUpload({
   assetId,
-  attachmentUrl,
+  hasAttachment,
   attachmentOriginalName,
   attachmentSize,
   onUploaded,
@@ -131,7 +137,6 @@ export function AssetAttachmentUpload({
     ) {
       onUploaded?.({
         attachmentPath: uploadFetcher.data.attachmentPath,
-        attachmentDisplayUrl: uploadFetcher.data.attachmentDisplayUrl,
         attachmentOriginalName: uploadFetcher.data.attachmentOriginalName,
         attachmentSize: uploadFetcher.data.attachmentSize,
       });
@@ -152,15 +157,15 @@ export function AssetAttachmentUpload({
 
   // Both fetchers submit to a different route than the current page. For an
   // already-existing asset, React Router revalidates the current route's
-  // loaders after any action by default, so `attachmentUrl` (a loader-data
-  // prop) refreshes on its own - same as ProfilePictureUpload. A caller with
+  // loaders after any action by default, so `hasAttachment` (from loader
+  // data) refreshes on its own - same as ProfilePictureUpload. A caller with
   // no loader-backed asset yet (the create-asset form) relies on onUploaded /
   // onRemoved above instead.
-  if (attachmentUrl) {
+  if (hasAttachment) {
     return (
       <div className="flex items-center gap-3">
         <a
-          href={attachmentUrl}
+          href={assetAttachmentHref(assetId)}
           target="_blank"
           rel="noreferrer"
           className="text-text-sm font-semibold text-primary-700 hover:text-primary-800"

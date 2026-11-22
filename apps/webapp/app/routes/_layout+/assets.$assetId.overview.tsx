@@ -51,7 +51,6 @@ import { useAssetCustodySources } from "~/hooks/use-asset-custody-sources";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { resolveAssetAttachmentDisplayUrl } from "~/modules/asset/attachment.server";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
@@ -91,6 +90,7 @@ import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assetAttachmentHref } from "~/utils/asset-attachment-href";
 import { assetDescriptionSchema } from "~/utils/asset-description";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
@@ -181,15 +181,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: getAssetOverviewFields(canUseBarcodes),
-    });
-
-    // asset.attachmentPath is a private-bucket storage path (see its schema
-    // comment) - resolve it to a short-lived signed URL now that
-    // requirePermission above gates access to this asset. Unconditional
-    // (not behind canEditAsset below) so view-only roles see it too.
-    const attachmentDisplayUrl = await resolveAssetAttachmentDisplayUrl({
-      attachmentPath: asset.attachmentPath,
-      assetId: asset.id,
     });
 
     /**
@@ -526,13 +517,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
-      asset: redactCustodianForViewer(
-        [{ ...asset, customFields, attachmentUrl: attachmentDisplayUrl }],
-        {
-          canSeeAllCustody: access.custody.seeAll,
-          userId,
-        }
-      )[0],
+      asset: redactCustodianForViewer([{ ...asset, customFields }], {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      })[0],
       currentOrganization,
       userId,
       lastScan,
@@ -1348,17 +1336,19 @@ export default function AssetOverview() {
                 )}
               />
 
-              {/* Attachment — read-only display; uploading/replacing/removing
-                  stays exclusive to the Edit page's AssetAttachmentUpload. */}
+              {/* Attachment: read-only here, shown to every role that can see
+                  the asset. Uploading and removing happen on the Edit page.
+                  The link opens through the viewing route, which re-checks
+                  permission on each click. */}
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Attachment
                 </span>
                 <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                  {asset.attachmentUrl ? (
+                  {asset.attachmentPath ? (
                     <div className="flex items-center gap-2">
                       <a
-                        href={asset.attachmentUrl}
+                        href={assetAttachmentHref(asset.id)}
                         target="_blank"
                         rel="noreferrer"
                         className="font-semibold text-primary-700 hover:text-primary-800"

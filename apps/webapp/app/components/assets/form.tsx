@@ -93,7 +93,10 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
-import { AssetAttachmentUpload } from "../shared/file-dropzone/asset-attachment-upload";
+import {
+  AssetAttachmentUpload,
+  type StagedAttachment,
+} from "../shared/file-dropzone/asset-attachment-upload";
 import {
   Tooltip,
   TooltipContent,
@@ -284,6 +287,7 @@ type Props = Partial<
     | "thumbnailImage"
     | "mainImage"
     | "mainImageExpiration"
+    | "attachmentPath"
     | "attachmentOriginalName"
     | "attachmentSize"
     | "categoryId"
@@ -302,14 +306,6 @@ type Props = Partial<
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
   referer?: string | null;
-  /**
-   * NOT `Asset["attachmentPath"]` - the DB column is a bare storage path,
-   * but by the time this reaches the form it has already been resolved to
-   * a short-lived signed URL (edit: by the loader; create: staging
-   * response's `attachmentDisplayUrl`, fed through `pendingAttachment`
-   * below), so it genuinely is a URL here.
-   */
-  attachmentUrl?: string | null;
   /**
    * Location is not a column on `Asset` — it lives on the `AssetLocation`
    * pivot. Callers derive the single primary-location id via
@@ -361,7 +357,7 @@ const AssetFormInner = ({
   thumbnailImage,
   mainImage,
   mainImageExpiration,
-  attachmentUrl,
+  attachmentPath,
   attachmentOriginalName,
   attachmentSize,
   categoryId,
@@ -403,17 +399,11 @@ const AssetFormInner = ({
 
   // Lifted staged-attachment state for the create form only (see
   // AssetAttachmentUpload's onUploaded/onRemoved doc comment) - null on the
-  // edit form, where `attachmentUrl` etc. come from loader data instead.
+  // edit form, where the attachment comes from loader data instead.
   // `attachmentPath` here is the raw storage path submitted on final create
-  // (see Asset.attachmentPath's schema comment); `attachmentDisplayUrl` is a
-  // short-lived signed URL used only to render the link while still on
-  // this page - it is never itself submitted or persisted.
-  const [pendingAttachment, setPendingAttachment] = useState<{
-    attachmentPath: string;
-    attachmentDisplayUrl: string;
-    attachmentOriginalName: string | null;
-    attachmentSize: number;
-  } | null>(null);
+  // (see Asset.attachmentPath's schema comment).
+  const [pendingAttachment, setPendingAttachment] =
+    useState<StagedAttachment | null>(null);
 
   // Mirrors AssetAttachmentUpload's own pending state (create mode only) so
   // Save can stay disabled while a drop is still mid-upload/delete - without
@@ -1376,14 +1366,11 @@ const AssetFormInner = ({
           >
             <AssetAttachmentUpload
               assetId={id ?? pendingAttachmentId}
-              // Edit mode: attachmentUrl is already a loader-resolved signed
-              // URL (see the edit route's loader). Create mode: the widget
-              // needs something clickable NOW, before the raw path in
-              // pendingAttachment.attachmentPath has anywhere to be resolved
-              // from - attachmentDisplayUrl is the signed URL minted for
-              // exactly that, at staging-upload time.
-              attachmentUrl={
-                id ? attachmentUrl : pendingAttachment?.attachmentDisplayUrl
+              // Edit mode reads the asset's stored path; create mode, the
+              // file staged under the placeholder id. Either way the link
+              // opens through the viewing route, by that same id.
+              hasAttachment={
+                id ? Boolean(attachmentPath) : Boolean(pendingAttachment)
               }
               attachmentOriginalName={
                 id

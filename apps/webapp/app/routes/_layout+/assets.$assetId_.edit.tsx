@@ -16,7 +16,6 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { resolveAssetAttachmentDisplayUrl } from "~/modules/asset/attachment.server";
 import {
   getAllEntriesForCreateAndEdit,
   getAsset,
@@ -164,16 +163,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: asset.id,
     };
 
-    // asset.attachmentPath is a private-bucket storage path (see its schema
-    // comment) - resolve it to a short-lived signed URL now that
-    // requirePermission above gates access to this asset.
-    const attachmentDisplayUrl = await resolveAssetAttachmentDisplayUrl({
-      attachmentPath: asset.attachmentPath,
-      assetId: asset.id,
-    });
-
     return payload({
-      asset: { ...asset, attachmentUrl: attachmentDisplayUrl },
+      asset,
       header,
       categories,
       totalCategories,
@@ -438,7 +429,7 @@ export default function AssetEditPage() {
               ? new Date(asset.mainImageExpiration)
               : null
           }
-          attachmentUrl={asset.attachmentUrl}
+          attachmentPath={asset.attachmentPath}
           attachmentOriginalName={asset.attachmentOriginalName}
           attachmentSize={asset.attachmentSize}
           title={asset.title}
